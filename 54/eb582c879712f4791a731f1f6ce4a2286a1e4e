@@ -1,0 +1,25 @@
+CLAUDE.md
+  s_1b256955da0490::t_dc21204252bff9 1-13
+docs/agents/domain.md
+  s_1b256955da0490::t_27bc59f0bee4b1 1-51
+docs/agents/issue-tracker.md
+  s_1b256955da0490::t_2f6e4e502e005a 1-30
+docs/agents/triage-labels.md
+  s_1b256955da0490::t_c9dc7584aa0fe1 1-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "54eb582c879712f4791a731f1f6ce4a2286a1e4e",
+  "prompts": {},
+  "sessions": {
+    "s_1b256955da0490": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6f10e458-8ca9-496d-9345-3ae0f6d68ae2",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
