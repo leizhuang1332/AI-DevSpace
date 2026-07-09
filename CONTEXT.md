@@ -68,7 +68,7 @@ AI 可执行的工作单元（如"设计退款表结构"、"开发 refund-servic
 浏览器端单页应用（端口 3333，Next.js 14）。负责：
 
 - 展示需求列表、详情、对话
-- 与 Agent 通过 HTTP REST + WebSocket 通信
+- 与 Agent 通过 **HTTP REST + SSE** 通信（Client → Agent 走 REST POST；Agent → Client 走 SSE 长连推送，使用 `@fastify/sse`；见 [ADR-0001](docs/adr/0001-hybrid-web-agent-architecture.md) + 决策 31）
 - **不**直连文件系统、**不**跑 git、**不**调 LLM
 
 ### Skill（技能）
@@ -111,7 +111,7 @@ AI 可执行的工作单元（如"设计退款表结构"、"开发 refund-servic
 ## 决策记录（已锁定 v1.0）
 
 | # | 决策 | 关联 ADR |
-|---|------|----------|
+| --- | ------ | ---------- |
 | 1 | 产品形态 = D. 混合（Web 工作台 + 本地 Agent 守护进程） | [ADR-0001](docs/adr/0001-hybrid-web-agent-architecture.md) |
 | 2 | 数据存储 = 纯文件系统（markdown/yaml/json），必要时回退 sqlite3 | [ADR-0002](docs/adr/0002-filesystem-as-database.md) |
 | 3 | 工作空间根目录 = `~/.aidevspace/` | — |
@@ -131,7 +131,7 @@ AI 可执行的工作单元（如"设计退款表结构"、"开发 refund-servic
 | 17 | UI 参考对象 = Linear（极简、克制、开发者向、Cmd+K 哲学） | — |
 | 18 | 主题策略 = 跟随系统 + 手动覆盖（三档 System / Dark / Light），`config.yaml` 的 `theme` 字段 | — |
 | 19 | 用户偏好：亮色为心智模型（暗色为次选） | — |
-| 20 | 主色（Brand）= Linear 紫 #5e6ad2，10 阶色板（50-900） | — |
+| 20 | 主色（Brand）= Linear 紫 #5e6ad2，**6 阶**：brand / brand-50 / brand-100 / brand-500 / brand-600 / brand-700（取代原"10 阶 50-900"字面） | [ADR-0005](docs/adr/0005-brand-palette-six-step.md) |
 | 21 | 语义色：Success #16a34a / Warning #f59e0b / Error #ef4444 / Info #64748b | — |
 | 22 | 需求状态色 = 分组共享色（4 色 + 灰）；CLARIFYING 特殊（紫+警告红点）；MVP 不带数字徽章 | — |
 | 23 | AI 存在方式 = 形态 C（混合）：默认隐身 + Cmd+K 唤起 + 主动推送 + Inline 标记；**取消右栏常驻** | — |
@@ -147,6 +147,8 @@ AI 可执行的工作单元（如"设计退款表结构"、"开发 refund-servic
 | 33 | 需求列表 = 宽松风格（行高 48px / 字号 14px / 副标题 12px）；其他列表保持紧凑 32px；副标题格式 `N repo · N 天前更新` | — |
 | 34 | Agent 鉴权 = 动态 Token（`~/.aidevspace/.agent-token` 0600/ACL）+ Origin 校验（仅 `localhost:3333`）；请求头 `X-AIDevSpace-Token` | — |
 | 35 | AI 切换粒度 = 全局一个 Provider；`config.yaml` 加 `ai.provider` 字段；Agent 目录约定 `apps/agent/src/providers/`（**有 src**） | — |
+| 36 | UI 实施对照标准（三件套单一事实源）：`PRD.md` 述"为什么" / `UI-POLISH-SPEC.md` 定"怎么做" / [`docs/design/pages/*.html`](docs/design/README.md) 定"长什么样"；12 路由 1:1 对应 React route，3 层叠（`Cmd+K` / `Cmd+/` / `Cmd+N`）作 overlay 不占 route；早期 [`AI-DevSpace-Design.md`](AI-DevSpace-Design.md) 已 DEPRECATED | [ADR-0006](docs/adr/0006-html-prototype-as-source-of-truth.md) |
+| 37 | 前端目录结构 = Next.js 14 App Router 三层嵌套：(1) 根 `app/layout.tsx` 仅 ThemeProvider；(2) `(workspace)/layout.tsx` 包 StatusBar + Sidebar + `Cmd+K`/`Cmd+N`/`Cmd+/` 键盘监听 + 三个 overlay portal；(3) `(workspace)/requirements/[id]/layout.tsx` 仅在需求详情组 (03–07) 包资源树 + Inline 提示栏；dev group 维持现有 prod notFound | [ADR-0007](docs/adr/0007-workspace-route-group-shell.md) |
 
 ---
 

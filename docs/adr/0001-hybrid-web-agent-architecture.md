@@ -1,8 +1,10 @@
 # ADR-0001: 混合形态 — Web 工作台 + 本地 Agent 守护进程
 
-**Status:** Accepted  
-**Date:** 2026-07-08  
+**Status:** Accepted（已更新，2026-07-09 修订通信协议为 SSE；架构其他决策不变）  
+**Date:** 2026-07-08（2026-07-09 修订通信协议段）  
 **Deciders:** 项目负责人
+
+> **修订记录**：决策 31（实时通信协议 = SSE）落地后，本 ADR 的"通信协议"段已对应更新（HTTP REST + **WebSocket** → HTTP REST + **SSE**）。架构其他决策（Web + Agent 混合形态、进程解耦、单进程故障隔离、端口固定、本机单用户部署）保持不变。
 
 ## Context
 
@@ -25,12 +27,12 @@
 
 - **Web 工作台**（Next.js，端口 3333）：UI 展示、用户交互、状态镜像
 - **本地 Agent 守护进程**（Node.js，端口 7777）：调度 SDK、文件操作、git worktree、Skill 加载
-- 二者通过 localhost 上的 HTTP REST + WebSocket 通信
+- 二者通过 localhost 上的 **HTTP REST + SSE** 通信：Client → Agent 走 REST POST 发起请求；Agent → Client 走 SSE 长连推送长生命周期事件（AI 输出 / 状态变更 / 错误），Agent 端使用 `@fastify/sse`
 
 ## Consequences
 
 ### 正面
-- Web 与 Agent 进程解耦，未来上云端只需替换通信层
+- Web 与 Agent 进程解耦，未来上云端只需替换通信层（SSE 单向 vs WebSocket 双向的选择影响扩展性，此为决策 31 的 trade-off）
 - 直连本机资源，git/文件/LLM 全部走本地
 - 团队协作 P1+ 时，把 Web 部署到云端即可，业务代码不动
 - 单进程故障隔离（Agent 挂了 Web 重启就行；SDK 崩了只影响一个需求）

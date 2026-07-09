@@ -38,7 +38,7 @@
 
 - issue 03 / 05 / 06 / 07 / 11 的回填（路由表加全复数、状态枚举加 CLARIFYING、订阅 SSE 替代 WS）
 - issues 12-21 的创建（Step 1-6 对应的 10 个 issue）
-- ADR-0001 / PRD §9 段落文字更新（"HTTP REST + WebSocket" → "HTTP REST + SSE"）
+- ~~ADR-0001 / PRD §9 段落文字更新（"HTTP REST + WebSocket" → "HTTP REST + SSE"）~~ —— **已完成 2026-07-09 见 housekeeping**
 
 ---
 
@@ -987,17 +987,17 @@ git commit -m "feat(web): add theme switcher (System/Light/Dark)"
 
 ---
 
-## Task 8: _dev/tokens 测试页
+## Task 8: dev/tokens 测试页
 
 **Files:**
-- Create: `apps/web/src/app/_dev/tokens/page.tsx`
-- Create: `apps/web/src/app/_dev/tokens/layout.tsx`（限定 dev-only 守卫）
+- Create: `apps/web/src/app/dev/tokens/page.tsx`
+- Create: `apps/web/src/app/dev/tokens/layout.tsx`（限定 dev-only 守卫）
 
 **Interfaces:**
-- Produces: `http://localhost:3333/_dev/tokens` 在 dev 环境下展示：spacing 网格 / 字号样本 / 圆角样本 / 阴影样本 / 主题色色块 / 字体样本
+- Produces: `http://localhost:3333/dev/tokens` 在 dev 环境下展示：spacing 网格 / 字号样本 / 圆角样本 / 阴影样本 / 主题色色块 / 字体样本
 - Produces: 同一页面在 `next build` 产出的静态文件中**不出现**（生产构建排除）
 
-- [ ] **Step 1: 创建 `apps/web/src/app/_dev/tokens/layout.tsx`（dev 守卫）**
+- [ ] **Step 1: 创建 `apps/web/src/app/dev/tokens/layout.tsx`（dev 守卫）**
 
 ```tsx
 import type { ReactNode } from 'react';
@@ -1011,7 +1011,7 @@ export default function DevLayout({ children }: { children: ReactNode }) {
 }
 ```
 
-- [ ] **Step 2: 创建 `apps/web/src/app/_dev/tokens/page.tsx`**
+- [ ] **Step 2: 创建 `apps/web/src/app/dev/tokens/page.tsx`**
 
 ```tsx
 const SPACING = [1, 2, 3, 4, 5, 6, 8, 10, 12] as const;
@@ -1163,10 +1163,10 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 - [ ] **Step 3: 启动 + 验证 dev 页可访问**
 
 Run: `pnpm --filter @ai-devspace/web dev`（后台）
-Run: `curl -s -o /dev/null -w "%{http_code}" http://localhost:3333/_dev/tokens`
+Run: `curl -s -o /dev/null -w "%{http_code}" http://localhost:3333/dev/tokens`
 Expected: `200`
 
-浏览器打开 `http://localhost:3333/_dev/tokens`：
+浏览器打开 `http://localhost:3333/dev/tokens`：
 Expected:
 - 6 个 section 全部渲染（Spacing / Font Size / Radius / Shadow / 主题色 / 语义色 / Font Family）
 - Spacing 区 9 个蓝条宽度递增
@@ -1176,7 +1176,7 @@ Expected:
 - [ ] **Step 4: 验证生产构建排除**
 
 Run: `pnpm --filter @ai-devspace/web build`
-Expected: 构建成功，控制台输出 routes 列表**不包含** `/_dev/tokens`
+Expected: 构建成功，控制台输出 routes 列表**不包含** `/dev/tokens`
 
 Run: `grep -r "_dev/tokens" apps/web/.next/server/app/ 2>/dev/null | head -3`
 Expected: 无输出（已排除）
@@ -1213,7 +1213,7 @@ git commit -m "feat(web): add dev-only /_dev/tokens inspection page"
 | tokens.css 包含 A+B 两段 | `grep -c "^- --" apps/web/src/styles/tokens.css` | 命中（基础 token + 主题 token 都有） |
 | tailwind.config.ts 完整 mapping | 阅读文件，确认 colors/spacing/fontSize/borderRadius/fontFamily 都用 `var(--...)` | 通过 |
 | layout.tsx 接入 next-themes | `grep -A1 "ThemeProvider" apps/web/src/app/layout.tsx` | 命中 `attribute="class" defaultTheme="system"` |
-| /_dev/tokens 测试页可访问 | 浏览器打开 | 6 section 全部展示 |
+| /dev/tokens 测试页可访问 | 浏览器打开 | 6 section 全部展示 |
 | 三档主题切换（System / Dark / Light）实时生效 | 浏览器点 ThemeSwitcher 三个按钮 | 颜色实时变化，无 FOUC |
 | shadcn 所需 token 就位 | DevTools Elements → :root → 看到 `--background/foreground/primary/...` | 全部命中 |
 | package.json 锁版本 | `grep -E "tailwindcss|next-themes|tailwindcss-animate" apps/web/package.json` | 三个包都在，版本号符合 spec |
@@ -1221,7 +1221,7 @@ git commit -m "feat(web): add dev-only /_dev/tokens inspection page"
 - [ ] **Step 3: 端到端 smoke**
 
 Run: `pnpm --filter @ai-devspace/web build`
-Expected: 编译成功，路由列表包含 `/`、`/_dev/tokens`（仅 dev 守卫；生产应被排除 —— 确认见 Task 8 Step 4）
+Expected: 编译成功，路由列表包含 `/`、`/dev/tokens`（仅 dev 守卫；生产应被排除 —— 确认见 Task 8 Step 4）
 
 Run: `pnpm --filter @ai-devspace/web start` &  sleep 3 && `curl -s -o /dev/null -w "%{http_code}" http://localhost:3333`
 Expected: `200`
@@ -1254,7 +1254,7 @@ git commit -m "chore(web): step 1 acceptance — final cleanup"
 - [ ] 所有 shadcn 主题 token（`--background` 到 `--ring`）在 `:root` 和 `.dark` 都有定义
 - [ ] `darkMode: ['class']` 出现在 `tailwind.config.ts`
 - [ ] `ThemeProvider` 用 `attribute="class"`、`defaultTheme="system"`、`enableSystem`
-- [ ] `/_dev/tokens` 在 `next build` 产物中**不存在**
+- [ ] `/dev/tokens` 在 `next build` 产物中**不存在**
 - [ ] 切换 System / Light / Dark 时浏览器**不出现 FOUC**（主题在 hydration 前已应用）
 - [ ] 仓库根 `pnpm install` 在 Windows / macOS / Linux 都成功
 - [ ] 所有提交都有意义的中文 commit message（不用 `wip` / `fix typo`）
@@ -1272,6 +1272,6 @@ git commit -m "chore(web): step 1 acceptance — final cleanup"
 | 组件级 token（9 状态色 / AI 6 状态色 / 进度环色） | Step 2 |
 | 字体文件实际下载与 `next/font/google` 接入 | Step 2 |
 | 命令面板 / 状态条 / Toast 组件 | Step 4-6 |
-| ADR-0001 / PRD §9 段落文字更新（"WebSocket" → "SSE"） | 文档维护，下个会话 |
+| ~~ADR-0001 / PRD §9 段落文字更新（"WebSocket" → "SSE"）~~ | ~~文档维护，下个会话~~ —— 已完成 2026-07-09 见 housekeeping |
 | Agent 进程骨架（issue 03） | 与 Web 并行，本计划不涉及 |
 | 测试框架（Vitest / Playwright） | 不在本 spec 范围；视觉验证 + curl 200 即可 |

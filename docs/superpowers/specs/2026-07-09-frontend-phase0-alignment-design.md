@@ -91,7 +91,7 @@ Workspace：
 - `error` — 错误推送
 
 **影响**：
-- ADR-0001 + PRD §9 段落文字需要更新（"HTTP REST + WebSocket" → "HTTP REST + SSE"）
+- ~~ADR-0001 + PRD §9 段落文字需要更新（"HTTP REST + WebSocket" → "HTTP REST + SSE"）~~ —— **已完成 2026-07-09 见 housekeeping**
 - issue 03 需删除 `WS /ws/requirement/:id` 路由
 - Step 3 `useSSE` hook 直接基于 §6.4 类型实现
 
@@ -159,7 +159,7 @@ Workspace：
 
 ### 3.0 脚手架前提（最小 monorepo）
 
-**目标**：让 `pnpm dev` 在 `apps/web/` 起一个空 Next.js 14 App Router 页面，`packages/shared/` 能被引用；Token 配置完成后 `/_dev/tokens` 测试页可访问。
+**目标**：让 `pnpm dev` 在 `apps/web/` 起一个空 Next.js 14 App Router 页面，`packages/shared/` 能被引用；Token 配置完成后 `/dev/tokens` 测试页可访问。
 
 #### 3.0.1 仓库根文件
 
@@ -216,7 +216,7 @@ pnpm init
 - `apps/web/tsconfig.json`：继承 `../../tsconfig.base.json`，加 `"plugins": [{ "name": "next" }]`
 - `apps/web/src/app/layout.tsx`：根布局（本 spec §3.4）
 - `apps/web/src/app/page.tsx`：占位首页（"AI-DevSpace — Step 1 OK"）
-- `apps/web/src/app/_dev/tokens/page.tsx`：仅 `process.env.NODE_ENV === 'development'` 渲染的测试页（§3.5 验收项）
+- `apps/web/src/app/dev/tokens/page.tsx`：仅 `process.env.NODE_ENV === 'development'` 渲染的测试页（§3.5 验收项）
 
 #### 3.0.3 packages/shared 初始化
 
@@ -278,7 +278,7 @@ ai-devspace/
 │           ├── app/
 │           │   ├── layout.tsx   # ThemeProvider 接入（3.4）
 │           │   ├── page.tsx     # 占位首页
-│           │   └── _dev/tokens/page.tsx   # 仅 dev 环境（3.5）
+│           │   └── dev/tokens/page.tsx    # 仅 dev 环境（3.5）
 │           └── styles/
 │               ├── tokens.css   # ★ 全部 CSS variables（A+B 两段）
 │               └── globals.css  # @tailwind base/components/utilities + 引用 tokens.css
@@ -485,7 +485,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 - [ ] `apps/web/src/styles/tokens.css` 包含 A+B 两段（brand 10 阶留 TODO）
 - [ ] `apps/web/tailwind.config.ts` 完整 mapping 上文 3.3 节
 - [ ] `apps/web/src/app/layout.tsx` 接入 next-themes（attribute=class, defaultTheme=system）
-- [ ] 临时 `/_dev/tokens` 测试页（仅 dev 环境）网格展示：间距 / 字号 / 圆角 / 阴影 / 主题色
+- [ ] 临时 `/dev/tokens` 测试页（仅 dev 环境）网格展示：间距 / 字号 / 圆角 / 阴影 / 主题色
 - [ ] 三档主题切换（System / Dark / Light）实时生效，无 FOUC
 - [ ] shadcn 所需的 `--background/foreground/primary/...` 全部就位
 - [ ] `package.json` 锁定：tailwindcss ^3.4、next-themes ^0.3、tailwindcss-animate ^1.0
@@ -508,8 +508,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 | **issue 05**（需求 CRUD） | meta.yaml 状态枚举加 `CLARIFYING`；删"写死 8 个"段落；本 spec 决策 D 加注"ARCHIVED 不限制能力" | 中（影响布局组件） |
 | **issue 06 / 07 / 11** | 路径前缀 `/api/requirement` → `/api/requirements`；订阅 `WS` → `SSE` | 高 |
 | **monorepo 脚手架** | 当前仓库无 `apps/` `packages/`，需按 §3.0 创建 pnpm workspace + Next.js 14 + Tailwind 初始集 | 高（本 spec Step 1 前置） |
-| **ADR-0001** | "HTTP REST + WebSocket" → "HTTP REST + SSE" | 低（文档级） |
-| **PRD §9** | "HTTP REST + WebSocket" → "HTTP REST + SSE" | 低 |
+| **ADR-0001** | ~~"HTTP REST + WebSocket" → "HTTP REST + SSE"~~ —— 已完成 2026-07-09 | 低（文档级） |
+| **PRD §9** | ~~"HTTP REST + WebSocket" → "HTTP REST + SSE"~~ —— 已完成 2026-07-09 | 低 |
 | **PRD §6.2/§6.3** | "右栏 360px AI 助手" 描述过时，但 §5.1 IA 树仍正确，仅段落需加注 "UI-POLISH-SPEC §4.1 取消右栏常驻" | 低 |
 | **issues 12-21** | UI-POLISH-SPEC §12 列出但文件未创建；本会话 6 步全部对应这 10 个 issue | 高（开工前补） |
 
