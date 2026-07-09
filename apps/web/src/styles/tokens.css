@@ -72,6 +72,14 @@
   --popover:               0 0% 100%;
   --popover-foreground:   222 47% 11%;
   --primary:               234 56% 60%;          /* #5e6ad2 */
+  /* Linear 风格视觉基线（来自 docs/design/pages/*.html） */
+  --bg:                240 25% 99%;            /* #fbfbfd */
+  --bg-elevated:       0 0% 100%;              /* #ffffff */
+  --bg-subtle:         240 9% 96%;             /* #f5f5f7 */
+  --border-strong:     240 9% 84%;             /* #d8d8de */
+  --text-1:            222 47% 11%;            /* #0f172a */
+  --text-2:            215 16% 47%;            /* #475569 */
+  --text-3:            215 16% 65%;            /* #94a3b8 */
   /* Brand 6 阶（ADR-0005） */
   --brand:               234 56% 60%;          /* 别名，与 500 同值 */
   --brand-50:            234 100% 96%;
@@ -103,6 +111,14 @@
   --popover:               222 47% 8%;
   --popover-foreground:   210 40% 98%;
   --primary:               234 70% 70%;          /* #7c87e8 */
+  /* Linear 风格视觉基线（dark） */
+  --bg:                222 47% 6%;             /* slate-900 ish */
+  --bg-elevated:       222 47% 8%;             /* #1e293b ish */
+  --bg-subtle:         217 33% 14%;            /* subtle dark */
+  --border-strong:     217 33% 24%;            /* border strong dark */
+  --text-1:            210 40% 98%;            /* light text */
+  --text-2:            215 20% 65%;            /* mid text dark */
+  --text-3:            215 16% 65%;            /* muted text dark */
   /* Brand 6 阶（dark） */
   --brand:               234 70% 70%;
   --brand-50:            234 50% 16%;

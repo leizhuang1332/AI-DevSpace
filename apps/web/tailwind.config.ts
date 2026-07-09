@@ -44,7 +44,36 @@ const config: Config = {
           600: 'hsl(var(--brand-600))',
           700: 'hsl(var(--brand-700))',
         },
-        border: 'hsl(var(--border))',
+        bg: {
+          DEFAULT: 'hsl(var(--bg) / <alpha-value>)',
+          elevated: 'hsl(var(--bg-elevated) / <alpha-value>)',
+          subtle: 'hsl(var(--bg-subtle) / <alpha-value>)',
+        },
+        text: {
+          1: 'hsl(var(--text-1) / <alpha-value>)',
+          2: 'hsl(var(--text-2) / <alpha-value>)',
+          3: 'hsl(var(--text-3) / <alpha-value>)',
+        },
+        success: {
+          DEFAULT: 'hsl(var(--success-500) / <alpha-value>)',
+          foreground: 'hsl(var(--success-500) / <alpha-value>)',
+        },
+        warning: {
+          DEFAULT: 'hsl(var(--warning-500) / <alpha-value>)',
+          foreground: 'hsl(var(--warning-500) / <alpha-value>)',
+        },
+        error: {
+          DEFAULT: 'hsl(var(--error-500) / <alpha-value>)',
+          foreground: 'hsl(var(--error-500) / <alpha-value>)',
+        },
+        info: {
+          DEFAULT: 'hsl(var(--info-500) / <alpha-value>)',
+          foreground: 'hsl(var(--info-500) / <alpha-value>)',
+        },
+        border: {
+          DEFAULT: 'hsl(var(--border) / <alpha-value>)',
+          strong: 'hsl(var(--border-strong) / <alpha-value>)',
+        },
         input: 'hsl(var(--input))',
         ring: 'hsl(var(--ring))',
       },
