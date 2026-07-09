@@ -1,0 +1,104 @@
+.scratch/ai-devspace-mvp/issues/02-workspace-init.md
+  s_85212c552f0577::t_2d91c555b42079 1-30
+docs/design/pages/08-repos.html
+  s_f32af8a66a198c::t_15f26d04d7c448 1-298
+docs/design/pages/13-command-palette.html
+  s_f32af8a66a198c::t_f6da2d497f7946 1-223
+.scratch/ai-devspace-mvp/issues/06-repo-worktree.md
+  s_85212c552f0577::t_836f992da340f6 1-40
+.scratch/ai-devspace-mvp/issues/07-ai-chat-panel.md
+  s_85212c552f0577::t_a289c8b6402be6 1-41
+docs/adr/0003-git-worktree-isolation.md
+  s_85212c552f0577::t_b6967156d45e7a 1-41
+.scratch/ai-devspace-mvp/issues/04-web-skeleton.md
+  s_85212c552f0577::t_385439b01eacaf 1-37
+docs/design/pages/12-settings.html
+  s_f32af8a66a198c::t_c4c1586347dbf9 1-264
+.scratch/ai-devspace-mvp/UI-POLISH-SPEC.md
+  s_85212c552f0577::t_beb38363be48df 1-912
+docs/design/pages/07-requirement-settings.html
+  s_f32af8a66a198c::t_d41680d3cbeb5f 1-248
+docs/adr/0004-claude-code-sdk-as-ai-engine.md
+  s_85212c552f0577::t_e70f398e4e0005 1-49
+.scratch/ai-devspace-mvp/issues/03-agent-skeleton.md
+  s_85212c552f0577::t_b21edc87de540d 1-39
+.scratch/ai-devspace-mvp/issues/08-builtin-skills.md
+  s_85212c552f0577::t_1e10f6ea5d4cc1 1-52
+docs/design/README.md
+  s_f32af8a66a198c::t_72896d771bad76 1-61
+docs/design/pages/03-requirement-workspace.html
+  s_f32af8a66a198c::t_bb59adb45b89f1 1-328
+docs/adr/0001-hybrid-web-agent-architecture.md
+  s_85212c552f0577::t_e64fafe0501dba 1-50
+.scratch/ai-devspace-mvp/issues/09-knowledge-base.md
+  s_85212c552f0577::t_be473b9260083c 1-40
+.scratch/ai-devspace-mvp/PRD.md
+  s_85212c552f0577::t_9fa5385d5b1873 1-274
+.scratch/ai-devspace-mvp/issues/10-coding-standards.md
+  s_85212c552f0577::t_45cd429a6e921f 1-36
+docs/design/pages/09-repo-detail.html
+  s_f32af8a66a198c::t_00527f1aabc570 1-210
+.scratch/ai-devspace-mvp/issues/01-monorepo-init.md
+  s_85212c552f0577::t_2d601dc940827b 1-31
+.scratch/ai-devspace-mvp/issues/11-dashboard.md
+  s_85212c552f0577::t_b46cae2bca16e2 1-33
+docs/design/pages/02-requirements.html
+  s_f32af8a66a198c::t_9967de8a1d5f95 1-255
+docs/design/pages/15-new-requirement-modal.html
+  s_f32af8a66a198c::t_6b68dd3f8b3f83 1-195
+CONTEXT.md
+  s_85212c552f0577::t_f294549363b3b1 140-141
+  s_85212c552f0577::t_24c7fba74021d2 4-6,13,15,18,21,23,29,31,37-39,44,46,50,52,57-59,62,64-80,87,89,92-104,106-107,111-129,150-159
+  s_85212c552f0577::t_9d9c326e72e195 143
+  s_85212c552f0577::t_43bad0781e7777 132-133
+  s_85212c552f0577::t_092e63b7e19376 144
+  s_85212c552f0577::t_9b75f1af18e2b3 142
+  s_85212c552f0577::t_4b9d8bc91abd31 134-135
+  s_85212c552f0577::t_a3057e1f256688 137-139
+  s_85212c552f0577::t_bb1d0f3e9a9e93 130-131
+  s_85212c552f0577::t_018837d2f54e36 136
+  s_85212c552f0577::t_96bf91cddb53cf 1-3,7-12,14,16-17,19-20,22,24-28,30,32-36,40-43,45,47-49,51,53-56,60-61,63,81-86,88,90-91,105,108-110,147-149
+  s_85212c552f0577::t_f175f8a6e88475 145-146
+docs/adr/0002-filesystem-as-database.md
+  s_85212c552f0577::t_c989767eb5af54 1-61
+docs/design/pages/10-knowledge.html
+  s_f32af8a66a198c::t_6ae4a55175fd01 1-252
+.scratch/ai-devspace-mvp/issues/05-requirement-crud.md
+  s_85212c552f0577::t_7a1f8eba5088aa 1-40
+docs/design/pages/04-requirement-repos.html
+  s_f32af8a66a198c::t_61b77b94c82ed2 1-303
+docs/design/pages/11-skills.html
+  s_f32af8a66a198c::t_bf485578e5c227 1-263
+docs/design/pages/14-shortcuts-cheatsheet.html
+  s_f32af8a66a198c::t_c5f51dece1cd53 1-151
+docs/design/pages/01-dashboard.html
+  s_f32af8a66a198c::t_347de7bd5901fc 1-352
+docs/design/pages/06-requirement-history.html
+  s_f32af8a66a198c::t_b7c85167af8a19 1-312
+docs/design/pages/05-requirement-artifacts.html
+  s_f32af8a66a198c::t_bbd7395b1182c1 1-276
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4912abe982d9008ec9bd6a261003a9034825f05f",
+  "prompts": {},
+  "sessions": {
+    "s_85212c552f0577": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "64b2a4d3-6b3f-411c-8a4e-7a173afdc7d5",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    },
+    "s_f32af8a66a198c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "452c165e-d689-4ea8-bda7-20406355bdf3",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
