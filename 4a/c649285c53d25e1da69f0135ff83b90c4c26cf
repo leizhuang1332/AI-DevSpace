@@ -1,0 +1,21 @@
+apps/web/src/app/dev/tokens/layout.tsx
+  s_e2f22b99582c55::t_3c345bacbd21f7 1-9
+apps/web/src/app/dev/tokens/page.tsx
+  s_e2f22b99582c55::t_58794574a96688 1-151
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4ac649285c53d25e1da69f0135ff83b90c4c26cf",
+  "prompts": {},
+  "sessions": {
+    "s_e2f22b99582c55": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-afeb564942a4f0b64",
+        "model": "unknown"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
