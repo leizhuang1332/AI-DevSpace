@@ -1,0 +1,22 @@
+apps/web/src/styles/tokens.css
+  s_598550e31acff3::t_84253a63693c1e 75-82
+  s_598550e31acff3::t_96b02e65638aa4 114-121
+apps/web/tailwind.config.ts
+  s_598550e31acff3::t_19c7bc57a8af0e 47-76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b4566d8d0ac561fafffbe776240f3169f9438186",
+  "prompts": {},
+  "sessions": {
+    "s_598550e31acff3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9def9a8d-cfab-4fc1-8235-9b383e99fefc",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
