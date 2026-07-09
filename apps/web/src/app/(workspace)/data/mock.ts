@@ -49,10 +49,84 @@ export const inbox: InboxItem[] = [
 ];
 
 export const repositories: Repository[] = [
-  { name: 'refund-service', branch: 'feature/refund-optimize', latestCommit: 'abc1234', changedFiles: 12 },
-  { name: 'order-service', branch: 'main', latestCommit: 'def5678', changedFiles: 0 },
-  { name: 'pay-gateway', branch: 'feature/gray-payment', latestCommit: '9ab12cd', changedFiles: 7 },
+  { name: 'refund-service',  branch: 'feature/refund-optimize', latestCommit: 'a8f3e21', changedFiles: 12 },
+  { name: 'order-service',   branch: 'main',                     latestCommit: '9d2e0ab', changedFiles: 0  },
+  { name: 'member-service',  branch: 'feature/member-tier',      latestCommit: 'b1c7e22', changedFiles: 3  },
+  { name: 'pay-gateway',     branch: 'feature/gray-payment',     latestCommit: 'c4d9f30', changedFiles: 7  },
+  { name: 'risk-service',    branch: 'main',                     latestCommit: 'e5a1b82', changedFiles: 0  },
+  { name: 'coupon-service',  branch: 'feature/coupon-stack',     latestCommit: 'f6b2c93', changedFiles: 5  },
+  { name: 'cart-service',    branch: 'main',                     latestCommit: '7d8e4a1', changedFiles: 0  },
+  { name: 'seckill-service', branch: 'main',                     latestCommit: '8e9f5b2', changedFiles: 0  },
 ];
+
+export interface KnowledgeItem {
+  id: string;
+  title: string;
+  category: 'domain' | 'pattern' | 'bug' | 'standard' | 'note';
+  body: string;
+  tags: string[];
+  source: 'ai' | 'human';
+  refs: number;
+  agoText: string;
+}
+
+export const knowledge: KnowledgeItem[] = [
+  { id: 'kb-1', title: '退款幂等性处理方案', category: 'bug',     body: '退款请求必须携带 idempotency_key，服务端用 Redis SETNX 锁 5 分钟。key 格式：refund:{user_id}:{order_id}:{timestamp_bucket}。若用户重复点击（前端未禁用），第二次直接返回第一次结果（缓存 1h）...', tags: ['refund', 'idempotency', 'redis'],         source: 'ai',    refs: 8,  agoText: '5 天前'   },
+  { id: 'kb-2', title: '支付链路异步回调状态机', category: 'pattern', body: '支付网关 → 商户回调采用状态机驱动（PENDING → PROCESSING → SUCCESS/FAILED/EXPIRED）。每个状态变更写入 payment_callback_log 表，必须保证 at-least-once 投递...', tags: ['payment', 'callback', 'state-machine'], source: 'human', refs: 12, agoText: '1 周前'   },
+  { id: 'kb-3', title: '退款链路数据库设计规范', category: 'domain',  body: '退款涉及 4 张核心表：refund_order（主单）、refund_flow（状态变更）、refund_compensation（补偿记录）、refund_audit（审计日志）。所有表必须有 created_at 和 updated_at...', tags: ['refund', 'database', 'spec'], source: 'human', refs: 5,  agoText: '2 周前'   },
+  { id: 'kb-4', title: '会员成长值并发更新 Bug 修复', category: 'bug',  body: '高并发下用户成长值丢失。根因：UPDATE member_growth SET value = value + ? WHERE user_id=? 在 RR 隔离级别下未加行锁。修复：使用 SELECT ... FOR UPDATE 悲观锁...', tags: ['member', 'concurrency', 'mysql'],           source: 'ai',    refs: 6,  agoText: '3 周前'   },
+  { id: 'kb-5', title: '后端 Java 代码规范（公司级）', category: 'standard', body: '所有 Controller 必须返回 Result<T> 包装类；Service 层禁止直接操作 HttpServletRequest；异常统一抛 BizException + 全局 @RestControllerAdvice 捕获...', tags: ['java', 'spec', 'company'],                 source: 'human', refs: 32, agoText: '1 月前'   },
+  { id: 'kb-6', title: '会员等级体系业务模型', category: 'domain', body: '会员分为 6 级（V1-V6），升级由成长值驱动。成长值来源：消费 1 元 = 1 点；签到 1 天 = 5 点；评论 = 2 点。降级保护：V4 及以上 90 天无消费不降级...', tags: ['member', 'business', 'tier'], source: 'human', refs: 4, agoText: '1 月前' },
+  { id: 'kb-7', title: '订单状态机流转规则', category: 'pattern', body: '订单主状态 7 种：CREATED / PAID / SHIPPED / COMPLETED / REFUNDING / REFUNDED / CANCELLED。状态转换需写入 order_state_log 表，由 OrderStateMachine 统一驱动，禁止 Service 散落改状态...', tags: ['order', 'state-machine'], source: 'human', refs: 9, agoText: '2 月前' },
+  { id: 'kb-8', title: '优惠券叠加规则配置化方案', category: 'pattern', body: '把优惠券叠加规则抽到 coupon_stack_rule 表，规则按 (coupon_type, scene, user_tier) 维度匹配。前端只展示「最优叠加组合」，后端按规则树计算最终抵扣金额...', tags: ['coupon', 'rule-engine'], source: 'ai', refs: 3, agoText: '3 周前' },
+  { id: 'kb-9', title: '风控拦截误杀率优化', category: 'bug', body: '上线后风控拦截误杀率 1.2%。根因：规则阈值硬编码。修复：阈值改为 Apollo 动态配置 + 灰度切流；增加白名单机制；离线复盘最近 7 天拦截明细，调参 3 次...', tags: ['risk', 'config', 'tuning'], source: 'ai', refs: 5, agoText: '2 周前' },
+  { id: 'kb-10', title: '下单链路幂等方案', category: 'pattern', body: '下单接口使用 token + Redis 防重：前端调用 /order/token 获取一次性 token（5 分钟有效），提交订单时携带，服务端 SETNX 校验。同一用户 1 秒内多次提交只生效一次...', tags: ['order', 'idempotency'], source: 'human', refs: 7, agoText: '1 月前' },
+  { id: 'kb-11', title: '分布式链路追踪接入', category: 'standard', body: '统一使用 SkyWalking 9.x 接入。所有 RPC 调用必须传 traceId（从 Header 或 Context 取）；日志模板含 [%traceId] [%spanId] 占位符；本地开发用本地探针不连服务端...', tags: ['observability', 'spec'], source: 'human', refs: 15, agoText: '3 月前' },
+  { id: 'kb-12', title: '购物车持久化 Redis 方案', category: 'pattern', body: '购物车数据存 Redis Hash 结构：key=cart:{user_id}，field=sku_id，value=数量 + 加购时间。TTL 30 天。每次访问先读 Redis，未命中回源 DB 并回写...', tags: ['cart', 'redis', 'storage'], source: 'ai', refs: 4, agoText: '2 周前' },
+];
+
+export interface Skill {
+  id: string;
+  name: string;
+  stage: string;
+  builtIn: boolean;
+  version: string;
+  description: string;
+  injects: string;
+  outputs: string;
+  createdText?: string;
+}
+
+export const skills: Skill[] = [
+  { id: 'sk-analyze', name: 'analyze-stage',   stage: 'DRAFT → ANALYZING', builtIn: true,  version: 'v1.0', description: '读取 requirement.md，生成需求理解（01-understanding.md）和澄清问题（02-questions.md）。理解不清的地方必须提问，不能假设。', injects: 'requirement.md',                                outputs: 'analysis/*' },
+  { id: 'sk-design',  name: 'design-stage',    stage: 'DESIGNING',         builtIn: true,  version: 'v1.0', description: '基于分析结果生成数据库、API、服务层三层设计。必须产出 OpenAPI yaml 和 SQL DDL。', injects: 'analysis/ + knowledge',                            outputs: 'design/* + artifacts/*' },
+  { id: 'sk-plan',    name: 'plan-stage',      stage: 'PLANNING',          builtIn: true,  version: 'v1.0', description: '将设计分解为可执行的 Task 列表（tasks.md）。每个 Task 包含验收标准、关联产物、预估工作量。', injects: 'design/*',                                       outputs: 'plan/tasks.md' },
+  { id: 'sk-code',    name: 'code-stage',      stage: 'IMPLEMENTING',      builtIn: true,  version: 'v1.0', description: '逐个执行 Task，写入代码到对应 repo 的 worktree。完成后自动 commit（需用户授权）。遇到阻塞自动生成问题。', injects: 'plan/ + design/ + 当前 Task',         outputs: 'commit + 更新 tasks.md' },
+  { id: 'sk-test',    name: 'test-stage',      stage: 'IMPLEMENTING',      builtIn: true,  version: 'v1.0', description: '为每个 Task 生成测试用例（正常 / 边界 / 异常），自动运行单元测试，失败回写 code-stage。', injects: 'code diff + plan/tasks.md',                       outputs: 'test/*.md + junit report' },
+  { id: 'sk-submit',  name: 'submit-stage',    stage: 'SUBMITTING',        builtIn: true,  version: 'v1.0', description: '合并 worktree 到目标分支，触发 CI，发起 PR（GitHub / GitLab），等待 Code Review 结果。', injects: 'worktree + tasks.md',                            outputs: 'PR + merge commit' },
+  { id: 'sk-review',  name: 'company-review-stage', stage: 'REVIEW',        builtIn: false, version: 'v0.3', description: '遵循公司 review 规范的代码审查 Skill。检查命名规范、异常处理、日志格式（基于 knowledge/standards/java-code-spec.md）。', injects: 'code diff + standards', outputs: 'review/*.md', createdText: '用户自定义 · 1 个月前' },
+  { id: 'sk-mig',     name: 'db-migration-stage',    stage: 'DEPLOY',       builtIn: false, version: 'v0.1', description: '数据库迁移脚本生成。读取 SQL DDL，自动生成 Flyway / Liquibase 兼容的版本化迁移脚本（含回滚段）。', injects: 'artifacts/*.sql',                              outputs: 'repos/*/db/migration/V*.sql', createdText: '用户自定义 · 2 周前' },
+];
+
+export interface GlobalSettings {
+  theme: 'system' | 'light' | 'dark';
+  typewriterSpeed: 'off' | 'fast' | 'medium' | 'slow';
+  silentMode: boolean;
+  silentWindowSeconds: number;
+  agentEndpoint: string;
+  workspaceRoot: string;
+  diskUsage: string;
+}
+
+export const settings: GlobalSettings = {
+  theme: 'light',
+  typewriterSpeed: 'medium',
+  silentMode: true,
+  silentWindowSeconds: 30,
+  agentEndpoint: 'http://localhost:7777',
+  workspaceRoot: '~/.aidevspace/',
+  diskUsage: '1.2 GB · 28 个需求 · 8 个仓库 · 47 条知识',
+};
 
 export const artifacts: Artifact[] = [
   { id: 'a-1', name: 'refund.sql', type: 'database', requirementId: 'req-001', createdBy: 'design-stage', agoMinutes: 10, size: 12000 },
