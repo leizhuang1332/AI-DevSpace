@@ -58,3 +58,56 @@
   --error-500:     0 84% 60%;  /* #ef4444 */
   --info-500:    215 16% 47%;  /* #64748b */
 }
+
+/* ============================================================
+   B 段：主题 token（light/dark，HSL 三元组形式）
+   依据：本 spec §3.2
+   ============================================================ */
+
+:root {                               /* light (default) */
+  --background:           0 0% 100%;
+  --foreground:           222 47% 11%;
+  --card:                  0 0% 100%;
+  --card-foreground:      222 47% 11%;
+  --popover:               0 0% 100%;
+  --popover-foreground:   222 47% 11%;
+  --primary:               234 56% 60%;          /* #5e6ad2 */
+  --primary-foreground:   0 0% 100%;
+  --secondary:             210 40% 96%;
+  --secondary-foreground: 222 47% 11%;
+  --muted:                 210 40% 96%;
+  --muted-foreground:      215 16% 47%;
+  --accent:                234 100% 96%;
+  --accent-foreground:     234 56% 30%;
+  --destructive:           0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --border:                214 32% 91%;
+  --input:                 214 32% 91%;
+  --ring:                  234 56% 60%;
+  --color-bg-hover:        210 40% 98%;
+  --color-text-muted:      215 16% 47%;
+}
+
+.dark {                               /* dark */
+  --background:           222 47% 6%;
+  --foreground:           210 40% 98%;
+  --card:                  222 47% 8%;
+  --card-foreground:      210 40% 98%;
+  --popover:               222 47% 8%;
+  --popover-foreground:   210 40% 98%;
+  --primary:               234 70% 70%;          /* #7c87e8 */
+  --primary-foreground:   222 47% 6%;
+  --secondary:             217 33% 17%;
+  --secondary-foreground: 210 40% 98%;
+  --muted:                 217 33% 17%;
+  --muted-foreground:      215 20% 65%;
+  --accent:                234 30% 20%;
+  --accent-foreground:     234 70% 80%;
+  --destructive:           0 63% 50%;
+  --destructive-foreground: 210 40% 98%;
+  --border:                217 33% 17%;
+  --input:                 217 33% 17%;
+  --ring:                  234 70% 70%;
+  --color-bg-hover:        217 33% 14%;
+  --color-text-muted:      215 20% 65%;
+}
