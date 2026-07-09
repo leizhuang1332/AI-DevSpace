@@ -1,0 +1,19 @@
+apps/web/src/components/center-tabs.tsx
+  s_598550e31acff3::t_0f5db2e8b25f9e 6-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "113f77ecc2fca2e25c578a2b86d2b3173c8a0883",
+  "prompts": {},
+  "sessions": {
+    "s_598550e31acff3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9def9a8d-cfab-4fc1-8235-9b383e99fefc",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
