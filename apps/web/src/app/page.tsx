@@ -1,10 +1,14 @@
 import { SHARED_PACKAGE_OK } from '@ai-devspace/shared';
+import { ThemeSwitcher } from '@/components/theme-switcher';
 
 export default function HomePage() {
   return (
     <main className="min-h-screen bg-background p-6 text-foreground">
-      <h1 className="text-3xl font-bold text-primary">AI-DevSpace</h1>
-      <p className="mt-4 text-base text-muted-foreground">
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className="text-3xl font-bold text-primary">AI-DevSpace</h1>
+        <ThemeSwitcher />
+      </div>
+      <p className="text-base text-muted-foreground">
         Step 1 OK — monorepo resolved, shared={String(SHARED_PACKAGE_OK)}
       </p>
       <div className="mt-6 flex gap-2">
