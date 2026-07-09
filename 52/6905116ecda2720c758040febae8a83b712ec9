@@ -1,0 +1,32 @@
+.scratch/ai-devspace-mvp/UI-POLISH-SPEC.md
+  s_85212c552f0577::t_8f4d7208deb61a 220-296
+  s_85212c552f0577::t_0b9138cc600974 886
+  s_85212c552f0577::t_050f6e61cf0166 920
+  s_85212c552f0577::t_d4ed4b9894282a 1178-1201
+  s_85212c552f0577::t_429b02b8b300c4 736
+  s_85212c552f0577::t_47adc5fe92403f 709-735,737-759,761-843,845-885,887-919,921-953
+  s_85212c552f0577::t_98932de0ea7847 844
+  s_85212c552f0577::t_70da7293893763 760
+  s_85212c552f0577::t_9a1a047928bd9a 96
+  s_85212c552f0577::t_d4974be51fe732 441-500
+CONTEXT.md
+  s_85212c552f0577::t_b4f16447571280 149
+  s_85212c552f0577::t_e5fa72bd0e838a 148
+  s_85212c552f0577::t_dcd2a50474e4f8 147
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "526905116ecda2720c758040febae8a83b712ec9",
+  "prompts": {},
+  "sessions": {
+    "s_85212c552f0577": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "64b2a4d3-6b3f-411c-8a4e-7a173afdc7d5",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
