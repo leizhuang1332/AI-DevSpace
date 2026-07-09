@@ -25,8 +25,16 @@ export interface Artifact { id: string; name: string; type: 'database' | 'config
 // mock 集合（Step 2 内增长；P1+ 改 SSE 接入）
 export const requirements: Requirement[] = [
   { id: 'req-001', title: '退款功能优化', status: 'implementing', progress: 62, repos: ['refund-service', 'order-service'], updatedAt: '2026-07-09T15:00:00Z', currentStage: 'code-stage', currentTask: 12 },
-  { id: 'req-002', title: '会员等级体系重构', status: 'clarifying', progress: 25, repos: ['member-service'], updatedAt: '2026-07-08T18:00:00Z', currentStage: 'analyze-stage' },
+  { id: 'req-002', title: '会员等级体系重构', status: 'clarifying', progress: 25, repos: ['member-service'], updatedAt: '2026-07-09T12:00:00Z', currentStage: 'analyze-stage' },
   { id: 'req-003', title: '支付链路灰度切流', status: 'designing', progress: 38, repos: ['pay-gateway', 'risk-service'], updatedAt: '2026-07-09T11:00:00Z', currentStage: 'design-stage' },
+  { id: 'req-004', title: '订单导出（CSV）', status: 'done', progress: 100, repos: ['order-service'], updatedAt: '2026-07-08T09:00:00Z' },
+  { id: 'req-005', title: '优惠券叠加规则', status: 'planning', progress: 48, repos: ['coupon-service'], updatedAt: '2026-07-07T14:00:00Z' },
+  { id: 'req-006', title: '风险决策引擎接入', status: 'analyzing', progress: 15, repos: ['risk-service', 'pay-gateway'], updatedAt: '2026-07-06T16:00:00Z' },
+  { id: 'req-007', title: '2023 Q4 活动复盘归档', status: 'archived', progress: 100, repos: ['promo-service'], updatedAt: '2026-05-01T10:00:00Z' },
+  { id: 'req-008', title: '草稿：活动反作弊策略', status: 'draft', progress: 5, repos: [], updatedAt: '2026-07-09T08:00:00Z' },
+  { id: 'req-009', title: '风控拦截 PR 提交', status: 'submitting', progress: 90, repos: ['risk-service'], updatedAt: '2026-07-09T13:30:00Z' },
+  { id: 'req-010', title: '秒杀链路压测报告', status: 'done', progress: 100, repos: ['seckill-service', 'pay-gateway'], updatedAt: '2026-07-05T18:00:00Z' },
+  { id: 'req-011', title: '购物车持久化重构', status: 'analyzing', progress: 30, repos: ['cart-service'], updatedAt: '2026-07-08T20:00:00Z' },
 ];
 
 export const sessions: Session[] = [
