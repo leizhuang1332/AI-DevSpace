@@ -1,0 +1,21 @@
+apps/web/src/components/theme-switcher.tsx
+  s_2cd8e533483c13::t_8a71521f6f6ab3 1-43
+apps/web/src/app/page.tsx
+  s_2cd8e533483c13::t_00c2712dc09091 2,7-11,27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d5280e0b1d2d11d4e3759d7d63b815a22f5e1888",
+  "prompts": {},
+  "sessions": {
+    "s_2cd8e533483c13": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5a2dc01d-e3c7-40a1-a99f-5b54fd15ec27",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
