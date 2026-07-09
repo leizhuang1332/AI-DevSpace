@@ -1,0 +1,25 @@
+apps/web/src/styles/tokens.css
+  s_2cd8e533483c13::t_21cb126ea8793c 1-60
+apps/web/tailwind.config.ts
+  s_2cd8e533483c13::t_c6d7708e94643a 5-40
+apps/web/src/app/page.tsx
+  s_2cd8e533483c13::t_d4dca5d2c5dead 5-7,10-14,17
+apps/web/src/styles/globals.css
+  s_2cd8e533483c13::t_01db72b55a95b9 4-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b13d12ba7e98aeadfb37e6b3bd44893bc423ac3c",
+  "prompts": {},
+  "sessions": {
+    "s_2cd8e533483c13": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5a2dc01d-e3c7-40a1-a99f-5b54fd15ec27",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
