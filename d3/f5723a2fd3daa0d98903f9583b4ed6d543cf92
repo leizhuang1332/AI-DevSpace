@@ -1,0 +1,30 @@
+apps/web/src/app/(workspace)/requirements/[id]/layout.tsx
+  s_598550e31acff3::t_cdfb11cb06e074 1-19
+apps/web/src/components/resource-tree.tsx
+  s_598550e31acff3::t_6027eb25b0de97 54-102
+  s_598550e31acff3::t_d35a6ac2b84a0c 9-21
+  s_598550e31acff3::t_fee1cc321c0c38 1-4,8,22-23,28-53
+  s_598550e31acff3::t_c836bfd60b9c9d 5-7,24-27
+apps/web/src/app/(workspace)/requirements/[id]/page.tsx
+  s_598550e31acff3::t_c7462299f08946 1-18
+apps/web/src/components/center-tabs.tsx
+  s_598550e31acff3::t_19d5a433de051d 1-40
+apps/web/src/components/inline-rail.tsx
+  s_598550e31acff3::t_5086683cfb0f54 1-100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d3f5723a2fd3daa0d98903f9583b4ed6d543cf92",
+  "prompts": {},
+  "sessions": {
+    "s_598550e31acff3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9def9a8d-cfab-4fc1-8235-9b383e99fefc",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
