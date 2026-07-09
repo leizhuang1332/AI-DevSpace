@@ -1,0 +1,28 @@
+package.json
+  s_2cd8e533483c13::t_b550a6621fde91 1-12
+  s_2cd8e533483c13::t_e88080c424be39 13
+tsconfig.base.json
+  s_2cd8e533483c13::t_69fe9e7e37e03f 1-11
+  s_2cd8e533483c13::t_e88080c424be39 12
+pnpm-workspace.yaml
+  s_2cd8e533483c13::t_fdd6a42beb423c 1-2
+  s_2cd8e533483c13::t_e88080c424be39 3
+pnpm-lock.yaml
+  s_2cd8e533483c13::t_0b2f23507496a8 1-9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0699b2a43d2ae0236baf49a96a116e7fe171a9aa",
+  "prompts": {},
+  "sessions": {
+    "s_2cd8e533483c13": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5a2dc01d-e3c7-40a1-a99f-5b54fd15ec27",
+        "model": "MiniMax-M3"
+      },
+      "human_author": null
+    }
+  }
+}
