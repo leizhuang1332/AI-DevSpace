@@ -19,7 +19,7 @@ export function ThemeSwitcher() {
   return (
     <div className="inline-flex overflow-hidden rounded-md border border-border text-sm">
       {OPTIONS.map((opt) => {
-        const active = mounted && (theme === opt.value || (opt.value === 'system' && theme === 'system'));
+        const active = mounted && theme === opt.value;
         return (
           <button
             key={opt.value}
