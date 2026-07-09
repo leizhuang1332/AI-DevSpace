@@ -1,7 +1,8 @@
 ---
-Status: ready-for-human
+Status: ready-for-agent
 Type: design
 Created: 2026-07-09
+Approved: 2026-07-09
 Feature: ai-devspace-mvp
 Author: Claude (brainstorming session)
 Related: PRD.md, UI-POLISH-SPEC.md, CONTEXT.md
