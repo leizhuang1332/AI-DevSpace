@@ -11,3 +11,10 @@ Five canonical states, recorded as a `Status:` line in each issue's frontmatter 
 ### Domain docs
 
 Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+## git 操作特批
+
+此项目允许执行以下git操作：
+- `git add`
+- `git commit`
+- `git push`
