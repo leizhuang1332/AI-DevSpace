@@ -3,11 +3,11 @@ import { useRouter, useSearchParams } from 'next/navigation';
 
 type Tab = 'markdown' | 'diff' | 'files' | 'chat';
 
-const TABS: { key: Tab; label: string; icon: string; shortcut: string }[] = [
-  { key: 'markdown', label: 'Markdown', icon: '📄', shortcut: '⌘1' },
-  { key: 'diff', label: 'Diff', icon: '🔀', shortcut: '⌘2' },
-  { key: 'files', label: '文件树', icon: '📁', shortcut: '⌘3' },
-  { key: 'chat', label: '本次对话', icon: '💬', shortcut: '⌘4' },
+const TABS: { key: Tab; label: string; icon: string }[] = [
+  { key: 'markdown', label: 'Markdown', icon: '📄' },
+  { key: 'diff', label: 'Diff', icon: '🔀' },
+  { key: 'files', label: '文件树', icon: '📁' },
+  { key: 'chat', label: '本次对话', icon: '💬' },
 ];
 
 interface Props {
@@ -24,7 +24,6 @@ export function CenterTabs({ defaultTab = 'markdown' }: Props) {
         <button
           key={t.key}
           onClick={() => router.replace(`?tab=${t.key}`)}
-          title={`${t.shortcut} 切换`}
           className={`flex items-center gap-1.5 h-7 px-3 text-sm rounded-md ${
             active === t.key
               ? 'bg-bg-elevated text-text-1 font-medium shadow-sm'

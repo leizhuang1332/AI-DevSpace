@@ -1,6 +1,4 @@
 'use client';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
 
 interface Props {
   requirementId: string;
@@ -71,7 +69,6 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 export function ResourceTree({ requirementId }: Props) {
-  const pathname = usePathname();
   return (
     <aside className="bg-bg-elevated border-r border-border py-3 overflow-auto">
       {TREE_SECTIONS.map((section) => (
