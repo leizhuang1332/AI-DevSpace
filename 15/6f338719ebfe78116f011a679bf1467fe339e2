@@ -1,0 +1,33 @@
+docs/superpowers/specs/2026-07-09-frontend-phase0-alignment-design.md
+  s_2cd8e533483c13::t_2295886198a6ba 147-148
+  s_2cd8e533483c13::t_c56f6bc60cb668 507,509
+  s_eb84aa9cd3cd9a::t_69b22bda57953d 1-146,149-156,261-263,289-362,364-368,371-374,376-386,388-392,395-398,400-406,409-506,508,510-531
+  s_eb84aa9cd3cd9a::t_bcfa54d30d6e05 363,369-370,375
+  s_eb84aa9cd3cd9a::t_ad1230ea36d207 387,393-394,399
+  s_eb84aa9cd3cd9a::t_241a8872c5b20f 407-408
+  s_2cd8e533483c13::t_87980d929518a2 157-260,264-288
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "156f338719ebfe78116f011a679bf1467fe339e2",
+  "prompts": {},
+  "sessions": {
+    "s_2cd8e533483c13": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5a2dc01d-e3c7-40a1-a99f-5b54fd15ec27",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    },
+    "s_eb84aa9cd3cd9a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cb63e359-3512-4f55-b41e-291bf7ae5a84",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
