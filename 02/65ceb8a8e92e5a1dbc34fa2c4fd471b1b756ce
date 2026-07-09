@@ -1,0 +1,32 @@
+apps/web/src/components/theme-switcher.tsx
+  s_2cd8e533483c13::t_6bd0101303a94a 22
+apps/web/next-env.d.ts
+  s_2cd8e533483c13::t_417896cab08143 1-4
+  s_8a2be43bb7672e::t_3dc7a64c4912db 5
+apps/web/components.json
+  s_2cd8e533483c13::t_28f942927f0453 1-20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0265ceb8a8e92e5a1dbc34fa2c4fd471b1b756ce",
+  "prompts": {},
+  "sessions": {
+    "s_2cd8e533483c13": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5a2dc01d-e3c7-40a1-a99f-5b54fd15ec27",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    },
+    "s_8a2be43bb7672e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2732d136-e8e5-4ffd-955d-08457ba21f5e",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
