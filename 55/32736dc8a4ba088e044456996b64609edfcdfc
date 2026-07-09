@@ -1,0 +1,21 @@
+apps/web/src/app/(workspace)/data/mock.ts
+  s_598550e31acff3::t_b7ddc78813988e 28,30-37
+apps/web/src/app/(workspace)/requirements/page.tsx
+  s_598550e31acff3::t_7751726e42d382 1-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5532736dc8a4ba088e044456996b64609edfcdfc",
+  "prompts": {},
+  "sessions": {
+    "s_598550e31acff3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9def9a8d-cfab-4fc1-8235-9b383e99fefc",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
