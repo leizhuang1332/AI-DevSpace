@@ -72,6 +72,13 @@
   --popover:               0 0% 100%;
   --popover-foreground:   222 47% 11%;
   --primary:               234 56% 60%;          /* #5e6ad2 */
+  /* Brand 6 阶（ADR-0005） */
+  --brand:               234 56% 60%;          /* 别名，与 500 同值 */
+  --brand-50:            234 100% 96%;
+  --brand-100:           234 90% 90%;
+  --brand-500:           234 56% 60%;          /* #5e6ad2，与 --primary 同值 */
+  --brand-600:           234 56% 53%;          /* hover */
+  --brand-700:           234 50% 46%;          /* active 前色 */
   --primary-foreground:   0 0% 100%;
   --secondary:             210 40% 96%;
   --secondary-foreground: 222 47% 11%;
@@ -96,6 +103,13 @@
   --popover:               222 47% 8%;
   --popover-foreground:   210 40% 98%;
   --primary:               234 70% 70%;          /* #7c87e8 */
+  /* Brand 6 阶（dark） */
+  --brand:               234 70% 70%;
+  --brand-50:            234 50% 16%;
+  --brand-100:           234 50% 22%;
+  --brand-500:           234 70% 70%;          /* #7c87e8，与 --primary 同值 */
+  --brand-600:           234 75% 76%;
+  --brand-700:           234 80% 84%;
   --primary-foreground:   222 47% 6%;
   --secondary:             217 33% 17%;
   --secondary-foreground: 210 40% 98%;
