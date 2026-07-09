@@ -1,0 +1,29 @@
+apps/web/src/components/sidebar.tsx
+  s_598550e31acff3::t_b37227a8fb79cf 1-37
+apps/web/src/components/keyboard-bridge.tsx
+  s_598550e31acff3::t_b3bd6bf7210bed 1-28
+apps/web/src/components/statusbar.tsx
+  s_598550e31acff3::t_a233e26aa451db 1-61
+apps/web/src/app/(workspace)/data/mock.ts
+  s_598550e31acff3::t_9e8dbcd009f2c3 1-53
+apps/web/src/app/(workspace)/page.tsx
+  s_598550e31acff3::t_44275a68d91bda 1-13
+apps/web/src/app/(workspace)/layout.tsx
+  s_598550e31acff3::t_cf47de66f72617 1-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "57f2f42e27cf1bf3b591478d2d3c7a0c8f75d8ce",
+  "prompts": {},
+  "sessions": {
+    "s_598550e31acff3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9def9a8d-cfab-4fc1-8235-9b383e99fefc",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
