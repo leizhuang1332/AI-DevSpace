@@ -1,0 +1,22 @@
+apps/web/tailwind.config.ts
+  s_598550e31acff3::t_dfe1e468fb35f2 39-46
+apps/web/src/styles/tokens.css
+  s_598550e31acff3::t_4dab7d58df14e5 75-81
+  s_598550e31acff3::t_3150a3101b6443 106-112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e0580edd5e4ceebe824027e4e8a373c1c0a7bc99",
+  "prompts": {},
+  "sessions": {
+    "s_598550e31acff3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9def9a8d-cfab-4fc1-8235-9b383e99fefc",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
