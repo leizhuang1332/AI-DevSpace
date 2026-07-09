@@ -144,6 +144,9 @@ AI 可执行的工作单元（如"设计退款表结构"、"开发 refund-servic
 | 30 | 三态：空态极简（icon+标题+CTA） / 加载混合（骨架屏+进度条+spinner） / 错误分层（内嵌+Toast+弹窗+状态条 L3）；骨架屏 shimmer 1.5s | — |
 | 31 | 实时通信协议 = **SSE**（Server-Sent Events），不用 WebSocket；客户端→服务端走 REST POST；Agent 用 `@fastify/sse` | — |
 | 32 | AI 输出打字机效果：流式 SSE 推送 chunk（10-100 字符），前端按字符打字（默认 20ms/字，可设 10/20/30/关），点击气泡跳过 | — |
+| 33 | 需求列表 = 宽松风格（行高 48px / 字号 14px / 副标题 12px）；其他列表保持紧凑 32px；副标题格式 `N repo · N 天前更新` | — |
+| 34 | Agent 鉴权 = 动态 Token（`~/.aidevspace/.agent-token` 0600/ACL）+ Origin 校验（仅 `localhost:3333`）；请求头 `X-AIDevSpace-Token` | — |
+| 35 | AI 切换粒度 = 全局一个 Provider；`config.yaml` 加 `ai.provider` 字段；Agent 目录约定 `apps/agent/src/providers/`（**有 src**） | — |
 
 ---
 

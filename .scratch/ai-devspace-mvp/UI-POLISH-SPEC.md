@@ -93,7 +93,7 @@ Related: PRD.md
 ```
 
 **统一规则**：
-- 列表行高：32px
+- 列表行高：32px（**需求列表例外 48px**，见 §4.6）
 - 卡片内边距：16px
 - 页面内边距：24px
 - 元素同级间距：8px
@@ -216,6 +216,83 @@ Related: PRD.md
 - **AI 回答（在命令面板中）**：以"可执行结果卡片"呈现
 - **AI 主动推送**：Toast 或 Inline 浮窗
 - **AI 提问**：命令面板顶部 L3 状态 + Inline 浮窗
+
+### 4.6 需求列表（**宽松风格**，与紧凑的例外）
+
+需求列表是用户最高频查看的页面，单独采用**宽松风格**（行高 48px），与其他紧凑列表（资源树 32px、知识库 32px、命令面板 32px）形成节奏对比：**列表放松 → 详情紧凑专注**。
+
+```
+┌────────────────────────────────────────────────────────────┐
+│ ▌退款功能优化                            ● 实施中   65%     │  ← 行高 48px
+│  3 个 repo · 2 天前更新                                      │  ← 副标题 12px
+├────────────────────────────────────────────────────────────┤
+│ ▌会员系统升级                            ● 设计中   20%     │
+│  1 个 repo · 1 周前更新                                      │
+├────────────────────────────────────────────────────────────┤
+│ ▌订单中心改造                            ● 测试中   80%     │
+│  2 个 repo · 今天                                            │
+└────────────────────────────────────────────────────────────┘
+```
+
+| 项 | 值 |
+|---|---|
+| 列表行高 | **48px**（其他列表 32px） |
+| 字号（标题） | **14px**（其他列表 13px） |
+| 字号（副标题） | 12px（次要色 `var(--color-text-muted)`） |
+| 行内边距 | 12px 16px |
+| 列表项之间 | 1px 分隔线（与紧凑列表一致） |
+| 左色条 | 4px × 32px（状态色） |
+| 状态徽章 | 右侧，14px 高 |
+| 进度环 | 32px 直径，右侧 |
+| Hover | 浅色背景 `var(--color-bg-hover)` + 阴影轻提 |
+| 选中 | 紫色边框 + 浅紫背景 `var(--color-brand-50)` |
+
+**副标题格式**（统一）：
+```
+{N} 个 repo · {N} {时间单位}前更新
+```
+
+例：
+- `3 个 repo · 2 天前更新`
+- `1 个 repo · 1 周前更新`
+- `2 个 repo · 今天`
+- `0 个 repo · 3 小时前更新`
+
+**时间格式化**：
+- < 1 分钟：`刚刚`
+- < 1 小时：`N 分钟前更新`
+- < 24 小时：`N 小时前更新`
+- < 7 天：`N 天前更新`
+- < 30 天：`N 周前更新`
+- < 12 个月：`N 个月前更新`
+- > 12 个月：`N 年前更新`
+
+**视觉对比**（紧凑 vs 宽松）：
+
+紧凑 32px（旧）：
+```
+退款功能优化     ● 实施中  65%   2天前
+会员系统升级     ● 设计中  20%   1周前
+（一眼能看 12 行）
+```
+
+宽松 48px（新）：
+```
+▌退款功能优化                           ● 实施中  65%
+  3 个 repo · 2 天前更新
+▌会员系统升级                           ● 设计中  20%
+  1 个 repo · 1 周前更新
+（一眼能看 8 行，但每行信息更丰富）
+```
+
+**例外范围**（其他列表**不**采用宽松）：
+- ❌ 资源树（保持 32px）
+- ❌ 知识库列表（保持 32px）
+- ❌ 仓库列表（保持 32px）
+- ❌ 命令面板建议（保持 32px）
+- ❌ 对话历史列表（保持 32px）
+- ❌ 通知中心（保持 32px）
+- ❌ Dashboard 卡片网格（保持卡片化布局）
 
 ---
 
@@ -360,6 +437,66 @@ interface StatusBadgeProps {
   showLabel?: boolean
 }
 ```
+
+### 5.6 RequirementListItem（需求列表项，**宽松风格**）
+
+> 仅用于需求列表页面（`/requirements`）。其他列表（资源树/知识库/仓库）使用通用 `ListItem` 紧凑组件。
+
+```typescript
+// packages/web/src/components/requirement/RequirementListItem.tsx
+interface RequirementListItemProps {
+  /** 需求快照（来自 GET /api/requirements） */
+  requirement: RequirementSnapshot
+  /** 选中状态 */
+  selected?: boolean
+  /** 点击行 → 打开详情 */
+  onOpen: (id: string) => void
+  /** 点击状态徽章 → 快速筛选同状态需求 */
+  onStatusClick?: (status: RequirementStatusValue) => void
+  /** 是否展示 "AI 正在跑" 状态指示（SSE 推送） */
+  aiActive?: boolean
+}
+
+/** 时间格式化工具（前端） */
+// packages/web/src/utils/format.ts
+function formatRelativeTime(timestamp: number): string {
+  const diff = Date.now() - timestamp
+  const minute = 60 * 1000
+  const hour = 60 * minute
+  const day = 24 * hour
+  const week = 7 * day
+  const month = 30 * day
+  const year = 365 * day
+
+  if (diff < minute)       return '刚刚'
+  if (diff < hour)         return `${Math.floor(diff / minute)} 分钟前更新`
+  if (diff < day)          return `${Math.floor(diff / hour)} 小时前更新`
+  if (diff < week)         return `${Math.floor(diff / day)} 天前更新`
+  if (diff < month)        return `${Math.floor(diff / week)} 周前更新`
+  if (diff < year)         return `${Math.floor(diff / month)} 个月前更新`
+  return `${Math.floor(diff / year)} 年前更新`
+}
+
+function formatSubtitle(requirement: RequirementSnapshot): string {
+  const repos = requirement.repos.length
+  const repoText = repos === 0 ? '0 个 repo' : `${repos} 个 repo`
+  return `${repoText} · ${formatRelativeTime(requirement.updatedAt)}`
+}
+```
+
+**视觉规范**（详见 §4.6）：
+- 行高 48px
+- 标题 14px + 副标题 12px（次要色）
+- 左色条 4px × 32px（状态色）
+- 右侧：状态徽章 + 进度环
+- Hover：浅色背景 + 阴影轻提
+- 选中：紫色边框 + 浅紫背景
+
+**AI 实时状态指示**（`aiActive`）：
+- 列表项右侧增加一个紫色脉冲圆点（与状态条 L1 一致）
+- 让用户在列表页就能看到"哪个需求 AI 正在跑"
+
+---
 
 ---
 
@@ -566,6 +703,251 @@ export interface WorktreeInfo {
   changedFiles: number
 }
 ```
+
+---
+
+## 7.5 鉴权与 AI Provider 抽象
+
+### 7.5.1 鉴权方案（动态 Token + Origin 校验）
+
+**为什么需要鉴权**：
+- ❌ **不是**为了防网络中间人（localhost 通信不走网络）
+- ✅ **是**为了防**恶意网页 CSRF**（浏览器 fetch 默认带 Origin，恶意网站可调 `localhost:7777`）
+- ✅ **是**为了防**同机其他用户**（Linux/macOS 多用户系统）
+
+**机制**（双保险）：
+
+#### Token 生成与存储
+
+```
+~/.aidevspace/
+├── config.yaml
+└── .agent-token                  ← Agent 启动时生成（32 字节 base64url）
+```
+
+| 平台 | 文件权限 |
+|---|---|
+| macOS / Linux | `chmod 600`（仅当前用户可读） |
+| Windows | `ICACLS` 限当前用户 ACL |
+
+#### Agent 启动流程
+
+```typescript
+// apps/agent/src/auth/token-manager.ts
+import { randomBytes } from 'node:crypto'
+import { readFileSync, writeFileSync, chmodSync, existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { homedir } from 'node:os'
+
+const TOKEN_PATH = join(homedir(), '.aidevspace', '.agent-token')
+
+export function getOrCreateToken(): string {
+  if (existsSync(TOKEN_PATH)) {
+    return readFileSync(TOKEN_PATH, 'utf8').trim()
+  }
+  const token = randomBytes(32).toString('base64url')
+  writeFileSync(TOKEN_PATH, token, { mode: 0o600 })
+  if (process.platform !== 'win32') {
+    chmodSync(TOKEN_PATH, 0o600)
+  }
+  return token
+}
+```
+
+#### 校验中间件
+
+```typescript
+// apps/agent/src/auth/origin-guard.ts
+import type { FastifyRequest, FastifyReply } from 'fastify'
+
+const ALLOWED_ORIGINS = new Set([
+  'http://localhost:3333',
+  'http://127.0.0.1:3333',
+])
+
+export function makeAuthGuard(expectedToken: string) {
+  return async (req: FastifyRequest, reply: FastifyReply) => {
+    // 跳过 SSE 端点（用 EventSource 时浏览器不带自定义头）
+    if (req.url.startsWith('/sse/')) {
+      // SSE 走 Origin 校验 + 一次性握手
+      const origin = req.headers.origin
+      if (!origin || !ALLOWED_ORIGINS.has(origin)) {
+        return reply.code(403).send({ error: 'invalid origin' })
+      }
+      return
+    }
+
+    // REST 走 Token 校验
+    const token = req.headers['x-aidevspace-token']
+    const origin = req.headers.origin
+    if (token !== expectedToken) {
+      return reply.code(401).send({ error: 'invalid token' })
+    }
+    if (origin && !ALLOWED_ORIGINS.has(origin)) {
+      return reply.code(403).send({ error: 'invalid origin' })
+    }
+  }
+}
+```
+
+#### Web 端请求拦截器
+
+```typescript
+// apps/web/src/lib/agent-client.ts
+import { readFileSync } from 'node:fs'   // 仅在 SSR 时用
+import { join } from 'node:path'
+import { homedir } from 'node:os'
+
+const TOKEN_PATH = join(homedir(), '.aidevspace', '.agent-token')
+
+// SSR 时直接读文件；CSR 时通过 __INITIAL_DATA__ 注入
+const AGENT_TOKEN = process.env.AGENT_TOKEN
+  || (typeof window === 'undefined' ? readFileSync(TOKEN_PATH, 'utf8').trim() : '')
+
+export async function agentFetch(path: string, init?: RequestInit) {
+  const res = await fetch(`http://localhost:7777${path}`, {
+    ...init,
+    headers: {
+      ...init?.headers,
+      'X-AIDevSpace-Token': AGENT_TOKEN,
+      'Origin': 'http://localhost:3333',
+    },
+  })
+  if (!res.ok) throw new Error(`Agent ${res.status}`)
+  return res
+}
+```
+
+#### SSE 鉴权的特别处理
+
+**问题**：`EventSource` 浏览器 API **不支持**自定义请求头（不能带 `X-AIDevSpace-Token`）。
+
+**解决方案**：
+- SSE 端点走 **Origin 校验**（不校验 Token）
+- 浏览器 EventSource 自动带 Origin
+- 恶意网站 `https://evil.com` 调 `localhost:7777/sse/...` 时 Origin 是 `https://evil.com`，被拒
+
+**初次握手**：
+- 用户首次访问 Web → Web 读 `.agent-token`（SSR）→ 注入到页面 props
+- 后续 SSE 连接靠 Origin 校验保护
+
+### 7.5.2 AI Provider 抽象（多 SDK 切换）
+
+**配置**：
+```yaml
+# ~/.aidevspace/config.yaml
+ai:
+  provider: "claude-code"   # MVP
+  # 未来: "codex" / "opencode"
+```
+
+**抽象接口**（`apps/agent/src/providers/AIProvider.ts`）：
+
+```typescript
+import type { Readable } from 'node:stream'
+
+export interface AIMessage {
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  attachments?: Array<{ type: 'file' | 'directory'; path: string }>
+}
+
+export interface AIStreamEvent {
+  type: 'text' | 'tool_call' | 'tool_result' | 'file_change' | 'done' | 'error'
+  messageId?: string
+  delta?: string
+  toolName?: string
+  toolInput?: unknown
+  toolOutput?: string
+  filePath?: string
+  error?: { code: string; message: string }
+  timestamp: number
+}
+
+export interface AIProvider {
+  /** Provider 名称（与 config.ai.provider 对应） */
+  readonly name: string
+
+  /** 流式运行 AI */
+  run(
+    messages: AIMessage[],
+    context: {
+      cwd: string                  // Agent 当前工作目录（worktree 路径）
+      systemPrompt: string
+      allowedTools?: string[]
+    }
+  ): AsyncIterable<AIStreamEvent>
+
+  /** 中止当前运行 */
+  abort(messageId: string): Promise<void>
+}
+```
+
+**ClaudeCodeProvider 实现**（`apps/agent/src/providers/ClaudeCodeProvider.ts`）：
+
+```typescript
+import { spawn } from 'node:child_process'
+import { AIProvider, AIMessage, AIStreamEvent } from './AIProvider'
+
+export class ClaudeCodeProvider implements AIProvider {
+  readonly name = 'claude-code'
+
+  async *run(messages: AIMessage[], context: { cwd: string; systemPrompt: string }): AsyncIterable<AIStreamEvent> {
+    // spawn @anthropic-ai/claude-code SDK 子进程
+    const proc = spawn('claude-code', [
+      '--system-prompt', context.systemPrompt,
+      '--cwd', context.cwd,
+      '--stream',
+    ], { stdio: ['pipe', 'pipe', 'pipe'] })
+
+    // 发送消息
+    proc.stdin.write(JSON.stringify(messages))
+    proc.stdin.end()
+
+    // 解析流式输出
+    for await (const line of readLines(proc.stdout)) {
+      const event = JSON.parse(line) as AIStreamEvent
+      yield event
+    }
+  }
+
+  async abort(messageId: string): Promise<void> {
+    // 通过 IPC 通知子进程中止
+  }
+}
+```
+
+**Provider 工厂**（`apps/agent/src/providers/index.ts`）：
+
+```typescript
+import { ClaudeCodeProvider } from './ClaudeCodeProvider'
+// import { CodexProvider } from './CodexProvider'        // P1+
+// import { OpenCodeProvider } from './OpenCodeProvider'  // P1+
+
+export type ProviderName = 'claude-code' | 'codex' | 'opencode'
+
+export function createProvider(name: ProviderName): AIProvider {
+  switch (name) {
+    case 'claude-code':
+      return new ClaudeCodeProvider()
+    // case 'codex':        return new CodexProvider()
+    // case 'opencode':     return new OpenCodeProvider()
+    default:
+      throw new Error(`Unknown AI provider: ${name}`)
+  }
+}
+```
+
+### 7.5.3 切换流程
+
+**用户切换 Provider**：
+1. 改 `~/.aidevspace/config.yaml`：`ai.provider: "claude-code"` → `"codex"`
+2. 重启 Agent（`pnpm agent:start`）
+3. Agent 启动时读 config，初始化对应 Provider
+4. 后续所有 AI 调用走新 Provider
+5. 旧需求的历史对话保留（不丢失）
+
+**MVP 阶段不实现 UI 切换**，用户改 yaml 即可。P2 可加设置页 UI 切换。
 
 ---
 
@@ -793,23 +1175,30 @@ packages/shared/                       # 跨端共享
 │   └── theme.ts                       # 主题类型
 
 apps/agent/                            # Node.js 守护进程
-├── src/
-│   ├── server.ts                      # Fastify 入口
-│   ├── routes/
-│   │   ├── sse.ts                     # SSE 端点
-│   │   ├── requirements.ts
-│   │   ├── repos.ts
-│   │   ├── knowledge.ts
-│   │   ├── commands.ts
-│   │   └── workspace.ts
-│   ├── services/
-│   │   ├── RequirementService.ts
-│   │   ├── RepositoryService.ts
-│   │   ├── ClaudeCodeProvider.ts
-│   │   ├── SkillLoader.ts
-│   │   └── WorkspaceService.ts
-│   └── events/
-│       └── event-bus.ts               # 事件总线
+└── src/
+    ├── server.ts                      # Fastify 入口
+    ├── routes/
+    │   ├── sse.ts                     # SSE 端点（带鉴权）
+    │   ├── requirements.ts
+    │   ├── repos.ts
+    │   ├── knowledge.ts
+    │   ├── commands.ts
+    │   └── workspace.ts
+    ├── services/
+    │   ├── RequirementService.ts
+    │   ├── RepositoryService.ts
+    │   ├── SkillLoader.ts
+    │   └── WorkspaceService.ts
+    ├── providers/                     # ★ AI Provider 抽象（多 SDK 切换）
+    │   ├── AIProvider.ts              # 抽象接口
+    │   ├── ClaudeCodeProvider.ts      # MVP 实现
+    │   ├── CodexProvider.ts           # P1+（占位）
+    │   └── OpenCodeProvider.ts        # P1+（占位）
+    ├── auth/                          # ★ 鉴权
+    │   ├── token-manager.ts           # .agent-token 读写
+    │   └── origin-guard.ts            # Origin 校验中间件
+    └── events/
+        └── event-bus.ts               # 事件总线
 ```
 
 ### 11.2 依赖清单（apps/web）
