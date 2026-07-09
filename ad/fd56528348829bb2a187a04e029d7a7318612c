@@ -1,0 +1,32 @@
+apps/web/tailwind.config.ts
+  s_2cd8e533483c13::t_0fe16620e72175 80
+  s_2cd8e533483c13::t_ec706c74289b01 4,8-36
+  s_2cd8e533483c13::t_a54a257bff71ec 37-42
+apps/web/src/app/page.tsx
+  s_2cd8e533483c13::t_22c75328464b52 5-7,11-19,23
+apps/web/src/app/layout.tsx
+  s_2cd8e533483c13::t_916feadcfebd7f 2,12-17
+apps/web/src/styles/tokens.css
+  s_2cd8e533483c13::t_f0236b42a13cda 61-96
+  s_2cd8e533483c13::t_b7e57b0a9c1bfb 97-113
+apps/web/package.json
+  s_2cd8e533483c13::t_ea9b12fd32e34c 16
+pnpm-lock.yaml
+  s_2cd8e533483c13::t_7cfd963e09ad66 25-27,370-375,841-845
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "adfd56528348829bb2a187a04e029d7a7318612c",
+  "prompts": {},
+  "sessions": {
+    "s_2cd8e533483c13": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5a2dc01d-e3c7-40a1-a99f-5b54fd15ec27",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
