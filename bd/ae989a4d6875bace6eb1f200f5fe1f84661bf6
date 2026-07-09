@@ -1,0 +1,20 @@
+docs/superpowers/plans/2026-07-09-frontend-phase0-step1.md
+  s_2cd8e533483c13::t_46ae6bbd0f792d 1-1027,1051-1080,1082-1091,1093-1115,1117-1118,1120-1277
+  s_2cd8e533483c13::t_836a570ec15b96 1028-1050,1081,1092,1116,1119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "bdae989a4d6875bace6eb1f200f5fe1f84661bf6",
+  "prompts": {},
+  "sessions": {
+    "s_2cd8e533483c13": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5a2dc01d-e3c7-40a1-a99f-5b54fd15ec27",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
