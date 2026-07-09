@@ -1,0 +1,33 @@
+apps/web/src/components/stat-card.tsx
+  s_598550e31acff3::t_73560453f9b805 1-18
+apps/web/src/components/status-badge.tsx
+  s_598550e31acff3::t_ace850f33f7479 1-29
+apps/web/src/components/progress-bar.tsx
+  s_598550e31acff3::t_082ed1f4aa4513 1-15
+apps/web/src/components/request-card.tsx
+  s_598550e31acff3::t_5aaaddda640327 1-29
+apps/web/src/components/ai-status-dot.tsx
+  s_598550e31acff3::t_59d29f56a65707 1-25
+apps/web/src/components/active-session-card.tsx
+  s_598550e31acff3::t_8fbd85f1b2d8b0 1-37
+apps/web/src/components/empty-state.tsx
+  s_598550e31acff3::t_ea604bd3cb6355 1-18
+apps/web/src/components/inbox-item.tsx
+  s_598550e31acff3::t_5d1dc9b675ea9e 1-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "efa2910551a09a055857eb6ee2af485518781e0f",
+  "prompts": {},
+  "sessions": {
+    "s_598550e31acff3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9def9a8d-cfab-4fc1-8235-9b383e99fefc",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
