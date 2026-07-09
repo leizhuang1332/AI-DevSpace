@@ -1,0 +1,27 @@
+pnpm-lock.yaml
+  s_2cd8e533483c13::t_b0632478246c14 10-26
+packages/shared/tsconfig.json
+  s_2cd8e533483c13::t_3bc989aec49a83 1-8
+packages/shared/package.json
+  s_2cd8e533483c13::t_dae8fc90b6ffc6 1-16
+packages/shared/src/index.ts
+  s_2cd8e533483c13::t_36023ba2b50d31 1-2
+.gitignore
+  s_2cd8e533483c13::t_2e8a6fb86a5550 1-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ab7a555f979cfe7300d90aa02af8ac2f863cfcd9",
+  "prompts": {},
+  "sessions": {
+    "s_2cd8e533483c13": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5a2dc01d-e3c7-40a1-a99f-5b54fd15ec27",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
