@@ -23,7 +23,13 @@ export default function DashboardPage() {
       <section className="grid grid-cols-4 gap-4 mb-6">
         <StatCard label="进行中" value={ongoing.length} delta="+2 本周" deltaTone="up" />
         <StatCard label="已完成" value={23} delta="本月" />
-        <StatCard label="待回答" value={3} delta="AI 提问" deltaTone="neutral" valueClassName="text-warning" />
+        <div className="bg-bg-elevated border border-border rounded-lg p-5">
+          <div className="text-text-3 text-sm mb-2">待回答</div>
+          <div className="text-[32px] font-semibold tracking-tight leading-none">
+            <span style={{ color: 'hsl(var(--warning))' }}>3</span>
+          </div>
+          <div className="text-xs mt-2 text-text-3">AI 提问</div>
+        </div>
         <StatCard label="知识沉淀" value={47} delta="+5 自动" deltaTone="up" />
       </section>
 
