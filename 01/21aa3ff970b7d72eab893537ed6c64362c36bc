@@ -1,0 +1,55 @@
+docs/adr/0001-hybrid-web-agent-architecture.md
+  s_598550e31acff3::t_75d9c3ca97383d 35
+  s_598550e31acff3::t_a2114887b0b605 3-4,7
+  s_598550e31acff3::t_276dd0daaea5e9 30
+  s_598550e31acff3::t_2ad8adbe88ea64 8
+docs/superpowers/plans/2026-07-09-frontend-phase0-step1.md
+  s_598550e31acff3::t_9f5f15b68c9a6b 990
+  s_598550e31acff3::t_f26435ed8cd227 41
+  s_598550e31acff3::t_f0603d2b17b8a6 993-994,1000,1014
+  s_598550e31acff3::t_0d9c80f4f42734 997,1166,1169,1179,1216,1224,1257
+  s_598550e31acff3::t_7466e2afa040e4 1275
+docs/adr/0005-brand-palette-six-step.md
+  s_598550e31acff3::t_2e904d91da431e 1-67
+docs/superpowers/plans/2026-07-09-frontend-step2-html-port.md
+  s_598550e31acff3::t_dd27f558eac7a9 1-1640
+docs/adr/0007-workspace-route-group-shell.md
+  s_598550e31acff3::t_a635ea7b16943f 1-102
+docs/superpowers/specs/2026-07-09-frontend-phase0-alignment-design.md
+  s_598550e31acff3::t_f6b64a659899fc 162
+  s_598550e31acff3::t_e4866523494ff0 94
+  s_598550e31acff3::t_e37463eec2fa28 219
+  s_598550e31acff3::t_f3ade45ad8e0c7 511-512
+  s_598550e31acff3::t_4087732d18b00d 281
+  s_598550e31acff3::t_8a1a9e6ffe0ac5 488
+.scratch/ai-devspace-mvp/issues/03-agent-skeleton.md
+  s_598550e31acff3::t_5c273d4de87153 7,11,24-25,32
+CONTEXT.md
+  s_598550e31acff3::t_028ac427599a7a 114
+  s_598550e31acff3::t_4b52b94b2aed1f 71
+  s_598550e31acff3::t_6e09f5d7d7f81b 134
+  s_598550e31acff3::t_01e51459b587c7 150
+  s_598550e31acff3::t_18fd2041be0bd0 151
+.scratch/ai-devspace-mvp/PRD.md
+  s_598550e31acff3::t_80f5da1ce0f159 204
+docs/adr/0006-html-prototype-as-source-of-truth.md
+  s_598550e31acff3::t_02e420d16483cf 1-71
+docs/superpowers/specs/2026-07-09-frontend-step2-html-port.md
+  s_598550e31acff3::t_c43ec72fb0ebce 1-292
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0121aa3ff970b7d72eab893537ed6c64362c36bc",
+  "prompts": {},
+  "sessions": {
+    "s_598550e31acff3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9def9a8d-cfab-4fc1-8235-9b383e99fefc",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
