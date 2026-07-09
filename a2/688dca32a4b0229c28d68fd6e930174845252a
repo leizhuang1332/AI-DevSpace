@@ -1,0 +1,19 @@
+docs/superpowers/specs/2026-07-09-frontend-phase0-alignment-design.md
+  s_2cd8e533483c13::t_71c6e00ef065b7 2,5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a2688dca32a4b0229c28d68fd6e930174845252a",
+  "prompts": {},
+  "sessions": {
+    "s_2cd8e533483c13": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5a2dc01d-e3c7-40a1-a99f-5b54fd15ec27",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
