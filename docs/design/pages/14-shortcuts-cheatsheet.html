@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>14 · 快捷键速查 · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{
+  --brand:#5e6ad2; --brand-50:#eef0fb; --brand-500:#5e6ad2; --brand-600:#525bc7;
+  --bg:#fbfbfd; --bg-elevated:#fff; --bg-subtle:#f5f5f7; --border:#ebebef; --border-strong:#d8d8de;
+  --text-1:#0f172a; --text-2:#475569; --text-3:#94a3b8;
+  --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px; --space-6:24px; --space-8:32px;
+  --text-xs:11px; --text-sm:12px; --text-base:13px; --text-md:14px; --text-lg:16px; --text-xl:18px; --text-2xl:20px; --text-3xl:24px;
+  --row-md:32px;
+  --radius-sm:4px; --radius-md:6px; --radius-lg:8px; --radius-xl:12px;
+  --shadow-xl:0 24px 64px rgba(0,0,0,0.15);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:#0f172a;color:#fff;font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased;min-height:100vh;padding:var(--space-8)}
+
+.backdrop{position:fixed;inset:0;background:rgba(15,23,42,0.85);backdrop-filter:blur(8px);z-index:-1}
+
+.shortcuts{position:relative;max-width:920px;margin:0 auto}
+
+.head{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-6)}
+.head h1{font-size:var(--text-3xl);font-weight:600;letter-spacing:-0.02em}
+.head .right{display:flex;align-items:center;gap:var(--space-3)}
+.search{position:relative;width:280px}
+.search input{width:100%;height:36px;padding:0 12px 0 36px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:var(--radius-md);color:#fff;font-size:var(--text-md);outline:none;font-family:inherit}
+.search input::placeholder{color:rgba(255,255,255,0.4)}
+.search input:focus{border-color:var(--brand-500);background:rgba(255,255,255,0.1)}
+.search::before{content:"🔍";position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:12px;color:rgba(255,255,255,0.5)}
+.close{width:36px;height:36px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.6);cursor:pointer;font-size:16px}
+.close:hover{background:rgba(255,255,255,0.12);color:#fff}
+
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:var(--space-5)}
+
+.group{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:var(--radius-lg);padding:var(--space-5)}
+.group h2{font-size:var(--text-md);font-weight:600;color:#fff;margin-bottom:var(--space-3);display:flex;align-items:center;gap:var(--space-2)}
+.group h2::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--brand-500)}
+.row{display:flex;align-items:center;justify-content:space-between;padding:var(--space-2) 0;font-size:var(--text-md)}
+.row:not(:last-child){border-bottom:1px solid rgba(255,255,255,0.06)}
+.row .desc{color:rgba(255,255,255,0.85)}
+.row .keys{display:inline-flex;gap:4px}
+.kbd{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:22px;padding:0 6px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-bottom-width:2px;border-radius:var(--radius-sm);font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:rgba(255,255,255,0.9)}
+.row .note{font-size:var(--text-xs);color:rgba(255,255,255,0.4);margin-left:var(--space-2)}
+
+.foot{display:flex;align-items:center;justify-content:space-between;margin-top:var(--space-5);padding-top:var(--space-4);border-top:1px solid rgba(255,255,255,0.08);font-size:var(--text-xs);color:rgba(255,255,255,0.5)}
+.foot kbd{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);padding:1px 6px;border-radius:3px;font-family:'JetBrains Mono',monospace;font-size:11px;color:rgba(255,255,255,0.9)}
+
+.note{margin-top:var(--space-6);padding:var(--space-4);background:rgba(94,106,210,0.1);border:1px solid rgba(94,106,210,0.3);border-radius:var(--radius-md);font-size:var(--text-sm);color:rgba(255,255,255,0.85);max-width:920px;margin-left:auto;margin-right:auto}
+.note strong{color:#fff}
+</style>
+</head>
+<body>
+
+<div class="backdrop"></div>
+
+<div class="shortcuts">
+
+  <div class="head">
+    <h1>⌨️ 快捷键速查</h1>
+    <div class="right">
+      <div class="search"><input placeholder="搜索快捷键…" autofocus></div>
+      <button class="close" title="关闭 (ESC)">✕</button>
+    </div>
+  </div>
+
+  <div class="grid">
+
+    <div class="group">
+      <h2>全局</h2>
+      <div class="row"><span class="desc">命令面板（当前需求）</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">K</span></span></div>
+      <div class="row"><span class="desc">命令面板（全局）</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">⇧</span><span class="kbd">K</span></span></div>
+      <div class="row"><span class="desc">AI 提问模式（在命令面板中）</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">I</span></span></div>
+      <div class="row"><span class="desc">新建需求</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">N</span></span></div>
+      <div class="row"><span class="desc">切换 / 新建需求 Tab</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">T</span></span></div>
+      <div class="row"><span class="desc">关闭当前 Tab</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">W</span></span></div>
+      <div class="row"><span class="desc">切换主题</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">⇧</span><span class="kbd">L</span></span></div>
+      <div class="row"><span class="desc">打开设置</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">,</span></span></div>
+      <div class="row"><span class="desc">快捷键速查</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">/</span><span class="note">或</span><span class="kbd">?</span></span></div>
+      <div class="row"><span class="desc">关闭弹窗 / 退出聚焦</span><span class="keys"><span class="kbd">ESC</span></span></div>
+    </div>
+
+    <div class="group">
+      <h2>左侧一级导航</h2>
+      <div class="row"><span class="desc">概览</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">1</span></span></div>
+      <div class="row"><span class="desc">需求</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">2</span></span></div>
+      <div class="row"><span class="desc">仓库</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">3</span></span></div>
+      <div class="row"><span class="desc">知识库</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">4</span></span></div>
+      <div class="row"><span class="desc">Skill 管理</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">5</span></span></div>
+      <div class="row"><span class="desc">设置</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">6</span></span></div>
+      <div class="row"><span class="desc">切换 Tab 1~9</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">1~9</span></span></div>
+    </div>
+
+    <div class="group">
+      <h2>需求详情页</h2>
+      <div class="row"><span class="desc">切主工作区 Tab</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">1~4</span></span></div>
+      <div class="row"><span class="desc">上 / 下一个 Tab</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">[</span><span class="note">/</span><span class="kbd">⌘</span><span class="kbd">]</span></span></div>
+      <div class="row"><span class="desc">重新跑当前 Skill</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">R</span></span></div>
+      <div class="row"><span class="desc">在 IDEA 打开 worktree</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">⇧</span><span class="kbd">E</span></span></div>
+      <div class="row"><span class="desc">查看当前 Diff</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">⇧</span><span class="kbd">D</span></span></div>
+      <div class="row"><span class="desc">跳到最新 Commit</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">⇧</span><span class="kbd">C</span></span></div>
+      <div class="row"><span class="desc">提交 AI 提问（在命令面板中）</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">↵</span></span></div>
+    </div>
+
+    <div class="group">
+      <h2>命令面板内</h2>
+      <div class="row"><span class="desc">选中上下项</span><span class="keys"><span class="kbd">↑</span><span class="kbd">↓</span></span></div>
+      <div class="row"><span class="desc">执行当前选中</span><span class="keys"><span class="kbd">↵</span></span></div>
+      <div class="row"><span class="desc">切换命令 / AI 模式</span><span class="keys"><span class="kbd">Tab</span></span></div>
+      <div class="row"><span class="desc">全局搜索（知识库 / 需求 / 产物）</span><span class="keys"><span class="kbd">/</span></span></div>
+      <div class="row"><span class="desc">直接命令模式</span><span class="keys"><span class="kbd">&gt;</span></span></div>
+      <div class="row"><span class="desc">清空输入</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">⌫</span></span></div>
+      <div class="row"><span class="desc">关闭</span><span class="keys"><span class="kbd">ESC</span></span></div>
+    </div>
+
+    <div class="group">
+      <h2>资源树</h2>
+      <div class="row"><span class="desc">上下选中</span><span class="keys"><span class="kbd">↑</span><span class="kbd">↓</span></span></div>
+      <div class="row"><span class="desc">打开当前节点</span><span class="keys"><span class="kbd">↵</span></span></div>
+      <div class="row"><span class="desc">折叠 / 展开当前节点</span><span class="keys"><span class="kbd">H</span></span></div>
+      <div class="row"><span class="desc">折叠 / 展开所有</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">⇧</span><span class="kbd">H</span></span></div>
+      <div class="row"><span class="desc">展开 / 折叠</span><span class="keys"><span class="kbd">→</span><span class="kbd">←</span></span></div>
+    </div>
+
+    <div class="group">
+      <h2>发现性</h2>
+      <div class="row" style="border-bottom:none;flex-direction:column;align-items:flex-start;gap:6px">
+        <div><strong style="color:#fff">L1 UI 标注</strong> · hover UI 元素显示快捷键</div>
+        <div><strong style="color:#fff">L2 命令面板</strong> · <code>⌘K</code> → 输"快捷键"→ 显示所有</div>
+        <div><strong style="color:#fff">L3 速查面板</strong> · <code>⌘/</code> 唤起本页</div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="foot">
+    <div>macOS · 按 <kbd>Ctrl</kbd> 替代 <kbd>⌘</kbd> 在 Windows / Linux</div>
+    <div>任何位置按 <kbd>?</kbd> 唤起本页</div>
+  </div>
+
+</div>
+
+<div class="note">
+  <strong>设计说明：</strong>Cmd+/ 唤起的速查面板 = 「快捷键发现性 3 层」的 L3。<b>L1</b> = UI 元素 hover 显示，<b>L2</b> = 命令面板搜"快捷键"，<b>L3</b> = 本页全屏速查。全局 90% 走 Cmd+K（Linear 哲学），仅最常用的几条保留直接快捷键。暗色背景 + 毛玻璃，符合"系统级悬浮"视觉等级（高于 Toast，低于错误弹窗）。
+</div>
+
+</body>
+</html>

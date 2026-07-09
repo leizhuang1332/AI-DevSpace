@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>13 · 命令面板 · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{
+  --brand:#5e6ad2; --brand-50:#eef0fb; --brand-100:#dde1f5; --brand-500:#5e6ad2; --brand-600:#525bc7;
+  --success:#16a34a; --warning:#f59e0b;
+  --bg:#fbfbfd; --bg-elevated:#fff; --bg-subtle:#f5f5f7; --border:#ebebef; --border-strong:#d8d8de;
+  --text-1:#0f172a; --text-2:#475569; --text-3:#94a3b8;
+  --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px; --space-6:24px; --space-8:32px;
+  --text-xs:11px; --text-sm:12px; --text-base:13px; --text-md:14px; --text-lg:16px; --text-xl:18px;
+  --radius-sm:4px; --radius-md:6px; --radius-lg:8px; --radius-xl:12px;
+  --shadow-xl:0 24px 64px rgba(0,0,0,0.15), 0 8px 16px rgba(0,0,0,0.08);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:#1a1a2e;color:var(--text-1);font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased;min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding-top:80px}
+
+/* Backdrop */
+.backdrop{position:fixed;inset:0;background:rgba(15,23,42,0.4);backdrop-filter:blur(4px);z-index:100}
+
+/* Palette */
+.palette{position:relative;z-index:101;width:680px;max-width:90vw;background:var(--bg-elevated);border-radius:var(--radius-xl);box-shadow:var(--shadow-xl);overflow:hidden}
+
+/* Header */
+.ph-context{display:flex;align-items:center;justify-content:space-between;padding:var(--space-2) var(--space-4);background:var(--bg-subtle);border-bottom:1px solid var(--border);font-size:var(--text-xs);color:var(--text-3)}
+.ph-context .ctx{display:inline-flex;align-items:center;gap:6px}
+.ph-context .ctx .badge{background:var(--bg-elevated);border:1px solid var(--border);padding:1px 6px;border-radius:var(--radius-sm);font-family:'JetBrains Mono',monospace;color:var(--text-2)}
+.ph-context .modes{display:flex;gap:var(--space-1)}
+.ph-context .modes button{padding:3px 8px;border-radius:var(--radius-sm);background:transparent;border:none;cursor:pointer;color:var(--text-2);font-size:var(--text-xs)}
+.ph-context .modes button.active{background:var(--bg-elevated);color:var(--brand-600);font-weight:500;box-shadow:0 1px 2px rgba(0,0,0,0.04)}
+
+/* Search input */
+.palette-input{display:flex;align-items:center;gap:var(--space-3);padding:var(--space-4) var(--space-5);border-bottom:1px solid var(--border)}
+.palette-input .ic{font-size:18px;color:var(--text-3)}
+.palette-input input{flex:1;border:none;outline:none;font-size:var(--text-lg);color:var(--text-1);font-family:inherit;background:transparent}
+.palette-input input::placeholder{color:var(--text-3)}
+.palette-input .esc{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-3);background:var(--bg-subtle);padding:2px 8px;border-radius:var(--radius-sm)}
+
+/* AI mode indicator */
+.palette.ai .palette-input{border-bottom:1px solid var(--brand-500);background:#fafafe}
+.palette.ai .palette-input .ic{color:var(--brand-600)}
+
+/* Tabs (3-segment) */
+.p-tabs{display:flex;align-items:center;gap:2px;padding:var(--space-2) var(--space-4);background:var(--bg-subtle);border-bottom:1px solid var(--border)}
+.p-tab{padding:var(--space-2) var(--space-3);font-size:var(--text-sm);color:var(--text-2);border-radius:var(--radius-md);cursor:pointer;background:none;border:none;display:inline-flex;align-items:center;gap:6px}
+.p-tab:hover{background:var(--bg-elevated)}
+.p-tab.active{background:var(--bg-elevated);color:var(--text-1);font-weight:500;box-shadow:0 1px 2px rgba(0,0,0,0.04)}
+.p-tab .badge-count{font-size:var(--text-xs);color:var(--text-3);background:var(--bg-subtle);padding:0 6px;border-radius:8px}
+.p-tab.active .badge-count{background:var(--brand-50);color:var(--brand-600)}
+
+/* Results */
+.results{max-height:420px;overflow-y:auto;padding:var(--space-2) 0}
+.section-label{padding:var(--space-2) var(--space-5);font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:500}
+.cmd{display:flex;align-items:center;gap:var(--space-3);padding:var(--space-2) var(--space-5);cursor:pointer;font-size:var(--text-md)}
+.cmd:hover{background:var(--bg-subtle)}
+.cmd.sel{background:var(--brand-50)}
+.cmd .ic{width:28px;height:28px;border-radius:var(--radius-md);background:var(--bg-subtle);display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--text-2)}
+.cmd.sel .ic{background:var(--brand-500);color:#fff}
+.cmd .label{flex:1}
+.cmd .label .t{color:var(--text-1)}
+.cmd .label .desc{font-size:var(--text-xs);color:var(--text-3)}
+.cmd .shortcut{display:inline-flex;gap:2px}
+.cmd .shortcut kbd{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);background:var(--bg-subtle);border:1px solid var(--border);padding:1px 6px;border-radius:var(--radius-sm);color:var(--text-2)}
+
+/* AI result card */
+.ai-result{padding:var(--space-4) var(--space-5);border-top:1px solid var(--border)}
+.ai-result .head{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-3)}
+.ai-result .head .who{display:flex;align-items:center;gap:var(--space-2);font-size:var(--text-sm);color:var(--text-2)}
+.ai-result .head .who .d{width:6px;height:6px;border-radius:50%;background:var(--success)}
+.ai-result .head .actions{display:flex;gap:var(--space-2);font-size:var(--text-xs)}
+.ai-result .head .actions button{padding:3px 8px;border-radius:var(--radius-sm);background:var(--bg-subtle);border:1px solid var(--border);cursor:pointer;color:var(--text-2)}
+.ai-result .card{background:var(--bg-subtle);border-radius:var(--radius-md);padding:var(--space-4);font-size:var(--text-md);color:var(--text-1);line-height:1.6}
+.ai-result .card .t{font-weight:500;margin-bottom:var(--space-2);display:flex;align-items:center;gap:var(--space-2)}
+.ai-result .card .t::before{content:"✨"}
+.ai-result .card ul{padding-left:var(--space-5);font-size:var(--text-sm);color:var(--text-2)}
+.ai-result .card ul li{margin-bottom:var(--space-1)}
+.ai-result .footer{display:flex;justify-content:space-between;align-items:center;margin-top:var(--space-3);padding-top:var(--space-3);border-top:1px solid var(--border);font-size:var(--text-xs);color:var(--text-3)}
+.ai-result .footer .actions{display:flex;gap:var(--space-2)}
+.ai-result .footer .actions button{height:24px;padding:0 10px;font-size:var(--text-xs);border-radius:var(--radius-sm);background:var(--brand);color:#fff;border:none;cursor:pointer;font-weight:500}
+
+/* Footer hints */
+.p-foot{display:flex;align-items:center;justify-content:space-between;padding:var(--space-2) var(--space-4);background:var(--bg-subtle);border-top:1px solid var(--border);font-size:var(--text-xs);color:var(--text-3)}
+.p-foot .hints{display:flex;gap:var(--space-3)}
+.p-foot .hint{display:inline-flex;align-items:center;gap:4px}
+.p-foot kbd{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px}
+
+.note{position:fixed;bottom:24px;left:24px;right:24px;background:#fffbeb;border:1px solid #fde68a;border-radius:var(--radius-md);padding:var(--space-3) var(--space-4);font-size:var(--text-xs);color:#78350f;max-width:680px;margin:0 auto;z-index:102}
+</style>
+</head>
+<body>
+
+<div class="backdrop"></div>
+
+<div class="palette">
+  <div class="ph-context">
+    <div class="ctx">
+      <span class="badge">退款功能优化</span>
+      <span>· 绑当前需求（⌘⇧K 切全局）</span>
+    </div>
+    <div class="modes">
+      <button>命令</button>
+      <button>AI 提问</button>
+      <button>历史</button>
+    </div>
+  </div>
+
+  <div class="palette-input">
+    <span class="ic">⌘K</span>
+    <input placeholder="搜索命令、AI 提问、文件…" value="ref" autofocus>
+    <span class="esc">ESC</span>
+  </div>
+
+  <div class="p-tabs">
+    <button class="p-tab active">⚡ 命令 <span class="badge-count">6</span></button>
+    <button class="p-tab">✨ AI 提问 <span class="badge-count">⌘I</span></button>
+    <button class="p-tab">📜 历史 <span class="badge-count">12</span></button>
+  </div>
+
+  <div class="results">
+
+    <div class="section-label">需求操作</div>
+    <div class="cmd sel">
+      <div class="ic">▶</div>
+      <div class="label">
+        <div class="t">运行 <strong>code-stage</strong> Skill</div>
+        <div class="desc">继续执行下一个 Task（当前 #12 退款接口开发）</div>
+      </div>
+      <div class="shortcut"><kbd>⌘</kbd><kbd>R</kbd></div>
+    </div>
+    <div class="cmd">
+      <div class="ic">⏸</div>
+      <div class="label">
+        <div class="t">暂停当前 Skill</div>
+        <div class="desc">保存 AI 会话上下文到 conversations/</div>
+      </div>
+    </div>
+    <div class="cmd">
+      <div class="ic">⟳</div>
+      <div class="label">
+        <div class="t">重新运行 <strong>code-stage</strong></div>
+        <div class="desc">丢弃当前进度，重新执行</div>
+      </div>
+    </div>
+
+    <div class="section-label">导航</div>
+    <div class="cmd">
+      <div class="ic">📄</div>
+      <div class="label">
+        <div class="t">打开 design/<strong>02-api.md</strong></div>
+        <div class="desc">当前需求 · 设计阶段 · API 定义</div>
+      </div>
+    </div>
+    <div class="cmd">
+      <div class="ic">📦</div>
+      <div class="label">
+        <div class="t">打开 artifacts/<strong>refund.sql</strong></div>
+        <div class="desc">产物 · 5 分钟前由 design-stage 生成</div>
+      </div>
+    </div>
+    <div class="cmd">
+      <div class="ic">⌘⇧E</div>
+      <div class="label">
+        <div class="t">在 IDEA 打开 refund-service worktree</div>
+        <div class="desc">~/.aidevspace/requirements/req-2024-007/refund-service</div>
+      </div>
+      <div class="shortcut"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>E</kbd></div>
+    </div>
+
+    <div class="section-label">仓库 / 知识库</div>
+    <div class="cmd">
+      <div class="ic">📚</div>
+      <div class="label">
+        <div class="t">添加知识：<strong>refund-</strong>idempotency</div>
+        <div class="desc">从历史需求沉淀 · 已存在于知识库</div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="p-foot">
+    <div class="hints">
+      <span class="hint"><kbd>↑↓</kbd> 选择</span>
+      <span class="hint"><kbd>↵</kbd> 执行</span>
+      <span class="hint"><kbd>⌘I</kbd> AI 模式</span>
+      <span class="hint"><kbd>/</kbd> 全局搜索</span>
+    </div>
+    <div>绑当前需求 · ⌘⇧K 切全局</div>
+  </div>
+</div>
+
+<!-- ============ AI mode preview (alternate view) ============ -->
+<div class="note" style="margin-top:48px">
+  <strong>设计说明：</strong>Cmd+K 是整个产品的「AI 隐身」核心入口。<b>三段式</b>：命令（确定性操作）/ AI 提问（自然语言 → 可执行结果卡片）/ 历史（最近命令与 AI 问答）。<br>
+  上方为「命令模式」；下方为「AI 提问模式」示意（输入 <code style="font-family:'JetBrains Mono',monospace">"refund-service 里有没有重复退款的可能"</code>）→ 输出"可执行结果卡片"（不是聊天回复）：<br>
+  <div style="margin-top:8px;display:flex;gap:12px">
+    <div style="flex:1;background:#fff;padding:12px;border-radius:6px">
+      <div style="font-weight:500;margin-bottom:6px">✨ 已扫描 12 个代码位置</div>
+      <ul style="font-size:11px;color:#475569;padding-left:16px">
+        <li>RefundService.java:78 — 缺少 idempotency_key 检查</li>
+        <li>RefundController.java:124 — POST /refunds 未做重复拦截</li>
+      </ul>
+      <div style="margin-top:8px;display:flex;gap:6px">
+        <button style="height:22px;padding:0 10px;font-size:11px;background:#5e6ad2;color:#fff;border:none;border-radius:4px">▶ 让 code-stage 修复</button>
+        <button style="height:22px;padding:0 10px;font-size:11px;background:#f5f5f7;border:1px solid #ebebef;border-radius:4px">📌 加入知识库</button>
+      </div>
+    </div>
+    <div style="flex:1;background:#fff;padding:12px;border-radius:6px">
+      <div style="font-weight:500;margin-bottom:6px">✨ 建议 Skill：add-idempotency-check</div>
+      <ul style="font-size:11px;color:#475569;padding-left:16px">
+        <li>读取现有退款代码 → 注入 idempotency_key</li>
+        <li>写入 Redis SETNX 5min 锁</li>
+        <li>自动 commit + 测试</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

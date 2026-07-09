@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>07 · 需求设置 · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{
+  --brand:#5e6ad2; --brand-50:#eef0fb; --brand-500:#5e6ad2; --brand-600:#525bc7;
+  --success:#16a34a; --warning:#f59e0b; --error:#ef4444;
+  --bg:#fbfbfd; --bg-elevated:#fff; --bg-subtle:#f5f5f7; --border:#ebebef; --border-strong:#d8d8de;
+  --text-1:#0f172a; --text-2:#475569; --text-3:#94a3b8;
+  --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px; --space-6:24px; --space-8:32px;
+  --text-xs:11px; --text-sm:12px; --text-base:13px; --text-md:14px; --text-lg:16px; --text-xl:18px; --text-2xl:20px;
+  --radius-sm:4px; --radius-md:6px; --radius-lg:8px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text-1);font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased}
+.statusbar{position:sticky;top:0;z-index:50;background:var(--bg-elevated);border-bottom:1px solid var(--border)}
+.statusbar .tabs{display:flex;align-items:center;height:40px;padding:0 var(--space-4);gap:2px}
+.statusbar .tab{display:flex;align-items:center;gap:6px;height:28px;padding:0 var(--space-3);font-size:var(--text-sm);color:var(--text-2);border-radius:var(--radius-md);cursor:pointer}
+.statusbar .tab:hover{background:var(--bg-subtle)}
+.statusbar .tab.active{background:var(--brand-50);color:var(--brand-600);font-weight:500}
+.statusbar .tab .dot{width:6px;height:6px;border-radius:50%}
+.statusbar .info{display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 var(--space-4);border-top:1px solid var(--border);background:var(--bg-subtle);font-size:var(--text-sm);color:var(--text-2)}
+.layout{display:grid;grid-template-columns:240px 1fr 240px;min-height:calc(100vh - 72px)}
+.tree{background:var(--bg-elevated);border-right:1px solid var(--border);padding:var(--space-3) 0;overflow:auto}
+.tree-section{padding:0 var(--space-3);margin-bottom:var(--space-4)}
+.tree-section-label{padding:var(--space-2);font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:500}
+.tree-node{display:flex;align-items:center;gap:var(--space-2);height:28px;padding:0 var(--space-2);border-radius:var(--radius-md);font-size:var(--text-sm);color:var(--text-2);cursor:pointer}
+.tree-node:hover{background:var(--bg-subtle)}
+.tree-node.active{background:var(--brand-50);color:var(--brand-600);font-weight:500}
+.tree-node .ic{font-size:14px;width:16px;text-align:center}
+.tree-node .status-dot{width:6px;height:6px;border-radius:50%;margin-left:auto}
+
+.main{padding:var(--space-6) var(--space-8);overflow:auto;max-width:920px}
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:var(--space-5)}
+.page-head h1{font-size:var(--text-2xl);font-weight:600}
+.page-head .sub{color:var(--text-2);font-size:var(--text-md);margin-top:var(--space-1)}
+.tabs-nav{display:flex;gap:2px;margin-bottom:var(--space-5);border-bottom:1px solid var(--border)}
+.nav-tab{display:flex;align-items:center;gap:6px;height:32px;padding:0 var(--space-3);font-size:var(--text-sm);color:var(--text-2);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+.nav-tab:hover{color:var(--text-1)}
+.nav-tab.active{color:var(--brand-600);border-bottom-color:var(--brand);font-weight:500}
+.btn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 var(--space-3);border-radius:var(--radius-md);font-size:var(--text-sm);font-weight:500;cursor:pointer;border:none;background:var(--brand);color:#fff}
+.btn-danger{background:var(--error);color:#fff}
+
+/* Settings sections */
+.section{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-5);margin-bottom:var(--space-4)}
+.section h2{font-size:var(--text-md);font-weight:600;margin-bottom:var(--space-1)}
+.section .desc{font-size:var(--text-sm);color:var(--text-3);margin-bottom:var(--space-4)}
+.field{display:grid;grid-template-columns:160px 1fr;gap:var(--space-4);align-items:center;padding:var(--space-3) 0;border-top:1px solid var(--border)}
+.field:first-of-type{border-top:none}
+.field .label{font-size:var(--text-sm);font-weight:500;color:var(--text-1)}
+.field .desc-sm{font-size:var(--text-xs);color:var(--text-3);margin-top:2px}
+.field .control input,.field .control textarea{width:100%;padding:var(--space-2) var(--space-3);background:var(--bg-subtle);border:1px solid var(--border-strong);border-radius:var(--radius-md);font-size:var(--text-md);color:var(--text-1);font-family:inherit;outline:none}
+.field .control input:focus,.field .control textarea:focus{border-color:var(--brand-500);background:var(--bg-elevated);box-shadow:0 0 0 3px rgba(94,106,210,.15)}
+.field .control textarea{resize:vertical;min-height:120px;font-family:'JetBrains Mono',monospace;font-size:var(--text-sm)}
+
+/* Toggle */
+.toggle{display:inline-flex;align-items:center;gap:var(--space-2);cursor:pointer}
+.toggle .sw{position:relative;width:32px;height:18px;background:var(--border-strong);border-radius:9px;transition:background .15s}
+.toggle .sw::after{content:"";position:absolute;left:2px;top:2px;width:14px;height:14px;background:#fff;border-radius:50%;transition:transform .15s}
+.toggle.on .sw{background:var(--brand-500)}
+.toggle.on .sw::after{transform:translateX(14px)}
+
+/* Member list (知识库引用) */
+.chip-list{display:flex;gap:6px;flex-wrap:wrap}
+.chip{height:24px;padding:0 8px;background:var(--bg-subtle);border-radius:var(--radius-sm);font-size:var(--text-xs);color:var(--text-2);display:inline-flex;align-items:center;gap:4px}
+.chip .x{cursor:pointer;color:var(--text-3)}
+.chip.add{background:var(--brand-50);color:var(--brand-600);cursor:pointer;border:1px dashed var(--brand-500)}
+
+.note{margin-top:var(--space-5);padding:var(--space-4);background:#f0f9ff;border:1px solid #bae6fd;border-radius:var(--radius-md);font-size:var(--text-sm);color:#075985}
+</style>
+</head>
+<body>
+
+<header class="statusbar">
+  <div class="tabs">
+    <div class="tab active"><span class="dot" style="background:var(--brand)"></span>退款功能 · 实施中</div>
+    <div class="tab"><span class="dot" style="background:var(--warning)"></span>会员等级 · 待澄清</div>
+    <div class="tab"><span class="dot" style="background:var(--success)"></span>订单导出 · 已完成</div>
+    <div class="tab">归档 · 4</div>
+  </div>
+  <div class="info">
+    <div><strong style="color:var(--text-1);font-weight:500">退款功能优化</strong> · 需求设置</div>
+    <div>⌘K 命令</div>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="tree">
+    <div class="tree-section"><div class="tree-section-label">概览</div>
+      <div class="tree-node"><span class="ic">📋</span>需求文档</div>
+      <div class="tree-node"><span class="ic">📊</span>进度概览</div>
+    </div>
+    <div class="tree-section"><div class="tree-section-label">分析</div>
+      <div class="tree-node"><span class="ic">📄</span>01-understanding</div>
+      <div class="tree-node"><span class="ic">❓</span>02-questions</div>
+      <div class="tree-node"><span class="ic">📦</span>99-summary</div>
+    </div>
+    <div class="tree-section"><div class="tree-section-label">设计</div>
+      <div class="tree-node"><span class="ic">🗄️</span>01-database</div>
+      <div class="tree-node"><span class="ic">🔌</span>02-api</div>
+      <div class="tree-node"><span class="ic">⚙️</span>03-service</div>
+    </div>
+    <div class="tree-section"><div class="tree-section-label">计划</div>
+      <div class="tree-node"><span class="ic">📝</span>tasks.md</div>
+    </div>
+    <div class="tree-section"><div class="tree-section-label">产物</div>
+      <div class="tree-node"><span class="ic">📄</span>refund.sql</div>
+      <div class="tree-node"><span class="ic">📄</span>refund-api.yaml</div>
+      <div class="tree-node"><span class="ic">📄</span>apollo.yaml</div>
+    </div>
+    <div class="tree-section"><div class="tree-section-label">对话</div>
+      <div class="tree-node"><span class="ic">💬</span>001-analyze</div>
+      <div class="tree-node"><span class="ic">💬</span>002-design</div>
+      <div class="tree-node"><span class="ic">💬</span>003-code</div>
+    </div>
+    <div class="tree-section"><div class="tree-section-label">仓库</div>
+      <div class="tree-node"><span class="ic">📦</span>refund-service</div>
+      <div class="tree-node"><span class="ic">📦</span>order-service</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="page-head">
+      <div>
+        <h1>需求设置</h1>
+        <div class="sub">仅作用于「退款功能优化」这个需求</div>
+      </div>
+      <button class="btn">保存更改</button>
+    </div>
+
+    <div class="tabs-nav">
+      <div class="nav-tab">📄 工作区</div>
+      <div class="nav-tab">📦 仓库</div>
+      <div class="nav-tab">📦 产物</div>
+      <div class="nav-tab">💬 对话与变更</div>
+      <div class="nav-tab active">⚙️ 需求设置</div>
+    </div>
+
+    <div class="section">
+      <h2>基本信息</h2>
+      <div class="desc">需求名称、负责人、目标分支</div>
+      <div class="field">
+        <div><div class="label">需求名称</div></div>
+        <div class="control"><input value="退款功能优化"></div>
+      </div>
+      <div class="field">
+        <div><div class="label">Slug</div><div class="desc-sm">目录名 / 标识符</div></div>
+        <div class="control"><input value="req-2024-007-refund-optimize" style="font-family:'JetBrains Mono',monospace;font-size:var(--text-sm)"></div>
+      </div>
+      <div class="field">
+        <div><div class="label">负责人</div></div>
+        <div class="control"><input value="李雷"></div>
+      </div>
+      <div class="field">
+        <div><div class="label">目标分支</div><div class="desc-sm">submit-stage 完成后合并到</div></div>
+        <div class="control"><input value="main" style="font-family:'JetBrains Mono',monospace"></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>AI 上下文</h2>
+      <div class="desc">控制 AI 在该需求下的 Skill 选择、上下文装配、自动提交等行为</div>
+      <div class="field">
+        <div><div class="label">默认 Skill 链</div><div class="desc-sm">analyze → clarify → design → plan → code → test → submit</div></div>
+        <div class="control" style="font-size:var(--text-sm);color:var(--text-2)">analyze-stage → design-stage → plan-stage → code-stage → test-stage → submit-stage</div>
+      </div>
+      <div class="field">
+        <div><div class="label">加载的知识库</div><div class="desc-sm">每次 Skill 运行前自动注入上下文</div></div>
+        <div class="control">
+          <div class="chip-list">
+            <span class="chip">📚 domain/payment.md <span class="x">×</span></span>
+            <span class="chip">📚 patterns/refund-3rd-party.md <span class="x">×</span></span>
+            <span class="chip">📚 bugs/refund-idempotency.md <span class="x">×</span></span>
+            <span class="chip add">+ 添加</span>
+          </div>
+        </div>
+      </div>
+      <div class="field">
+        <div><div class="label">提交时自动推送</div></div>
+        <div class="control"><div class="toggle on"><div class="sw"></div><span style="font-size:var(--text-sm)">开启</span></div></div>
+      </div>
+      <div class="field">
+        <div><div class="label">提交时需用户授权</div></div>
+        <div class="control"><div class="toggle on"><div class="sw"></div><span style="font-size:var(--text-sm)">开启（推荐）</span></div></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>原始 PRD</h2>
+      <div class="desc">创建需求时粘贴的原文，AI 分析的源头</div>
+      <div class="field">
+        <div><div class="label">PRD 内容</div></div>
+        <div class="control"><textarea># 退款功能优化
+
+## 背景
+当前退款流程存在以下问题：
+1. 部分退款场景不支持
+2. 退款失败时状态不一致
+3. ...
+
+## 目标
+- 支持按订单项部分退款
+- 退款失败自动回滚关联优惠券
+- 退款链路状态机化</textarea></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>危险操作</h2>
+      <div class="desc">归档、删除、强制推送</div>
+      <div class="field">
+        <div><div class="label">归档需求</div><div class="desc-sm">移动到归档 Tab，停止 AI 监听</div></div>
+        <div class="control"><button class="btn btn-danger">归档此需求</button></div>
+      </div>
+      <div class="field">
+        <div><div class="label">删除需求</div><div class="desc-sm">删除 requirement 目录（含 worktree），<strong style="color:var(--error)">不可恢复</strong></div></div>
+        <div class="control"><button class="btn btn-danger">永久删除</button></div>
+      </div>
+    </div>
+
+    <div class="note">
+      <strong>设计说明：</strong>需求设置仅作用于单个需求（区别于全局设置 12）。<b>加载的知识库</b> 是关键 — 用户可手动挑选本需求相关的知识条目，每次 Skill 运行前 Agent 自动注入到 SDK 上下文。
+    </div>
+
+  </main>
+
+  <aside style="background:var(--bg-elevated);border-left:1px solid var(--border);padding:var(--space-4);overflow:auto">
+    <div style="font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:500;margin-bottom:var(--space-3)">本页导航</div>
+    <div style="display:flex;flex-direction:column;gap:2px;font-size:var(--text-sm)">
+      <a style="padding:6px 8px;border-radius:4px;color:var(--text-2);text-decoration:none">基本信息</a>
+      <a style="padding:6px 8px;border-radius:4px;color:var(--brand-600);background:var(--brand-50);text-decoration:none;font-weight:500">AI 上下文</a>
+      <a style="padding:6px 8px;border-radius:4px;color:var(--text-2);text-decoration:none">原始 PRD</a>
+      <a style="padding:6px 8px;border-radius:4px;color:var(--text-2);text-decoration:none">危险操作</a>
+    </div>
+
+    <div style="margin-top:var(--space-5);padding:var(--space-3);background:var(--bg-subtle);border-radius:6px;font-size:var(--text-xs);color:var(--text-2);line-height:1.6">
+      <strong style="color:var(--text-1)">💡 小贴士</strong><br>
+      「加载的知识库」可大幅提升 AI 在该需求下的回答质量。建议每个需求手动挑选 3-5 个最相关的知识条目。
+    </div>
+  </aside>
+</div>
+
+</body>
+</html>

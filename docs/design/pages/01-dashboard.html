@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>01 · Dashboard · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{
+  /* === Design Tokens (UI-POLISH-SPEC §1) === */
+  --brand:#5e6ad2; --brand-50:#eef0fb; --brand-100:#dde1f5; --brand-500:#5e6ad2; --brand-600:#525bc7; --brand-700:#454eb0;
+  --success:#16a34a; --warning:#f59e0b; --error:#ef4444; --info:#64748b;
+  --bg:#fbfbfd; --bg-elevated:#ffffff; --bg-subtle:#f5f5f7; --border:#ebebef; --border-strong:#d8d8de;
+  --text-1:#0f172a; --text-2:#475569; --text-3:#94a3b8;
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px; --space-6:24px; --space-8:32px; --space-10:40px;
+  --text-xs:11px; --text-sm:12px; --text-base:13px; --text-md:14px; --text-lg:16px; --text-xl:18px; --text-2xl:20px; --text-3xl:24px; --text-4xl:32px;
+  --row-sm:28px; --row-md:32px; --row-lg:36px;
+  --radius-sm:4px; --radius-md:6px; --radius-lg:8px; --radius-xl:12px;
+  --shadow-md:0 2px 4px rgba(0,0,0,0.06);
+  --shadow-lg:0 4px 12px rgba(0,0,0,0.08);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg);color:var(--text-1);font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased}
+
+/* === StatusBar === */
+.statusbar{position:sticky;top:0;z-index:50;background:var(--bg-elevated);border-bottom:1px solid var(--border)}
+.statusbar .tabs{display:flex;align-items:center;height:40px;padding:0 var(--space-4);gap:2px;overflow-x:auto}
+.statusbar .tab{display:flex;align-items:center;gap:var(--space-2);height:28px;padding:0 var(--space-3);font-size:var(--text-sm);color:var(--text-2);border-radius:var(--radius-md);cursor:pointer;white-space:nowrap}
+.statusbar .tab:hover{background:var(--bg-subtle);color:var(--text-1)}
+.statusbar .tab.active{background:var(--brand-50);color:var(--brand-700);font-weight:500}
+.statusbar .tab .dot{width:6px;height:6px;border-radius:50%;background:var(--brand)}
+.statusbar .tab-add{width:24px;height:24px;display:flex;align-items:center;justify-content:center;color:var(--text-3);border-radius:var(--radius-md);cursor:pointer;margin-left:var(--space-2)}
+.statusbar .tab-add:hover{background:var(--bg-subtle);color:var(--text-1)}
+.statusbar .info{display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 var(--space-4);border-top:1px solid var(--border);background:var(--bg-subtle);font-size:var(--text-sm)}
+.statusbar .info .left{display:flex;align-items:center;gap:var(--space-3)}
+.statusbar .ai-dot{display:inline-flex;align-items:center;gap:var(--space-2);color:var(--text-2)}
+.statusbar .ai-dot .pulse{width:6px;height:6px;border-radius:50%;background:var(--brand);box-shadow:0 0 0 0 rgba(94,106,210,.6);animation:pulse 1.4s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(94,106,210,.6)}70%{box-shadow:0 0 0 6px rgba(94,106,210,0)}100%{box-shadow:0 0 0 0 rgba(94,106,210,0)}}
+.statusbar .info .right{display:flex;align-items:center;gap:var(--space-4);color:var(--text-2)}
+.statusbar .kbd{display:inline-flex;align-items:center;height:18px;padding:0 6px;background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-sm);font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-2)}
+
+/* === Layout === */
+.layout{display:grid;grid-template-columns:56px 1fr;min-height:calc(100vh - 72px)}
+.sidebar{display:flex;flex-direction:column;align-items:center;padding:var(--space-3) 0;gap:2px;background:var(--bg-elevated);border-right:1px solid var(--border)}
+.sidebar .logo{width:32px;height:32px;border-radius:var(--radius-md);background:var(--brand);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:var(--text-md);margin-bottom:var(--space-3)}
+.sidebar .nav-item{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius-md);color:var(--text-2);cursor:pointer;font-size:18px;position:relative}
+.sidebar .nav-item:hover{background:var(--bg-subtle);color:var(--text-1)}
+.sidebar .nav-item.active{background:var(--brand-50);color:var(--brand-700)}
+.sidebar .nav-item.active::before{content:"";position:absolute;left:-12px;top:8px;bottom:8px;width:2px;background:var(--brand);border-radius:1px}
+.sidebar .nav-item .tip{position:absolute;left:48px;background:var(--text-1);color:#fff;padding:4px 8px;border-radius:var(--radius-sm);font-size:var(--text-xs);white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .15s}
+.sidebar .nav-item:hover .tip{opacity:1}
+
+.main{padding:var(--space-6) var(--space-8);overflow:auto}
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:var(--space-6)}
+.page-head h1{font-size:var(--text-3xl);font-weight:600;letter-spacing:-0.02em}
+.page-head .sub{color:var(--text-2);font-size:var(--text-md);margin-top:var(--space-1)}
+.btn{display:inline-flex;align-items:center;gap:var(--space-2);height:32px;padding:0 var(--space-3);border-radius:var(--radius-md);font-size:var(--text-md);font-weight:500;cursor:pointer;border:none;background:var(--brand);color:#fff}
+.btn:hover{background:var(--brand-600)}
+.btn-secondary{background:var(--bg-elevated);color:var(--text-1);border:1px solid var(--border-strong)}
+.btn-secondary:hover{background:var(--bg-subtle)}
+
+/* === Section === */
+.section{margin-bottom:var(--space-8)}
+.section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-4)}
+.section-head h2{font-size:var(--text-xl);font-weight:600;letter-spacing:-0.01em}
+.section-head .meta{color:var(--text-3);font-size:var(--text-sm)}
+
+/* === Stat Grid === */
+.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-4);margin-bottom:var(--space-6)}
+.stat-card{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-5)}
+.stat-card .label{color:var(--text-3);font-size:var(--text-sm);margin-bottom:var(--space-2)}
+.stat-card .num{font-size:var(--text-4xl);font-weight:600;letter-spacing:-0.03em;line-height:1}
+.stat-card .delta{color:var(--text-3);font-size:var(--text-xs);margin-top:var(--space-2)}
+.stat-card .delta.up{color:var(--success)}
+.stat-card .delta.down{color:var(--error)}
+
+/* === Active Sessions === */
+.sessions{display:flex;flex-direction:column;gap:var(--space-2)}
+.session{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-4);display:grid;grid-template-columns:1fr auto;align-items:center;gap:var(--space-4)}
+.session .left{display:flex;align-items:center;gap:var(--space-4)}
+.session .icon{width:36px;height:36px;border-radius:var(--radius-md);background:var(--brand-50);color:var(--brand-700);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:var(--text-md)}
+.session .title{font-size:var(--text-md);font-weight:500;margin-bottom:2px}
+.session .meta-row{display:flex;align-items:center;gap:var(--space-3);font-size:var(--text-sm);color:var(--text-2)}
+.session .meta-row .dot{width:5px;height:5px;border-radius:50%;background:var(--text-3)}
+.session .actions{display:flex;gap:var(--space-2)}
+.action-btn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 var(--space-3);background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-md);font-size:var(--text-sm);color:var(--text-2);cursor:pointer}
+.action-btn:hover{background:var(--bg-elevated);color:var(--text-1)}
+.action-btn.primary{background:var(--brand);color:#fff;border-color:var(--brand)}
+.action-btn.primary:hover{background:var(--brand-600)}
+
+/* === AI Status Dot === */
+.ai-status{display:inline-flex;align-items:center;gap:6px;font-size:var(--text-sm)}
+.ai-status .d{width:8px;height:8px;border-radius:50%}
+.ai-status.idle .d{background:var(--text-3)}
+.ai-status.thinking .d{background:var(--brand);animation:bounce 1.2s infinite}
+.ai-status.tool_calling .d{background:var(--brand);animation:spin 1s linear infinite;border-top-color:transparent;background:conic-gradient(from 0deg,var(--brand) 0%,transparent 30%)}
+.ai-status.writing .d{background:var(--success)}
+.ai-status.awaiting_user .d{background:var(--warning);box-shadow:0 0 0 0 rgba(245,158,11,.6);animation:pulse-orange 1.6s infinite}
+.ai-status.error .d{background:var(--error);animation:pulse-red 1.6s infinite}
+@keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse-orange{0%{box-shadow:0 0 0 0 rgba(245,158,11,.6)}70%{box-shadow:0 0 0 6px rgba(245,158,11,0)}}
+@keyframes pulse-red{0%{box-shadow:0 0 0 0 rgba(239,68,68,.6)}70%{box-shadow:0 0 0 6px rgba(239,68,68,0)}}
+
+/* === Status Badge === */
+.badge{display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 8px;border-radius:var(--radius-sm);font-size:var(--text-xs);font-weight:500;background:var(--bg-subtle);color:var(--text-2)}
+.badge .d{width:6px;height:6px;border-radius:50%}
+.badge.draft .d{background:#cbd5e1}
+.badge.analyzing .d,.badge.designing .d,.badge.planning .d{background:#a5b4fc}
+.badge.implementing .d{background:var(--brand)}
+.badge.submitting .d{background:var(--warning)}
+.badge.done .d{background:var(--success)}
+.badge.archived .d{background:#64748b}
+.badge.clarifying .d{background:var(--brand);position:relative}
+.badge.clarifying .d::after{content:"";position:absolute;top:-2px;right:-2px;width:5px;height:5px;border-radius:50%;background:var(--error);border:1.5px solid var(--bg-elevated)}
+
+/* === Inbox === */
+.inbox{display:flex;flex-direction:column;gap:var(--space-2)}
+.inbox-item{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-4);display:grid;grid-template-columns:24px 1fr auto;gap:var(--space-4);align-items:start}
+.inbox-item .ic{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px}
+.inbox-item .ic.q{background:var(--warning)}
+.inbox-item .ic.e{background:var(--error)}
+.inbox-item .ic.t{background:var(--info)}
+.inbox-item .body .who{font-size:var(--text-sm);color:var(--text-3);margin-bottom:4px}
+.inbox-item .body .msg{font-size:var(--text-md);line-height:1.5}
+.inbox-item .when{font-size:var(--text-xs);color:var(--text-3)}
+
+/* === Cards Grid (进行中需求) === */
+.req-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-4)}
+.req-card{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-4);cursor:pointer;transition:transform .15s,box-shadow .15s}
+.req-card:hover{transform:translateY(-1px);box-shadow:var(--shadow-md);border-color:var(--border-strong)}
+.req-card .top{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-3)}
+.req-card .title{font-size:var(--text-md);font-weight:500;margin-bottom:var(--space-2)}
+.req-card .repos{display:flex;gap:var(--space-1);flex-wrap:wrap;margin-bottom:var(--space-3)}
+.req-card .repo-tag{height:18px;padding:0 6px;background:var(--bg-subtle);border-radius:var(--radius-sm);font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-2);display:inline-flex;align-items:center}
+.req-card .progress{display:flex;align-items:center;gap:var(--space-2)}
+.req-card .bar{flex:1;height:4px;background:var(--bg-subtle);border-radius:2px;overflow:hidden}
+.req-card .bar .fill{height:100%;background:var(--brand);border-radius:2px}
+.req-card .pct{font-size:var(--text-xs);color:var(--text-3);font-variant-numeric:tabular-nums}
+
+/* === Annotation === */
+.note{margin-top:var(--space-4);padding:var(--space-4);background:#fffbeb;border:1px solid #fde68a;border-radius:var(--radius-md);font-size:var(--text-sm);color:#78350f}
+.note strong{color:#451a03}
+
+/* === Empty state === */
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:var(--space-12);text-align:center;color:var(--text-3);border:1px dashed var(--border-strong);border-radius:var(--radius-lg)}
+.empty .ic{font-size:48px;margin-bottom:var(--space-3);opacity:.5}
+.empty .t{font-size:var(--text-md);color:var(--text-2);margin-bottom:var(--space-1)}
+.empty .s{font-size:var(--text-sm);margin-bottom:var(--space-4)}
+</style>
+</head>
+<body>
+
+<!-- ============ StatusBar ============ -->
+<header class="statusbar">
+  <div class="tabs">
+    <div class="tab active"><span class="dot"></span>退款功能 · 实施中</div>
+    <div class="tab"><span class="dot" style="background:var(--warning)"></span>会员等级 · 待澄清</div>
+    <div class="tab"><span class="dot" style="background:var(--success)"></span>订单导出 · 已完成</div>
+    <div class="tab">归档 · 4</div>
+    <div class="tab-add">＋</div>
+    <div style="flex:1"></div>
+    <div class="tab" style="color:var(--text-3)">⌘K</div>
+  </div>
+  <div class="info">
+    <div class="left">
+      <strong style="color:var(--text-1);font-weight:500">退款功能</strong>
+      <span style="color:var(--text-3)">·</span>
+      <span style="color:var(--text-2)">实施中</span>
+      <span style="color:var(--text-3)">·</span>
+      <span class="ai-status thinking"><span class="d"></span>思考中 · 正在读取 design/02-api.md</span>
+    </div>
+    <div class="right">
+      <span style="color:var(--warning)">⚠ 3 待回答</span>
+      <span><span class="kbd">⌘K</span> 命令</span>
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+  <!-- ============ Sidebar ============ -->
+  <nav class="sidebar">
+    <div class="logo">A</div>
+    <div class="nav-item active" data-tip="概览 Dashboard">🏠<div class="tip">概览 (⌘1)</div></div>
+    <div class="nav-item" data-tip="需求">📌<div class="tip">需求 (⌘2)</div></div>
+    <div class="nav-item" data-tip="仓库">📦<div class="tip">仓库 (⌘3)</div></div>
+    <div class="nav-item" data-tip="知识库">📚<div class="tip">知识库 (⌘4)</div></div>
+    <div class="nav-item" data-tip="Skill">🤖<div class="tip">Skill (⌘5)</div></div>
+    <div style="flex:1"></div>
+    <div class="nav-item" data-tip="设置">⚙️<div class="tip">设置 (⌘6)</div></div>
+  </nav>
+
+  <!-- ============ Main ============ -->
+  <main class="main">
+
+    <div class="page-head">
+      <div>
+        <h1>概览</h1>
+        <div class="sub">下午好，<strong>李雷</strong> · 当前 5 个进行中需求，2 个 AI 会话活跃</div>
+      </div>
+      <div style="display:flex;gap:var(--space-2)">
+        <button class="btn btn-secondary">查看历史</button>
+        <button class="btn">+ 新建需求</button>
+      </div>
+    </div>
+
+    <!-- ====== 统计 ====== -->
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="label">进行中</div>
+        <div class="num">5</div>
+        <div class="delta up">+2 本周</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">已完成</div>
+        <div class="num">23</div>
+        <div class="delta">本月</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">待回答</div>
+        <div class="num" style="color:var(--warning)">3</div>
+        <div class="delta">AI 提问</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">知识沉淀</div>
+        <div class="num">47</div>
+        <div class="delta up">+5 自动</div>
+      </div>
+    </div>
+
+    <!-- ====== 进行中需求 ====== -->
+    <section class="section">
+      <div class="section-head">
+        <h2>进行中的需求</h2>
+        <div class="meta">5 个 · 2 个 AI 活跃</div>
+      </div>
+      <div class="req-grid">
+        <div class="req-card">
+          <div class="top"><span class="badge implementing"><span class="d"></span>实施中</span><span style="color:var(--text-3);font-size:var(--text-xs)">2 小时前</span></div>
+          <div class="title">退款功能优化</div>
+          <div class="repos"><span class="repo-tag">refund-service</span><span class="repo-tag">order-service</span></div>
+          <div class="progress"><div class="bar"><div class="fill" style="width:62%"></div></div><div class="pct">62%</div></div>
+        </div>
+        <div class="req-card">
+          <div class="top"><span class="badge clarifying"><span class="d"></span>待澄清</span><span style="color:var(--text-3);font-size:var(--text-xs)">1 天前</span></div>
+          <div class="title">会员等级体系重构</div>
+          <div class="repos"><span class="repo-tag">member-service</span></div>
+          <div class="progress"><div class="bar"><div class="fill" style="width:25%;background:var(--warning)"></div></div><div class="pct">25%</div></div>
+        </div>
+        <div class="req-card">
+          <div class="top"><span class="badge designing"><span class="d"></span>设计中</span><span style="color:var(--text-3);font-size:var(--text-xs)">3 小时前</span></div>
+          <div class="title">支付链路灰度切流</div>
+          <div class="repos"><span class="repo-tag">pay-gateway</span><span class="repo-tag">risk-service</span></div>
+          <div class="progress"><div class="bar"><div class="fill" style="width:38%;background:#a5b4fc"></div></div><div class="pct">38%</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====== 当前活跃会话 ====== -->
+    <section class="section">
+      <div class="section-head">
+        <h2>当前活跃会话</h2>
+        <div class="meta">来自 2 个需求的 AI 子进程</div>
+      </div>
+      <div class="sessions">
+        <div class="session">
+          <div class="left">
+            <div class="icon">退</div>
+            <div>
+              <div class="title">退款功能 · 实施中</div>
+              <div class="meta-row">
+                <span class="ai-status thinking"><span class="d"></span>思考中</span>
+                <span class="dot"></span>
+                <span>code-stage · Task #12 退款接口开发</span>
+                <span class="dot"></span>
+                <span>已读取 8 个文件</span>
+              </div>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="action-btn">查看对话</button>
+            <button class="action-btn">打开 IDEA</button>
+            <button class="action-btn">查看 Diff</button>
+            <button class="action-btn primary">▶ 继续</button>
+          </div>
+        </div>
+        <div class="session">
+          <div class="left">
+            <div class="icon" style="background:#fde68a;color:#78350f">会</div>
+            <div>
+              <div class="title">会员等级 · 待澄清</div>
+              <div class="meta-row">
+                <span class="ai-status awaiting_user"><span class="d"></span>等待用户回答</span>
+                <span class="dot"></span>
+                <span>analyze-stage · 已生成 4 个问题</span>
+                <span class="dot"></span>
+                <span>1 小时前</span>
+              </div>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="action-btn primary">去回答</button>
+            <button class="action-btn">查看对话</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====== 待办（AI 提问待回答 / 需用户决策） ====== -->
+    <section class="section">
+      <div class="section-head">
+        <h2>待办</h2>
+        <div class="meta">3 项 · 按时间倒序</div>
+      </div>
+      <div class="inbox">
+        <div class="inbox-item">
+          <div class="ic q">?</div>
+          <div class="body">
+            <div class="who">退款功能 · AI 提问</div>
+            <div class="msg">退款失败时是否要回滚已扣减的优惠券额度？目前 code-stage 阻塞在这里</div>
+          </div>
+          <div class="when">2 分钟前</div>
+        </div>
+        <div class="inbox-item">
+          <div class="ic e">!</div>
+          <div class="body">
+            <div class="who">支付链路灰度切流 · 错误</div>
+            <div class="msg">SDK 调用失败：Anthropic API 502，Agent 已自动重试 2 次</div>
+          </div>
+          <div class="when">15 分钟前</div>
+        </div>
+        <div class="inbox-item">
+          <div class="ic q">?</div>
+          <div class="body">
+            <div class="who">会员等级 · AI 提问</div>
+            <div class="msg">黄金会员的成长值是否继承历史等级？需要业务确认</div>
+          </div>
+          <div class="when">1 小时前</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====== 设计注释 ====== -->
+    <div class="note">
+      <strong>设计说明：</strong>Dashboard 是首屏，遵循 Linear「3 段信息密度」——统计卡片（数字感）→ 进行中需求（卡片）→ 活跃会话（详情）→ 待办（行动入口）。空态展示在"待办"区（0 时显示「🎉 没有待办，去喝杯咖啡」）。所有数字都是真实 SSE/REST 数据，AI 状态来自 <code style="font-family:'JetBrains Mono',monospace">ai.status</code> 事件流。
+    </div>
+
+  </main>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>05 · 产物 · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{
+  --brand:#5e6ad2; --brand-50:#eef0fb; --brand-500:#5e6ad2; --brand-600:#525bc7;
+  --success:#16a34a; --warning:#f59e0b; --error:#ef4444;
+  --bg:#fbfbfd; --bg-elevated:#fff; --bg-subtle:#f5f5f7; --border:#ebebef; --border-strong:#d8d8de;
+  --text-1:#0f172a; --text-2:#475569; --text-3:#94a3b8;
+  --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px; --space-6:24px; --space-8:32px;
+  --text-xs:11px; --text-sm:12px; --text-base:13px; --text-md:14px; --text-lg:16px; --text-xl:18px; --text-2xl:20px;
+  --row-md:32px;
+  --radius-sm:4px; --radius-md:6px; --radius-lg:8px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text-1);font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased}
+.statusbar{position:sticky;top:0;z-index:50;background:var(--bg-elevated);border-bottom:1px solid var(--border)}
+.statusbar .tabs{display:flex;align-items:center;height:40px;padding:0 var(--space-4);gap:2px}
+.statusbar .tab{display:flex;align-items:center;gap:6px;height:28px;padding:0 var(--space-3);font-size:var(--text-sm);color:var(--text-2);border-radius:var(--radius-md);cursor:pointer}
+.statusbar .tab:hover{background:var(--bg-subte)}
+.statusbar .tab.active{background:var(--brand-50);color:var(--brand-600);font-weight:500}
+.statusbar .tab .dot{width:6px;height:6px;border-radius:50%}
+.statusbar .info{display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 var(--space-4);border-top:1px solid var(--border);background:var(--bg-subtle);font-size:var(--text-sm);color:var(--text-2)}
+.layout{display:grid;grid-template-columns:240px 1fr;min-height:calc(100vh - 72px)}
+.tree{background:var(--bg-elevated);border-right:1px solid var(--border);padding:var(--space-3) 0;overflow:auto}
+.tree-section{padding:0 var(--space-3);margin-bottom:var(--space-4)}
+.tree-section-label{padding:var(--space-2);font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:500}
+.tree-node{display:flex;align-items:center;gap:var(--space-2);height:28px;padding:0 var(--space-2);border-radius:var(--radius-md);font-size:var(--text-sm);color:var(--text-2);cursor:pointer}
+.tree-node:hover{background:var(--bg-subtle);color:var(--text-1)}
+.tree-node.active{background:var(--brand-50);color:var(--brand-600);font-weight:500}
+.tree-node .ic{font-size:14px;width:16px;text-align:center}
+.tree-node .status-dot{width:6px;height:6px;border-radius:50%;margin-left:auto}
+.main{padding:var(--space-6) var(--space-8);overflow:auto}
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:var(--space-5)}
+.page-head h1{font-size:var(--text-2xl);font-weight:600}
+.page-head .sub{color:var(--text-2);font-size:var(--text-md);margin-top:var(--space-1)}
+.tabs-nav{display:flex;gap:2px;margin-bottom:var(--space-5);border-bottom:1px solid var(--border)}
+.nav-tab{display:flex;align-items:center;gap:6px;height:32px;padding:0 var(--space-3);font-size:var(--text-sm);color:var(--text-2);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+.nav-tab:hover{color:var(--text-1)}
+.nav-tab.active{color:var(--brand-600);border-bottom-color:var(--brand);font-weight:500}
+.btn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 var(--space-3);border-radius:var(--radius-md);font-size:var(--text-sm);font-weight:500;cursor:pointer;border:none;background:var(--brand);color:#fff}
+.btn-secondary{background:var(--bg-elevated);color:var(--text-1);border:1px solid var(--border-strong)}
+
+/* Filter row */
+.filter-row{display:flex;gap:var(--space-2);margin-bottom:var(--space-4)}
+.chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 var(--space-3);background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-md);font-size:var(--text-sm);color:var(--text-2);cursor:pointer}
+.chip.active{background:var(--brand-50);border-color:var(--brand-500);color:var(--brand-600)}
+
+/* Artifact grid */
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-3)}
+.art{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-4);cursor:pointer;transition:all .15s}
+.art:hover{border-color:var(--border-strong);box-shadow:0 2px 4px rgba(0,0,0,0.06);transform:translateY(-1px)}
+.art-head{display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-3)}
+.art-icon{width:36px;height:36px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;font-size:18px;color:#fff;font-weight:600}
+.art.sql{}.art-icon.sql{background:#336791}
+.art-icon.openapi{background:#85ea2d;color:#0a4500}
+.art-icon.apollo{background:#f59e0b}
+.art-icon.sequence{background:#8b5cf6}
+.art-icon.test{background:#16a34a}
+.art-icon.config{background:#64748b}
+.art-name{font-family:'JetBrains Mono',monospace;font-size:var(--text-md);font-weight:500}
+.art-meta{font-size:var(--text-xs);color:var(--text-3);margin-top:2px}
+.art-snippet{background:var(--bg-subtle);border-radius:var(--radius-sm);padding:var(--space-2);font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-2);line-height:1.5;margin-top:var(--space-2);max-height:64px;overflow:hidden}
+.art-foot{display:flex;align-items:center;justify-content:space-between;margin-top:var(--space-3);padding-top:var(--space-3);border-top:1px solid var(--border);font-size:var(--text-xs);color:var(--text-3)}
+.art-foot .stage{display:inline-flex;align-items:center;gap:4px}
+.art-foot .stage .d{width:5px;height:5px;border-radius:50%;background:var(--success)}
+.note{margin-top:var(--space-5);padding:var(--space-4);background:#f0f9ff;border:1px solid #bae6fd;border-radius:var(--radius-md);font-size:var(--text-sm);color:#075985}
+</style>
+</head>
+<body>
+
+<header class="statusbar">
+  <div class="tabs">
+    <div class="tab active"><span class="dot" style="background:var(--brand)"></span>退款功能 · 实施中</div>
+    <div class="tab"><span class="dot" style="background:var(--warning)"></span>会员等级 · 待澄清</div>
+    <div class="tab"><span class="dot" style="background:var(--success)"></span>订单导出 · 已完成</div>
+    <div class="tab">归档 · 4</div>
+  </div>
+  <div class="info">
+    <div><strong style="color:var(--text-1);font-weight:500">退款功能优化</strong> · 6 个产物 · 5 个被 Skill 引用</div>
+    <div>⌘K 命令</div>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="tree">
+    <div class="tree-section"><div class="tree-section-label">概览</div>
+      <div class="tree-node"><span class="ic">📋</span>需求文档</div>
+      <div class="tree-node"><span class="ic">📊</span>进度概览</div>
+    </div>
+    <div class="tree-section"><div class="tree-section-label">分析</div>
+      <div class="tree-node"><span class="ic">📄</span>01-understanding<span class="status-dot" style="background:var(--success)"></span></div>
+      <div class="tree-node"><span class="ic">❓</span>02-questions<span class="status-dot" style="background:var(--warning)"></span></div>
+      <div class="tree-node"><span class="ic">📦</span>99-summary</div>
+    </div>
+    <div class="tree-section"><div class="tree-section-label">设计</div>
+      <div class="tree-node"><span class="ic">🗄️</span>01-database<span class="status-dot" style="background:var(--success)"></span></div>
+      <div class="tree-node"><span class="ic">🔌</span>02-api<span class="status-dot" style="background:var(--success)"></span></div>
+      <div class="tree-node"><span class="ic">⚙️</span>03-service<span class="status-dot" style="background:#a5b4fc"></span></div>
+      <div class="tree-node"><span class="ic">📦</span>99-summary</div>
+    </div>
+    <div class="tree-section"><div class="tree-section-label">计划</div>
+      <div class="tree-node"><span class="ic">📝</span>tasks.md</div>
+    </div>
+    <div class="tree-section"><div class="tree-section-label">产物</div>
+      <div class="tree-node"><span class="ic">📄</span>refund.sql<span class="status-dot" style="background:var(--success)"></span></div>
+      <div class="tree-node"><span class="ic">📄</span>refund-api.yaml<span class="status-dot" style="background:var(--success)"></span></div>
+      <div class="tree-node active"><span class="ic">📄</span>apollo.yaml<span class="status-dot" style="background:var(--warning)"></span></div>
+    </div>
+    <div class="tree-section"><div class="tree-section-label">对话</div>
+      <div class="tree-node"><span class="ic">💬</span>001-analyze</div>
+      <div class="tree-node"><span class="ic">💬</span>002-design</div>
+      <div class="tree-node"><span class="ic">💬</span>003-code</div>
+    </div>
+    <div class="tree-section"><div class="tree-section-label">仓库</div>
+      <div class="tree-node"><span class="ic">📦</span>refund-service</div>
+      <div class="tree-node"><span class="ic">📦</span>order-service</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="page-head">
+      <div>
+        <h1>产物</h1>
+        <div class="sub">AI 在开发过程中产生的所有可保存、可复用产物</div>
+      </div>
+      <div style="display:flex;gap:var(--space-2)">
+        <button class="btn btn-secondary">⌘⇧D Diff 全量</button>
+        <button class="btn">+ 新增产物</button>
+      </div>
+    </div>
+
+    <div class="tabs-nav">
+      <div class="nav-tab">📄 工作区</div>
+      <div class="nav-tab">📦 仓库</div>
+      <div class="nav-tab active">📦 产物 <span style="background:var(--brand);color:#fff;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px">6</span></div>
+      <div class="nav-tab">💬 对话与变更</div>
+      <div class="nav-tab">⚙️ 需求设置</div>
+    </div>
+
+    <div class="filter-row">
+      <button class="chip active">全部 6</button>
+      <button class="chip">SQL 1</button>
+      <button class="chip">OpenAPI 1</button>
+      <button class="chip">Apollo 1</button>
+      <button class="chip">测试用例 1</button>
+      <button class="chip">序列图 1</button>
+      <button class="chip">配置 1</button>
+      <span style="flex:1"></span>
+      <button class="chip">排序：生成时间 ↓</button>
+    </div>
+
+    <div class="grid">
+
+      <div class="art">
+        <div class="art-head">
+          <div class="art-icon sql">SQL</div>
+          <div>
+            <div class="art-name">refund.sql</div>
+            <div class="art-meta">design-stage · 12 KB · 2 表</div>
+          </div>
+        </div>
+        <div class="art-snippet">CREATE TABLE refund_order (
+  id BIGINT PRIMARY KEY,
+  order_id BIGINT NOT NULL,
+  user_id BIGINT...</div>
+        <div class="art-foot">
+          <span class="stage"><span class="d"></span>已被 code-stage 引用</span>
+          <span>10 分钟前</span>
+        </div>
+      </div>
+
+      <div class="art">
+        <div class="art-head">
+          <div class="art-icon openapi">OA</div>
+          <div>
+            <div class="art-name">refund-api.yaml</div>
+            <div class="art-meta">design-stage · 8 KB · 5 接口</div>
+          </div>
+        </div>
+        <div class="art-snippet">paths:
+  /refunds:
+    post:
+      summary: 创建退款单
+      requestBody: ...</div>
+        <div class="art-foot">
+          <span class="stage"><span class="d"></span>已被 code-stage 引用</span>
+          <span>1 小时前</span>
+        </div>
+      </div>
+
+      <div class="art">
+        <div class="art-head">
+          <div class="art-icon apollo">⚙</div>
+          <div>
+            <div class="art-name">apollo.yaml</div>
+            <div class="art-meta">design-stage · 4 KB · 8 配置</div>
+          </div>
+        </div>
+        <div class="art-snippet">refund:
+  max-amount: 5000
+  auto-approve: false
+  retry-times: 3 ...</div>
+        <div class="art-foot">
+          <span class="stage" style="color:var(--warning)"><span class="d" style="background:var(--warning)"></span>待人工审核</span>
+          <span>3 小时前</span>
+        </div>
+      </div>
+
+      <div class="art">
+        <div class="art-head">
+          <div class="art-icon sequence">→</div>
+          <div>
+            <div class="art-name">refund-sequence.md</div>
+            <div class="art-meta">design-stage · 6 KB · Mermaid</div>
+          </div>
+        </div>
+        <div class="art-snippet">sequenceDiagram
+  Client->>Gateway: POST /refunds
+  Gateway->>Refund: 创建退款单...</div>
+        <div class="art-foot">
+          <span class="stage"><span class="d"></span>已被 review 引用</span>
+          <span>昨天</span>
+        </div>
+      </div>
+
+      <div class="art">
+        <div class="art-head">
+          <div class="art-icon test">✓</div>
+          <div>
+            <div class="art-name">refund-cases.md</div>
+            <div class="art-meta">test-stage · 14 KB · 28 用例</div>
+          </div>
+        </div>
+        <div class="art-snippet">## TC-001 正常退款
+- Given 用户已下单
+- When 申请退款...</div>
+        <div class="art-foot">
+          <span class="stage"><span class="d"></span>已采纳 · 28/28 通过</span>
+          <span>昨天</span>
+        </div>
+      </div>
+
+      <div class="art">
+        <div class="art-head">
+          <div class="art-icon config">⚙</div>
+          <div>
+            <div class="art-name">application-refund.yml</div>
+            <div class="art-meta">code-stage · 2 KB</div>
+          </div>
+        </div>
+        <div class="art-snippet">spring:
+  datasource:
+    url: jdbc:mysql://...
+    username: refund...</div>
+        <div class="art-foot">
+          <span class="stage"><span class="d"></span>已写入 worktree</span>
+          <span>10 分钟前</span>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="note">
+      <strong>设计说明：</strong>产物 = AI 在开发过程中产生的「可保存、可复用」中间或最终结果。MVP 包含 7 类：SQL、OpenAPI、Apollo、序列图、测试用例、配置、文档。点击产物 → 打开详情（预览 + Diff + 下载 + 「@引用」按钮 — 注入到下次 AI 上下文）。右上角 ⚠ 标记 = AI 已生成但需人工审核（apollo.yaml 这种带业务规则的产物）。
+    </div>
+
+  </main>
+</div>
+
+</body>
+</html>

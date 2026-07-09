@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>06 · 对话与变更 · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{
+  --brand:#5e6ad2; --brand-50:#eef0fb; --brand-500:#5e6ad2; --brand-600:#525bc7;
+  --success:#16a34a; --warning:#f59e0b;
+  --bg:#fbfbfd; --bg-elevated:#fff; --bg-subtle:#f5f5f7; --border:#ebebef; --border-strong:#d8d8de;
+  --text-1:#0f172a; --text-2:#475569; --text-3:#94a3b8;
+  --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px; --space-6:24px; --space-8:32px;
+  --text-xs:11px; --text-sm:12px; --text-base:13px; --text-md:14px; --text-lg:16px; --text-xl:18px; --text-2xl:20px;
+  --row-md:32px;
+  --radius-sm:4px; --radius-md:6px; --radius-lg:8px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text-1);font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased}
+.statusbar{position:sticky;top:0;z-index:50;background:var(--bg-elevated);border-bottom:1px solid var(--border)}
+.statusbar .tabs{display:flex;align-items:center;height:40px;padding:0 var(--space-4);gap:2px}
+.statusbar .tab{display:flex;align-items:center;gap:6px;height:28px;padding:0 var(--space-3);font-size:var(--text-sm);color:var(--text-2);border-radius:var(--radius-md);cursor:pointer}
+.statusbar .tab:hover{background:var(--bg-subtle)}
+.statusbar .tab.active{background:var(--brand-50);color:var(--brand-600);font-weight:500}
+.statusbar .tab .dot{width:6px;height:6px;border-radius:50%}
+.statusbar .info{display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 var(--space-4);border-top:1px solid var(--border);background:var(--bg-subtle);font-size:var(--text-sm);color:var(--text-2)}
+.layout{display:grid;grid-template-columns:240px 1fr 320px;min-height:calc(100vh - 72px)}
+.tree{background:var(--bg-elevated);border-right:1px solid var(--border);padding:var(--space-3) 0;overflow:auto}
+.tree-section{padding:0 var(--space-3);margin-bottom:var(--space-4)}
+.tree-section-label{padding:var(--space-2);font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:500}
+.tree-node{display:flex;align-items:center;gap:var(--space-2);height:28px;padding:0 var(--space-2);border-radius:var(--radius-md);font-size:var(--text-sm);color:var(--text-2);cursor:pointer}
+.tree-node:hover{background:var(--bg-subtle);color:var(--text-1)}
+.tree-node.active{background:var(--brand-50);color:var(--brand-600);font-weight:500}
+.tree-node .ic{font-size:14px;width:16px;text-align:center}
+.tree-node .status-dot{width:6px;height:6px;border-radius:50%;margin-left:auto}
+.main{padding:var(--space-6) var(--space-8);overflow:auto}
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:var(--space-5)}
+.page-head h1{font-size:var(--text-2xl);font-weight:600}
+.page-head .sub{color:var(--text-2);font-size:var(--text-md);margin-top:var(--space-1)}
+.tabs-nav{display:flex;gap:2px;margin-bottom:var(--space-5);border-bottom:1px solid var(--border)}
+.nav-tab{display:flex;align-items:center;gap:6px;height:32px;padding:0 var(--space-3);font-size:var(--text-sm);color:var(--text-2);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+.nav-tab:hover{color:var(--text-1)}
+.nav-tab.active{color:var(--brand-600);border-bottom-color:var(--brand);font-weight:500}
+.btn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 var(--space-3);border-radius:var(--radius-md);font-size:var(--text-sm);font-weight:500;cursor:pointer;border:none;background:var(--brand);color:#fff}
+.btn-secondary{background:var(--bg-elevated);color:var(--text-1);border:1px solid var(--border-strong)}
+
+/* Timeline */
+.timeline{position:relative;padding-left:var(--space-8)}
+.timeline::before{content:"";position:absolute;left:14px;top:8px;bottom:8px;width:2px;background:var(--border)}
+.tl-item{position:relative;margin-bottom:var(--space-5)}
+.tl-dot{position:absolute;left:-29px;top:6px;width:16px;height:16px;border-radius:50%;background:var(--bg-elevated);border:3px solid var(--brand)}
+.tl-dot.stage{background:var(--brand)}
+.tl-dot.commit{background:var(--success);border-color:var(--success)}
+.tl-dot.user{background:var(--warning);border-color:var(--warning)}
+.tl-card{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-4)}
+.tl-card .head{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-2)}
+.tl-card .head .stage-tag{display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 8px;background:var(--brand-50);color:var(--brand-600);border-radius:var(--radius-sm);font-size:var(--text-xs);font-weight:500}
+.tl-card .head .when{font-size:var(--text-xs);color:var(--text-3)}
+.tl-card .title{font-size:var(--text-md);font-weight:500;margin-bottom:var(--space-2)}
+.tl-card .body{font-size:var(--text-md);color:var(--text-2);line-height:1.6}
+.tl-card .body code{font-family:'JetBrains Mono',monospace;font-size:12px;background:var(--bg-subtle);padding:2px 6px;border-radius:4px;color:var(--brand-600)}
+.tl-card .files{margin-top:var(--space-3);padding-top:var(--space-3);border-top:1px solid var(--border);display:flex;gap:var(--space-2);flex-wrap:wrap}
+.tl-card .files .file{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-2);background:var(--bg-subtle);padding:2px 8px;border-radius:4px}
+
+/* Right sidebar - conversation list */
+.right-aside{background:var(--bg-elevated);border-left:1px solid var(--border);padding:var(--space-4);overflow:auto}
+.conv-list{display:flex;flex-direction:column;gap:var(--space-2)}
+.conv-item{background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3);cursor:pointer}
+.conv-item.active{border-color:var(--brand-500);background:var(--brand-50)}
+.conv-item .head{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-1)}
+.conv-item .seq{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--brand-600);font-weight:500}
+.conv-item .when{font-size:var(--text-xs);color:var(--text-3)}
+.conv-item .name{font-size:var(--text-sm);font-weight:500;margin-bottom:4px}
+.conv-item .preview{font-size:var(--text-xs);color:var(--text-2);line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.note{margin-top:var(--space-5);padding:var(--space-4);background:#f0f9ff;border:1px solid #bae6fd;border-radius:var(--radius-md);font-size:var(--text-sm);color:#075985}
+</style>
+</head>
+<body>
+
+<header class="statusbar">
+  <div class="tabs">
+    <div class="tab active"><span class="dot" style="background:var(--brand)"></span>退款功能 · 实施中</div>
+    <div class="tab"><span class="dot" style="background:var(--warning)"></span>会员等级 · 待澄清</div>
+    <div class="tab"><span class="dot" style="background:var(--success)"></span>订单导出 · 已完成</div>
+    <div class="tab">归档 · 4</div>
+  </div>
+  <div class="info">
+    <div><strong style="color:var(--text-1);font-weight:500">退款功能优化</strong> · 14 次会话 · 32 个 commit</div>
+    <div>⌘K 命令</div>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="tree">
+    <div class="tree-section"><div class="tree-section-label">概览</div>
+      <div class="tree-node"><span class="ic">📋</span>需求文档</div>
+      <div class="tree-node"><span class="ic">📊</span>进度概览</div>
+    </div>
+    <div class="tree-section"><div class="tree-section-label">分析</div>
+      <div class="tree-node"><span class="ic">📄</span>01-understanding<span class="status-dot" style="background:var(--success)"></span></div>
+      <div class="tree-node"><span class="ic">❓</span>02-questions<span class="status-dot" style="background:var(--warning)"></span></div>
+      <div class="tree-node"><span class="ic">📦</span>99-summary</div>
+    </div>
+    <div class="tree-section"><div class="tree-section-label">设计</div>
+      <div class="tree-node"><span class="ic">🗄️</span>01-database<span class="status-dot" style="background:var(--success)"></span></div>
+      <div class="tree-node"><span class="ic">🔌</span>02-api<span class="status-dot" style="background:var(--success)"></span></div>
+      <div class="tree-node"><span class="ic">⚙️</span>03-service<span class="status-dot" style="background:#a5b4fc"></span></div>
+      <div class="tree-node"><span class="ic">📦</span>99-summary</div>
+    </div>
+    <div class="tree-section"><div class="tree-section-label">计划</div>
+      <div class="tree-node"><span class="ic">📝</span>tasks.md</div>
+    </div>
+    <div class="tree-section"><div class="tree-section-label">产物</div>
+      <div class="tree-node"><span class="ic">📄</span>refund.sql</div>
+      <div class="tree-node"><span class="ic">📄</span>refund-api.yaml</div>
+      <div class="tree-node"><span class="ic">📄</span>apollo.yaml</div>
+    </div>
+    <div class="tree-section"><div class="tree-section-label">对话</div>
+      <div class="tree-node"><span class="ic">💬</span>001-analyze<span class="status-dot" style="background:var(--success)"></span></div>
+      <div class="tree-node"><span class="ic">💬</span>002-design<span class="status-dot" style="background:var(--success)"></span></div>
+      <div class="tree-node active"><span class="ic">💬</span>003-code<span class="status-dot" style="background:var(--brand)"></span></div>
+    </div>
+    <div class="tree-section"><div class="tree-section-label">仓库</div>
+      <div class="tree-node"><span class="ic">📦</span>refund-service</div>
+      <div class="tree-node"><span class="ic">📦</span>order-service</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="page-head">
+      <div>
+        <h1>对话与变更</h1>
+        <div class="sub">会话历史 + 文件变更 + Commit 流水</div>
+      </div>
+      <div style="display:flex;gap:var(--space-2)">
+        <button class="btn btn-secondary">筛选</button>
+        <button class="btn">⌘K 跳到命令面板</button>
+      </div>
+    </div>
+
+    <div class="tabs-nav">
+      <div class="nav-tab">📄 工作区</div>
+      <div class="nav-tab">📦 仓库</div>
+      <div class="nav-tab">📦 产物</div>
+      <div class="nav-tab active">💬 对话与变更</div>
+      <div class="nav-tab">⚙️ 需求设置</div>
+    </div>
+
+    <div class="timeline">
+
+      <div class="tl-item">
+        <div class="tl-dot stage"></div>
+        <div class="tl-card">
+          <div class="head">
+            <span class="stage-tag">▶ code-stage</span>
+            <span class="when">2 分钟前 · 会话 #003-code · AI 自动</span>
+          </div>
+          <div class="title">开始执行 Task #12 退款接口开发</div>
+          <div class="body">读取 <code>design/02-api.md</code> + <code>refund.sql</code>，正在生成 <code>RefundService.java</code>。已读 8 个文件，写入 0 个文件。</div>
+          <div class="files">
+            <span class="file">📄 design/02-api.md</span>
+            <span class="file">📄 artifacts/refund.sql</span>
+            <span class="file">📁 repos/refund-service/src/...</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-item">
+        <div class="tl-dot user"></div>
+        <div class="tl-card">
+          <div class="head">
+            <span class="stage-tag" style="background:#fff7ed;color:#92400e">👤 用户决策</span>
+            <span class="when">25 分钟前</span>
+          </div>
+          <div class="title">回答 AI 提问：「退款失败时是否回滚优惠券？」</div>
+          <div class="body">→ <strong>是</strong>。回滚策略：调用 <code>coupon-service</code> 的 <code>/compensate</code> 接口，幂等键 = refund_id。code-stage 已据此修改。</div>
+        </div>
+      </div>
+
+      <div class="tl-item">
+        <div class="tl-dot commit"></div>
+        <div class="tl-card">
+          <div class="head">
+            <span class="stage-tag" style="background:#dcfce7;color:#166534">✓ commit a8f3e21</span>
+            <span class="when">10 分钟前 · AI 自动提交</span>
+          </div>
+          <div class="title">feat(refund): 退款订单表索引优化</div>
+          <div class="body">添加 <code>idx_user_status_created</code> 联合索引。包含 1 schema 变更 + 1 migration 脚本。</div>
+          <div class="files">
+            <span class="file">📄 artifacts/refund.sql</span>
+            <span class="file">📄 repos/refund-service/db/migration/V20240709_01.sql</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-item">
+        <div class="tl-dot stage"></div>
+        <div class="tl-card">
+          <div class="head">
+            <span class="stage-tag">▶ code-stage</span>
+            <span class="when">1 小时前</span>
+          </div>
+          <div class="title">完成 Task #11 设计退款表结构</div>
+          <div class="body">生成 2 张表（<code>refund_order</code> / <code>refund_flow</code>）+ 3 个索引 + 1 张序列图。等待人工 review 后 commit。</div>
+        </div>
+      </div>
+
+      <div class="tl-item">
+        <div class="tl-dot commit"></div>
+        <div class="tl-card">
+          <div class="head">
+            <span class="stage-tag" style="background:#dcfce7;color:#166534">✓ commit 7c91b44</span>
+            <span class="when">2 小时前 · 李雷</span>
+          </div>
+          <div class="title">feat(refund): 添加退款状态机</div>
+          <div class="body">人工 commit。补充 5 个边界状态。</div>
+          <div class="files">
+            <span class="file">📄 repos/refund-service/src/main/java/.../RefundStateMachine.java</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-item">
+        <div class="tl-dot stage"></div>
+        <div class="tl-card">
+          <div class="head">
+            <span class="stage-tag">✓ plan-stage 完成</span>
+            <span class="when">昨天 18:42</span>
+          </div>
+          <div class="title">plan-stage 阶段完成 · 进入实施</div>
+          <div class="body">生成 19 个 Task，AI 评估总工作量 ~3 天。状态：DRAFT → ANALYZING → DESIGNING → PLANNING → <strong>IMPLEMENTING</strong></div>
+        </div>
+      </div>
+
+      <div class="tl-item">
+        <div class="tl-dot stage"></div>
+        <div class="tl-card">
+          <div class="head">
+            <span class="stage-tag" style="background:#f3e8ff;color:#6b21a8">+ 创建需求</span>
+            <span class="when">2026-07-08 14:30 · 李雷</span>
+          </div>
+          <div class="title">创建需求：退款功能优化</div>
+          <div class="body">从粘贴 PRD 开始。关联 2 个仓库（refund-service, order-service）。</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="note">
+      <strong>设计说明：</strong>时间轴 = 「会话 × 文件变更 × Commit」三流合一。紫色圆点 = Skill 阶段完成，绿色 = Commit，黄色 = 用户决策 / 问答。点击卡片 → 跳到对应会话的 markdown（资源树对话节点）或文件 Diff。<b>本 Tab 是"历史回溯"</b>，而 AI 实时的状态变化看 StatusBar / Inline 提示栏。空态：刚创建需求时显示「⏳ 等待第一次 Skill 运行」骨架。
+    </div>
+
+  </main>
+
+  <!-- Right: conversation list -->
+  <aside class="right-aside">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-3)">
+      <div style="font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:500">会话列表 · 3</div>
+      <button class="btn-secondary" style="font-size:var(--text-xs);padding:2px 8px;height:22px">+ 新建</button>
+    </div>
+    <div class="conv-list">
+      <div class="conv-item active">
+        <div class="head">
+          <span class="seq">#003-code</span>
+          <span class="when">进行中</span>
+        </div>
+        <div class="name">code-stage · 实施中</div>
+        <div class="preview">开始 Task #12 退款接口开发。读取 design/02-api.md + refund.sql，生成 RefundService.java...</div>
+      </div>
+      <div class="conv-item">
+        <div class="head">
+          <span class="seq">#002-design</span>
+          <span class="when">昨天</span>
+        </div>
+        <div class="name">design-stage · 已完成</div>
+        <div class="preview">生成数据库设计 + OpenAPI + Apollo 配置。3 个产物已落盘，14 次修订...</div>
+      </div>
+      <div class="conv-item">
+        <div class="head">
+          <span class="seq">#001-analyze</span>
+          <span class="when">2026-07-08</span>
+        </div>
+        <div class="name">analyze-stage · 已完成</div>
+        <div class="preview">基于 PRD 生成需求理解 + 4 个澄清问题。用户已回答 1 个，3 个待回答...</div>
+      </div>
+    </div>
+
+    <div style="margin-top:var(--space-5);font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:500;margin-bottom:var(--space-3)">变更统计</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-2);font-size:var(--text-sm)">
+      <div style="background:var(--bg-subtle);padding:var(--space-3);border-radius:var(--radius-md)">
+        <div style="color:var(--text-3);font-size:var(--text-xs)">Commits</div>
+        <div style="font-size:var(--text-xl);font-weight:600">32</div>
+      </div>
+      <div style="background:var(--bg-subtle);padding:var(--space-3);border-radius:var(--radius-md)">
+        <div style="color:var(--text-3);font-size:var(--text-xs)">文件变更</div>
+        <div style="font-size:var(--text-xl);font-weight:600">48</div>
+      </div>
+      <div style="background:var(--bg-subtle);padding:var(--space-3);border-radius:var(--radius-md)">
+        <div style="color:var(--text-3);font-size:var(--text-xs)">+ 行</div>
+        <div style="font-size:var(--text-xl);font-weight:600;color:var(--success)">+1.2k</div>
+      </div>
+      <div style="background:var(--bg-subtle);padding:var(--space-3);border-radius:var(--radius-md)">
+        <div style="color:var(--text-3);font-size:var(--text-xs)">− 行</div>
+        <div style="font-size:var(--text-xl);font-weight:600;color:var(--error)">−248</div>
+      </div>
+    </div>
+  </aside>
+</div>
+
+</body>
+</html>

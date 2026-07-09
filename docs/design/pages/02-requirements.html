@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>02 · 需求列表 · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{
+  --brand:#5e6ad2; --brand-50:#eef0fb; --brand-500:#5e6ad2; --brand-600:#525bc7;
+  --success:#16a34a; --warning:#f59e0b; --error:#ef4444; --info:#64748b;
+  --bg:#fbfbfd; --bg-elevated:#ffffff; --bg-subtle:#f5f5f7; --border:#ebebef; --border-strong:#d8d8de;
+  --text-1:#0f172a; --text-2:#475569; --text-3:#94a3b8;
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px; --space-6:24px; --space-8:32px;
+  --text-xs:11px; --text-sm:12px; --text-base:13px; --text-md:14px; --text-lg:16px; --text-xl:18px; --text-2xl:20px; --text-3xl:24px;
+  --row-md:32px;
+  --radius-sm:4px; --radius-md:6px; --radius-lg:8px;
+  --shadow-md:0 2px 4px rgba(0,0,0,0.06); --shadow-lg:0 4px 12px rgba(0,0,0,0.08);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg);color:var(--text-1);font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased}
+
+/* StatusBar / Sidebar (共享) */
+.statusbar{position:sticky;top:0;z-index:50;background:var(--bg-elevated);border-bottom:1px solid var(--border)}
+.statusbar .tabs{display:flex;align-items:center;height:40px;padding:0 var(--space-4);gap:2px}
+.statusbar .tab{display:flex;align-items:center;gap:6px;height:28px;padding:0 var(--space-3);font-size:var(--text-sm);color:var(--text-2);border-radius:var(--radius-md);cursor:pointer;white-space:nowrap}
+.statusbar .tab:hover{background:var(--bg-subtle);color:var(--text-1)}
+.statusbar .tab.active{background:var(--brand-50);color:var(--brand-600);font-weight:500}
+.statusbar .tab .dot{width:6px;height:6px;border-radius:50%;background:var(--brand)}
+.statusbar .tab-add{width:24px;height:24px;display:flex;align-items:center;justify-content:center;color:var(--text-3);border-radius:var(--radius-md);cursor:pointer;margin-left:var(--space-2)}
+.statusbar .info{display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 var(--space-4);border-top:1px solid var(--border);background:var(--bg-subtle);font-size:var(--text-sm);color:var(--text-2)}
+
+.layout{display:grid;grid-template-columns:56px 1fr;min-height:calc(100vh - 72px)}
+.sidebar{display:flex;flex-direction:column;align-items:center;padding:var(--space-3) 0;gap:2px;background:var(--bg-elevated);border-right:1px solid var(--border)}
+.sidebar .logo{width:32px;height:32px;border-radius:var(--radius-md);background:var(--brand);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;margin-bottom:var(--space-3)}
+.sidebar .nav-item{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius-md);color:var(--text-2);cursor:pointer;font-size:18px;position:relative}
+.sidebar .nav-item:hover{background:var(--bg-subtle)}
+.sidebar .nav-item.active{background:var(--brand-50);color:var(--brand-600)}
+.sidebar .nav-item.active::before{content:"";position:absolute;left:-12px;top:8px;bottom:8px;width:2px;background:var(--brand);border-radius:1px}
+.sidebar .nav-item .tip{position:absolute;left:48px;background:var(--text-1);color:#fff;padding:4px 8px;border-radius:var(--radius-sm);font-size:var(--text-xs);white-space:nowrap;opacity:0;pointer-events:none}
+.sidebar .nav-item:hover .tip{opacity:1}
+
+.main{padding:var(--space-6) var(--space-8);overflow:auto;max-width:1400px}
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:var(--space-5)}
+.page-head h1{font-size:var(--text-3xl);font-weight:600;letter-spacing:-0.02em}
+.page-head .sub{color:var(--text-2);font-size:var(--text-md);margin-top:var(--space-1)}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 var(--space-3);border-radius:var(--radius-md);font-size:var(--text-md);font-weight:500;cursor:pointer;border:none;background:var(--brand);color:#fff}
+.btn-secondary{background:var(--bg-elevated);color:var(--text-1);border:1px solid var(--border-strong)}
+
+/* Toolbar */
+.toolbar{display:flex;align-items:center;gap:var(--space-3);padding:var(--space-3) 0;margin-bottom:var(--space-3);border-bottom:1px solid var(--border)}
+.search{position:relative;flex:1;max-width:320px}
+.search input{width:100%;height:32px;padding:0 12px 0 32px;background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-md);font-size:var(--text-md);color:var(--text-1);outline:none}
+.search input:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(94,106,210,.15)}
+.search::before{content:"🔍";position:absolute;left:10px;top:50%;transform:translateY(-50%);font-size:12px;color:var(--text-3)}
+.search kbd{position:absolute;right:8px;top:50%;transform:translateY(-50%);font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-3);background:var(--bg-subtle);padding:2px 6px;border-radius:var(--radius-sm)}
+.tabs-row{display:flex;gap:var(--space-1);padding:0 var(--space-3);background:var(--bg-subtle);border-radius:var(--radius-md);height:32px;align-items:center}
+.tab-btn{height:24px;padding:0 var(--space-2);border-radius:var(--radius-sm);font-size:var(--text-sm);color:var(--text-2);cursor:pointer;background:none;border:none;display:inline-flex;align-items:center;gap:6px}
+.tab-btn.active{background:var(--bg-elevated);color:var(--text-1);font-weight:500;box-shadow:var(--shadow-md)}
+.tab-btn .count{color:var(--text-3);font-size:var(--text-xs);font-variant-numeric:tabular-nums}
+.tab-btn.active .count{color:var(--text-2)}
+.spacer{flex:1}
+
+/* List (Linear 风格) */
+.list{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}
+.list-head{display:grid;grid-template-columns:36px 1fr 180px 100px 100px 80px 40px;align-items:center;height:32px;padding:0 var(--space-4);border-bottom:1px solid var(--border);background:var(--bg-subtle);font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:500}
+.row{display:grid;grid-template-columns:36px 1fr 180px 100px 100px 80px 40px;align-items:center;height:var(--row-md);padding:0 var(--space-4);border-bottom:1px solid var(--border);cursor:pointer;font-size:var(--text-md)}
+.row:last-child{border-bottom:none}
+.row:hover{background:var(--bg-subtle)}
+.row .checkbox{width:14px;height:14px;border:1.5px solid var(--border-strong);border-radius:3px}
+.row .title-block .title{font-weight:500;color:var(--text-1)}
+.row .title-block .slug{font-size:var(--text-xs);color:var(--text-3);font-family:'JetBrains Mono',monospace;margin-top:1px}
+.row .repos{display:flex;gap:4px;flex-wrap:wrap}
+.row .repo{height:18px;padding:0 6px;background:var(--bg-subtle);border-radius:var(--radius-sm);font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-2);display:inline-flex;align-items:center}
+.row .updated{font-size:var(--text-sm);color:var(--text-2)}
+.row .progress{display:flex;align-items:center;gap:6px}
+.row .progress .bar{width:60px;height:4px;background:var(--bg-subtle);border-radius:2px;overflow:hidden}
+.row .progress .fill{height:100%;background:var(--brand);border-radius:2px}
+.row .progress .pct{font-size:var(--text-xs);color:var(--text-3);font-variant-numeric:tabular-nums}
+.row .actions{text-align:right;color:var(--text-3);font-size:16px}
+
+/* Status badges */
+.badge{display:inline-flex;align-items:center;gap:6px;height:18px;padding:0 6px;border-radius:var(--radius-sm);font-size:var(--text-xs);font-weight:500;background:var(--bg-subtle);color:var(--text-2)}
+.badge .d{width:6px;height:6px;border-radius:50%}
+.badge.draft .d{background:#cbd5e1}
+.badge.analyzing .d,.badge.designing .d,.badge.planning .d{background:#a5b4fc}
+.badge.implementing .d{background:var(--brand)}
+.badge.submitting .d{background:var(--warning)}
+.badge.done .d{background:var(--success)}
+.badge.archived .d{background:#64748b}
+.badge.clarifying .d{background:var(--brand);position:relative}
+.badge.clarifying .d::after{content:"";position:absolute;top:-2px;right:-2px;width:5px;height:5px;border-radius:50%;background:var(--error);border:1.5px solid var(--bg-elevated)}
+
+/* Floating action */
+.fab{position:fixed;right:32px;bottom:32px;width:48px;height:48px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:var(--shadow-lg);cursor:pointer;border:none}
+
+.note{margin-top:var(--space-5);padding:var(--space-4);background:#f0f9ff;border:1px solid #bae6fd;border-radius:var(--radius-md);font-size:var(--text-sm);color:#075985}
+.note strong{color:#0c4a6e}
+
+.empty{padding:var(--space-12);text-align:center;color:var(--text-3);display:flex;flex-direction:column;align-items:center;gap:var(--space-3)}
+.empty .ic{font-size:48px;opacity:.5}
+.empty .t{font-size:var(--text-md);color:var(--text-2)}
+.empty .s{font-size:var(--text-sm)}
+</style>
+</head>
+<body>
+
+<header class="statusbar">
+  <div class="tabs">
+    <div class="tab"><span class="dot" style="background:var(--brand)"></span>退款功能 · 实施中</div>
+    <div class="tab"><span class="dot" style="background:var(--warning)"></span>会员等级 · 待澄清</div>
+    <div class="tab"><span class="dot" style="background:var(--success)"></span>订单导出 · 已完成</div>
+    <div class="tab">归档 · 4</div>
+    <div class="tab-add">＋</div>
+  </div>
+  <div class="info">
+    <div>列表视图 · 5 个进行中需求</div>
+    <div><kbd style="font-family:'JetBrains Mono',monospace;font-size:var(--text-xs)">⌘K</kbd> 命令 · <kbd style="font-family:'JetBrains Mono',monospace;font-size:var(--text-xs)">⌘N</kbd> 新建</div>
+  </div>
+</header>
+
+<div class="layout">
+  <nav class="sidebar">
+    <div class="logo">A</div>
+    <div class="nav-item">🏠<div class="tip">概览 (⌘1)</div></div>
+    <div class="nav-item active">📌<div class="tip">需求 (⌘2)</div></div>
+    <div class="nav-item">📦<div class="tip">仓库 (⌘3)</div></div>
+    <div class="nav-item">📚<div class="tip">知识 (⌘4)</div></div>
+    <div class="nav-item">🤖<div class="tip">Skill (⌘5)</div></div>
+    <div style="flex:1"></div>
+    <div class="nav-item">⚙️<div class="tip">设置 (⌘6)</div></div>
+  </nav>
+
+  <main class="main">
+
+    <div class="page-head">
+      <div>
+        <h1>需求</h1>
+        <div class="sub">共 28 个需求 · 5 个进行中 · 23 个已完成</div>
+      </div>
+      <div style="display:flex;gap:var(--space-2)">
+        <button class="btn btn-secondary">筛选</button>
+        <button class="btn">+ 新建需求</button>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <div class="search">
+        <input placeholder="搜索需求标题、仓库、状态…">
+        <kbd>/</kbd>
+      </div>
+      <div class="tabs-row">
+        <button class="tab-btn active">所有 <span class="count">28</span></button>
+        <button class="tab-btn">进行中 <span class="count">5</span></button>
+        <button class="tab-btn">待澄清 <span class="count">2</span></button>
+        <button class="tab-btn">已完成 <span class="count">23</span></button>
+        <button class="tab-btn">已归档 <span class="count">4</span></button>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn btn-secondary" style="height:28px;font-size:var(--text-sm)">排序：更新时间 ↓</button>
+    </div>
+
+    <div class="list">
+      <div class="list-head">
+        <div></div>
+        <div>标题</div>
+        <div>关联仓库</div>
+        <div>状态</div>
+        <div>进度</div>
+        <div>更新</div>
+        <div></div>
+      </div>
+
+      <div class="row">
+        <div class="checkbox"></div>
+        <div class="title-block"><div class="title">退款功能优化</div><div class="slug">req-2024-007-refund-optimize</div></div>
+        <div class="repos"><span class="repo">refund-service</span><span class="repo">order-service</span></div>
+        <div><span class="badge implementing"><span class="d"></span>实施中</span></div>
+        <div class="progress"><div class="bar"><div class="fill" style="width:62%"></div></div><div class="pct">62%</div></div>
+        <div class="updated">2 分钟前</div>
+        <div class="actions">···</div>
+      </div>
+
+      <div class="row">
+        <div class="checkbox"></div>
+        <div class="title-block"><div class="title">会员等级体系重构</div><div class="slug">req-2024-006-member-tier</div></div>
+        <div class="repos"><span class="repo">member-service</span></div>
+        <div><span class="badge clarifying"><span class="d"></span>待澄清</span></div>
+        <div class="progress"><div class="bar"><div class="fill" style="width:25%;background:var(--warning)"></div></div><div class="pct">25%</div></div>
+        <div class="updated">1 小时前</div>
+        <div class="actions">···</div>
+      </div>
+
+      <div class="row">
+        <div class="checkbox"></div>
+        <div class="title-block"><div class="title">支付链路灰度切流</div><div class="slug">req-2024-005-pay-grayscale</div></div>
+        <div class="repos"><span class="repo">pay-gateway</span><span class="repo">risk-service</span></div>
+        <div><span class="badge designing"><span class="d"></span>设计中</span></div>
+        <div class="progress"><div class="bar"><div class="fill" style="width:38%;background:#a5b4fc"></div></div><div class="pct">38%</div></div>
+        <div class="updated">3 小时前</div>
+        <div class="actions">···</div>
+      </div>
+
+      <div class="row">
+        <div class="checkbox"></div>
+        <div class="title-block"><div class="title">订单导出（CSV）</div><div class="slug">req-2024-004-order-export</div></div>
+        <div class="repos"><span class="repo">order-service</span></div>
+        <div><span class="badge done"><span class="d"></span>已完成</span></div>
+        <div class="progress"><div class="bar"><div class="fill" style="width:100%;background:var(--success)"></div></div><div class="pct">100%</div></div>
+        <div class="updated">昨天</div>
+        <div class="actions">···</div>
+      </div>
+
+      <div class="row">
+        <div class="checkbox"></div>
+        <div class="title-block"><div class="title">优惠券叠加规则</div><div class="slug">req-2024-003-coupon-stack</div></div>
+        <div class="repos"><span class="repo">coupon-service</span></div>
+        <div><span class="badge planning"><span class="d"></span>计划中</span></div>
+        <div class="progress"><div class="bar"><div class="fill" style="width:48%;background:#a5b4fc"></div></div><div class="pct">48%</div></div>
+        <div class="updated">2 天前</div>
+        <div class="actions">···</div>
+      </div>
+
+      <div class="row">
+        <div class="checkbox"></div>
+        <div class="title-block"><div class="title">风险决策引擎接入</div><div class="slug">req-2024-002-risk-engine</div></div>
+        <div class="repos"><span class="repo">risk-service</span><span class="repo">pay-gateway</span></div>
+        <div><span class="badge analyzing"><span class="d"></span>分析中</span></div>
+        <div class="progress"><div class="bar"><div class="fill" style="width:15%;background:#a5b4fc"></div></div><div class="pct">15%</div></div>
+        <div class="updated">3 天前</div>
+        <div class="actions">···</div>
+      </div>
+
+      <div class="row">
+        <div class="checkbox"></div>
+        <div class="title-block"><div class="title">2023 Q4 活动复盘归档</div><div class="slug">req-2023-031-q4-retro</div></div>
+        <div class="repos"><span class="repo">promo-service</span></div>
+        <div><span class="badge archived"><span class="d"></span>已归档</span></div>
+        <div class="progress"><div class="bar"><div class="fill" style="width:100%;background:#64748b"></div></div><div class="pct">100%</div></div>
+        <div class="updated">2 月前</div>
+        <div class="actions">···</div>
+      </div>
+    </div>
+
+    <div class="note">
+      <strong>设计说明：</strong>Linear 风格表头 + 行高 32px（紧凑列表）。点击行进入详情页（03）。勾选复选框进入批量操作（归档 / 删除）。右上「+ 新建需求」对应 <code style="font-family:'JetBrains Mono',monospace">⌘N</code>，浮窗形态见 <code style="font-family:'JetBrains Mono',monospace">15-new-requirement-modal.html</code>。空态：刚启动时显示「📋 还没有需求 · 从一份 PRD 开始你的 AI 开发流 · + 新建需求」。
+    </div>
+
+  </main>
+</div>
+
+<button class="fab" title="新建需求 (⌘N)">+</button>
+
+</body>
+</html>

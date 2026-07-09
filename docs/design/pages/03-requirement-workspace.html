@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>03 · 需求工作区 · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{
+  --brand:#5e6ad2; --brand-50:#eef0fb; --brand-500:#5e6ad2; --brand-600:#525bc7;
+  --success:#16a34a; --warning:#f59e0b; --error:#ef4444; --info:#64748b;
+  --bg:#fbfbfd; --bg-elevated:#ffffff; --bg-subtle:#f5f5f7; --border:#ebebef; --border-strong:#d8d8de;
+  --text-1:#0f172a; --text-2:#475569; --text-3:#94a3b8;
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px; --space-6:24px; --space-8:32px;
+  --text-xs:11px; --text-sm:12px; --text-base:13px; --text-md:14px; --text-lg:16px; --text-xl:18px; --text-2xl:20px;
+  --row-md:32px;
+  --radius-sm:4px; --radius-md:6px; --radius-lg:8px;
+  --shadow-sm:0 1px 2px rgba(0,0,0,0.04); --shadow-lg:0 4px 12px rgba(0,0,0,0.08);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg);color:var(--text-1);font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased}
+
+/* StatusBar */
+.statusbar{position:sticky;top:0;z-index:50;background:var(--bg-elevated);border-bottom:1px solid var(--border)}
+.statusbar .tabs{display:flex;align-items:center;height:40px;padding:0 var(--space-4);gap:2px}
+.statusbar .tab{display:flex;align-items:center;gap:6px;height:28px;padding:0 var(--space-3);font-size:var(--text-sm);color:var(--text-2);border-radius:var(--radius-md);cursor:pointer;white-space:nowrap}
+.statusbar .tab:hover{background:var(--bg-subtle)}
+.statusbar .tab.active{background:var(--brand-50);color:var(--brand-600);font-weight:500}
+.statusbar .tab .dot{width:6px;height:6px;border-radius:50%;background:var(--brand)}
+.statusbar .info{display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 var(--space-4);border-top:1px solid var(--border);background:var(--bg-subtle);font-size:var(--text-sm);color:var(--text-2)}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(94,106,210,.6)}70%{box-shadow:0 0 0 6px rgba(94,106,210,0)}100%{box-shadow:0 0 0 0 rgba(94,106,210,0)}}
+.dot-pulse{width:8px;height:8px;border-radius:50%;background:var(--brand);animation:pulse 1.4s infinite;display:inline-block}
+
+/* Three-column layout */
+.layout{display:grid;grid-template-columns:240px 1fr 120px;min-height:calc(100vh - 72px);background:var(--bg)}
+
+/* Resource Tree */
+.tree{background:var(--bg-elevated);border-right:1px solid var(--border);padding:var(--space-3) 0;overflow:auto}
+.tree-section{padding:0 var(--space-3);margin-bottom:var(--space-4)}
+.tree-section-label{padding:var(--space-2) var(--space-2);font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:500;display:flex;align-items:center;justify-content:space-between}
+.tree-node{display:flex;align-items:center;gap:var(--space-2);height:28px;padding:0 var(--space-2);border-radius:var(--radius-md);font-size:var(--text-sm);color:var(--text-2);cursor:pointer}
+.tree-node:hover{background:var(--bg-subtle);color:var(--text-1)}
+.tree-node.active{background:var(--brand-50);color:var(--brand-600);font-weight:500}
+.tree-node .ic{font-size:14px;width:16px;text-align:center;color:var(--text-3)}
+.tree-node.active .ic{color:var(--brand-600)}
+.tree-node .badge-mini{margin-left:auto;font-size:var(--text-xs);color:var(--text-3);background:var(--bg-subtle);padding:1px 6px;border-radius:var(--radius-sm)}
+.tree-node .status-dot{width:6px;height:6px;border-radius:50%;margin-left:auto}
+.tree-children{padding-left:var(--space-4)}
+.tree-node.sub{height:26px;font-size:var(--text-sm)}
+
+/* Center (main work area) */
+.center{display:flex;flex-direction:column;background:var(--bg-elevated);overflow:hidden}
+.center-tabs{display:flex;align-items:center;height:40px;padding:0 var(--space-4);gap:2px;border-bottom:1px solid var(--border);background:var(--bg-subtle)}
+.center-tab{display:flex;align-items:center;gap:6px;height:28px;padding:0 var(--space-3);font-size:var(--text-sm);color:var(--text-2);border-radius:var(--radius-md);cursor:pointer}
+.center-tab:hover{background:var(--bg-elevated)}
+.center-tab.active{background:var(--bg-elevated);color:var(--text-1);font-weight:500;box-shadow:var(--shadow-sm)}
+.center-toolbar{display:flex;align-items:center;justify-content:space-between;height:40px;padding:0 var(--space-6);border-bottom:1px solid var(--border);background:var(--bg-elevated)}
+.center-toolbar .left{display:flex;align-items:center;gap:var(--space-3)}
+.center-toolbar .breadcrumb{font-size:var(--text-sm);color:var(--text-3)}
+.center-toolbar .breadcrumb .sep{margin:0 6px;color:var(--text-3)}
+.center-toolbar .breadcrumb .cur{color:var(--text-1)}
+.center-toolbar .right{display:flex;gap:var(--space-2);align-items:center}
+.btn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 var(--space-3);border-radius:var(--radius-md);font-size:var(--text-sm);font-weight:500;cursor:pointer;border:none;background:var(--brand);color:#fff}
+.btn-secondary{background:var(--bg-subtle);color:var(--text-1);border:1px solid var(--border-strong)}
+.btn-secondary:hover{background:var(--bg-elevated)}
+.btn-ghost{background:transparent;color:var(--text-2);height:28px;padding:0 var(--space-2)}
+.btn-ghost:hover{color:var(--text-1)}
+
+/* Markdown view */
+.markdown{padding:var(--space-8) var(--space-12);max-width:880px;margin:0 auto;overflow:auto;height:calc(100vh - 152px)}
+.md-h1{font-size:var(--text-2xl);font-weight:600;letter-spacing:-0.02em;margin-bottom:var(--space-2);display:flex;align-items:center;gap:var(--space-3)}
+.md-meta{color:var(--text-3);font-size:var(--text-sm);margin-bottom:var(--space-6);display:flex;gap:var(--space-3);align-items:center}
+.md-h2{font-size:var(--text-lg);font-weight:600;margin:var(--space-6) 0 var(--space-3);padding-bottom:var(--space-2);border-bottom:1px solid var(--border)}
+.md-h3{font-size:var(--text-md);font-weight:600;margin:var(--space-5) 0 var(--space-2)}
+.md-p{font-size:var(--text-md);line-height:1.7;color:var(--text-1);margin-bottom:var(--space-3)}
+.md-list{padding-left:var(--space-6);margin-bottom:var(--space-3)}
+.md-list li{font-size:var(--text-md);line-height:1.7;color:var(--text-1);margin-bottom:var(--space-1)}
+.md-inline-code{font-family:'JetBrains Mono',monospace;background:var(--bg-subtle);padding:2px 6px;border-radius:var(--radius-sm);font-size:12px;color:var(--brand-600)}
+.md-code{background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3) var(--space-4);margin:var(--space-3) 0;font-family:'JetBrains Mono',monospace;font-size:var(--text-sm);overflow-x:auto;line-height:1.6}
+.md-blockquote{border-left:3px solid var(--brand);background:var(--brand-50);padding:var(--space-3) var(--space-4);border-radius:0 var(--radius-md) var(--radius-md) 0;margin:var(--space-3) 0;color:var(--text-2)}
+.md-table{width:100%;border-collapse:collapse;margin:var(--space-3) 0;font-size:var(--text-sm)}
+.md-table th{text-align:left;padding:var(--space-2) var(--space-3);background:var(--bg-subtle);font-weight:500;color:var(--text-2);border-bottom:1px solid var(--border)}
+.md-table td{padding:var(--space-2) var(--space-3);border-bottom:1px solid var(--border)}
+
+/* AI Inline marks (新范式：内嵌提示) */
+.inline-mark{display:inline-flex;align-items:center;gap:4px;padding:1px 6px;background:#fff7ed;border:1px dashed var(--warning);border-radius:var(--radius-sm);font-size:var(--text-sm);color:#92400e;cursor:help;position:relative}
+.inline-mark::before{content:"✨";font-size:11px}
+.inline-mark:hover{background:#fef3c7}
+
+/* Right rail (Inline 浮窗收纳) */
+.right-rail{background:var(--bg-subtle);border-left:1px solid var(--border);padding:var(--space-3);overflow:auto;position:relative}
+.rail-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-3)}
+.rail-head .t{font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:500}
+.rail-toggle{font-size:var(--text-xs);color:var(--text-3);background:none;border:none;cursor:pointer}
+.inline-card{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3);margin-bottom:var(--space-2);font-size:var(--text-sm);position:relative}
+.inline-card .ttl{font-weight:500;margin-bottom:var(--space-1);display:flex;align-items:center;gap:6px}
+.inline-card .body{color:var(--text-2);line-height:1.6;font-size:var(--text-sm)}
+.inline-card .body code{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--brand-600)}
+.inline-card .close{position:absolute;top:6px;right:6px;color:var(--text-3);cursor:pointer;font-size:12px}
+.inline-card.warn{border-left:3px solid var(--warning)}
+.inline-card.tip{border-left:3px solid var(--brand)}
+.inline-card.err{border-left:3px solid var(--error)}
+
+.note{margin:var(--space-4) var(--space-8) var(--space-3);padding:var(--space-3) var(--space-4);background:#f0f9ff;border:1px solid #bae6fd;border-radius:var(--radius-md);font-size:var(--text-sm);color:#075985}
+</style>
+</head>
+<body>
+
+<header class="statusbar">
+  <div class="tabs">
+    <div class="tab active"><span class="dot" style="background:var(--brand)"></span>退款功能 · 实施中</div>
+    <div class="tab"><span class="dot" style="background:var(--warning)"></span>会员等级 · 待澄清</div>
+    <div class="tab"><span class="dot" style="background:var(--success)"></span>订单导出 · 已完成</div>
+    <div class="tab">归档 · 4</div>
+  </div>
+  <div class="info">
+    <div style="display:flex;align-items:center;gap:var(--space-3)">
+      <strong style="color:var(--text-1);font-weight:500">退款功能优化</strong>
+      <span style="color:var(--text-3)">·</span>
+      <span>实施中 · code-stage · Task #12 退款接口开发</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:var(--space-4)">
+      <span style="display:flex;align-items:center;gap:6px"><span class="dot-pulse"></span>AI 思考中 · 正在读取 design/02-api.md</span>
+      <span style="color:var(--warning)">⚠ 3 待回答</span>
+      <span style="color:var(--text-3);font-size:var(--text-xs)">⌘K 命令</span>
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+
+  <!-- ========== LEFT: Resource Tree ========== -->
+  <aside class="tree">
+    <div class="tree-section">
+      <div class="tree-section-label"><span>概览</span></div>
+      <div class="tree-node">
+        <span class="ic">📋</span>需求文档
+      </div>
+      <div class="tree-node">
+        <span class="ic">📊</span>进度概览
+      </div>
+    </div>
+
+    <div class="tree-section">
+      <div class="tree-section-label"><span>分析</span><span style="cursor:pointer">+</span></div>
+      <div class="tree-node">
+        <span class="ic">📄</span>01-understanding<span class="status-dot" style="background:var(--success)"></span>
+      </div>
+      <div class="tree-node">
+        <span class="ic">❓</span>02-questions<span class="badge-mini">3 待答</span>
+      </div>
+      <div class="tree-node">
+        <span class="ic">📦</span>99-summary
+      </div>
+    </div>
+
+    <div class="tree-section">
+      <div class="tree-section-label"><span>设计</span><span style="cursor:pointer">+</span></div>
+      <div class="tree-node active">
+        <span class="ic">🗄️</span>01-database<span class="status-dot" style="background:var(--success)"></span>
+      </div>
+      <div class="tree-node">
+        <span class="ic">🔌</span>02-api<span class="status-dot" style="background:var(--success)"></span>
+      </div>
+      <div class="tree-node">
+        <span class="ic">⚙️</span>03-service<span class="status-dot" style="background:#a5b4fc"></span>
+      </div>
+      <div class="tree-node">
+        <span class="ic">📦</span>99-summary
+      </div>
+    </div>
+
+    <div class="tree-section">
+      <div class="tree-section-label"><span>计划</span><span style="cursor:pointer">+</span></div>
+      <div class="tree-node">
+        <span class="ic">📝</span>tasks.md
+      </div>
+    </div>
+
+    <div class="tree-section">
+      <div class="tree-section-label"><span>产物</span><span style="cursor:pointer">+</span></div>
+      <div class="tree-node">
+        <span class="ic">📄</span>refund.sql<span class="status-dot" style="background:var(--success)"></span>
+      </div>
+      <div class="tree-node">
+        <span class="ic">📄</span>refund-api.yaml<span class="status-dot" style="background:var(--success)"></span>
+      </div>
+      <div class="tree-node">
+        <span class="ic">📄</span>apollo.yaml<span class="status-dot" style="background:var(--warning)"></span>
+      </div>
+    </div>
+
+    <div class="tree-section">
+      <div class="tree-section-label"><span>对话</span><span style="cursor:pointer">+</span></div>
+      <div class="tree-node">
+        <span class="ic">💬</span>001-analyze<span class="status-dot" style="background:var(--success)"></span>
+      </div>
+      <div class="tree-node">
+        <span class="ic">💬</span>002-design<span class="status-dot" style="background:var(--success)"></span>
+      </div>
+      <div class="tree-node">
+        <span class="ic">💬</span>003-code<span class="status-dot" style="background:var(--brand)"></span>
+      </div>
+    </div>
+
+    <div class="tree-section">
+      <div class="tree-section-label"><span>仓库</span><span style="cursor:pointer">+</span></div>
+      <div class="tree-node">
+        <span class="ic">📦</span>refund-service
+      </div>
+      <div class="tree-node">
+        <span class="ic">📦</span>order-service
+      </div>
+    </div>
+  </aside>
+
+  <!-- ========== CENTER ========== -->
+  <section class="center">
+    <div class="center-tabs">
+      <div class="center-tab active">📄 Markdown</div>
+      <div class="center-tab">🔀 Diff</div>
+      <div class="center-tab">📁 文件树</div>
+      <div class="center-tab">💬 本次对话</div>
+      <div style="flex:1"></div>
+      <div class="center-tab" style="color:var(--text-3)">⌘1~4 切换</div>
+    </div>
+
+    <div class="center-toolbar">
+      <div class="left">
+        <div class="breadcrumb">
+          <span>退款功能优化</span>
+          <span class="sep">/</span>
+          <span>设计</span>
+          <span class="sep">/</span>
+          <span class="cur">01-database.md</span>
+        </div>
+      </div>
+      <div class="right">
+        <button class="btn-ghost">↻ 重新生成</button>
+        <button class="btn-secondary">⌘⇧E 打开 IDEA</button>
+        <button class="btn">▶ 运行 code-stage</button>
+      </div>
+    </div>
+
+    <article class="markdown">
+      <h1 class="md-h1">01-database <span class="inline-mark" title="AI 提示：缺索引建议">缺索引</span></h1>
+      <div class="md-meta">
+        <span>由 <strong>design-stage</strong> 生成 · 2026-07-08</span>
+        <span>·</span>
+        <span>14 次修订</span>
+        <span>·</span>
+        <span style="color:var(--success)">✓ 已采纳</span>
+      </div>
+
+      <h2 class="md-h2">1. 退款表 <code style="font-family:'JetBrains Mono',monospace">refund_order</code></h2>
+
+      <p class="md-p">主表，记录每笔退款订单的状态、金额、退款渠道等信息。一笔原订单（<code class="md-inline-code">order_main</code>）可以对应多笔退款订单（部分退款场景）。</p>
+
+      <h3 class="md-h3">字段说明</h3>
+
+      <table class="md-table">
+        <thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code class="md-inline-code">id</code></td><td>BIGINT PK</td><td>主键，雪花算法</td></tr>
+          <tr><td><code class="md-inline-code">order_id</code></td><td>BIGINT</td><td>原订单 ID</td></tr>
+          <tr><td><code class="md-inline-code">user_id</code></td><td>BIGINT</td><td>用户 ID</td></tr>
+          <tr><td><code class="md-inline-code">amount</code></td><td>DECIMAL(10,2)</td><td>退款金额（元）</td></tr>
+          <tr><td><code class="md-inline-code">status</code></td><td>TINYINT</td><td>1-待审核 2-退款中 3-成功 4-失败</td></tr>
+          <tr><td><code class="md-inline-code">reason</code></td><td>VARCHAR(256)</td><td>退款原因</td></tr>
+          <tr><td><code class="md-inline-code">created_at</code></td><td>DATETIME</td><td>创建时间</td></tr>
+          <tr><td><code class="md-inline-code">updated_at</code></td><td>DATETIME</td><td>更新时间</td></tr>
+        </tbody>
+      </table>
+
+      <blockquote class="md-blockquote">
+        <strong>💡 AI 建议：</strong>高频查询场景 <code class="md-inline-code">WHERE user_id=? AND status=? ORDER BY created_at DESC</code>，建议加联合索引 <code class="md-inline-code">idx_user_status_created (user_id, status, created_at)</code>。<span class="inline-mark" title="点击查看优化建议">需优化</span>
+      </blockquote>
+
+      <h2 class="md-h2">2. 退款流水表 <code>refund_flow</code></h2>
+      <p class="md-p">记录退款链路上的每一步状态变更（异步、回调、重试）。</p>
+
+      <h2 class="md-h2">3. 索引设计</h2>
+      <ul class="md-list">
+        <li><code class="md-inline-code">idx_user_status_created (user_id, status, created_at)</code> — 用户维度查询</li>
+        <li><code class="md-inline-code">idx_order (order_id)</code> — 原订单维度</li>
+        <li><code class="md-inline-code">idx_status_updated (status, updated_at)</code> — 后台扫描任务</li>
+      </ul>
+    </article>
+  </section>
+
+  <!-- ========== RIGHT: Inline 提示栏（折叠状态默认） ========== -->
+  <aside class="right-rail">
+    <div class="rail-head">
+      <span class="t">AI 提示</span>
+      <button class="rail-toggle">⟨ 折叠</button>
+    </div>
+
+    <div class="inline-card tip">
+      <div class="ttl">✨ 缺索引建议</div>
+      <div class="body">检测到 <code>WHERE user_id + status</code> 查询无合适索引，建议在 <code>refund_order</code> 表加 <code>idx_user_status_created</code></div>
+      <button class="btn-ghost" style="margin-top:8px;padding:4px 0;font-size:12px">应用建议 →</button>
+    </div>
+
+    <div class="inline-card warn">
+      <div class="ttl">⚠ 待回答</div>
+      <div class="body">退款失败时是否要回滚已扣减的优惠券额度？</div>
+      <button class="btn-ghost" style="margin-top:8px;padding:4px 0;font-size:12px;color:var(--brand-600)">⌘K 去回答 →</button>
+    </div>
+
+    <div class="inline-card">
+      <div class="ttl">📊 进度</div>
+      <div class="body">设计阶段 100% · 计划阶段 100% · 实施阶段 62% (12/19 tasks)</div>
+    </div>
+
+    <div class="inline-card err">
+      <div class="ttl">🚨 Skill 阻塞</div>
+      <div class="body">code-stage 等待 3 个澄清问题的回复</div>
+    </div>
+  </aside>
+
+</div>
+
+<div class="note">
+  <strong>设计说明：</strong>这是 AI 隐身范式的核心页。<b>右栏不再是 AI 对话流</b>，而是「AI 主动推送的浮窗收纳处」（InlineHint）。AI 对话流被改写到资源树「对话」节点下的 markdown 文件中。<b>Markdown 中的内嵌 AI 标记</b>（虚线橙色框）= hover/click 触发 InlineHint。新增：<code style="font-family:'JetBrains Mono',monospace">Cmd+1~4</code> 切主工作区 Tab，<code style="font-family:'JetBrains Mono',monospace">↑↓</code> 资源树内移动。空态：刚进需求时主区显示「运行 analyze-stage 开始 →」。
+</div>
+
+</body>
+</html>

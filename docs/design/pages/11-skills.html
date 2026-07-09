@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>11 · Skill 管理 · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{
+  --brand:#5e6ad2; --brand-50:#eef0fb; --brand-500:#5e6ad2; --brand-600:#525bc7;
+  --success:#16a34a; --warning:#f59e0b;
+  --bg:#fbfbfd; --bg-elevated:#fff; --bg-subtle:#f5f5f7; --border:#ebebef; --border-strong:#d8d8de;
+  --text-1:#0f172a; --text-2:#475569; --text-3:#94a3b8;
+  --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px; --space-6:24px; --space-8:32px;
+  --text-xs:11px; --text-sm:12px; --text-base:13px; --text-md:14px; --text-lg:16px; --text-xl:18px; --text-2xl:20px; --text-3xl:24px;
+  --radius-sm:4px; --radius-md:6px; --radius-lg:8px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text-1);font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased}
+.statusbar{position:sticky;top:0;z-index:50;background:var(--bg-elevated);border-bottom:1px solid var(--border)}
+.statusbar .tabs{display:flex;align-items:center;height:40px;padding:0 var(--space-4);gap:2px}
+.statusbar .tab{display:flex;align-items:center;gap:6px;height:28px;padding:0 var(--space-3);font-size:var(--text-sm);color:var(--text-2);border-radius:var(--radius-md);cursor:pointer}
+.statusbar .tab:hover{background:var(--bg-subtle)}
+.statusbar .tab.active{background:var(--brand-50);color:var(--brand-600);font-weight:500}
+.statusbar .tab .dot{width:6px;height:6px;border-radius:50%}
+.statusbar .info{display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 var(--space-4);border-top:1px solid var(--border);background:var(--bg-subtle);font-size:var(--text-sm);color:var(--text-2)}
+.layout{display:grid;grid-template-columns:56px 1fr;min-height:calc(100vh - 72px)}
+.sidebar{display:flex;flex-direction:column;align-items:center;padding:var(--space-3) 0;gap:2px;background:var(--bg-elevated);border-right:1px solid var(--border)}
+.sidebar .logo{width:32px;height:32px;border-radius:6px;background:var(--brand);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;margin-bottom:var(--space-3)}
+.sidebar .nav-item{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:6px;color:var(--text-2);cursor:pointer;font-size:18px;position:relative}
+.sidebar .nav-item:hover{background:var(--bg-subtle)}
+.sidebar .nav-item.active{background:var(--brand-50);color:var(--brand-600)}
+.sidebar .nav-item.active::before{content:"";position:absolute;left:-12px;top:8px;bottom:8px;width:2px;background:var(--brand);border-radius:1px}
+.main{padding:var(--space-6) var(--space-8);overflow:auto}
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:var(--space-5)}
+.page-head h1{font-size:var(--text-3xl);font-weight:600;letter-spacing:-0.02em}
+.page-head .sub{color:var(--text-2);font-size:var(--text-md);margin-top:var(--space-1)}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 var(--space-3);border-radius:var(--radius-md);font-size:var(--text-md);font-weight:500;cursor:pointer;border:none;background:var(--brand);color:#fff}
+.btn-secondary{background:var(--bg-elevated);color:var(--text-1);border:1px solid var(--border-strong)}
+
+.sub-nav{display:flex;gap:2px;padding:var(--space-1);background:var(--bg-subtle);border-radius:var(--radius-md);width:fit-content;margin-bottom:var(--space-4)}
+.sub-nav button{height:28px;padding:0 var(--space-3);border-radius:var(--radius-sm);font-size:var(--text-sm);color:var(--text-2);background:none;border:none;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.sub-nav button.active{background:var(--bg-elevated);color:var(--text-1);font-weight:500;box-shadow:0 1px 2px rgba(0,0,0,0.04)}
+.sub-nav button .count{font-size:var(--text-xs);color:var(--text-3);background:var(--bg-subtle);padding:0 6px;border-radius:8px}
+.sub-nav button.active .count{background:var(--brand-50);color:var(--brand-600)}
+
+/* Skill pipeline visualization */
+.pipeline{display:flex;align-items:center;gap:var(--space-2);padding:var(--space-5);background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:var(--space-5);overflow-x:auto}
+.sk-step{display:flex;flex-direction:column;align-items:center;min-width:120px;padding:var(--space-3);background:var(--bg-subtle);border-radius:var(--radius-md);cursor:pointer;transition:all .15s}
+.sk-step:hover{transform:translateY(-2px);box-shadow:0 2px 4px rgba(0,0,0,0.06)}
+.sk-step.active{background:var(--brand-50);border:1px solid var(--brand-500)}
+.sk-step .ic{width:32px;height:32px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;margin-bottom:var(--space-2)}
+.sk-step .name{font-size:var(--text-sm);font-weight:500}
+.sk-step .meta{font-size:var(--text-xs);color:var(--text-3);margin-top:2px}
+.sk-arrow{color:var(--text-3);font-size:18px}
+
+/* Skill cards */
+.sk-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-4)}
+.sk-card{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-5);position:relative}
+.sk-card.built-in{border-left:3px solid var(--brand-500)}
+.sk-card.user{border-left:3px solid var(--warning)}
+.sk-card-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:var(--space-3)}
+.sk-card .badge-built{font-size:var(--text-xs);color:var(--brand-600);background:var(--brand-50);padding:2px 8px;border-radius:4px;font-weight:500}
+.sk-card .badge-user{font-size:var(--text-xs);color:#92400e;background:#fff7ed;padding:2px 8px;border-radius:4px;font-weight:500}
+.sk-name{font-family:'JetBrains Mono',monospace;font-size:var(--text-lg);font-weight:600;margin-bottom:4px}
+.sk-ver{font-size:var(--text-xs);color:var(--text-3);margin-bottom:var(--space-3)}
+.sk-desc{font-size:var(--text-md);color:var(--text-2);line-height:1.6;margin-bottom:var(--space-4)}
+.sk-meta{display:flex;justify-content:space-between;padding-top:var(--space-3);border-top:1px solid var(--border);font-size:var(--text-xs);color:var(--text-3)}
+.sk-meta span{display:inline-flex;align-items:center;gap:4px}
+.sk-meta code{font-family:'JetBrains Mono',monospace;background:var(--bg-subtle);padding:1px 6px;border-radius:3px;color:var(--text-2)}
+
+.note{margin-top:var(--space-5);padding:var(--space-4);background:#f0f9ff;border:1px solid #bae6fd;border-radius:var(--radius-md);font-size:var(--text-sm);color:#075985}
+</style>
+</head>
+<body>
+
+<header class="statusbar">
+  <div class="tabs">
+    <div class="tab"><span class="dot" style="background:var(--brand)"></span>退款功能 · 实施中</div>
+    <div class="tab"><span class="dot" style="background:var(--warning)"></span>会员等级 · 待澄清</div>
+    <div class="tab"><span class="dot" style="background:var(--success)"></span>订单导出 · 已完成</div>
+    <div class="tab">归档 · 4</div>
+  </div>
+  <div class="info">
+    <div><strong style="color:var(--text-1);font-weight:500">Skill 管理</strong> · 6 个内置 · 2 个用户自定义</div>
+    <div>⌘K 命令</div>
+  </div>
+</header>
+
+<div class="layout">
+  <nav class="sidebar">
+    <div class="logo">A</div>
+    <div class="nav-item">🏠</div>
+    <div class="nav-item">📌</div>
+    <div class="nav-item">📦</div>
+    <div class="nav-item">📚</div>
+    <div class="nav-item active">🤖</div>
+    <div style="flex:1"></div>
+    <div class="nav-item">⚙️</div>
+  </nav>
+
+  <main class="main">
+    <div class="page-head">
+      <div>
+        <h1>Skill 管理</h1>
+        <div class="sub">AI 在每个阶段如何工作 · 提示词模板 + 上下文装配规则 + 期望产物清单</div>
+      </div>
+      <div style="display:flex;gap:var(--space-2)">
+        <button class="btn btn-secondary">📖 编辑文档</button>
+        <button class="btn">+ 新建 Skill</button>
+      </div>
+    </div>
+
+    <div class="sub-nav">
+      <button class="active">所有 <span class="count">8</span></button>
+      <button>内置 <span class="count">6</span></button>
+      <button>用户 <span class="count">2</span></button>
+    </div>
+
+    <!-- Pipeline visualization -->
+    <div style="font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:500;margin-bottom:var(--space-2)">默认 Skill 链（按需求状态）</div>
+    <div class="pipeline">
+      <div class="sk-step active">
+        <div class="ic">A</div>
+        <div class="name">analyze-stage</div>
+        <div class="meta">DRAFT → ANALYZING</div>
+      </div>
+      <div class="sk-arrow">→</div>
+      <div class="sk-step">
+        <div class="ic">D</div>
+        <div class="name">design-stage</div>
+        <div class="meta">DESIGNING</div>
+      </div>
+      <div class="sk-arrow">→</div>
+      <div class="sk-step">
+        <div class="ic">P</div>
+        <div class="name">plan-stage</div>
+        <div class="meta">PLANNING</div>
+      </div>
+      <div class="sk-arrow">→</div>
+      <div class="sk-step">
+        <div class="ic">C</div>
+        <div class="name">code-stage</div>
+        <div class="meta">IMPLEMENTING</div>
+      </div>
+      <div class="sk-arrow">→</div>
+      <div class="sk-step">
+        <div class="ic">T</div>
+        <div class="name">test-stage</div>
+        <div class="meta">测试用例生成</div>
+      </div>
+      <div class="sk-arrow">→</div>
+      <div class="sk-step">
+        <div class="ic">S</div>
+        <div class="name">submit-stage</div>
+        <div class="meta">SUBMITTING</div>
+      </div>
+    </div>
+
+    <!-- Skill cards -->
+    <div class="sk-grid">
+
+      <div class="sk-card built-in">
+        <div class="sk-card-head">
+          <div>
+            <div class="sk-name">analyze-stage</div>
+            <div class="sk-ver">v1.0 · 内置</div>
+          </div>
+          <span class="badge-built">BUILT-IN</span>
+        </div>
+        <div class="sk-desc">读取 requirement.md，生成需求理解（01-understanding.md）和澄清问题（02-questions.md）。理解不清的地方必须提问，不能假设。</div>
+        <div class="sk-meta">
+          <span>📥 注入：requirement.md</span>
+          <span>📤 产物：<code>analysis/*</code></span>
+        </div>
+      </div>
+
+      <div class="sk-card built-in">
+        <div class="sk-card-head">
+          <div>
+            <div class="sk-name">design-stage</div>
+            <div class="sk-ver">v1.0 · 内置</div>
+          </div>
+          <span class="badge-built">BUILT-IN</span>
+        </div>
+        <div class="sk-desc">基于分析结果生成数据库、API、服务层三层设计。必须产出 OpenAPI yaml 和 SQL DDL。</div>
+        <div class="sk-meta">
+          <span>📥 注入：analysis/ + knowledge</span>
+          <span>📤 产物：<code>design/*</code> + <code>artifacts/*</code></span>
+        </div>
+      </div>
+
+      <div class="sk-card built-in">
+        <div class="sk-card-head">
+          <div>
+            <div class="sk-name">plan-stage</div>
+            <div class="sk-ver">v1.0 · 内置</div>
+          </div>
+          <span class="badge-built">BUILT-IN</span>
+        </div>
+        <div class="sk-desc">将设计分解为可执行的 Task 列表（tasks.md）。每个 Task 包含验收标准、关联产物、预估工作量。</div>
+        <div class="sk-meta">
+          <span>📥 注入：design/*</span>
+          <span>📤 产物：<code>plan/tasks.md</code></span>
+        </div>
+      </div>
+
+      <div class="sk-card built-in">
+        <div class="sk-card-head">
+          <div>
+            <div class="sk-name">code-stage</div>
+            <div class="sk-ver">v1.0 · 内置</div>
+          </div>
+          <span class="badge-built">BUILT-IN</span>
+        </div>
+        <div class="sk-desc">逐个执行 Task，写入代码到对应 repo 的 worktree。完成后自动 commit（需用户授权）。遇到阻塞自动生成问题。</div>
+        <div class="sk-meta">
+          <span>📥 注入：plan/ + design/ + 当前 Task</span>
+          <span>📤 产物：commit + 更新 tasks.md</span>
+        </div>
+      </div>
+
+      <div class="sk-card user">
+        <div class="sk-card-head">
+          <div>
+            <div class="sk-name">company-review-stage</div>
+            <div class="sk-ver">v0.3 · 用户自定义 · 1 个月前</div>
+          </div>
+          <span class="badge-user">USER</span>
+        </div>
+        <div class="sk-desc">遵循公司 review 规范的代码审查 Skill。检查命名规范、异常处理、日志格式（基于 knowledge/standards/java-code-spec.md）。</div>
+        <div class="sk-meta">
+          <span>📥 注入：code diff + standards</span>
+          <span>📤 产物：<code>review/*.md</code></span>
+        </div>
+      </div>
+
+      <div class="sk-card user">
+        <div class="sk-card-head">
+          <div>
+            <div class="sk-name">db-migration-stage</div>
+            <div class="sk-ver">v0.1 · 用户自定义 · 2 周前</div>
+          </div>
+          <span class="badge-user">USER</span>
+        </div>
+        <div class="sk-desc">数据库迁移脚本生成。读取 SQL DDL，自动生成 Flyway / Liquibase 兼容的版本化迁移脚本（含回滚段）。</div>
+        <div class="sk-meta">
+          <span>📥 注入：artifacts/*.sql</span>
+          <span>📤 产物：<code>repos/*/db/migration/V*.sql</code></span>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="note">
+      <strong>设计说明：</strong>Skill = 「AI 在某阶段如何工作」的可加载单元。MVP 内置 6 个（对应 Vibecoding 7 步流程的核心），用户可自定义扩展。<b>每个 Skill = 一个目录</b>，含 <code style="font-family:'JetBrains Mono',monospace">SKILL.md</code>（提示词模板）+ <code style="font-family:'JetBrains Mono',monospace">context.yml</code>（上下文装配规则）+ <code style="font-family:'JetBrains Mono',monospace">artifacts.yml</code>（期望产物清单）。点击 Skill 卡片 → 打开完整编辑器（YAML + Markdown 双 tab）。空态：「🤖 加载 Skill · 6 个内置 Skill 已就绪」。
+    </div>
+
+  </main>
+</div>
+
+</body>
+</html>

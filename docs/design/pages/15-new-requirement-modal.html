@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>15 · 新建需求 · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{
+  --brand:#5e6ad2; --brand-50:#eef0fb; --brand-500:#5e6ad2; --brand-600:#525bc7;
+  --success:#16a34a;
+  --bg:#fbfbfd; --bg-elevated:#fff; --bg-subtle:#f5f5f7; --border:#ebebef; --border-strong:#d8d8de;
+  --text-1:#0f172a; --text-2:#475569; --text-3:#94a3b8;
+  --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px; --space-6:24px; --space-8:32px;
+  --text-xs:11px; --text-sm:12px; --text-base:13px; --text-md:14px; --text-lg:16px; --text-xl:18px; --text-2xl:20px;
+  --radius-sm:4px; --radius-md:6px; --radius-lg:8px; --radius-xl:12px;
+  --shadow-xl:0 24px 64px rgba(0,0,0,0.15), 0 8px 16px rgba(0,0,0,0.08);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:#1a1a2e;color:var(--text-1);font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:var(--space-8)}
+
+.backdrop{position:fixed;inset:0;background:rgba(15,23,42,0.4);backdrop-filter:blur(4px);z-index:100}
+
+.modal{position:relative;z-index:101;width:720px;max-width:90vw;background:var(--bg-elevated);border-radius:var(--radius-xl);box-shadow:var(--shadow-xl);overflow:hidden}
+
+/* Header */
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:var(--space-5) var(--space-6);border-bottom:1px solid var(--border)}
+.modal-head h2{font-size:var(--text-xl);font-weight:600;letter-spacing:-0.01em;display:flex;align-items:center;gap:var(--space-3)}
+.modal-head h2::before{content:"✨";font-size:18px}
+.modal-head .close{width:28px;height:28px;border-radius:var(--radius-md);background:var(--bg-subtle);border:none;cursor:pointer;color:var(--text-3);font-size:14px;display:flex;align-items:center;justify-content:center}
+.modal-head .close:hover{background:var(--bg-elevated);color:var(--text-1)}
+
+/* Body */
+.modal-body{padding:var(--space-6);max-height:60vh;overflow-y:auto}
+
+/* Step indicator */
+.steps{display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-6)}
+.step{display:flex;align-items:center;gap:var(--space-2);font-size:var(--text-sm);color:var(--text-3)}
+.step .n{width:24px;height:24px;border-radius:50%;background:var(--bg-subtle);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:var(--text-xs);border:1px solid var(--border)}
+.step.active{color:var(--brand-600);font-weight:500}
+.step.active .n{background:var(--brand-500);color:#fff;border-color:var(--brand-500)}
+.step.done .n{background:var(--success);color:#fff;border-color:var(--success)}
+.step .n{display:inline-flex}
+.step.done{color:var(--success)}
+.step-line{width:24px;height:1px;background:var(--border)}
+
+/* Form fields */
+.field{margin-bottom:var(--space-5)}
+.field label{display:block;font-size:var(--text-sm);font-weight:500;color:var(--text-1);margin-bottom:var(--space-2)}
+.field .hint{font-size:var(--text-xs);color:var(--text-3);margin-top:4px}
+.field input,.field textarea{width:100%;padding:var(--space-3);background:var(--bg-subtle);border:1px solid var(--border-strong);border-radius:var(--radius-md);font-size:var(--text-md);color:var(--text-1);font-family:inherit;outline:none;transition:all .15s}
+.field input:focus,.field textarea:focus{border-color:var(--brand-500);background:var(--bg-elevated);box-shadow:0 0 0 3px rgba(94,106,210,.15)}
+.field textarea{resize:vertical;min-height:140px;font-family:'JetBrains Mono',monospace;font-size:var(--text-sm);line-height:1.6}
+.field .count{float:right;font-size:var(--text-xs);color:var(--text-3)}
+
+/* Repo picker */
+.repo-picker{background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3);max-height:200px;overflow:auto}
+.repo-opt{display:flex;align-items:center;gap:var(--space-3);padding:var(--space-2);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--text-sm)}
+.repo-opt:hover{background:var(--bg-elevated)}
+.repo-opt .cb{width:16px;height:16px;border:1.5px solid var(--border-strong);border-radius:3px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px}
+.repo-opt.on .cb{background:var(--brand-500);border-color:var(--brand-500)}
+.repo-opt .name{font-family:'JetBrains Mono',monospace;font-weight:500}
+.repo-opt .url{color:var(--text-3);font-size:var(--text-xs);font-family:'JetBrains Mono',monospace}
+.repo-opt .branch{color:var(--text-3);font-size:var(--text-xs);margin-left:auto}
+.add-repo{margin-top:var(--space-2);font-size:var(--text-sm);color:var(--brand-600);cursor:pointer;display:flex;align-items:center;gap:6px;padding:var(--space-2)}
+.add-repo:hover{text-decoration:underline}
+
+/* Skill chain preview */
+.skill-preview{display:flex;align-items:center;gap:var(--space-1);padding:var(--space-3);background:var(--brand-50);border-radius:var(--radius-md);font-size:var(--text-sm);color:var(--brand-600)}
+.skill-preview .sk{padding:2px 8px;background:var(--bg-elevated);border:1px solid var(--brand-500);border-radius:var(--radius-sm);font-family:'JetBrains Mono',monospace;font-size:var(--text-xs)}
+.skill-preview .arr{color:var(--text-3)}
+
+/* Footer */
+.modal-foot{display:flex;align-items:center;justify-content:space-between;padding:var(--space-4) var(--space-6);border-top:1px solid var(--border);background:var(--bg-subtle)}
+.modal-foot .left{font-size:var(--text-xs);color:var(--text-3)}
+.modal-foot .right{display:flex;gap:var(--space-2)}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 var(--space-4);border-radius:var(--radius-md);font-size:var(--text-md);font-weight:500;cursor:pointer;border:none;background:var(--brand);color:#fff}
+.btn:hover{background:var(--brand-600)}
+.btn-secondary{background:var(--bg-elevated);color:var(--text-1);border:1px solid var(--border-strong)}
+.btn-secondary:hover{background:var(--bg-subtle)}
+.btn-ghost{background:transparent;color:var(--text-2)}
+.btn-ghost:hover{color:var(--text-1)}
+
+.note{position:fixed;bottom:24px;left:24px;right:24px;background:#fffbeb;border:1px solid #fde68a;border-radius:var(--radius-md);padding:var(--space-3) var(--space-4);font-size:var(--text-xs);color:#78350f;max-width:680px;margin:0 auto;z-index:102}
+</style>
+</head>
+<body>
+
+<div class="backdrop"></div>
+
+<div class="modal">
+  <div class="modal-head">
+    <h2>新建需求</h2>
+    <button class="close" title="关闭 (ESC)">✕</button>
+  </div>
+
+  <div class="modal-body">
+
+    <div class="steps">
+      <div class="step active"><span class="n">1</span>基本信息</div>
+      <div class="step-line"></div>
+      <div class="step"><span class="n">2</span>关联仓库</div>
+      <div class="step-line"></div>
+      <div class="step"><span class="n">3</span>PRD & 启动</div>
+    </div>
+
+    <div class="field">
+      <label>需求名称 <span style="color:var(--error)">*</span></label>
+      <input value="退款功能优化" autofocus>
+      <div class="hint">简洁、动词开头 · 如「退款功能优化」「会员等级重构」</div>
+    </div>
+
+    <div class="field">
+      <label>目标分支（合并到）</label>
+      <input value="main" style="font-family:'JetBrains Mono',monospace">
+      <div class="hint">submit-stage 完成后，AI 自动请求合并到此分支</div>
+    </div>
+
+    <div class="field">
+      <label>关联仓库 <span style="color:var(--error)">*</span></label>
+      <div class="repo-picker">
+        <div class="repo-opt on">
+          <div class="cb">✓</div>
+          <div style="flex:1">
+            <div class="name">refund-service</div>
+            <div class="url">git@github.com:company/refund-service.git</div>
+          </div>
+          <div class="branch">main</div>
+        </div>
+        <div class="repo-opt on">
+          <div class="cb">✓</div>
+          <div style="flex:1">
+            <div class="name">order-service</div>
+            <div class="url">git@github.com:company/order-service.git</div>
+          </div>
+          <div class="branch">main</div>
+        </div>
+        <div class="repo-opt">
+          <div class="cb"></div>
+          <div style="flex:1">
+            <div class="name">pay-gateway</div>
+            <div class="url">git@github.com:company/pay-gateway.git</div>
+          </div>
+          <div class="branch">main</div>
+        </div>
+        <div class="repo-opt">
+          <div class="cb"></div>
+          <div style="flex:1">
+            <div class="name">risk-service</div>
+            <div class="url">git@github.com:company/risk-service.git</div>
+          </div>
+          <div class="branch">main</div>
+        </div>
+        <div class="add-repo">+ 添加新仓库（粘贴 Git URL）</div>
+      </div>
+      <div class="hint">已选 2 个 · 每个仓库会自动创建 git worktree</div>
+    </div>
+
+    <div class="field">
+      <label>PRD 原文（可选 · 也可以在创建后粘贴）</label>
+      <textarea placeholder="支持 Markdown · AI 会基于此生成 analysis/01-understanding.md"></textarea>
+      <div class="count">0 / 5000</div>
+    </div>
+
+    <div class="field">
+      <label>默认 Skill 链</label>
+      <div class="skill-preview">
+        <span class="sk">analyze</span><span class="arr">→</span>
+        <span class="sk">design</span><span class="arr">→</span>
+        <span class="sk">plan</span><span class="arr">→</span>
+        <span class="sk">code</span><span class="arr">→</span>
+        <span class="sk">test</span><span class="arr">→</span>
+        <span class="sk">submit</span>
+        <span style="margin-left:auto;font-size:var(--text-xs);color:var(--text-3)">可在需求设置中调整</span>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="modal-foot">
+    <div class="left">⌘N 全局快捷键 · ESC 关闭</div>
+    <div class="right">
+      <button class="btn-ghost">取消</button>
+      <button class="btn-secondary">下一步 →</button>
+      <button class="btn">✓ 创建需求</button>
+    </div>
+  </div>
+</div>
+
+<div class="note">
+  <strong>设计说明：</strong>新建需求 = 创建工作的起点。MVP 简化为单页表单（不分多步），3 个必填：名称、关联仓库、PRD。提交后 → Agent 端 (1) 创建 <code style="font-family:'JetBrains Mono',monospace">~/.aidevspace/requirements/req-xxx/</code> 目录，(2) 写 <code style="font-family:'JetBrains Mono',monospace">meta.yaml</code>，(3) 对每个 repo 在需求下建 worktree，(4) 写入 <code style="font-family:'JetBrains Mono',monospace">requirement.md</code>，(5) 状态置 <code style="font-family:'JetBrains Mono',monospace">DRAFT</code>。空态对应需求列表 0 条记录时显示。
+</div>
+
+</body>
+</html>
