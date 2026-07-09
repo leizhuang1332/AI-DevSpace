@@ -1,0 +1,19 @@
+apps/web/src/app/(workspace)/requirements/[id]/history/page.tsx
+  s_598550e31acff3::t_30b0416c890e1f 26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0d994e902f602e823c52b840a75c3adf03c36e8b",
+  "prompts": {},
+  "sessions": {
+    "s_598550e31acff3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9def9a8d-cfab-4fc1-8235-9b383e99fefc",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
