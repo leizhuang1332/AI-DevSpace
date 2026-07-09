@@ -23,7 +23,7 @@ export default function RequirementHistoryPage({ params }: Props) {
 
       <div className="flex items-center justify-between h-10 px-6 border-b border-border bg-bg-elevated">
         <div className="flex items-center gap-3 text-sm text-text-3">
-          <span>{convs.length} 个会话 · {events.filter((e) => e.kind === 'commit').length + 32 - 32} 个 commit</span>
+          <span>{convs.length} 个会话 · {events.filter((e) => e.kind === 'commit').length} 个 commit</span>
           <span>·</span>
           <span>会话历史 + 文件变更 + Commit 流水</span>
         </div>
