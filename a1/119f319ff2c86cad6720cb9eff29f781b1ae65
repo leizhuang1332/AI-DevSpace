@@ -1,0 +1,32 @@
+apps/web/src/components/command-palette.tsx
+  s_598550e31acff3::t_084c8187a2ef28 1-187
+apps/web/src/styles/globals.css
+  s_598550e31acff3::t_d207e321dbb70e 6-35
+apps/web/src/components/new-requirement-modal.tsx
+  s_598550e31acff3::t_3d4e6f772ce212 1-53,55-92,97,102,107-150,152,162-232
+  s_598550e31acff3::t_c86e4e20813302 54,93-96,98-101,103-106,151,153-161
+apps/web/src/components/shortcuts-cheatsheet.tsx
+  s_598550e31acff3::t_86f9e577530a2e 1-165
+apps/web/src/components/ui-overlay-store.tsx
+  s_598550e31acff3::t_30b992f8346336 1-58
+apps/web/src/app/(workspace)/layout.tsx
+  s_598550e31acff3::t_f26dedc8e51cbd 4-7,11-12,14-20,22-25,27
+apps/web/src/components/keyboard-bridge.tsx
+  s_598550e31acff3::t_6b0415e419916c 2-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a1119f319ff2c86cad6720cb9eff29f781b1ae65",
+  "prompts": {},
+  "sessions": {
+    "s_598550e31acff3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9def9a8d-cfab-4fc1-8235-9b383e99fefc",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
