@@ -1,0 +1,19 @@
+.scratch/feature/sdk-integration/spike-notes.md
+  s_fed29e16399768::t_7fb3fdd60b8a0e 30,49,52-163
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.11",
+  "base_commit_sha": "e53de6e104098e8e722bdccc1a8d34fcdda6fffb",
+  "prompts": {},
+  "sessions": {
+    "s_fed29e16399768": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3ba3a56a-24e3-4b36-a8e6-5efd6f341336",
+        "model": "unknown"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
