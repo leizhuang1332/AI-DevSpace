@@ -1,0 +1,19 @@
+.scratch/ai-devspace-mvp/issues/02-workspace-init.md
+  s_f6955944c1e53f::t_66edbf6ed0d281 37-39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.11",
+  "base_commit_sha": "f247e7b4a0e4151dcfef4fb0ecc15d5593c2ac5a",
+  "prompts": {},
+  "sessions": {
+    "s_f6955944c1e53f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a6caf5dc-c8fb-4243-839f-869f0d34c5ea",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
