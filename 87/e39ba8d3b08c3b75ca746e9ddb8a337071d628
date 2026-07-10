@@ -1,0 +1,41 @@
+.scratch/ai-devspace-mvp/issues/08c-snapshot-undo.md
+  s_4ea869e2f812d3::t_b85bb07cea988a 1-114
+docs/adr/0008-skill-as-prompt-fragment.md
+  s_4ea869e2f812d3::t_b44fdfdaaf9e3e 1-121
+CONTEXT.md
+  s_4ea869e2f812d3::t_0b89f19ba3381f 133,135,137-141,143,145,147-151
+  s_4ea869e2f812d3::t_704f52a5314e7c 208
+  s_4ea869e2f812d3::t_5bf5762db28849 188-190
+  s_4ea869e2f812d3::t_6e32f0c229dff8 203-207
+  s_4ea869e2f812d3::t_7d91ecd50785f6 176,180
+  s_4ea869e2f812d3::t_b1c24f885d1275 102-124,126-127
+  s_4ea869e2f812d3::t_db26256265ebcc 209-214
+  s_4ea869e2f812d3::t_c9327ee7a7963b 10-35
+.scratch/ai-devspace-mvp/issues/08a-skill-loader-arming.md
+  s_4ea869e2f812d3::t_335df1c2d20684 1-93
+.scratch/ai-devspace-mvp/issues/08b-context-triggers.md
+  s_4ea869e2f812d3::t_64330979177559 1-115
+.scratch/ai-devspace-mvp/issues/08-builtin-skills.md
+  s_4ea869e2f812d3::t_01e974f32f2ab0 22
+  s_4ea869e2f812d3::t_ea1f0b102f4a89 2,5-14,17-21,23-32
+docs/adr/0009-ai-failure-defense.md
+  s_4ea869e2f812d3::t_dc84bfc3d097e3 1-168
+.scratch/ai-devspace-mvp/issues/08d-bad-feedback-loop.md
+  s_4ea869e2f812d3::t_6c91aca89350fa 1-121
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "87e39ba8d3b08c3b75ca746e9ddb8a337071d628",
+  "prompts": {},
+  "sessions": {
+    "s_4ea869e2f812d3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f35711c6-50bc-4fca-9e67-b0246c7b8893",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
