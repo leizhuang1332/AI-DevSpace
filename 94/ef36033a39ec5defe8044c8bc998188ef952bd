@@ -1,0 +1,20 @@
+CLAUDE.md
+  s_f6955944c1e53f::t_6e243c29fa5e37 27
+  s_f6955944c1e53f::t_196e551afb19d1 21-26,28-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.11",
+  "base_commit_sha": "94ef36033a39ec5defe8044c8bc998188ef952bd",
+  "prompts": {},
+  "sessions": {
+    "s_f6955944c1e53f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a6caf5dc-c8fb-4243-839f-869f0d34c5ea",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
