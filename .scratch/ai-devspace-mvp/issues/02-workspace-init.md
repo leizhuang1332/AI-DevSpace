@@ -34,5 +34,6 @@ Agent 端提供"创建/检测/读取" `~/.aidevspace/` 目录的能力，落地 
 - 2026-07-10 由 agent 实现完成。范围 = 3 API + WorkspaceService 全套 + agent boot init + web Settings 全 5 section 接 config.yaml + vitest + testing-library 测试基建。
 - 测试：packages/shared 23 + apps/agent 36 + apps/web 35 = **94/94 GREEN**；typecheck 3/3 包通过；agent eslint `--max-warnings 0` 干净。
 - 设计 spec 落 `docs/superpowers/specs/2026-07-10-workspace-init-design.md`。
-- **未提交**（按用户"永远不要 git commit"硬约束），提交由用户决定；PR 描述草稿见对话。
-- commit sha: _pending_（用户决定提交后填入）
+- code-review 双轴：Standards 15 + Spec 5 全部 Important 修干净，再跑仍 GREEN。
+- commit: `07ad54904952dcb5d960f5ab56603d901139285b` — feat(workspace): init workspace on agent boot + wire web settings to config.yaml (issue 02)
+- 摘要：Agent 端 WorkspaceService + 路由 + boot init；Web Settings 全 5 section 接 config.yaml；packages/shared 加 DEFAULT_CONFIG + Zod schema；测试基建 Vitest+RTL；code-review 双轴均无 Important。
