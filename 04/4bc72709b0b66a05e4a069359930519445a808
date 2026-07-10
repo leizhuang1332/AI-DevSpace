@@ -1,0 +1,43 @@
+docs/adr/0010-claude-code-sdk-integration.md
+  s_fed29e16399768::t_d2a75e333ac35a 1-340
+.scratch/feature/sdk-integration/PRD.md
+  s_fed29e16399768::t_eb1e6f4eff1f70 1-52
+apps/agent/spike/sdk-spike.ts
+  s_fed29e16399768::t_df4f3d3c4c98b8 1-247
+CONTEXT.md
+  s_fed29e16399768::t_b33f257cc9e10d 177
+  s_fed29e16399768::t_8e4cdfa40445f0 174-175
+.scratch/feature/sdk-integration/issues/01-p0-skeleton.md
+  s_fed29e16399768::t_1d84db37b3794c 1-44
+.scratch/feature/sdk-integration/spike-notes.md
+  s_fed29e16399768::t_6226b2e6900465 1-101
+docs/adr/0004-claude-code-sdk-as-ai-engine.md
+  s_fed29e16399768::t_fe3b870af01700 15,33,40,46
+  s_fed29e16399768::t_c5c7685c1eec21 3-5,21,23-26,28
+.scratch/feature/sdk-integration/issues/05-p4-errors.md
+  s_fed29e16399768::t_2295dd0838ed7f 1-63
+.scratch/feature/sdk-integration/issues/04-p3-persistence.md
+  s_fed29e16399768::t_12dfbfc82da723 1-49
+.scratch/feature/sdk-integration/issues/02-p1-write-queue.md
+  s_fed29e16399768::t_a83e2c013859b3 1-58
+.scratch/feature/sdk-integration/issues/06-p5-observability.md
+  s_fed29e16399768::t_88c89da9d2a66c 1-69
+.scratch/feature/sdk-integration/issues/03-p2-prompt-tools.md
+  s_fed29e16399768::t_cfcb1bcda195fa 1-73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.11",
+  "base_commit_sha": "044bc72709b0b66a05e4a069359930519445a808",
+  "prompts": {},
+  "sessions": {
+    "s_fed29e16399768": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3ba3a56a-24e3-4b36-a8e6-5efd6f341336",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
