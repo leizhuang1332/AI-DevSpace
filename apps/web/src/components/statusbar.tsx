@@ -1,4 +1,5 @@
 import type { Requirement, AIStatus } from '@/app/(workspace)/data/mock';
+import { STATUS_DOT } from './status-badge';
 
 interface Props {
   tabs: Requirement[]; // 当前工作空间的需求集
@@ -23,10 +24,7 @@ export function StatusBar({ tabs, currentId, aiStatus }: Props) {
         {tabs.map(t => (
           <div key={t.id} className={`flex items-center gap-2 h-7 px-3 text-sm rounded-md cursor-pointer whitespace-nowrap
             ${t.id === currentId ? 'bg-brand-50 text-brand-700 font-medium' : 'text-text-2 hover:bg-bg-subtle'}`}>
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background:
-              t.status === 'implementing' ? 'var(--brand)' :
-              t.status === 'clarifying' ? 'var(--warning)' :
-              t.status === 'done' ? 'var(--success)' : 'var(--info)' }} />
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: STATUS_DOT[t.status] }} />
             {t.title} · {t.status}
           </div>
         ))}

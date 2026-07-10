@@ -24,10 +24,7 @@ const inputCls =
 
 export default function SettingsPage() {
   return (
-    <div className="grid grid-cols-[56px_240px_1fr] min-h-[calc(100vh-72px)]">
-      {/* Sidebar spacer — provided by (workspace)/layout.tsx */}
-      <div />
-
+    <div className="grid grid-cols-[240px_1fr] min-h-[calc(100vh-72px)]">
       {/* Settings side nav */}
       <aside className="bg-bg-elevated border-r border-border p-4 overflow-auto">
         <h3 className="text-[11px] text-text-3 uppercase tracking-wider font-medium px-2 mb-2">

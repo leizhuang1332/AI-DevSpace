@@ -1,64 +1,21 @@
 import Link from 'next/link';
-import { repositories } from '@/app/(workspace)/data/mock';
+import { repositories, repoDetails, EMPTY_REPO_DETAIL, type WorktreeBadgeTone } from '@/app/(workspace)/data/mock';
 
 // 映射 HTML 原型中的标签 tone
-const TAG_TONE = {
-  succ: 'bg-[#dcfce7] text-[#166534]',
-  warm: 'bg-[#fef3c7] text-[#92400e]',
+const TAG_TONE: Record<WorktreeBadgeTone, string> = {
+  succ:  'bg-[#dcfce7] text-[#166534]',
+  warm:  'bg-[#fef3c7] text-[#92400e]',
   plain: 'bg-bg-subtle text-text-2',
-} as const;
-
-const REPO_TAGS: Record<string, { label: string; tone: keyof typeof TAG_TONE }[]> = {
-  'refund-service':  [
-    { label: '退款功能优化', tone: 'succ'  },
-    { label: '退款链路 v2',  tone: 'plain' },
-    { label: '退款幂等性修复', tone: 'warm' },
-  ],
-  'order-service':   [
-    { label: '退款功能优化', tone: 'succ'  },
-    { label: '订单导出（CSV）', tone: 'plain' },
-  ],
-  'member-service':  [
-    { label: '会员等级体系重构', tone: 'warm' },
-  ],
-  'pay-gateway':     [
-    { label: '支付链路灰度切流',   tone: 'plain' },
-    { label: '风险决策引擎接入', tone: 'warm' },
-  ],
-  'risk-service':    [
-    { label: '风险决策引擎接入', tone: 'plain' },
-  ],
-  'coupon-service':  [
-    { label: '优惠券叠加规则', tone: 'plain' },
-  ],
-  'cart-service':    [],
-  'seckill-service': [],
 };
 
-const REPO_STATS: Record<string, { worktrees: number; linkedReqs: number; fetchText: string; ahead: string }> = {
-  'refund-service':  { worktrees: 3, linkedReqs: 2, fetchText: '5 分钟前',  ahead: '12 commits ahead' },
-  'order-service':   { worktrees: 2, linkedReqs: 2, fetchText: '2 小时前',  ahead: 'synced'          },
-  'member-service':  { worktrees: 1, linkedReqs: 1, fetchText: '昨天',      ahead: '3 commits behind' },
-  'pay-gateway':     { worktrees: 2, linkedReqs: 2, fetchText: '3 小时前',  ahead: 'synced'          },
-  'risk-service':    { worktrees: 1, linkedReqs: 1, fetchText: '5 小时前',  ahead: 'synced'          },
-  'coupon-service':  { worktrees: 1, linkedReqs: 1, fetchText: '2 天前',    ahead: '1 commit behind' },
-  'cart-service':    { worktrees: 1, linkedReqs: 1, fetchText: '昨天',      ahead: 'synced'          },
-  'seckill-service': { worktrees: 1, linkedReqs: 1, fetchText: '1 周前',    ahead: 'synced'          },
-};
-
-const REPO_DATES: Record<string, string> = {
-  'refund-service':  '2026-07-08',
-  'order-service':   '2026-07-08',
-  'member-service':  '2026-07-07',
-  'pay-gateway':     '2026-07-09',
-  'risk-service':    '2026-07-08',
-  'coupon-service':  '2026-07-07',
-  'cart-service':    '2026-07-08',
-  'seckill-service': '2026-07-05',
+const TAG_DOT: Record<WorktreeBadgeTone, string> = {
+  succ:  'bg-success',
+  warm:  'bg-warning',
+  plain: 'bg-brand',
 };
 
 export default function ReposPage() {
-  const totalWorktrees = Object.values(REPO_STATS).reduce((s, r) => s + r.worktrees, 0);
+  const totalWorktrees = Object.values(repoDetails).reduce((s, r) => s + r.repoStats.worktrees, 0);
 
   return (
     <main className="p-6 lg:p-8 overflow-auto">
@@ -86,8 +43,9 @@ export default function ReposPage() {
 
       <div className="grid grid-cols-2 gap-4">
         {repositories.map((r) => {
-          const stats = REPO_STATS[r.name] ?? { worktrees: 1, linkedReqs: 1, fetchText: '—', ahead: 'synced' };
-          const tags = REPO_TAGS[r.name] ?? [];
+          const detail = repoDetails[r.name] ?? EMPTY_REPO_DETAIL;
+          const stats = detail.repoStats;
+          const tags = detail.tags;
           return (
             <Link
               key={r.name}
@@ -130,11 +88,7 @@ export default function ReposPage() {
                       key={t.label}
                       className={`h-5 px-2 rounded-sm text-xs flex items-center gap-1 ${TAG_TONE[t.tone]}`}
                     >
-                      <span
-                        className={`w-1.5 h-1.5 rounded-full ${
-                          t.tone === 'succ' ? 'bg-success' : t.tone === 'warm' ? 'bg-warning' : 'bg-brand'
-                        }`}
-                      />
+                      <span className={`w-1.5 h-1.5 rounded-full ${TAG_DOT[t.tone]}`} />
                       {t.label}
                     </span>
                   ))}
@@ -145,7 +99,7 @@ export default function ReposPage() {
                 <span>
                   <span className="font-mono">{r.branch.split('/')[0]}</span> · {stats.ahead}
                 </span>
-                <span>{REPO_DATES[r.name] ?? '—'}</span>
+                <span>{detail.date}</span>
               </div>
             </Link>
           );

@@ -408,3 +408,183 @@ export function reposFor(reqId: string): RepoCard[] {
   if (reqId === 'req-001') return REFUND_REPOS;
   return [];
 }
+
+// =====================================================================
+// 仓库详情 (page 09 repos/[name]) — 下沉以避免与 repositories[] 漂移
+// =====================================================================
+
+export type WorktreeBadgeTone = 'succ' | 'warm' | 'plain';
+
+export interface RepoWorktree {
+  branch: string;
+  meta: string;
+  path: string;
+  reqLink?: string;
+  badgeTone: WorktreeBadgeTone;
+  badgeText: string;
+}
+
+export interface RepoCommit {
+  sha: string;
+  msg: string;
+  author: string;
+}
+
+export interface RepoDetailStats {
+  worktrees: number;
+  linkedReqs: number;
+  disk?: string;
+  fetchText: string;
+}
+
+export interface RepoRepoStats {
+  worktrees: number;
+  linkedReqs: number;
+  fetchText: string;
+  ahead: string;
+}
+
+export interface RepoTag {
+  label: string;
+  tone: WorktreeBadgeTone;
+}
+
+export interface RepoDetail {
+  worktrees: RepoWorktree[];
+  commits: RepoCommit[];
+  detailStats: RepoDetailStats;
+  repoStats: RepoRepoStats;
+  tags: RepoTag[];
+  date: string;
+}
+
+export const EMPTY_REPO_DETAIL: RepoDetail = {
+  worktrees: [],
+  commits: [],
+  detailStats: { worktrees: 1, linkedReqs: 0, fetchText: '—' },
+  repoStats:   { worktrees: 1, linkedReqs: 1, fetchText: '—', ahead: 'synced' },
+  tags: [],
+  date: '—',
+};
+
+export const repoDetails: Record<string, RepoDetail> = {
+  'refund-service': {
+    worktrees: [
+      { branch: 'main',                                 meta: '主分支 · 最新 commit 3 天前',                       path: '~/.aidevspace/repos/refund-service',                            badgeTone: 'succ',  badgeText: '干净' },
+      { branch: 'req-2024-007-refund-optimize',         meta: '10 分钟前 · a8f3e21',                                path: '~/.aidevspace/requirements/req-2024-007/refund-service',        reqLink: '退款功能优化', badgeTone: 'warm',  badgeText: '12 文件 · +847' },
+      { branch: 'req-2024-002-refund-v2',               meta: '2 天前 · e1b2c4d',                                   path: '~/.aidevspace/requirements/req-2024-002/refund-service',        reqLink: '退款链路 v2',   badgeTone: 'warm',  badgeText: '3 文件 · +124' },
+    ],
+    commits: [
+      { sha: 'a8f3e21', msg: 'feat(refund): 退款订单表索引优化',   author: '李雷 · 10 分钟前' },
+      { sha: '9d2e0ab', msg: 'feat(order): 退款时回写订单状态',   author: '李雷 · 25 分钟前' },
+      { sha: '7c91b44', msg: 'feat(refund): 添加退款状态机',      author: '李雷 · 1 小时前' },
+      { sha: '3e0d9a1', msg: 'chore: 升级 spring-boot 3.2',      author: '李雷 · 昨天'     },
+      { sha: '5b71f3c', msg: 'feat: 接入 Prometheus 监控',       author: '李雷 · 2 天前'   },
+    ],
+    detailStats: { worktrees: 3, linkedReqs: 2, disk: '128 MB', fetchText: '5 分钟前' },
+    repoStats:   { worktrees: 3, linkedReqs: 2, fetchText: '5 分钟前',  ahead: '12 commits ahead' },
+    tags: [
+      { label: '退款功能优化',    tone: 'succ'  },
+      { label: '退款链路 v2',     tone: 'plain' },
+      { label: '退款幂等性修复', tone: 'warm' },
+    ],
+    date: '2026-07-08',
+  },
+  'order-service': {
+    worktrees: [
+      { branch: 'main',                                 meta: '主分支 · synced',                                     path: '~/.aidevspace/repos/order-service',                              badgeTone: 'succ',  badgeText: '干净' },
+      { branch: 'req-2024-007-refund-optimize',         meta: '25 分钟前 · 9d2e0ab',                                 path: '~/.aidevspace/requirements/req-2024-007/order-service',         reqLink: '退款功能优化', badgeTone: 'warm',  badgeText: '4 文件 · +128' },
+    ],
+    commits: [
+      { sha: '9d2e0ab', msg: 'feat(order): 退款时回写订单状态',   author: '李雷 · 25 分钟前' },
+      { sha: '7c91b44', msg: 'feat(order): 订单导出 CSV',          author: '李雷 · 2 天前'   },
+    ],
+    detailStats: { worktrees: 2, linkedReqs: 2, disk: '92 MB', fetchText: '2 小时前' },
+    repoStats:   { worktrees: 2, linkedReqs: 2, fetchText: '2 小时前',  ahead: 'synced'          },
+    tags: [
+      { label: '退款功能优化',   tone: 'succ'  },
+      { label: '订单导出（CSV）', tone: 'plain' },
+    ],
+    date: '2026-07-08',
+  },
+  'member-service': {
+    worktrees: [
+      { branch: 'main',                                 meta: '主分支 · synced',                                     path: '~/.aidevspace/repos/member-service',                             badgeTone: 'succ',  badgeText: '干净' },
+      { branch: 'feature/member-tier',                  meta: '3 天前 · b1c7e22',                                    path: '~/.aidevspace/requirements/req-002-tier/member-service',        reqLink: '会员等级体系重构', badgeTone: 'warm',  badgeText: '3 文件 · +56' },
+    ],
+    commits: [
+      { sha: 'b1c7e22', msg: 'feat(member): 等级体系重构',          author: '李雷 · 3 天前'   },
+      { sha: '4b1cd09', msg: 'fix: 成长值并发更新',                author: '李雷 · 1 周前'   },
+    ],
+    detailStats: { worktrees: 2, linkedReqs: 1, disk: '64 MB', fetchText: '昨天' },
+    repoStats:   { worktrees: 1, linkedReqs: 1, fetchText: '昨天',     ahead: '3 commits behind' },
+    tags: [{ label: '会员等级体系重构', tone: 'warm' }],
+    date: '2026-07-07',
+  },
+  'pay-gateway': {
+    worktrees: [
+      { branch: 'main',                                 meta: '主分支 · synced',                                     path: '~/.aidevspace/repos/pay-gateway',                                badgeTone: 'succ',  badgeText: '干净' },
+      { branch: 'feature/gray-payment',                 meta: '1 小时前 · c4d9f30',                                  path: '~/.aidevspace/requirements/req-003-gray/pay-gateway',           reqLink: '支付链路灰度切流', badgeTone: 'warm',  badgeText: '7 文件 · +212' },
+    ],
+    commits: [
+      { sha: 'c4d9f30', msg: 'feat(pay): 灰度切流配置',             author: '李雷 · 1 小时前' },
+      { sha: '8a7e6d5', msg: 'feat(pay): 风险引擎接入',            author: '李雷 · 2 天前'   },
+    ],
+    detailStats: { worktrees: 2, linkedReqs: 2, disk: '156 MB', fetchText: '3 小时前' },
+    repoStats:   { worktrees: 2, linkedReqs: 2, fetchText: '3 小时前',  ahead: 'synced'          },
+    tags: [
+      { label: '支付链路灰度切流', tone: 'plain' },
+      { label: '风险决策引擎接入', tone: 'warm'  },
+    ],
+    date: '2026-07-09',
+  },
+  'risk-service': {
+    worktrees: [
+      { branch: 'main',                                 meta: '主分支 · synced',                                     path: '~/.aidevspace/repos/risk-service',                               badgeTone: 'succ',  badgeText: '干净' },
+    ],
+    commits: [
+      { sha: 'e5a1b82', msg: 'feat(risk): 决策引擎 v2',             author: '李雷 · 5 小时前' },
+    ],
+    detailStats: { worktrees: 1, linkedReqs: 1, disk: '48 MB', fetchText: '5 小时前' },
+    repoStats:   { worktrees: 1, linkedReqs: 1, fetchText: '5 小时前',  ahead: 'synced'          },
+    tags: [{ label: '风险决策引擎接入', tone: 'plain' }],
+    date: '2026-07-08',
+  },
+  'coupon-service': {
+    worktrees: [
+      { branch: 'main',                                 meta: '主分支 · 1 commit behind',                            path: '~/.aidevspace/repos/coupon-service',                             badgeTone: 'succ',  badgeText: '干净' },
+      { branch: 'feature/coupon-stack',                 meta: '5 天前 · f6b2c93',                                    path: '~/.aidevspace/requirements/req-005-coupon/coupon-service',      reqLink: '优惠券叠加规则', badgeTone: 'warm',  badgeText: '5 文件 · +189' },
+    ],
+    commits: [
+      { sha: 'f6b2c93', msg: 'feat(coupon): 叠加规则配置化',       author: '李雷 · 5 天前'   },
+    ],
+    detailStats: { worktrees: 2, linkedReqs: 1, disk: '72 MB', fetchText: '2 天前' },
+    repoStats:   { worktrees: 1, linkedReqs: 1, fetchText: '2 天前',    ahead: '1 commit behind' },
+    tags: [{ label: '优惠券叠加规则', tone: 'plain' }],
+    date: '2026-07-07',
+  },
+  'cart-service': {
+    worktrees: [
+      { branch: 'main',                                 meta: '主分支 · synced',                                     path: '~/.aidevspace/repos/cart-service',                               badgeTone: 'succ',  badgeText: '干净' },
+    ],
+    commits: [
+      { sha: '7d8e4a1', msg: 'feat(cart): 持久化 Redis',           author: '李雷 · 2 周前'   },
+    ],
+    detailStats: { worktrees: 1, linkedReqs: 1, disk: '38 MB', fetchText: '昨天' },
+    repoStats:   { worktrees: 1, linkedReqs: 1, fetchText: '昨天',      ahead: 'synced'          },
+    tags: [],
+    date: '2026-07-08',
+  },
+  'seckill-service': {
+    worktrees: [
+      { branch: 'main',                                 meta: '主分支 · synced',                                     path: '~/.aidevspace/repos/seckill-service',                            badgeTone: 'succ',  badgeText: '干净' },
+    ],
+    commits: [
+      { sha: '8e9f5b2', msg: 'chore: 压测报告归档',                author: '李雷 · 1 周前'   },
+    ],
+    detailStats: { worktrees: 1, linkedReqs: 1, disk: '54 MB', fetchText: '1 周前' },
+    repoStats:   { worktrees: 1, linkedReqs: 1, fetchText: '1 周前',    ahead: 'synced'          },
+    tags: [],
+    date: '2026-07-05',
+  },
+};

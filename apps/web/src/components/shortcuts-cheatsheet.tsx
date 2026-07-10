@@ -81,7 +81,7 @@ export function ShortcutsCheatsheet() {
   })).filter((g) => g.rows.length > 0);
 
   return (
-    <div className="fixed inset-0 z-[100] bg-slate-900/85 backdrop-blur-md overflow-auto">
+    <div className="fixed inset-0 z-[100] bg-bg-elevated/95 backdrop-blur-md overflow-auto">
       <div className="relative max-w-[920px] mx-auto px-8 py-8 text-foreground">
         {/* Head */}
         <div className="flex items-center justify-between mb-6">

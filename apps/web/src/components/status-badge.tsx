@@ -14,6 +14,21 @@ const VARIANTS: Record<RequirementStatus, { dot: string; bg: string; label: stri
   clarifying:   { dot: 'bg-brand',     bg: 'bg-bg-subtle',          label: '待澄清' },
 };
 
+// Shared dot color map for cross-component reuse (e.g. StatusBar).
+// Values match the resolved CSS color used by StatusBadge's `dot` class
+// so any consumer (status dot, inline style, etc.) renders the same color.
+export const STATUS_DOT: Record<RequirementStatus, string> = {
+  draft:        'var(--text-3)',
+  analyzing:    '#a5b4fc',
+  designing:    '#a5b4fc',
+  planning:     '#a5b4fc',
+  implementing: 'var(--brand)',
+  submitting:   'var(--warning)',
+  done:         'var(--success)',
+  archived:     '#64748b',
+  clarifying:   'var(--brand)',
+};
+
 export function StatusBadge({ status }: { status: RequirementStatus }) {
   const v = VARIANTS[status];
   return (
