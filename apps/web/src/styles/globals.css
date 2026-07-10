@@ -3,3 +3,33 @@
 @tailwind utilities;
 
 @import './tokens.css';
+
+@layer components {
+  /* Light-surface kbd (used in CommandPalette on bg-elevated) */
+  .kbd {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+    background: hsl(var(--bg-subtle) / 0.9);
+    border: 1px solid hsl(var(--border));
+    padding: 1px 6px;
+    border-radius: 3px;
+    color: hsl(var(--text-2));
+    line-height: 1.4;
+  }
+  /* Dark-surface kbd (used in ShortcutsCheatsheet on bg-slate-900/85) */
+  .kbd-dark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 22px;
+    padding: 0 6px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.9);
+  }
+}
