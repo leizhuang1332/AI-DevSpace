@@ -1,0 +1,40 @@
+apps/web/src/app/(workspace)/repos/[name]/page.tsx
+  s_598550e31acff3::t_8a7aedcf47aadb 2,4,10,21-24,48,155
+apps/web/src/app/(workspace)/settings/page.tsx
+  s_598550e31acff3::t_4547687b0a0181 27
+apps/web/src/components/shortcuts-cheatsheet.tsx
+  s_598550e31acff3::t_0e4c504a5b5bd9 84
+apps/web/src/app/(workspace)/repos/page.tsx
+  s_598550e31acff3::t_a599daef21df5b 2,5-7,11-14,18,46-48,91,102,123
+apps/web/src/components/statusbar.tsx
+  s_598550e31acff3::t_f9076260edc35a 2
+  s_8d284663c18828::t_547b6126c69ff6 27
+apps/web/src/components/status-badge.tsx
+  s_598550e31acff3::t_16a782c8215573 17-31
+apps/web/src/app/(workspace)/data/mock.ts
+  s_598550e31acff3::t_31d24caba1faf1 411-590
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c4840081210e06fc09eb407e9e4c777f8cba6eb1",
+  "prompts": {},
+  "sessions": {
+    "s_598550e31acff3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9def9a8d-cfab-4fc1-8235-9b383e99fefc",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    },
+    "s_8d284663c18828": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a0b1349c17b856b09",
+        "model": "unknown"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
