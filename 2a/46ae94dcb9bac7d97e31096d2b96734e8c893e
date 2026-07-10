@@ -1,0 +1,19 @@
+.scratch/ai-devspace-mvp/issues/01-monorepo-init.pr-draft.md
+  s_1450369019e13f::t_eb8fc243d767e0 1-95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.11",
+  "base_commit_sha": "2a46ae94dcb9bac7d97e31096d2b96734e8c893e",
+  "prompts": {},
+  "sessions": {
+    "s_1450369019e13f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7369158b-e0b6-4071-aa22-d9a8cf4e915b",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
