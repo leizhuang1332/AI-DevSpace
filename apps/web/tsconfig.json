@@ -23,6 +23,8 @@
   },
   "include": [
     "next-env.d.ts",
+    "vitest.d.ts",
+    "vitest.setup.ts",
     "src/**/*.ts",
     "src/**/*.tsx",
     ".next/types/**/*.ts"

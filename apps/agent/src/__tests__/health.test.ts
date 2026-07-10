@@ -14,10 +14,14 @@ describe('GET /api/health', () => {
     await app.close()
   })
 
-  it('returns 200 with { ok: true, name: "agent" }', async () => {
+  it('returns 200 with { ok: true, name: "agent", workspaceRoot: string }', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/health' })
 
     expect(res.statusCode).toBe(200)
-    expect(res.json()).toEqual({ ok: true, name: 'agent' })
+    const body = res.json()
+    expect(body.ok).toBe(true)
+    expect(body.name).toBe('agent')
+    expect(typeof body.workspaceRoot).toBe('string')
+    expect(body.workspaceRoot.length).toBeGreaterThan(0)
   })
 })

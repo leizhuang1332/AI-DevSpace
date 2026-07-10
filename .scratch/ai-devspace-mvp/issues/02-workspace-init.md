@@ -1,5 +1,5 @@
 ---
-Status: ready-for-agent
+Status: resolved
 Type: task
 Stage: 1
 ---
@@ -28,3 +28,11 @@ Agent 端提供"创建/检测/读取" `~/.aidevspace/` 目录的能力，落地 
 ## 依赖
 
 - [01-monorepo-init.md](01-monorepo-init.md)
+
+## Comments
+
+- 2026-07-10 由 agent 实现完成。范围 = 3 API + WorkspaceService 全套 + agent boot init + web Settings 全 5 section 接 config.yaml + vitest + testing-library 测试基建。
+- 测试：packages/shared 23 + apps/agent 36 + apps/web 35 = **94/94 GREEN**；typecheck 3/3 包通过；agent eslint `--max-warnings 0` 干净。
+- 设计 spec 落 `docs/superpowers/specs/2026-07-10-workspace-init-design.md`。
+- **未提交**（按用户"永远不要 git commit"硬约束），提交由用户决定；PR 描述草稿见对话。
+- commit sha: _pending_（用户决定提交后填入）
