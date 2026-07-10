@@ -1,0 +1,131 @@
+apps/web/src/app/(workspace)/layout.tsx
+  s_f6955944c1e53f::t_6407d27c6fb0b8 2-3,13-23,27-34,36-40
+apps/web/src/lib/config-hooks.ts
+  s_f6955944c1e53f::t_db62d730f05fed 5,12,26
+  s_f6955944c1e53f::t_cc70fba0b12b2c 1-4,6-11,13-25,27-36
+apps/web/src/app/(workspace)/settings/sections/workspace.tsx
+  s_f6955944c1e53f::t_e87350e8850dfe 1-71
+apps/web/src/__tests__/settings/agent.test.tsx
+  s_f6955944c1e53f::t_b21b8f9ba3be17 1-69
+apps/agent/src/routes/workspace.ts
+  s_f6955944c1e53f::t_5d9447e6ea3fca 30,32-34,37,39-41
+  s_f6955944c1e53f::t_39e6cb4267c63e 1-29,31,35-36,38,42-43
+apps/web/src/__tests__/lib/agent-client.test.ts
+  s_f6955944c1e53f::t_fe98ea3100045f 1-15,17-21,30,34-36,38-44,51-52,54-98
+  s_f6955944c1e53f::t_209a854d82a4ee 16,22-29,31-33
+  s_f6955944c1e53f::t_8ff98f36209ed8 37,45-50,53
+apps/agent/src/services/WorkspaceService.ts
+  s_f6955944c1e53f::t_6a3de5a83e01c9 50-51
+  s_f6955944c1e53f::t_a939f11333bf3f 2-18,20-46,55-89,91-128,130-150,152-154,163-224
+  s_f6955944c1e53f::t_f202e7f76ce252 90,129,151,155-162
+  s_f6955944c1e53f::t_ecb302f0112b08 1,19,47-49,52-54,225
+apps/web/src/app/(workspace)/settings/sections/danger.tsx
+  s_f6955944c1e53f::t_3c45148659571b 23-29
+  s_f6955944c1e53f::t_23aa7b2e1096b9 1-22,30-110
+docs/superpowers/specs/2026-07-10-workspace-init-design.md
+  s_f6955944c1e53f::t_48d3818e23cabd 176
+  s_f6955944c1e53f::t_f171a2d6582204 1-106,108-175,177-193,207-246,248-497,499-547
+  s_f6955944c1e53f::t_1da75b0a8ab01f 107
+  s_f6955944c1e53f::t_66b82e206fa957 498
+  s_f6955944c1e53f::t_f38a60f14cbc4f 247
+  s_f6955944c1e53f::t_c12306efef2a42 194-206
+apps/agent/src/server.ts
+  s_f6955944c1e53f::t_6f501a364c3e24 9
+  s_f6955944c1e53f::t_56906c24da2889 23-29
+  s_f6955944c1e53f::t_0f7a8fabd2d44d 4-5,21-22,30-32,34
+apps/web/package.json
+  s_f6955944c1e53f::t_303bca61b01bd3 14,24-26,30,32,36-37
+  s_f6955944c1e53f::t_4b7a009e3c3225 9-10
+packages/shared/src/workspace.ts
+  s_f6955944c1e53f::t_8802a1201c26c5 1-28
+apps/agent/src/__tests__/workspace-init.test.ts
+  s_f6955944c1e53f::t_e1d4cd6a840e8d 1-124
+apps/web/vitest.setup.ts
+  s_f6955944c1e53f::t_0b0e07f0b29fac 1
+apps/web/src/__tests__/settings/workspace-section.test.tsx
+  s_f6955944c1e53f::t_79115d2529bfac 1-41,46-55
+  s_f6955944c1e53f::t_a32565ae7f4d0e 42-45
+apps/web/src/lib/agent-client.ts
+  s_f6955944c1e53f::t_41ef43c65fec7e 16-24
+  s_f6955944c1e53f::t_f6f07a34cc5546 1-3
+  s_f6955944c1e53f::t_ac2d90a780de7a 4-15,25-30
+apps/web/src/components/radio-pill-group.tsx
+  s_f6955944c1e53f::t_9b4566b585bbee 1-50
+.scratch/ai-devspace-mvp/issues/02-workspace-init.md
+  s_f6955944c1e53f::t_8eec386f48a956 2
+  s_f6955944c1e53f::t_28e1ab53580135 31-38
+apps/web/src/app/(workspace)/settings/settings-shell.tsx
+  s_f6955944c1e53f::t_0a1142343c3209 1-138
+packages/shared/package.json
+  s_f6955944c1e53f::t_82b37c8a2a0cae 5,12-16,19-20,22
+apps/web/src/app/(workspace)/settings/sections/appearance.tsx
+  s_f6955944c1e53f::t_fd7624046ac493 1-3,5-17,20,22-30,38-49
+  s_f6955944c1e53f::t_117a4123c9c232 4,18-19,21,31-37
+apps/web/src/app/(workspace)/settings/page.tsx
+  s_f6955944c1e53f::t_03af2b2c994ddf 1,3
+  s_f6955944c1e53f::t_e5766a49029275 6
+apps/agent/src/__tests__/workspace-route.test.ts
+  s_f6955944c1e53f::t_ef7a62b01e6204 1-83,86-90,93-94,96-99,102-113
+  s_f6955944c1e53f::t_79ea8c9716a66e 84-85,91-92,95,100-101
+packages/shared/src/__tests__/workspace-schema.test.ts
+  s_f6955944c1e53f::t_5510e976b8d2e4 1-104
+apps/web/src/__tests__/settings/danger.test.tsx
+  s_f6955944c1e53f::t_41f154d9c8d5ae 1-35,40-52
+  s_f6955944c1e53f::t_8452f77ebc2222 36-39
+apps/agent/src/__tests__/workspace-service.test.ts
+  s_f6955944c1e53f::t_83e74b9bfd5e06 1-39
+packages/shared/src/config-defaults.ts
+  s_f6955944c1e53f::t_88fd18227e7159 1-19
+apps/web/src/__tests__/settings/ai-experience.test.tsx
+  s_f6955944c1e53f::t_452150252b4dc8 1-48
+apps/web/vitest.config.ts
+  s_f6955944c1e53f::t_0b92081c0e6ef0 1-15
+apps/agent/package.json
+  s_f6955944c1e53f::t_0eb9ec5eb45f0e 17-18
+  s_f6955944c1e53f::t_be09b6ebc6d61f 15
+packages/shared/src/__tests__/config-defaults.test.ts
+  s_f6955944c1e53f::t_cfa4ff1ead28d2 1-45
+apps/web/src/app/(workspace)/settings/sections/agent.tsx
+  s_f6955944c1e53f::t_cb07335b7ca03c 1-97
+apps/web/src/__tests__/settings/shell.test.tsx
+  s_f6955944c1e53f::t_7e161abc9748a8 68-70
+  s_f6955944c1e53f::t_7d7944924a1ce8 1-67,71-102
+apps/agent/src/__tests__/health.test.ts
+  s_f6955944c1e53f::t_523f4d6f84df13 17,21-25
+packages/shared/src/index.ts
+  s_f6955944c1e53f::t_9a3f3437d7b5f8 1-2
+apps/web/src/__tests__/lib/config-hooks.test.tsx
+  s_f6955944c1e53f::t_5757bbd2da2843 6-14,18-19,48,53,58,62,74-77,82,85,88-97,101,110-112,116
+  s_f6955944c1e53f::t_d2e1fa1d830cc3 1-5,15-17,20-47,49-52,54-57,59-61,63-73,78-81,83-84,86-87,98-100,102-109,113-115,117-118
+apps/web/src/app/(workspace)/settings/sections/ai-experience.tsx
+  s_f6955944c1e53f::t_6993f377aa945d 1-3,5-18,21,23-37,45-75
+  s_f6955944c1e53f::t_c23452d8889412 4,19-20,22,38-44
+apps/web/tsconfig.json
+  s_f6955944c1e53f::t_d8221ea6cad524 26-27
+apps/agent/src/__tests__/workspace-update.test.ts
+  s_f6955944c1e53f::t_a5c001a14bc97e 69,72,75,77,80-81,86,91-92,97-99,103
+  s_f6955944c1e53f::t_597e12c679333b 1-41,43-68,70-71,73-74,76,78-79,82-85,87-90,93-96,100-102,104-121
+  s_f6955944c1e53f::t_096491cdcbf1a3 42
+apps/web/src/__tests__/settings/appearance.test.tsx
+  s_f6955944c1e53f::t_7d689ab0e2b632 1-33
+apps/web/vitest.d.ts
+  s_f6955944c1e53f::t_5c871feb83262f 1-2
+pnpm-lock.yaml
+  s_f6955944c1e53f::t_d7509b62285a06 32-34,41-43,59,66-68,77,91-99,109-111,115-117,123,126,130-132,135-138,143-145,149-151,156-273,650-652,739-741,886-922,953-967,1047-1052,1095-1098,1113-1116,1121-1124,1138-1144,1149-1151,1206-1209,1254-1257,1265-1267,1276-1278,1284-1287,1291-1294,1304-1306,1314-1317,1328-1337,1341-1348,1356-1363,1504-1507,1519-1530,1547-1550,1558-1565,1570-1585,1602-1605,1630-1632,1647-1660,1676-1680,1712-1721,1725-1728,1737-1748,1802-1804,1833-1835,1943-1946,1968-1974,1993-1996,2026-2031,2043-2049,2056-2059,2100-2103,2134-2136,2183-2189,2198-2205,2319-2339,2354-2380,2385-2387,2390-2391,2394-2535,2778-2782,2835-2836,2919-2959,2978-3000,3111-3122,3171-3172,3191-3192,3197-3198,3210-3215,3218-3219,3271-3275,3323-3326,3331-3332,3341-3342,3345-3349,3352-3356,3361-3362,3367-3368,3375-3384,3387-3390,3395-3405,3628-3635,3643-3662,3675-3676,3681-3686,3691-3712,3724-3725,3744-3745,3756-3785,3798-3799,3831-3838,3843-3844,3852-3859,3885,3895,3914-3915,3943-3946,3999,4006,4036-4041,4058-4061,4078-4082,4131-4134,4145-4150,4157-4158,4185-4188,4191,4195-4196,4214-4215,4218,4220,4222,4241,4277-4282,4289-4296,4378,4402,4414-4430,4442-4451,4453-4454
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.11",
+  "base_commit_sha": "07ad54904952dcb5d960f5ab56603d901139285b",
+  "prompts": {},
+  "sessions": {
+    "s_f6955944c1e53f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a6caf5dc-c8fb-4243-839f-869f0d34c5ea",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
