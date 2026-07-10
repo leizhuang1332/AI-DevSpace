@@ -21,7 +21,7 @@
  *   - 验证 log：记录每次 SDKMessage 的 type / 关键字段
  */
 
-import { query, type SDKMessage, type Options } from "@anthropic-ai/claude-code"
+import { query, type SDKMessage, type Options } from "@anthropic-ai/claude-agent-sdk"
 import Database from "better-sqlite3"
 import { homedir } from "os"
 import { join } from "path"
