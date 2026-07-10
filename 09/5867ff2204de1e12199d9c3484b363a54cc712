@@ -1,0 +1,19 @@
+apps/agent/spike/sdk-spike.ts
+  s_fed29e16399768::t_69d41d4511038d 24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.11",
+  "base_commit_sha": "095867ff2204de1e12199d9c3484b363a54cc712",
+  "prompts": {},
+  "sessions": {
+    "s_fed29e16399768": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3ba3a56a-24e3-4b36-a8e6-5efd6f341336",
+        "model": "unknown"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
