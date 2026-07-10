@@ -27,7 +27,7 @@
 
 ```bash
 cd d:/TraeProject/AI-DevSpace/apps/agent
-pnpm add @anthropic-ai/claude-code better-sqlite3
+pnpm add @anthropic-ai/claude-agent-sdk better-sqlite3
 pnpm add -D @types/better-sqlite3 tsx
 ```
 
@@ -46,10 +46,121 @@ pnpm tsx spike/sdk-spike.ts
 
 ## 跑出来的结果
 
-> ⏳ **TODO**：跑完 spike 后粘贴输出
+> ⏳ **完成**：跑完 spike 后粘贴输出
 
 ```
-（粘贴处）
+=== Claude Code SDK Spike ===
+
+[cc-switch] reading C:\Users\Lorcan\.cc-switch\cc-switch.db
+[cc-switch] current provider: MiniMax
+[cc-switch] baseUrl: https://api.minimaxi.com/anthropic
+[cc-switch] models:
+  main       → MiniMax-M3
+  haiku      → MiniMax-M3
+  sonnet     → MiniMax-M3[1M]
+  opus       → MiniMax-M3[1M]
+  fable      → MiniMax-M3[1M]
+  reasoning  → MiniMax-M3
+
+========== Spike A: model 参数接受 role 名 vs model id ==========
+
+[A1] query({ model: 'sonnet' })
+  [A1 event] type=system
+  [A1 event] type=system
+  [A1 event] type=system
+  [A1 event] type=system
+  [A1 event] type=system
+  [A1 event] type=system
+  [A1 event] type=system
+  [A1 event] type=system
+  [A1 event] type=system
+  [A1 event] type=system
+  [A1 event] type=system
+  [A1 event] type=system
+  [A1 event] type=system
+  [A1 event] type=system
+  [A1 event] type=system
+  [A1 event] type=system
+  [A1 event] type=system
+  [A1 event] type=system
+  [A1 event] type=system
+  [A1 event] type=system
+  [A1 event] type=system
+  [A1 event] type=system
+  [A1 event] type=system
+  [A1 event] type=assistant
+  [A1 event] type=assistant text="我是 MiniMax 公司开发的 MiniMax-M3 模型。"
+  [A1 event] type=result
+  [A1] ✅ 传 role 名可工作
+
+[A2] query({ model: 'MiniMax-M3[1M]' })
+  [A2 event] type=system
+  [A2 event] type=system
+  [A2 event] type=system
+  [A2 event] type=system
+  [A2 event] type=system
+  [A2 event] type=system
+  [A2 event] type=system
+  [A2 event] type=system
+  [A2 event] type=system
+  [A2 event] type=system
+  [A2 event] type=system
+  [A2 event] type=system
+  [A2 event] type=system
+  [A2 event] type=system
+  [A2 event] type=system
+  [A2 event] type=system
+  [A2 event] type=system
+  [A2 event] type=system
+  [A2 event] type=assistant
+  [A2 event] type=assistant text="我是 MiniMax-M3,由 MiniMax 开发的模型。"
+  [A2 event] type=result
+  [A2] ✅ 传 model id 字符串可工作（id=MiniMax-M3[1M]）
+
+========== Spike B: sessionId resume 续上下文 ==========
+
+[B1] 第一次 query（不传 resume）
+  [B1 event] type=system session_id=58ff400b…
+  [B1 event] type=system session_id=58ff400b…
+  [B1 event] type=system session_id=58ff400b…
+  [B1 event] type=system session_id=58ff400b…
+  [B1 event] type=system session_id=58ff400b…
+  [B1 event] type=system session_id=58ff400b…
+  [B1 event] type=system session_id=58ff400b…
+  [B1 event] type=system session_id=58ff400b…
+  [B1 event] type=system session_id=58ff400b…
+  [B1 event] type=system session_id=58ff400b…
+  [B1 event] type=system session_id=58ff400b…
+  [B1 event] type=system session_id=58ff400b…
+  [B1 event] type=system session_id=58ff400b…
+  [B1 event] type=system session_id=58ff400b…
+  [B1 event] type=system session_id=58ff400b…
+  [B1 event] type=system session_id=58ff400b…
+  [B1 event] type=system session_id=58ff400b…
+  [B1 event] type=system session_id=58ff400b…
+  [B1 event] type=system session_id=58ff400b…
+  [B1 event] type=system session_id=58ff400b…
+  [B1 event] type=assistant session_id=58ff400b…
+  [B1 event] type=assistant session_id=58ff400b…
+  [B1 event] type=result session_id=58ff400b…
+  [B1] ✅ 拿到 session_id: 58ff400b-dc95-4643-89ff-f44513dc65ae
+
+[B2] 第二次 query（resume: 58ff400b…）
+  [B2 event] type=system
+  [B2 event] type=system
+  [B2 event] type=system
+  [B2 event] type=system
+  [B2 event] type=system
+  [B2 event] type=system
+  [B2 event] type=system
+  [B2 event] type=assistant
+  [B2 event] type=assistant text="你刚才告诉我你的名字叫 **Lorcan**。
+
+（顺便说一下，从文件路径 `C:\Users\Lorcan\.claude\...` 也能看到这个名字，所以这…"
+  [B2 event] type=result
+  [B2] ✅ resume 续上下文成功（AI 记住了名字）
+
+=== Spike 完成 ===
 ```
 
 ---
