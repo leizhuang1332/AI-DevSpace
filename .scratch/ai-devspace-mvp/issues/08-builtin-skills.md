@@ -1,10 +1,35 @@
 ---
-Status: ready-for-agent
+Status: wontfix
 Type: task
 Stage: 2
+Superseded-by:
+  - 08a-skill-loader-arming.md
+  - 08b-context-triggers.md
+  - 08c-snapshot-undo.md
+  - 08d-bad-feedback-loop.md
+Superseded-by-ADR:
+  - docs/adr/0008-skill-as-prompt-fragment.md
+  - docs/adr/0009-ai-failure-defense.md
+Deprecated-on: 2026-07-10
+Deprecated-reason: "Skill 是提示词封装不是流程节点"哲学反转（grill 第 1-9 问决策）。原 6 阶段 Skill 流水线（analyze→design→plan→code→test→submit）与"AI 不推动流程、控制权完全交给用户"哲学直接冲突。
 ---
 
-# 08 - 6 个内置 Skill（流程落地）
+# 08 - 6 个内置 Skill（流程落地） — **DEPRECATED 2026-07-10**
+
+> ⚠️ **本 Issue 已废弃**。详见 [ADR-0008](docs/adr/0008-skill-as-prompt-fragment.md) 与 [ADR-0009](docs/adr/0009-ai-failure-defense.md)。
+>
+> 替代 Issue：
+>
+> - [08a-skill-loader-arming.md](08a-skill-loader-arming.md) — Skill 加载器 + 装填深度三档
+> - [08b-context-triggers.md](08b-context-triggers.md) — 触发规则 + Inline 提示栏
+> - [08c-snapshot-undo.md](08c-snapshot-undo.md) — 自动 snapshot + 1-click 回滚
+> - [08d-bad-feedback-loop.md](08d-bad-feedback-loop.md) — 👎 反馈通道
+>
+> 历史归档：原 issue 内容保留在下方，仅作变更溯源。
+
+---
+
+## 历史归档（原 issue 内容）
 
 ## 目标
 
