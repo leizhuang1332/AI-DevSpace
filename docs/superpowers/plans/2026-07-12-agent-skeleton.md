@@ -4,9 +4,9 @@
 
 **Goal:** 把 `apps/agent` 从 issue 02 末态（Fastify + `/api/health` + workspace）升级为 issue 03 定义的骨架：鉴权 + 7 条 REST 路由（含 5 条 501）+ SSE 长连通道 + 进程保活 + 文件日志。
 
-**Architecture:** Fastify 单进程 + 进程内 SseHub 桥（pin 后续 issue 06 SDK 集成）+ Auth Fastify plugin（preHandler 校验 cookie/header 双 sink）+ 同源 Origin 白名单。零新增运行依赖（仅 `@fastify/sse` 一个 npm 包）。保活走 bash 5s `kill -0` 轮询。
+**Architecture:** Fastify 单进程 + 进程内 SseHub 桥（pin 后续 issue 06 SDK 集成）+ Auth Fastify plugin（preHandler 校验 cookie/header 双 sink）+ 同源 Origin 白名单。SSE 用 `reply.hijack()` + `reply.raw.write(...)` 直接写 `event:` / `data:` 帧（不引 `@fastify/sse`，避免一处仅一行的封装噪音；后续如果需要 retry-id / 多 event type pipeline 再评估）。保活走 bash 5s `kill -0` 轮询。
 
-**Tech Stack:** Fastify 5、`@fastify/sse`、`@fastify/cors`（已有）、pino（Fastify 自带）、zod（`@ai-devspace/shared`）、Vitest 2。
+**Tech Stack:** Fastify 5、`@fastify/cors`（已有）、`@fastify/sse` 不安装、`fastify-plugin`（Task 3 已装）、pino（Fastify 自带）、zod（`@ai-devspace/shared`）、Vitest 2。
 
 **Spec reference:** `docs/superpowers/specs/2026-07-12-agent-skeleton-design.md`
 
@@ -73,7 +73,7 @@
 ## Task 1: 安装依赖 + 共享类型（sse / api / error）
 
 **Files:**
-- Modify: `apps/agent/package.json`（新增 `@fastify/sse` 依赖）
+- Modify: `apps/agent/package.json`（无新增运行依赖；本任务决定不引 `@fastify/sse`，改用 raw write，详见 Task 5 review 备注）
 - Create: `packages/shared/src/sse.ts`
 - Create: `packages/shared/src/api.ts`
 - Create: `packages/shared/src/error.ts`
@@ -81,20 +81,13 @@
 - Create: `packages/shared/src/__tests__/sse.test.ts`
 - Create: `packages/shared/src/__tests__/api.test.ts`
 
-### Step 1.1: 安装 `@fastify/sse`
+### Step 1.1: ~~安装 `@fastify/sse`~~ — 取消
 
-在 `apps/agent/package.json` 的 `dependencies` 末尾增加一行 `"@fastify/sse": "^0.5.0"`。
+本步骤最初规划安装 `@fastify/sse` 封装 SSE 帧；Task 5 实现后 review 发现 SSE 帧就一个函数（`event: ${type}\ndata: ${JSON.stringify(ev)}\n\n`），封装噪音大于价值。决定**不安装 `@fastify/sse`**，改用 raw `reply.raw.write(...)`，减少一个依赖。
 
-> **版本说明**：npm 上 `@fastify/sse` 当前最高版本为 `0.5.0`（尚未发布 1.x），与 Fastify 5 兼容；若发现与 fastify v5 peerDep 冲突，加 `--ignore-peer-deps` 兜底。
+对应到 Task 1：原本计划 Step 1.1 安装 `@fastify/sse`；本步骤**已取消**。Task 1 implementer 跳过 Step 1.1 的 dep 安装。
 
-然后：
-
-```bash
-cd /Users/Ray/TraeProjects/AI-DevSpace/.worktrees/feat-issue-03-agent-skeleton
-pnpm install
-```
-
-期望：lockfile 更新；`apps/agent/node_modules/@fastify/sse/` 出现。
+**若已 commit 含 `@fastify/sse` dep**（Task 1 的 `06d4b5d` 已装 `^0.5.0`），在 Task 5 review 修复 commit 里移除该 dep + lockfile 对应清理。
 
 ### Step 1.2: 写失败测试 — sse 类型
 
@@ -1237,6 +1230,18 @@ describe('GET /api/requirement/:id/events', () => {
     expect(body).toMatch(/event: placeholder/)
     expect(body).toMatch(/hello future/)
   })
+
+  it('unsubscribes from SseHub when client socket closes', async () => {
+    expect(hub.stats().subscribers).toBe(0)
+    await openSse('/api/requirement/REFUND-001/events', {
+      'x-aidevspace-token': token,
+    })
+    // openSse always destroys the socket after the read window; cleanup runs async.
+    // Wait one event-loop tick for the close handler to fire.
+    await new Promise((r) => setImmediate(r))
+    await new Promise((r) => setImmediate(r))
+    expect(hub.stats().subscribers).toBe(0)
+  })
 })
 ```
 
@@ -1303,15 +1308,15 @@ export const sseRoutes: FastifyPluginAsync<SseRoutesOptions> = async (fastify, o
 ### Step 5.3: 跑测试
 
 ```bash
-cd /Users/Ray/TraeProjects/AI-DevSpace/apps/agent && pnpm test requirementEventsRoute.test.ts
+cd /Users/Ray/TraeProjects/AI-DevSpace/.worktrees/feat-issue-03-agent-skeleton/apps/agent && pnpm test requirementEventsRoute.test.ts
 ```
 
-期望：5 passed（其中第 6 个 `subscribes to the reqId channel` 仅 sanity check stats，不强制断言）。
+期望：6 passed。
 
 ### Step 5.4: Commit
 
 ```bash
-cd /Users/Ray/TraeProjects/AI-DevSpace
+cd /Users/Ray/TraeProjects/AI-DevSpace/.worktrees/feat-issue-03-agent-skeleton
 git add apps/agent/src/sse/requirementEventsRoute.ts apps/agent/src/__tests__/requirementEventsRoute.test.ts
 git commit -m "feat(agent): SSE requirement events route (issue 03/5)
 
