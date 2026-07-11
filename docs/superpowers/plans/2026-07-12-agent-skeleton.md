@@ -748,11 +748,16 @@ cd /Users/Ray/TraeProjects/AI-DevSpace/apps/agent && pnpm test authPlugin.test.t
 
 ### Step 3.5: 实现 authPlugin.ts
 
+**3.5.0 加依赖** — 在 `apps/agent/package.json` 的 `dependencies` 末尾追加 `"fastify-plugin": "^5.0.0"`，然后 `pnpm install`。
+
+> **为什么需要 fastify-plugin**：Fastify 5 插件默认会创建 encapsulation scope，`onRequest` hook 只作用在插件内部注册的路由。auth 是 cross-cutting 必须全局生效，要用 `fastify-plugin` 的 `fp()` 包装来"逃出"封装。这是 Fastify 生态标准做法。
+
 创建 `apps/agent/src/auth/authPlugin.ts`：
 
 ```ts
+import fp from 'fastify-plugin'
 import { timingSafeEqual } from 'node:crypto'
-import type { FastifyInstance, FastifyPluginAsync } from 'fastify'
+import type { FastifyPluginAsync } from 'fastify'
 import { parseCookie } from './cookie.js'
 import type { TokenManager } from './TokenManager.js'
 
@@ -768,10 +773,7 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(ba, bb)
 }
 
-export const authPlugin: FastifyPluginAsync<AuthPluginOptions> = async (
-  fastify,
-  opts,
-) => {
+const authImpl: FastifyPluginAsync<AuthPluginOptions> = async (fastify, opts) => {
   const { tokenManager, allowedOrigins } = opts
   fastify.addHook('onRequest', async (req, reply) => {
     // Public bypass: routes declare { config: { public: true } }
@@ -793,6 +795,11 @@ export const authPlugin: FastifyPluginAsync<AuthPluginOptions> = async (
     }
   })
 }
+
+// `fp()` opts out of Fastify's plugin encapsulation so the onRequest hook
+// applies to sibling routes on the parent Fastify instance (auth is
+// cross-cutting, not just sub-tree-scoped).
+export const authPlugin = fp<AuthPluginOptions>(authImpl, { name: 'authPlugin' })
 ```
 
 ### Step 3.6: 跑全部 auth 测试
