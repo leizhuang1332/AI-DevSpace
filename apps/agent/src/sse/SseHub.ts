@@ -11,20 +11,29 @@ export interface SseHub {
   stats(): { subscribers: number }
 }
 
+export interface SseScheduler {
+  setInterval(handler: () => void, ms: number): NodeJS.Timeout
+  clearInterval(handle: NodeJS.Timeout): void
+}
+
 export interface CreateSseHubOptions {
   heartbeatMs?: number
   /** Injectable timer functions for tests. Defaults to global setInterval/clearInterval. */
-  scheduler?: {
-    setInterval: typeof setInterval
-    clearInterval: typeof clearInterval
-  }
+  scheduler?: SseScheduler
+}
+
+const defaultScheduler: SseScheduler = {
+  setInterval: ((handler: () => void, ms: number) =>
+    setInterval(handler, ms) as unknown as NodeJS.Timeout) as SseScheduler['setInterval'],
+  clearInterval: ((handle: NodeJS.Timeout) =>
+    clearInterval(handle as unknown as ReturnType<typeof setInterval>)) as SseScheduler['clearInterval'],
 }
 
 export function createSseHub(opts: CreateSseHubOptions = {}): SseHub {
   const channels = new Map<string, Set<SseListener>>()
   const heartbeatMs = opts.heartbeatMs ?? SSE_HEARTBEAT_MS
-  const scheduler = opts.scheduler ?? { setInterval, clearInterval }
-  let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+  const scheduler = opts.scheduler ?? defaultScheduler
+  let heartbeatTimer: NodeJS.Timeout | null = null
   let closed = false
 
   function totalSubscribers(): number {
@@ -49,7 +58,7 @@ export function createSseHub(opts: CreateSseHubOptions = {}): SseHub {
       }
     }, heartbeatMs)
     // Allow Node to exit even if timer is referenced
-    ;(heartbeatTimer as unknown as { unref?: () => void }).unref?.()
+    heartbeatTimer.unref?.()
   }
 
   function maybeStopHeartbeat(): void {

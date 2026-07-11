@@ -84,4 +84,47 @@ describe('createSseHub', () => {
     const hub = createSseHub()
     expect(() => hub.publish('none', { type: 'heartbeat', ts: 1 })).not.toThrow()
   })
+
+  it('does not call scheduler.setInterval when no subscribers (lazy heartbeat)', () => {
+    const setIntervalSpy = vi.fn(
+      () => 0 as unknown as NodeJS.Timeout,
+    ) as unknown as typeof setInterval
+    const clearIntervalSpy = vi.fn() as unknown as typeof clearInterval
+    const hub = createSseHub({
+      scheduler: { setInterval: setIntervalSpy, clearInterval: clearIntervalSpy },
+      heartbeatMs: 30_000,
+    })
+    expect(setIntervalSpy).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(60_000)
+    expect(setIntervalSpy).not.toHaveBeenCalled()
+    expect(hub.stats().subscribers).toBe(0)
+  })
+
+  it('starts heartbeat after first subscribe', () => {
+    const setIntervalSpy = vi.fn(
+      () => 0 as unknown as NodeJS.Timeout,
+    ) as unknown as typeof setInterval
+    const clearIntervalSpy = vi.fn() as unknown as typeof clearInterval
+    const hub = createSseHub({
+      scheduler: { setInterval: setIntervalSpy, clearInterval: clearIntervalSpy },
+      heartbeatMs: 30_000,
+    })
+    expect(setIntervalSpy).not.toHaveBeenCalled()
+    hub.subscribe('r1', () => {})
+    expect(setIntervalSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('delivers heartbeat event to subscribers when timer fires', () => {
+    const received: SseEvent[] = []
+    const hub = createSseHub({ heartbeatMs: 30_000 })
+    hub.subscribe('r1', (e) => received.push(e))
+    expect(received).toHaveLength(0)
+    vi.advanceTimersByTime(30_000)
+    expect(received).toHaveLength(1)
+    const ev = received[0]
+    expect(ev.type).toBe('heartbeat')
+    if (ev.type === 'heartbeat') {
+      expect(typeof ev.ts).toBe('number')
+    }
+  })
 })
