@@ -216,7 +216,7 @@ describe('BootstrapResponse', () => {
   it('accepts full payload', () => {
     const r = BootstrapResponse.safeParse({
       ok: true,
-      token: 'abc',
+      token: 'a'.repeat(43),  // 32-byte random base64url token, length 43
       cookieName: 'aidevspace_token',
       cookieAttributes: { SameSite: 'Strict', Path: '/', MaxAge: 2592000 },
       apiBase: 'http://localhost:7777',
