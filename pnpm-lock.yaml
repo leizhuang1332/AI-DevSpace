@@ -38,6 +38,9 @@ importers:
       '@fastify/cors':
         specifier: ^11.0.0
         version: 11.3.0
+      '@fastify/sse':
+        specifier: ^0.5.0
+        version: 0.5.0(fastify@5.10.0)
       better-sqlite3:
         specifier: ^12.11.1
         version: 12.11.1
@@ -693,6 +696,12 @@ packages:
 
   '@fastify/proxy-addr@5.1.0':
     resolution: {integrity: sha512-INS+6gh91cLUjB+PVHfu1UqcB76Sqtpyp7bnL+FYojhjygvOPA9ctiD/JDKsyD9Xgu4hUhCSJBPig/w7duNajw==}
+
+  '@fastify/sse@0.5.0':
+    resolution: {integrity: sha512-VLNPXtmmMA2+g5qlTlDhjzZZzFm2tIazfioZ20DyBvs516mcMmDImtjfHN2cCUhf2nfxmWeLK3aMlqv4FSM+5Q==}
+    engines: {node: '>=20.20.2'}
+    peerDependencies:
+      fastify: ^5.x
 
   '@hono/node-server@1.19.14':
     resolution: {integrity: sha512-GwtvgtXxnWsucXvbQXkRgqksiH2Qed37H9xHZocE5sA3N8O8O8/8FA3uclQXxXVzc9XBZuEOMK7+r02FmSpHtw==}
@@ -3254,6 +3263,12 @@ snapshots:
     dependencies:
       '@fastify/forwarded': 3.0.1
       ipaddr.js: 2.4.0
+
+  '@fastify/sse@0.5.0(fastify@5.10.0)':
+    dependencies:
+      '@fastify/error': 4.2.0
+      fastify: 5.10.0
+      fastify-plugin: 6.0.0
 
   '@hono/node-server@1.19.14(hono@4.12.29)':
     dependencies:
