@@ -154,4 +154,16 @@ describe('GET /api/requirement/:id/events', () => {
     expect(body).toMatch(/event: placeholder/)
     expect(body).toMatch(/hello future/)
   })
+
+  it('unsubscribes from SseHub when client socket closes', async () => {
+    expect(hub.stats().subscribers).toBe(0)
+    await openSse('/api/requirement/REFUND-001/events', {
+      'x-aidevspace-token': token,
+    })
+    // openSse always destroys the socket after the read window; cleanup runs async.
+    // Wait two event-loop ticks for the close handler to fire.
+    await new Promise((r) => setImmediate(r))
+    await new Promise((r) => setImmediate(r))
+    expect(hub.stats().subscribers).toBe(0)
+  })
 })
