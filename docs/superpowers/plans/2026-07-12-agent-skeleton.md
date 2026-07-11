@@ -83,12 +83,14 @@
 
 ### Step 1.1: 安装 `@fastify/sse`
 
-在 `/Users/Ray/TraeProjects/AI-DevSpace/apps/agent/package.json` 的 `dependencies` 末尾增加一行 `"@fastify/sse": "^2.0.0"`（与 fastify v5 兼容）。
+在 `apps/agent/package.json` 的 `dependencies` 末尾增加一行 `"@fastify/sse": "^0.5.0"`。
+
+> **版本说明**：npm 上 `@fastify/sse` 当前最高版本为 `0.5.0`（尚未发布 1.x），与 Fastify 5 兼容；若发现与 fastify v5 peerDep 冲突，加 `--ignore-peer-deps` 兜底。
 
 然后：
 
 ```bash
-cd /Users/Ray/TraeProjects/AI-DevSpace
+cd /Users/Ray/TraeProjects/AI-DevSpace/.worktrees/feat-issue-03-agent-skeleton
 pnpm install
 ```
 
