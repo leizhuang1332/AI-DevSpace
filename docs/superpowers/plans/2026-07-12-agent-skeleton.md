@@ -1075,114 +1075,175 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ### Step 5.1: 写失败测试
 
+> **重要：用 Node `http` 客户端做真请求，避开 `app.inject()` 的 hijack SSE 死锁。** `app.inject()` 在 `reply.hijack()` 后会等响应自然结束才返回；但 SSE 长连永远不结束，inject 会卡 5s 超时。
+
 创建 `apps/agent/src/__tests__/requirementEventsRoute.test.ts`：
 
 ```ts
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
-import { randomUUID } from 'node:crypto'
-import { mkdtempSync } from 'node:fs'
+import http from 'node:http'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TokenManager } from '../auth/TokenManager.js'
 import { authPlugin } from '../auth/authPlugin.js'
 import { createSseHub, type SseHub } from '../sse/SseHub.js'
 import { sseRoutes } from '../sse/requirementEventsRoute.js'
-import { createRequire } from 'node:module'
 
 let app: FastifyInstance
 let hub: SseHub
 let token: string
+let root: string
+let port: number
 
-const require = createRequire(import.meta.url)
+interface CapturedResponse {
+  statusCode: number
+  headers: Record<string, string | string[] | undefined>
+  body: string
+}
 
-function wait(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms))
+/** Open an SSE request, read until first event arrives or abortMs timeout. */
+function openSse(
+  urlPath: string,
+  headers: Record<string, string> = {},
+  readMs = 250,
+): Promise<CapturedResponse> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        method: 'GET',
+        hostname: '127.0.0.1',
+        port,
+        path: urlPath,
+        headers,
+      },
+      (res) => {
+        const chunks: Buffer[] = []
+        const timer = setTimeout(() => {
+          req.destroy()
+          resolve({
+            statusCode: res.statusCode ?? 0,
+            headers: res.headers as Record<string, string | string[] | undefined>,
+            body: Buffer.concat(chunks).toString('utf8'),
+          })
+        }, readMs)
+        res.on('data', (c) => chunks.push(c))
+        res.on('end', () => {
+          clearTimeout(timer)
+          resolve({
+            statusCode: res.statusCode ?? 0,
+            headers: res.headers as Record<string, string | string[] | undefined>,
+            body: Buffer.concat(chunks).toString('utf8'),
+          })
+        })
+        res.on('error', () => {
+          clearTimeout(timer)
+          resolve({
+            statusCode: res.statusCode ?? 0,
+            headers: res.headers as Record<string, string | string[] | undefined>,
+            body: Buffer.concat(chunks).toString('utf8'),
+          })
+        })
+      },
+    )
+    req.on('error', reject)
+    req.end()
+  })
 }
 
 describe('GET /api/requirement/:id/events', () => {
   beforeEach(async () => {
-    vi.useRealTimers()  // we want real timers for streaming tests
-    const root = mkdtempSync(join(tmpdir(), 'aidevsp-sse-'))
+    root = mkdtempSync(join(tmpdir(), 'aidevsp-sse-'))
     const tm = new TokenManager(root)
     token = await tm.ensure()
-    hub = createSseHub({ heartbeatMs: 60_000 })  // disable automatic heartbeat
+    hub = createSseHub({ heartbeatMs: 60_000 })
     app = Fastify({ logger: false })
     await app.register(authPlugin, { tokenManager: tm, allowedOrigins: ['http://localhost:3333'] })
     await app.register(sseRoutes, { hub })
     await app.ready()
+    const url = await app.listen({ port: 0, host: '127.0.0.1' })
+    port = new URL(url).port
   })
 
   afterEach(async () => {
     await app.close()
     await hub.close()
+    rmSync(root, { recursive: true, force: true })
   })
 
-  it('returns text/event-stream content type', async () => {
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/requirement/REFUND-001/events',
-      headers: { 'x-aidevspace-token': token },
+  it('returns 200 with text/event-stream content type', async () => {
+    const res = await openSse('/api/requirement/REFUND-001/events', {
+      'x-aidevspace-token': token,
     })
     expect(res.statusCode).toBe(200)
     expect(res.headers['content-type']).toMatch(/^text\/event-stream/)
   })
 
-  it('emits a hello event immediately', async () => {
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/requirement/REFUND-001/events',
-      headers: { 'x-aidevspace-token': token },
+  it('emits a hello event in the initial body chunk', async () => {
+    const res = await openSse('/api/requirement/REFUND-001/events', {
+      'x-aidevspace-token': token,
     })
     expect(res.body).toMatch(/event: hello/)
     expect(res.body).toMatch(/"reqId":"REFUND-001"/)
     expect(res.body).toMatch(/"sid":/)
   })
 
-  it('401 without token', async () => {
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/requirement/REFUND-001/events',
-    })
-    expect(res.statusCode).toBe(401)
-  })
-
-  it('emits X-Accel-Buffering: no', async () => {
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/requirement/REFUND-001/events',
-      headers: { 'x-aidevspace-token': token },
+  it('emits X-Accel-Buffering: no header', async () => {
+    const res = await openSse('/api/requirement/REFUND-001/events', {
+      'x-aidevspace-token': token,
     })
     expect(res.headers['x-accel-buffering']).toBe('no')
   })
 
-  it('subscribes to the reqId channel', () => {
-    // After a successful inject above (in beforeEach implicitly), we open one now:
-    expect(hub.stats().subscribers).toBe(0)
+  it('401 without token (does not open SSE)', async () => {
+    const res = await openSse('/api/requirement/REFUND-001/events', {})
+    expect(res.statusCode).toBe(401)
   })
 
   it('writes a publish() event to the stream body', async () => {
-    const p = app.inject({
-      method: 'GET',
-      url: '/api/requirement/REFUND-001/events',
-      headers: { 'x-aidevspace-token': token },
+    const chunks: Buffer[] = []
+    let done = false
+    await new Promise<void>((resolve) => {
+      const req = http.request(
+        {
+          method: 'GET',
+          hostname: '127.0.0.1',
+          port,
+          path: '/api/requirement/REFUND-001/events',
+          headers: { 'x-aidevspace-token': token },
+        },
+        (res) => {
+          res.on('data', (c) => {
+            chunks.push(c)
+            const body = Buffer.concat(chunks).toString('utf8')
+            if (body.includes('event: placeholder') && !done) {
+              done = true
+              req.destroy()
+              resolve()
+            }
+          })
+          res.on('end', () => resolve())
+        },
+      )
+      // small delay so the route registers the listener
+      setTimeout(() => {
+        hub.publish('REFUND-001', { type: 'placeholder', message: 'hello future' })
+      }, 50)
+      req.on('error', () => resolve())
+      req.end()
     })
-    // small tick so the route actually registers the listener
-    await wait(10)
-    hub.publish('REFUND-001', { type: 'placeholder', message: 'hello future' })
-    const res = await p
-    expect(res.body).toMatch(/event: placeholder/)
-    expect(res.body).toMatch(/hello future/)
+    const body = Buffer.concat(chunks).toString('utf8')
+    expect(body).toMatch(/event: placeholder/)
+    expect(body).toMatch(/hello future/)
   })
 })
 ```
 
-> 注：本测试用 `app.inject`（Fastify 5 的 streaming 注入）。`hello` 事件同步发出；`heartbeat` 在本测试 hub 里设了 60s 不会立刻触发。
-
 跑：
 
 ```bash
-cd /Users/Ray/TraeProjects/AI-DevSpace/apps/agent && pnpm test requirementEventsRoute.test.ts
+cd /Users/Ray/TraeProjects/AI-DevSpace/.worktrees/feat-issue-03-agent-skeleton/apps/agent && pnpm test requirementEventsRoute.test.ts 2>&1 | tee /tmp/sse-route-r.log
 ```
 
 期望：FAIL，`Cannot find module '../sse/requirementEventsRoute.js'`。
