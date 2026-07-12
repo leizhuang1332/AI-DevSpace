@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>11g · 工位 Tab 导航器(方案 E) · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{
+  --brand:#5e6ad2; --brand-50:#eef0fb; --brand-500:#5e6ad2; --brand-600:#525bc7; --brand-700:#4147a3;
+  --success:#16a34a; --warning:#f59e0b; --error:#ef4444; --info:#64748b;
+  /* 需求状态色(决策 22):分组共享 4 色 + 灰 */
+  --status-draft:#94a3b8;        /* 灰 */
+  --status-analyzing:#3b82f6;    /* 蓝 — AI 思考中 */
+  --status-clarifying:#5e6ad2;   /* 紫 + 警告红点(CLARIFYING 特殊) */
+  --status-clarifying-warn:#ef4444;
+  --status-designing:#f59e0b;    /* 黄 — 等待决策 */
+  --status-executing:#16a34a;    /* 绿 — 进行中 */
+  --status-wrapup:#94a3b8;       /* 灰 — 完成 */
+  --bg:#fbfbfd; --bg-elevated:#ffffff; --bg-subtle:#f5f5f7;
+  --border:#ebebef; --border-strong:#d8d8de;
+  --text-1:#0f172a; --text-2:#475569; --text-3:#94a3b8;
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-6:24px; --space-8:32px;
+  --text-xs:11px; --text-sm:12px; --text-base:13px; --text-md:14px; --text-lg:16px; --text-xl:18px;
+  --row-md:32px;
+  --radius-sm:4px; --radius-md:6px; --radius-lg:8px; --radius-xl:12px;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.04); --shadow-md:0 2px 4px rgba(0,0,0,.06); --shadow-lg:0 4px 12px rgba(0,0,0,.08);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg);color:var(--text-1);font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased}
+
+/* ======= Top dark nav(探索导航,沿用 11d) ======= */
+.topnav{position:sticky;top:0;z-index:100;background:#0f172a;color:#fff;padding:var(--space-2) var(--space-6);font-size:var(--text-sm);display:flex;align-items:center;gap:var(--space-4)}
+.topnav .pill{background:var(--brand);color:#fff;padding:2px 10px;border-radius:var(--radius-md);font-size:var(--text-xs);font-weight:500}
+.topnav a{color:#94a3b8;text-decoration:none;padding:4px 10px;border-radius:var(--radius-md);font-size:var(--text-sm)}
+.topnav a:hover{color:#fff;background:rgba(255,255,255,.06)}
+.topnav a.cur{color:#fff;background:var(--brand)}
+.topnav .spacer{flex:1}
+.topnav .meta{color:#64748b;font-size:var(--text-xs);font-family:'JetBrains Mono',monospace}
+
+/* ======= 工位 Tab 导航器(NEW — 本原型核心) ======= */
+.zone-bar{position:sticky;top:34px;z-index:50;background:var(--bg-elevated);border-bottom:1px solid var(--border);display:flex;align-items:stretch;padding:0 var(--space-4);height:44px}
+.zone-bar::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:1px;background:var(--border)}
+
+.zone-tabs{display:flex;align-items:center;gap:0;flex:1;overflow-x:auto}
+.zone-tab{
+  display:flex;align-items:center;gap:var(--space-2);
+  height:100%;padding:0 var(--space-4);
+  font-size:var(--text-sm);color:var(--text-2);
+  cursor:pointer;white-space:nowrap;position:relative;
+  border-bottom:2px solid transparent;
+  margin-bottom:-1px; /* 抵消 zone-bar 底边 */
+  transition:color .15s ease;
+}
+.zone-tab:hover{color:var(--text-1);background:var(--bg-subtle)}
+.zone-tab .ic{font-size:14px;width:16px;text-align:center;color:var(--text-3)}
+.zone-tab .name{font-weight:400}
+.zone-tab .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+
+/* 激活态 — 紫色下划线 + 加粗 */
+.zone-tab.active{color:var(--brand-700);font-weight:500}
+.zone-tab.active .ic{color:var(--brand-600)}
+.zone-tab.active .name{font-weight:500}
+.zone-tab.active{border-bottom-color:var(--brand)}
+
+/* 各工位状态色点(对应决策 22) */
+/* Overview 紫色 — brand 色,中性,区分于工位状态色 */
+.zone-tab .dot.s-overview{background:var(--brand)}
+.zone-tab .dot.s-draft{background:var(--status-draft)}
+.zone-tab .dot.s-analyzing{background:var(--status-analyzing)}
+.zone-tab .dot.s-clarifying{background:var(--status-clarifying);box-shadow:0 0 0 2px #fff,0 0 0 3px var(--status-clarifying-warn)}
+.zone-tab .dot.s-designing{background:var(--status-designing)}
+.zone-tab .dot.s-executing{background:var(--status-executing)}
+.zone-tab .dot.s-wrapup{background:var(--status-wrapup)}
+
+/* 脉动 — AI 思考中(对应决策 49 蓝脉动) */
+@keyframes pulse-blue{0%{box-shadow:0 0 0 0 rgba(59,130,246,.7)}70%{box-shadow:0 0 0 6px rgba(59,130,246,0)}100%{box-shadow:0 0 0 0 rgba(59,130,246,0)}}
+.zone-tab .dot.pulse{animation:pulse-blue 1.4s infinite}
+
+/* Tab 右侧:Cmd+K + AI 状态条 */
+.zone-bar-right{display:flex;align-items:center;gap:var(--space-3);font-size:var(--text-sm)}
+.kbd-trigger{display:flex;align-items:center;gap:var(--space-2);height:28px;padding:0 var(--space-3);background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-md);color:var(--text-2);cursor:pointer;font-size:var(--text-xs)}
+.kbd-trigger:hover{background:var(--bg-elevated);border-color:var(--border-strong)}
+.kbd-trigger .ic{font-size:13px;color:var(--text-3)}
+.kbd-trigger .kbd{font-family:'JetBrains Mono',monospace;font-size:10px;background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:var(--radius-sm);color:var(--text-2);margin-left:var(--space-2)}
+
+.ai-state{display:flex;align-items:center;gap:var(--space-2);color:var(--text-2)}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(94,106,210,.6)}70%{box-shadow:0 0 0 6px rgba(94,106,210,0)}100%{box-shadow:0 0 0 0 rgba(94,106,210,0)}}
+.ai-state .dot{width:8px;height:8px;border-radius:50%;background:var(--success);animation:pulse 1.6s infinite}
+.ai-state .meta{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-3)}
+
+/* ======= Sidebar(沿用 11d,但对应工位语境) ======= */
+.shell{display:grid;grid-template-columns:56px 240px 1fr 120px;background:var(--bg);min-height:calc(100vh - 78px)}
+.sidebar{background:var(--bg-elevated);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:var(--space-3) 0;gap:2px}
+.sidebar .logo{width:32px;height:32px;border-radius:var(--radius-md);background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;margin-bottom:var(--space-3)}
+.sidebar a{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius-md);font-size:18px;text-decoration:none;color:var(--text-2);position:relative}
+.sidebar a:hover{background:var(--bg-subtle);color:var(--text-1)}
+.sidebar a.active{background:var(--brand-50);color:var(--brand-700)}
+.sidebar a.active::before{content:'';position:absolute;left:-12px;top:8px;bottom:8px;width:2px;background:var(--brand);border-radius:1px}
+
+/* 资源树(EXECUTING 工位专属:任务 + Diff 文件 + 产物) */
+.tree{background:var(--bg-elevated);border-right:1px solid var(--border);padding:var(--space-3) 0;overflow:auto}
+.tree-section{padding:0 var(--space-3);margin-bottom:var(--space-3)}
+.tree-section-label{padding:var(--space-2) var(--space-2);font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:500;display:flex;align-items:center;justify-content:space-between}
+.tree-section-label .badge{background:var(--brand-50);color:var(--brand-700);font-size:10px;padding:1px 5px;border-radius:var(--radius-sm);font-weight:500}
+.tree-node{display:flex;align-items:center;gap:var(--space-2);height:28px;padding:0 var(--space-2);border-radius:var(--radius-md);font-size:var(--text-sm);color:var(--text-2);cursor:pointer}
+.tree-node:hover{background:var(--bg-subtle);color:var(--text-1)}
+.tree-node.active{background:var(--brand-50);color:var(--brand-700);font-weight:500}
+.tree-node .ic{font-size:14px;width:16px;text-align:center;color:var(--text-3)}
+.tree-node.active .ic{color:var(--brand-600)}
+.tree-node .status-dot{width:6px;height:6px;border-radius:50%;margin-left:auto}
+.tree-node .id{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-3);margin-right:4px}
+
+/* ======= 主区(EXECUTING 简版) ======= */
+.center{display:flex;flex-direction:column;background:var(--bg-elevated);overflow:hidden}
+
+/* 面包屑 + 工位标识 */
+.zone-strip{background:linear-gradient(90deg,var(--brand-50) 0%,rgba(238,240,251,0.3) 60%);border-bottom:1px solid var(--border);padding:var(--space-3) var(--space-6);display:flex;align-items:center;justify-content:space-between}
+.zone-strip .ttl{display:flex;align-items:center;gap:var(--space-2);font-weight:600;font-size:var(--text-md);color:var(--brand-700)}
+.zone-strip .ttl .badge{background:var(--brand);color:#fff;font-size:var(--text-xs);font-weight:500;padding:2px 8px;border-radius:var(--radius-md)}
+.zone-strip .meta{font-family:'JetBrains Mono',monospace;font-size:var(--text-sm);color:var(--brand-600);display:flex;align-items:center;gap:var(--space-3)}
+.zone-strip .meta span{display:flex;align-items:center;gap:4px}
+
+.mc-toolbar{display:flex;align-items:center;justify-content:space-between;padding:var(--space-2) var(--space-6);border-bottom:1px solid var(--border);background:var(--bg-elevated);gap:var(--space-3)}
+.mc-toolbar .left{display:flex;align-items:center;gap:var(--space-3)}
+.mc-toolbar .left .crumb{font-size:var(--text-sm);color:var(--text-3);display:flex;align-items:center;gap:6px}
+.mc-toolbar .left .crumb .cur{color:var(--text-1);font-weight:500}
+.mc-toolbar .right{display:flex;gap:var(--space-2)}
+.btn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 var(--space-3);border-radius:var(--radius-md);font-size:var(--text-sm);font-weight:500;cursor:pointer;border:none;background:var(--brand);color:#fff;font-family:inherit}
+.btn:hover{background:var(--brand-600)}
+.btn-secondary{background:var(--bg-elevated);color:var(--text-1);border:1px solid var(--border-strong)}
+.btn-secondary:hover{background:var(--bg-subtle)}
+.btn-ghost{background:transparent;color:var(--text-2)}
+.btn-ghost:hover{color:var(--text-1);background:var(--bg-subtle)}
+.btn-danger{background:var(--bg-elevated);color:var(--error);border:1px solid var(--border)}
+.btn-danger:hover{background:#fef2f2}
+
+/* Mission Control 主体 — 三栏:左 DAG / 中 Diff / 右 AI 行为 */
+.mc-main{display:grid;grid-template-columns:280px 1fr 320px;flex:1;min-height:0;border-top:1px solid var(--border)}
+.dag-col{background:var(--bg-elevated);border-right:1px solid var(--border);overflow:auto;padding:var(--space-4)}
+.dag-col .hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-3)}
+.dag-col .hd h4{font-size:var(--text-md);font-weight:600}
+.dag-col .hd .meta{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-3)}
+.dag-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:var(--space-4)}
+.dag-stats .cell{text-align:center;padding:6px;background:var(--bg-subtle);border-radius:var(--radius-sm)}
+.dag-stats .cell .n{font-size:var(--text-md);font-weight:600;color:var(--text-1)}
+.dag-stats .cell .l{font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em}
+.dag-stats .cell.done .n{color:var(--success)}
+.dag-stats .cell.doing .n{color:var(--brand)}
+.dag-stats .cell.wait .n{color:var(--warning)}
+.dag-stats .cell.todo .n{color:var(--text-3)}
+.dag-task{position:relative;background:var(--bg-elevated);border:1.5px solid var(--border-strong);border-radius:var(--radius-md);padding:8px 10px;font-size:var(--text-xs);color:var(--text-1);margin-bottom:6px;cursor:pointer;box-shadow:var(--shadow-sm)}
+.dag-task:hover{box-shadow:var(--shadow-md);border-color:var(--brand)}
+.dag-task .id{font-family:'JetBrains Mono',monospace;color:var(--text-3);font-size:10px}
+.dag-task .ttl{font-weight:500;margin-top:2px}
+.dag-task.done{border-color:var(--success);background:#f0fdf4;color:var(--success)}
+.dag-task.doing{border-color:var(--brand);background:var(--brand-50);color:var(--brand-700);box-shadow:0 0 0 3px rgba(94,106,210,.15)}
+.dag-task.wait{border-color:var(--warning);background:#fffbeb;color:#92400e}
+.dag-task.todo{border-color:var(--border-strong);color:var(--text-3)}
+
+/* Diff 列简化 */
+.diff-col{display:flex;flex-direction:column;border-right:1px solid var(--border);overflow:hidden;background:var(--bg-elevated)}
+.diff-col .hd{padding:var(--space-4) var(--space-4) var(--space-3);border-bottom:1px solid var(--border)}
+.diff-col .hd h4{font-size:var(--text-md);font-weight:600}
+.diff-body{flex:1;overflow:auto;padding:var(--space-4);font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);line-height:1.7}
+.diff-file{margin-bottom:var(--space-4)}
+.diff-file .filename{padding:6px var(--space-3);background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-md);font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-1);font-weight:600;display:flex;align-items:center;gap:var(--space-2);margin-bottom:2px}
+.diff-file .filename .stats{color:var(--text-3);font-weight:400}
+.diff-file .filename .stats .a{color:var(--success)}
+.diff-file .filename .stats .r{color:var(--error)}
+.diff-lines{border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden}
+.diff-line{display:grid;grid-template-columns:40px 1fr;padding:0 var(--space-2);color:var(--text-2)}
+.diff-line .gutter{color:var(--text-3);text-align:right;padding-right:var(--space-3);user-select:none;font-size:10px}
+.diff-line.add{background:#f0fdf4;color:#15803d}
+.diff-line.add .gutter{background:#dcfce7;color:#15803d}
+.diff-line.rem{background:#fef2f2;color:#b91c1c}
+.diff-line.rem .gutter{background:#fee2e2;color:#b91c1c}
+
+/* AI 行为流列 */
+.ai-col{background:var(--bg-elevated);overflow:auto;padding:var(--space-4);display:flex;flex-direction:column;gap:var(--space-3)}
+.ai-col .hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-2)}
+.ai-col .hd h4{font-size:var(--text-md);font-weight:600;display:flex;align-items:center;gap:6px}
+.ai-event{background:var(--bg-subtle);border-radius:var(--radius-md);padding:var(--space-3);font-size:var(--text-sm);border-left:3px solid var(--brand);position:relative}
+.ai-event.warn{border-left-color:var(--warning)}
+.ai-event.success{border-left-color:var(--success)}
+.ai-event .ts{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-3);margin-bottom:2px}
+.ai-event .act{font-weight:500;color:var(--text-1);margin-bottom:2px;display:flex;align-items:center;gap:6px}
+.ai-event .desc{color:var(--text-2);font-size:var(--text-xs);line-height:1.5}
+.ai-event .stats{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);margin-top:4px}
+.ai-event .stats .a{color:var(--success);font-weight:500}
+.ai-event .stats .r{color:var(--error);font-weight:500}
+
+/* ======= 右栏 Inline rail(EXECUTING 工位保留) ======= */
+.rail{background:var(--bg-subtle);border-left:1px solid var(--border);padding:var(--space-3);overflow:auto;display:flex;flex-direction:column;gap:var(--space-3)}
+.rail-section{font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:500;margin-bottom:4px;display:flex;align-items:center;justify-content:space-between}
+.rail-card{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3);font-size:var(--text-sm);border-left:3px solid var(--brand)}
+.rail-card.warn{border-left-color:var(--warning)}
+.rail-card.success{border-left-color:var(--success)}
+.rail-card .ttl{font-weight:500;font-size:var(--text-sm);margin-bottom:4px}
+.rail-card .body{color:var(--text-2);line-height:1.5;font-size:var(--text-xs)}
+.rail-card .act{display:inline-block;margin-top:6px;font-size:var(--text-xs);color:var(--brand-600);cursor:pointer}
+
+/* ======= AI 思考条(底部) ======= */
+.ai-think-bar{position:sticky;bottom:0;background:var(--bg-elevated);border-top:2px solid var(--brand);padding:var(--space-3) var(--space-6);display:flex;align-items:center;gap:var(--space-3);z-index:20;box-shadow:0 -4px 12px rgba(0,0,0,.04)}
+.ai-think-bar .pulse-wrap{width:36px;height:36px;border-radius:50%;background:var(--brand-50);display:flex;align-items:center;justify-content:center;position:relative}
+.ai-think-bar .pulse-wrap::before{content:'';position:absolute;inset:-4px;border-radius:50%;border:2px solid var(--brand);opacity:.3;animation:pulse 1.6s infinite}
+.ai-think-bar .text{flex:1;font-size:var(--text-md);color:var(--text-1)}
+.ai-think-bar .text strong{color:var(--brand-700)}
+.ai-think-bar .text .meta{color:var(--text-3);font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);margin-left:var(--space-2)}
+.ai-think-bar .right-actions{display:flex;gap:var(--space-2)}
+.ai-think-bar .right-actions .btn{height:32px;padding:0 var(--space-3)}
+
+/* ======= Cmd+K 浮层示意(右下角展示) ======= */
+.cmdk-demo{position:fixed;right:24px;bottom:80px;width:420px;background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);overflow:hidden;z-index:200}
+.cmdk-demo .search{display:flex;align-items:center;gap:var(--space-2);padding:var(--space-3);border-bottom:1px solid var(--border)}
+.cmdk-demo .search .ic{font-size:14px;color:var(--text-3)}
+.cmdk-demo .search input{border:none;outline:none;flex:1;font-size:var(--text-md);color:var(--text-1);background:transparent;font-family:inherit}
+.cmdk-demo .search .placeholder{color:var(--text-3)}
+.cmdk-demo .hint{font-size:var(--text-xs);color:var(--text-3);padding:var(--space-2) var(--space-3);background:var(--bg-subtle);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:var(--space-2)}
+.cmdk-demo .list{max-height:280px;overflow:auto}
+.cmdk-demo .group-label{padding:var(--space-2) var(--space-3);font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:500}
+.cmdk-demo .item{display:flex;align-items:center;gap:var(--space-3);padding:var(--space-2) var(--space-3);cursor:pointer;font-size:var(--text-sm)}
+.cmdk-demo .item:hover,.cmdk-demo .item.sel{background:var(--brand-50);color:var(--brand-700)}
+.cmdk-demo .item .ic{font-size:14px;width:16px;text-align:center;color:var(--text-3)}
+.cmdk-demo .item.sel .ic{color:var(--brand-600)}
+.cmdk-demo .item .name{flex:1}
+.cmdk-demo .item .kbd{font-family:'JetBrains Mono',monospace;font-size:10px;background:var(--bg-subtle);border:1px solid var(--border);padding:1px 5px;border-radius:var(--radius-sm);color:var(--text-2)}
+
+/* ======= 说明卡片 ======= */
+.note{margin:var(--space-6);padding:var(--space-4);background:#f0f9ff;border:1px solid #bae6fd;border-radius:var(--radius-md);font-size:var(--text-sm);color:#075985;line-height:1.7}
+.note b{color:#0c4a6e}
+.note pre{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);background:rgba(255,255,255,.5);padding:var(--space-3);border-radius:var(--radius-sm);overflow-x:auto;margin:var(--space-3) 0;color:var(--text-1)}
+.kbd{font-family:'JetBrains Mono',monospace;background:var(--bg-subtle);padding:1px 6px;border-radius:var(--radius-sm);font-size:11px;border:1px solid var(--border);color:var(--text-2)}
+
+.legend{position:fixed;left:24px;bottom:80px;background:var(--bg-elevated);border:1px solid var(--border-strong);border-radius:var(--radius-lg);box-shadow:var(--shadow-md);padding:var(--space-3);width:260px;z-index:200;font-size:var(--text-xs)}
+.legend h5{font-size:var(--text-sm);font-weight:600;margin-bottom:var(--space-2);color:var(--text-1)}
+.legend .row{display:flex;align-items:center;gap:var(--space-2);padding:3px 0;color:var(--text-2)}
+.legend .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+</style>
+</head>
+<body>
+
+<!-- 顶部深色导航条(沿用 11 系列探索导航) -->
+<div class="topnav">
+  <span class="pill">11g · 工位 Tab 导航器 · 方案 E</span>
+  <a href="11a-stage-adaptive-draft.html">11a · DRAFT</a>
+  <a href="11b-stage-adaptive-clarifying.html">11b · CLARIFYING</a>
+  <a href="11c-stage-adaptive-designing.html">11c · DESIGNING</a>
+  <a href="11d-stage-adaptive-implementing.html">11d · IMPL</a>
+  <a href="11e-stage-adaptive-analyzing.html">11e · ANALYZING</a>
+  <a href="11f-stage-adaptive-archive.html">11f · ARCHIVE</a>
+  <span class="spacer"></span>
+  <span class="meta">工位 = 独立路由 · 每个工位 1 套布局</span>
+</div>
+
+<!-- ======= 工位 Tab 导航器(方案 E · 本原型核心) ======= -->
+<div class="zone-bar">
+  <div class="zone-tabs">
+    <div class="zone-tab">
+      <span class="ic">📊</span>
+      <span class="name">OVERVIEW</span>
+      <span class="dot s-overview"></span>
+    </div>
+    <div class="zone-tab">
+      <span class="ic">📝</span>
+      <span class="name">DRAFTING</span>
+      <span class="dot s-draft"></span>
+    </div>
+    <div class="zone-tab">
+      <span class="ic">🔍</span>
+      <span class="name">ANALYZING</span>
+      <span class="dot s-analyzing pulse"></span>
+    </div>
+    <div class="zone-tab">
+      <span class="ic">❓</span>
+      <span class="name">CLARIFYING</span>
+      <span class="dot s-clarifying"></span>
+    </div>
+    <div class="zone-tab">
+      <span class="ic">🎯</span>
+      <span class="name">DESIGNING</span>
+      <span class="dot s-designing"></span>
+    </div>
+    <div class="zone-tab active">
+      <span class="ic">⚡</span>
+      <span class="name">EXECUTING</span>
+      <span class="dot s-executing"></span>
+    </div>
+    <div class="zone-tab">
+      <span class="ic">📦</span>
+      <span class="name">WRAP-UP</span>
+      <span class="dot s-wrapup"></span>
+    </div>
+  </div>
+  <div class="zone-bar-right">
+    <div class="kbd-trigger">
+      <span class="ic">🔎</span>
+      <span>搜索命令 / 切工位</span>
+      <span class="kbd">⌘K</span>
+    </div>
+    <div class="ai-state">
+      <span class="dot"></span>
+      <span>观察中</span>
+      <span class="meta">· 2 待回答 · 5 候命</span>
+    </div>
+  </div>
+</div>
+
+<!-- ======= 主区:Sidebar + 资源树 + 主区 + Inline rail ======= -->
+<div class="shell">
+  <!-- 主导航 Sidebar -->
+  <div class="sidebar">
+    <div class="logo">A</div>
+    <a href="#" title="需求列表">📋</a>
+    <a href="#" title="仓库">📁</a>
+    <a href="#" title="知识">📚</a>
+    <a href="#" class="active" title="工作台">⚡</a>
+    <a href="#" title="Skill">🎯</a>
+    <a href="#" title="设置">⚙️</a>
+  </div>
+
+  <!-- 资源树(EXECUTING 工位专属:任务 + 文件) -->
+  <div class="tree">
+    <div class="tree-section">
+      <div class="tree-section-label">
+        <span>任务 DAG</span>
+        <span class="badge">12</span>
+      </div>
+      <div class="tree-node"><span class="ic">✓</span><span>设计退款表</span><span class="status-dot" style="background:var(--success)"></span></div>
+      <div class="tree-node active"><span class="ic">⟳</span><span class="id">T-04</span><span>refund-service 接口</span><span class="status-dot" style="background:var(--brand)"></span></div>
+      <div class="tree-node"><span class="ic">●</span><span class="id">T-05</span><span>退款状态机</span><span class="status-dot" style="background:var(--warning)"></span></div>
+      <div class="tree-node"><span class="ic">○</span><span class="id">T-06</span><span>幂等校验</span><span class="status-dot" style="background:var(--text-3)"></span></div>
+    </div>
+    <div class="tree-section">
+      <div class="tree-section-label">
+        <span>变更文件</span>
+        <span class="badge">+8 / -3</span>
+      </div>
+      <div class="tree-node"><span class="ic">📄</span><span class="id">M</span><span>RefundController.java</span></div>
+      <div class="tree-node"><span class="ic">📄</span><span class="id">M</span><span>RefundService.java</span></div>
+      <div class="tree-node"><span class="ic">📄</span><span class="id">+</span><span>RefundRequest.java</span></div>
+    </div>
+    <div class="tree-section">
+      <div class="tree-section-label"><span>产物</span></div>
+      <div class="tree-node"><span class="ic">🔧</span><span>OpenAPI spec</span></div>
+      <div class="tree-node"><span class="ic">🗄️</span><span>DDL v2</span></div>
+    </div>
+  </div>
+
+  <!-- Mission Control 主区(简化版,沿用 11d) -->
+  <div class="center">
+    <div class="zone-strip">
+      <div class="ttl">
+        <span class="badge">EXECUTING</span>
+        <span>退款功能优化 · 工作台</span>
+      </div>
+      <div class="meta">
+        <span>⏱ 02:14:33</span>
+        <span>· 7/12 任务完成</span>
+        <span>· AI 活跃 12 min</span>
+      </div>
+    </div>
+    <div class="mc-toolbar">
+      <div class="left">
+        <div class="crumb">
+          <span>REF-2024-089</span><span>›</span><span>EXECUTING</span><span>›</span><span class="cur">T-04 refund-service 接口</span>
+        </div>
+      </div>
+      <div class="right">
+        <button class="btn-secondary">⏸ 暂停 AI</button>
+        <button class="btn-ghost">⚙️</button>
+        <button class="btn-danger">⏹ 中止</button>
+      </div>
+    </div>
+    <div class="mc-main">
+      <!-- DAG 列 -->
+      <div class="dag-col">
+        <div class="hd">
+          <h4>任务 DAG</h4>
+          <span class="meta">7 done · 1 doing · 4 todo</span>
+        </div>
+        <div class="dag-stats">
+          <div class="cell done"><div class="n">7</div><div class="l">done</div></div>
+          <div class="cell doing"><div class="n">1</div><div class="l">doing</div></div>
+          <div class="cell wait"><div class="n">1</div><div class="l">wait</div></div>
+          <div class="cell todo"><div class="n">3</div><div class="l">todo</div></div>
+        </div>
+        <div class="dag-task done"><div class="id">T-01</div><div class="ttl">设计退款表结构</div></div>
+        <div class="dag-task done"><div class="id">T-02</div><div class="ttl">DDL 评审 + 索引</div></div>
+        <div class="dag-task done"><div class="id">T-03</div><div class="ttl">OpenAPI 草案</div></div>
+        <div class="dag-task doing"><div class="id">T-04</div><div class="ttl">refund-service 接口</div></div>
+        <div class="dag-task wait"><div class="id">T-05</div><div class="ttl">退款状态机</div></div>
+        <div class="dag-task todo"><div class="id">T-06</div><div class="ttl">幂等校验</div></div>
+        <div class="dag-task todo"><div class="id">T-07</div><div class="ttl">单元测试</div></div>
+      </div>
+      <!-- Diff 列 -->
+      <div class="diff-col">
+        <div class="hd"><h4>累计 Diff</h4></div>
+        <div class="diff-body">
+          <div class="diff-file">
+            <div class="filename">RefundController.java <span class="stats">+<span class="a">42</span> / -<span class="r">8</span></span></div>
+            <div class="diff-lines">
+              <div class="diff-line add"><div class="gutter">+12</div><div>@PostMapping("/refunds")</div></div>
+              <div class="diff-line add"><div class="gutter">+13</div><div>public RefundResponse create(@Valid @RequestBody RefundRequest req)</div></div>
+              <div class="diff-line ctx"><div class="gutter">14</div><div>  {</div></div>
+              <div class="diff-line add"><div class="gutter">+15</div><div>    return refundService.create(req);</div></div>
+              <div class="diff-line ctx"><div class="gutter">16</div><div>  }</div></div>
+            </div>
+          </div>
+          <div class="diff-file">
+            <div class="filename">RefundService.java <span class="stats">+<span class="a">68</span> / -<span class="r">12</span></span></div>
+            <div class="diff-lines">
+              <div class="diff-line add"><div class="gutter">+24</div><div>@Transactional public RefundResponse create(RefundRequest req)</div></div>
+              <div class="diff-line rem"><div class="gutter">-18</div><div>// TODO: implement</div></div>
+              <div class="diff-line add"><div class="gutter">+25</div><div>  validateIdempotency(req.getIdempotencyKey());</div></div>
+              <div class="diff-line add"><div class="gutter">+26</div><div>  RefundOrder order = buildOrder(req);</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- AI 行为流列 -->
+      <div class="ai-col">
+        <div class="hd"><h4>🤖 AI 行为流</h4></div>
+        <div class="ai-event success">
+          <div class="ts">12:08:41</div>
+          <div class="act">✓ T-04 代码已落盘</div>
+          <div class="desc">Controller + Service 接口实现,自动跑通 linter / type-check</div>
+          <div class="stats">+<span class="a">110</span> / -<span class="r">20</span> · 3 文件</div>
+        </div>
+        <div class="ai-event">
+          <div class="ts">12:08:02</div>
+          <div class="act">⟳ 正在跑 T-05 状态机设计</div>
+          <div class="desc">读取现有 OrderStatus 枚举,生成状态机迁移图</div>
+        </div>
+        <div class="ai-event warn">
+          <div class="ts">12:07:30</div>
+          <div class="act">⚠ 检测到风险</div>
+          <div class="desc">T-04 接口缺幂等校验 — 但已安排在 T-06,继续执行</div>
+        </div>
+        <div class="ai-event">
+          <div class="ts">12:05:18</div>
+          <div class="act">📂 读取文件 RefundService.java</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Inline rail(EXECUTING 工位保留 — 选项 C) -->
+  <div class="rail">
+    <div class="rail-section">
+      <span>Inline 提示</span>
+      <span style="font-size:10px;color:var(--text-3)">EXECUTING</span>
+    </div>
+    <div class="rail-card success">
+      <div class="ttl">⏱ 自动 snapshot</div>
+      <div class="body">T-04 落盘前已快照 v2.3.1 · 出问题可一键回滚</div>
+      <span class="act">查看 →</span>
+    </div>
+    <div class="rail-card">
+      <div class="ttl">🎯 候命 Skill</div>
+      <div class="body">code-review · test-gen · commit-message-draft</div>
+      <span class="act">唤起 ⌘K →</span>
+    </div>
+    <div class="rail-card warn">
+      <div class="ttl">⚠ 待确认</div>
+      <div class="body">T-05 状态机设计 — 异常分支要不要纳入 v1?</div>
+      <span class="act">回答 →</span>
+    </div>
+  </div>
+</div>
+
+<!-- AI 思考条(底部) -->
+<div class="ai-think-bar">
+  <div class="pulse-wrap"><span style="font-size:16px">🤖</span></div>
+  <div class="text">
+    <strong>AI 正在执行 T-05</strong> · 读取 OrderStatus 枚举,生成状态机迁移图
+    <span class="meta">· 12:08:41 · 候命 5 · 待回答 2</span>
+  </div>
+  <div class="right-actions">
+    <button class="btn-secondary">查看详情</button>
+    <button class="btn">⏸ 暂停</button>
+  </div>
+</div>
+
+<!-- Cmd+K 浮层示意(右下角) -->
+<div class="cmdk-demo">
+  <div class="search">
+    <span class="ic">🔎</span>
+    <span class="placeholder">搜命令 / 切工位 / 问 AI…</span>
+  </div>
+  <div class="hint"><span class="kbd">/</span> 命令 · <span class="kbd">@zone</span> 切工位 · <span class="kbd">⌘I</span> 问 AI</div>
+  <div class="list">
+    <div class="group-label">工位</div>
+    <div class="item"><span class="ic">📊</span><span class="name">切到 OVERVIEW 概览页</span></div>
+    <div class="item sel"><span class="ic">⚡</span><span class="name">切到 EXECUTING 工位</span><span class="kbd">↵</span></div>
+    <div class="item"><span class="ic">🎯</span><span class="name">切到 DESIGNING 工位</span></div>
+    <div class="item"><span class="ic">📝</span><span class="name">切到 DRAFTING 工位</span></div>
+    <div class="item"><span class="ic">📦</span><span class="name">切到 WRAP-UP 工位</span></div>
+    <div class="group-label">命令</div>
+    <div class="item"><span class="ic">⏸</span><span class="name">暂停 AI 执行</span><span class="kbd">⌘.</span></div>
+    <div class="item"><span class="ic">📂</span><span class="name">查看本次 Diff</span><span class="kbd">⌘D</span></div>
+    <div class="item"><span class="ic">↶</span><span class="name">回滚上次 AI 写入</span><span class="kbd">⌘Z</span></div>
+  </div>
+</div>
+
+<!-- 状态色图例 -->
+<div class="legend">
+  <h5>工位状态色(决策 22)</h5>
+  <div class="row"><span class="dot" style="background:var(--brand)"></span><span>OVERVIEW · 紫(brand · 中性)</span></div>
+  <div class="row"><span class="dot" style="background:var(--status-draft)"></span><span>DRAFTING · 灰</span></div>
+  <div class="row"><span class="dot" style="background:var(--status-analyzing);animation:pulse-blue 1.4s infinite"></span><span>ANALYZING · 蓝(脉动)</span></div>
+  <div class="row"><span class="dot" style="background:var(--status-clarifying);box-shadow:0 0 0 2px #fff,0 0 0 3px var(--status-clarifying-warn)"></span><span>CLARIFYING · 紫+警告红点</span></div>
+  <div class="row"><span class="dot" style="background:var(--status-designing)"></span><span>DESIGNING · 黄(等待决策)</span></div>
+  <div class="row"><span class="dot" style="background:var(--status-executing)"></span><span>EXECUTING · 绿(进行中)</span></div>
+  <div class="row"><span class="dot" style="background:var(--status-wrapup)"></span><span>WRAP-UP · 灰</span></div>
+</div>
+
+<!-- 说明卡片 -->
+<div class="note">
+  <b>本原型要点 · 方案 E(7 Tab 升级版)</b>
+  <ol style="margin-left:20px;margin-top:6px;line-height:1.9">
+    <li><b>7 Tab 排序</b>:OVERVIEW → DRAFTING → ANALYZING → CLARIFYING → DESIGNING → EXECUTING → WRAP-UP(Overview 排第一)</li>
+    <li><b>OVERVIEW 不是工位</b>:用 brand 紫色区分于工位状态色,仪表板不是工作台</li>
+    <li><b>工位 = 独立路由</b>(选项 A):6 个工位各自对应独立 URL,工位切换 = 浏览器路由跳转</li>
+    <li><b>排序 = lifecycle 静态顺序</b>(子决定 5a):DRAFTING → ANALYZING → CLARIFYING → DESIGNING → EXECUTING → WRAP-UP,稳定可预测</li>
+    <li><b>视觉反馈 = 状态色点 + 激活态下划线</b>(子决定 5b):无数字徽章(对齐决策 22),紫色底部 2px 下划线标识当前工位</li>
+    <li><b>Cmd+K 双通道</b>:Tab 给视觉反馈,Cmd+K 给键盘流快速切工位,0 增量 UI</li>
+    <li><b>Inline 栏下放</b>(选项 C):仅 DRAFTING / EXECUTING 保留,本原型 EXECUTING 工位右侧展示 Inline 栏</li>
+    <li><b>资源树按工位变化</b>:EXECUTING 工位资源树 = 任务 DAG + 变更文件 + 产物;DRAFTING 工位资源树 = PRD + AC + 关联仓库</li>
+  </ol>
+  <pre>URL 示例 · /requirements/[id]/executing
+Shell 1: (workspace)/layout.tsx — StatusBar + Sidebar + 键盘监听 + ZoneBar(7 Tab · 工位路由时)
+Overview 页: requirements/[id]/page.tsx — 概览页(无 ZoneBar)
+工位 Shell: requirements/[id]/[zone]/layout.tsx — 工位专属资源树 + (可选)Inline 栏
+主区: requirements/[id]/[zone]/page.tsx — 工位布局</pre>
+</div>
+
+</body>
+</html>

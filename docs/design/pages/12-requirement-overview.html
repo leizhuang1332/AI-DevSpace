@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>12 · 需求概览页 OVERVIEW · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{
+  --brand:#5e6ad2; --brand-50:#eef0fb; --brand-500:#5e6ad2; --brand-600:#525bc7; --brand-700:#4147a3;
+  --success:#16a34a; --warning:#f59e0b; --error:#ef4444; --info:#64748b;
+  --status-draft:#94a3b8; --status-analyzing:#3b82f6; --status-clarifying:#5e6ad2;
+  --status-clarifying-warn:#ef4444; --status-designing:#f59e0b;
+  --status-executing:#16a34a; --status-wrapup:#94a3b8;
+  --bg:#fbfbfd; --bg-elevated:#ffffff; --bg-subtle:#f5f5f7;
+  --border:#ebebef; --border-strong:#d8d8de;
+  --text-1:#0f172a; --text-2:#475569; --text-3:#94a3b8;
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-6:24px; --space-8:32px;
+  --text-xs:11px; --text-sm:12px; --text-base:13px; --text-md:14px; --text-lg:16px; --text-xl:18px; --text-2xl:22px;
+  --row-md:32px;
+  --radius-sm:4px; --radius-md:6px; --radius-lg:8px; --radius-xl:12px;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.04); --shadow-md:0 2px 4px rgba(0,0,0,.06); --shadow-lg:0 4px 12px rgba(0,0,0,.08);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg);color:var(--text-1);font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased}
+
+/* ======= 顶部 dark nav(全局,无 ZoneBar) ======= */
+.topnav{position:sticky;top:0;z-index:100;background:#0f172a;color:#fff;padding:var(--space-2) var(--space-6);font-size:var(--text-sm);display:flex;align-items:center;gap:var(--space-4)}
+.topnav .pill{background:var(--brand);color:#fff;padding:2px 10px;border-radius:var(--radius-md);font-size:var(--text-xs);font-weight:500}
+.topnav a{color:#94a3b8;text-decoration:none;padding:4px 10px;border-radius:var(--radius-md);font-size:var(--text-sm)}
+.topnav a:hover{color:#fff;background:rgba(255,255,255,.06)}
+.topnav a.cur{color:#fff;background:var(--brand)}
+.topnav .spacer{flex:1}
+.topnav .meta{color:#64748b;font-size:var(--text-xs);font-family:'JetBrains Mono',monospace}
+
+/* ======= Shell: Sidebar + 主区(无 ZoneBar · 无 Inline rail) ======= */
+.shell{display:grid;grid-template-columns:56px 1fr;background:var(--bg);min-height:calc(100vh - 34px)}
+.sidebar{background:var(--bg-elevated);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:var(--space-3) 0;gap:2px}
+.sidebar .logo{width:32px;height:32px;border-radius:var(--radius-md);background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;margin-bottom:var(--space-3)}
+.sidebar a{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius-md);font-size:18px;text-decoration:none;color:var(--text-2);position:relative}
+.sidebar a:hover{background:var(--bg-subtle);color:var(--text-1)}
+.sidebar a.active{background:var(--brand-50);color:var(--brand-700)}
+.sidebar a.active::before{content:'';position:absolute;left:-12px;top:8px;bottom:8px;width:2px;background:var(--brand);border-radius:1px}
+
+/* ======= Overview 主区 ======= */
+.overview-main{display:flex;flex-direction:column;overflow:auto;padding:var(--space-6);max-width:1400px;width:100%}
+
+/* 面包屑 + 标题区 */
+.overview-header{margin-bottom:var(--space-6)}
+.breadcrumb{display:flex;align-items:center;gap:6px;font-size:var(--text-sm);color:var(--text-3);margin-bottom:var(--space-3)}
+.breadcrumb .cur{color:var(--text-1);font-weight:500}
+.overview-title{display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-3)}
+.overview-title h1{font-size:var(--text-2xl);font-weight:600;color:var(--text-1);letter-spacing:-.01em}
+.overview-title .req-id{font-family:'JetBrains Mono',monospace;font-size:var(--text-sm);color:var(--text-3);background:var(--bg-subtle);padding:2px 8px;border-radius:var(--radius-sm)}
+.meta-bar{display:flex;flex-wrap:wrap;gap:var(--space-4);font-size:var(--text-sm);color:var(--text-2)}
+.meta-bar .item{display:flex;align-items:center;gap:6px}
+.meta-bar .item .lbl{color:var(--text-3);font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.04em}
+.meta-bar .item .val{color:var(--text-1);font-weight:500}
+.meta-bar .item .val.repos{color:var(--brand-600);cursor:pointer}
+.meta-bar .actions{margin-left:auto;display:flex;gap:var(--space-2)}
+
+/* ======= 按钮 ======= */
+.btn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 var(--space-3);border-radius:var(--radius-md);font-size:var(--text-sm);font-weight:500;cursor:pointer;border:none;background:var(--brand);color:#fff;font-family:inherit}
+.btn:hover{background:var(--brand-600)}
+.btn-secondary{background:var(--bg-elevated);color:var(--text-1);border:1px solid var(--border-strong)}
+.btn-secondary:hover{background:var(--bg-subtle)}
+
+/* ======= 卡片通用 ======= */
+.card{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-4);box-shadow:var(--shadow-sm)}
+.card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-3)}
+.card-head h3{font-size:var(--text-md);font-weight:600;color:var(--text-1);display:flex;align-items:center;gap:var(--space-2)}
+.card-head .meta{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-3)}
+
+/* ======= 2x2 网格 ======= */
+.overview-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4);margin-bottom:var(--space-4)}
+
+/* ======= 完成进度卡片 ======= */
+.progress-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-3);margin-bottom:var(--space-4)}
+.progress-stats .cell{padding:var(--space-3);background:var(--bg-subtle);border-radius:var(--radius-md);text-align:center}
+.progress-stats .cell .n{font-size:var(--text-xl);font-weight:600;color:var(--text-1);font-family:'JetBrains Mono',monospace}
+.progress-stats .cell .l{font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-top:2px}
+.progress-bar{position:relative;height:24px;background:var(--bg-subtle);border-radius:var(--radius-md);overflow:hidden;margin-bottom:var(--space-3)}
+.progress-bar .fill{position:absolute;left:0;top:0;height:100%;background:linear-gradient(90deg,var(--brand),var(--brand-600));border-radius:var(--radius-md)}
+.progress-bar .label{position:absolute;left:var(--space-3);top:50%;transform:translateY(-50%);font-size:var(--text-sm);color:#fff;font-weight:500;font-family:'JetBrains Mono',monospace}
+.progress-detail{display:flex;gap:var(--space-4);font-size:var(--text-xs);color:var(--text-2)}
+.progress-detail .seg{display:flex;align-items:center;gap:4px}
+.progress-detail .seg .dot{width:8px;height:8px;border-radius:50%}
+
+/* ======= 工位地图卡片 ======= */
+.zone-map{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-2)}
+.zone-card{background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3);cursor:pointer;transition:all .15s ease;text-align:left}
+.zone-card:hover{border-color:var(--brand);box-shadow:var(--shadow-md);background:var(--bg-elevated)}
+.zone-card .hd{display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2)}
+.zone-card .ic{font-size:16px}
+.zone-card .nm{font-size:var(--text-sm);font-weight:600;color:var(--text-1);flex:1}
+.zone-card .dot{width:8px;height:8px;border-radius:50%}
+.zone-card .meta-row{display:flex;align-items:center;justify-content:space-between;font-size:var(--text-xs);color:var(--text-3);font-family:'JetBrains Mono',monospace;margin-top:var(--space-1)}
+.zone-card.cur{background:var(--brand-50);border-color:var(--brand)}
+
+/* ======= 里程碑时间线 ======= */
+.timeline{position:relative;padding-left:var(--space-6)}
+.timeline::before{content:'';position:absolute;left:7px;top:8px;bottom:8px;width:2px;background:var(--border)}
+.tl-node{position:relative;padding-bottom:var(--space-4)}
+.tl-node:last-child{padding-bottom:0}
+.tl-dot{position:absolute;left:-22px;top:4px;width:14px;height:14px;border-radius:50%;background:var(--bg-elevated);border:2px solid var(--border-strong)}
+.tl-node.done .tl-dot{background:var(--success);border-color:var(--success)}
+.tl-node.cur .tl-dot{background:var(--brand);border-color:var(--brand);box-shadow:0 0 0 4px var(--brand-50)}
+.tl-node.todo .tl-dot{background:var(--bg-elevated);border-color:var(--border-strong)}
+.tl-row{display:flex;align-items:center;justify-content:space-between}
+.tl-row .nm{font-size:var(--text-sm);font-weight:500;color:var(--text-1)}
+.tl-row .ts{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-3)}
+.tl-sub{font-size:var(--text-xs);color:var(--text-2);margin-top:2px}
+
+/* ======= AI 活动概览 ======= */
+.ai-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-3)}
+.ai-cell{padding:var(--space-3);background:var(--bg-subtle);border-radius:var(--radius-md);text-align:center}
+.ai-cell .n{font-size:var(--text-lg);font-weight:600;color:var(--text-1);font-family:'JetBrains Mono',monospace}
+.ai-cell .l{font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-top:2px}
+.ai-zones{display:flex;flex-direction:column;gap:var(--space-2);margin-top:var(--space-3)}
+.ai-zones .row{display:flex;align-items:center;gap:var(--space-2);font-size:var(--text-xs)}
+.ai-zones .row .nm{width:90px;color:var(--text-2)}
+.ai-zones .row .bar{flex:1;height:6px;background:var(--bg-subtle);border-radius:3px;overflow:hidden}
+.ai-zones .row .bar .fill{height:100%;background:var(--brand);border-radius:3px}
+.ai-zones .row .cnt{font-family:'JetBrains Mono',monospace;color:var(--text-3);width:30px;text-align:right}
+
+/* ======= AI 思考条(底部 · Overview 版本,显示需求级 AI 状态) ======= */
+.ai-think-bar{position:sticky;bottom:0;background:var(--bg-elevated);border-top:2px solid var(--brand);padding:var(--space-3) var(--space-6);display:flex;align-items:center;gap:var(--space-3);z-index:20;box-shadow:0 -4px 12px rgba(0,0,0,.04)}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(94,106,210,.6)}70%{box-shadow:0 0 0 6px rgba(94,106,210,0)}100%{box-shadow:0 0 0 0 rgba(94,106,210,0)}}
+.ai-think-bar .pulse-wrap{width:36px;height:36px;border-radius:50%;background:var(--brand-50);display:flex;align-items:center;justify-content:center;position:relative}
+.ai-think-bar .pulse-wrap::before{content:'';position:absolute;inset:-4px;border-radius:50%;border:2px solid var(--brand);opacity:.3;animation:pulse 1.6s infinite}
+.ai-think-bar .text{flex:1;font-size:var(--text-md);color:var(--text-1)}
+.ai-think-bar .text strong{color:var(--brand-700)}
+.ai-think-bar .text .meta{color:var(--text-3);font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);margin-left:var(--space-2)}
+.ai-think-bar .right-actions{display:flex;gap:var(--space-2)}
+.ai-think-bar .right-actions .btn{height:32px;padding:0 var(--space-3)}
+
+/* ======= 说明卡片 ======= */
+.note{margin:var(--space-6);padding:var(--space-4);background:#f0f9ff;border:1px solid #bae6fd;border-radius:var(--radius-md);font-size:var(--text-sm);color:#075985;line-height:1.7}
+.note b{color:#0c4a6e}
+.note pre{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);background:rgba(255,255,255,.5);padding:var(--space-3);border-radius:var(--radius-sm);overflow-x:auto;margin:var(--space-3) 0;color:var(--text-1)}
+.kbd{font-family:'JetBrains Mono',monospace;background:var(--bg-subtle);padding:1px 6px;border-radius:var(--radius-sm);font-size:11px;border:1px solid var(--border);color:var(--text-2)}
+
+.no-zone-bar{margin:var(--space-4) var(--space-6) 0;padding:var(--space-3);background:#fef3c7;border:1px dashed #fbbf24;border-radius:var(--radius-md);font-size:var(--text-xs);color:#92400e;text-align:center}
+</style>
+</head>
+<body>
+
+<!-- 顶部 dark nav(全局) -->
+<div class="topnav">
+  <span class="pill">12 · 需求概览页 · OVERVIEW</span>
+  <a href="11a-stage-adaptive-draft.html">11a · DRAFT</a>
+  <a href="11b-stage-adaptive-clarifying.html">11b · CLARIFYING</a>
+  <a href="11c-stage-adaptive-designing.html">11c · DESIGNING</a>
+  <a href="11d-stage-adaptive-implementing.html">11d · IMPL</a>
+  <a href="11e-stage-adaptive-analyzing.html">11e · ANALYZING</a>
+  <a href="11f-stage-adaptive-archive.html">11f · ARCHIVE</a>
+  <a href="11g-zone-tab-navigator.html">11g · ZoneBar</a>
+  <span class="spacer"></span>
+  <span class="meta">/requirements/[id]/ · 第 7 产品形态 · 非工位</span>
+</div>
+
+<!-- ⚠️ 注意:本原型无 ZoneBar!Overview 是仪表板,不是工作台 -->
+
+<!-- ======= Shell: Sidebar + 主区 ======= -->
+<div class="shell">
+  <!-- 主导航 Sidebar -->
+  <div class="sidebar">
+    <div class="logo">A</div>
+    <a href="#" title="需求列表">📋</a>
+    <a href="#" title="仓库">📁</a>
+    <a href="#" title="知识">📚</a>
+    <a href="#" class="active" title="工作台">⚡</a>
+    <a href="#" title="Skill">🎯</a>
+    <a href="#" title="设置">⚙️</a>
+  </div>
+
+  <!-- Overview 主区(无 ZoneBar · 无 Inline rail) -->
+  <div class="overview-main">
+    <!-- 面包屑 + 标题区 -->
+    <div class="overview-header">
+      <div class="breadcrumb">
+        <span>📋 需求列表</span>
+        <span>›</span>
+        <span class="cur">REF-2024-089 · Overview</span>
+      </div>
+      <div class="overview-title">
+        <h1>退款功能优化</h1>
+        <span class="req-id">REF-2024-089</span>
+      </div>
+      <div class="meta-bar">
+        <div class="item"><span class="lbl">状态</span><span class="val" style="color:var(--status-executing)">● EXECUTING</span></div>
+        <div class="item"><span class="lbl">关联仓库</span><span class="val repos">refund-service · order-core · payment-gateway (3)</span></div>
+        <div class="item"><span class="lbl">负责人</span><span class="val">@ray</span></div>
+        <div class="item"><span class="lbl">创建</span><span class="val">2026-07-08 · 4 天前</span></div>
+        <div class="item"><span class="lbl">最近更新</span><span class="val">12 分钟前</span></div>
+        <div class="actions">
+          <button class="btn-secondary">⚙️ 设置</button>
+          <button class="btn">📦 归档 →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2x2 内容网格 -->
+    <div class="overview-grid">
+
+      <!-- 左上:完成进度 -->
+      <div class="card">
+        <div class="card-head">
+          <h3>📈 完成进度</h3>
+          <span class="meta">72%</span>
+        </div>
+        <div class="progress-stats">
+          <div class="cell"><div class="n" style="color:var(--success)">7</div><div class="l">已完成</div></div>
+          <div class="cell"><div class="n" style="color:var(--brand)">1</div><div class="l">进行中</div></div>
+          <div class="cell"><div class="n" style="color:var(--warning)">1</div><div class="l">等待中</div></div>
+          <div class="cell"><div class="n" style="color:var(--text-3)">3</div><div class="l">待办</div></div>
+        </div>
+        <div class="progress-bar">
+          <div class="fill" style="width:72%"></div>
+          <div class="label">72% · 7/12 任务</div>
+        </div>
+        <div class="progress-detail">
+          <div class="seg"><span class="dot" style="background:var(--success)"></span><span>代码 +110/-20 行</span></div>
+          <div class="seg"><span class="dot" style="background:var(--brand)"></span><span>产物 5 件</span></div>
+          <div class="seg"><span class="dot" style="background:var(--warning)"></span><span>PR #234 等待 review</span></div>
+        </div>
+      </div>
+
+      <!-- 右上:工位地图(6 工位入口) -->
+      <div class="card">
+        <div class="card-head">
+          <h3>🗺️ 工作台地图</h3>
+          <span class="meta">6 工位 · 点击进入</span>
+        </div>
+        <div class="zone-map">
+          <a class="zone-card" href="11a-stage-adaptive-draft.html">
+            <div class="hd"><span class="ic">📝</span><span class="nm">DRAFTING</span><span class="dot" style="background:var(--status-draft)"></span></div>
+            <div class="meta-row"><span>PRD 已写</span><span>3 节</span></div>
+          </a>
+          <a class="zone-card" href="11e-stage-adaptive-analyzing.html">
+            <div class="hd"><span class="ic">🔍</span><span class="nm">ANALYZING</span><span class="dot" style="background:var(--status-analyzing)"></span></div>
+            <div class="meta-row"><span>已完成</span><span>5 子问题</span></div>
+          </a>
+          <a class="zone-card" href="11b-stage-adaptive-clarifying.html">
+            <div class="hd"><span class="ic">❓</span><span class="nm">CLARIFYING</span><span class="dot" style="background:var(--status-clarifying)"></span></div>
+            <div class="meta-row"><span>已澄清</span><span>3 轮</span></div>
+          </a>
+          <a class="zone-card" href="11c-stage-adaptive-designing.html">
+            <div class="hd"><span class="ic">🎯</span><span class="nm">DESIGNING</span><span class="dot" style="background:var(--status-designing)"></span></div>
+            <div class="meta-row"><span>方案 A 已选</span><span>3 候选</span></div>
+          </a>
+          <a class="zone-card cur" href="11d-stage-adaptive-implementing.html">
+            <div class="hd"><span class="ic">⚡</span><span class="nm">EXECUTING</span><span class="dot" style="background:var(--status-executing)"></span></div>
+            <div class="meta-row"><span>当前进度</span><span>1/4 任务</span></div>
+          </a>
+          <a class="zone-card" href="11f-stage-adaptive-archive.html">
+            <div class="hd"><span class="ic">📦</span><span class="nm">WRAP-UP</span><span class="dot" style="background:var(--status-wrapup)"></span></div>
+            <div class="meta-row"><span>待归档</span><span>—</span></div>
+          </a>
+        </div>
+      </div>
+
+      <!-- 左下:关键里程碑时间线 -->
+      <div class="card">
+        <div class="card-head">
+          <h3>⏱ 关键里程碑</h3>
+          <span class="meta">5/5 已完成 · 当前 EXECUTING</span>
+        </div>
+        <div class="timeline">
+          <div class="tl-node done">
+            <div class="tl-dot"></div>
+            <div class="tl-row"><span class="nm">DRAFTING · 写 PRD</span><span class="ts">2026-07-08</span></div>
+            <div class="tl-sub">完成需求文档 + AC 5 条 · 关联 3 仓库</div>
+          </div>
+          <div class="tl-node done">
+            <div class="tl-dot"></div>
+            <div class="tl-row"><span class="nm">ANALYZING · AI 分析</span><span class="ts">2026-07-09</span></div>
+            <div class="tl-sub">识别子问题 5 个 / 风险点 3 个 / 候选方案 3 个</div>
+          </div>
+          <div class="tl-node done">
+            <div class="tl-dot"></div>
+            <div class="tl-row"><span class="nm">CLARIFYING · 澄清</span><span class="ts">2026-07-09 → 07-10</span></div>
+            <div class="tl-sub">3 轮问答 · 解决了幂等键冲突问题</div>
+          </div>
+          <div class="tl-node done">
+            <div class="tl-dot"></div>
+            <div class="tl-row"><span class="nm">DESIGNING · 选方案</span><span class="ts">2026-07-10</span></div>
+            <div class="tl-sub">选择方案 A · 异步退款 · 接受 2 个取舍点</div>
+          </div>
+          <div class="tl-node done">
+            <div class="tl-dot"></div>
+            <div class="tl-row"><span class="nm">PLANNING · 任务拆分</span><span class="ts">2026-07-11</span></div>
+            <div class="tl-sub">12 个任务 · 关键路径 7 个 · 估算 3 天</div>
+          </div>
+          <div class="tl-node cur">
+            <div class="tl-dot"></div>
+            <div class="tl-row"><span class="nm">EXECUTING · 实施中</span><span class="ts">2026-07-11 → 进行中</span></div>
+            <div class="tl-sub">已完成 7/12 任务 · PR #234 等待 review</div>
+          </div>
+          <div class="tl-node todo">
+            <div class="tl-dot"></div>
+            <div class="tl-row"><span class="nm" style="color:var(--text-3)">WRAP-UP · 归档</span><span class="ts">—</span></div>
+            <div class="tl-sub">待 EXECUTING 完成后归档</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右下:AI 活动概览 -->
+      <div class="card">
+        <div class="card-head">
+          <h3>🤖 AI 活动概览</h3>
+          <span class="meta">总活跃 1h 23min</span>
+        </div>
+        <div class="ai-grid">
+          <div class="ai-cell"><div class="n">124</div><div class="l">总写入行</div></div>
+          <div class="ai-cell"><div class="n">23</div><div class="l">Skill 调用</div></div>
+          <div class="ai-cell"><div class="n">7</div><div class="l">快照数</div></div>
+        </div>
+        <div style="margin-top:var(--space-4);font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:500;margin-bottom:var(--space-2)">AI 在各工位活跃度</div>
+        <div class="ai-zones">
+          <div class="row"><span class="nm">EXECUTING</span><span class="bar"><span class="fill" style="width:78%"></span></span><span class="cnt">78%</span></div>
+          <div class="row"><span class="nm">DESIGNING</span><span class="bar"><span class="fill" style="width:42%"></span></span><span class="cnt">42%</span></div>
+          <div class="row"><span class="nm">CLARIFYING</span><span class="bar"><span class="fill" style="width:28%"></span></span><span class="cnt">28%</span></div>
+          <div class="row"><span class="nm">ANALYZING</span><span class="bar"><span class="fill" style="width:18%"></span></span><span class="cnt">18%</span></div>
+          <div class="row"><span class="nm">DRAFTING</span><span class="bar"><span class="fill" style="width:12%"></span></span><span class="cnt">12%</span></div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- 说明卡片 -->
+    <div class="note">
+      <b>本原型要点 · 需求概览页 OVERVIEW</b>
+      <ol style="margin-left:20px;margin-top:6px;line-height:1.9">
+        <li><b>第 7 产品形态 · 非工位</b>——Overview 是仪表板,不是工作台;用户"看"需求全貌,不"做"具体动作</li>
+        <li><b>无 ZoneBar</b>——Overview 不显示 7 Tab 导航器(对比 11g 的 EXECUTING active),进工位时 ZoneBar 才出现</li>
+        <li><b>无 Inline rail</b>——Overview 不属于工位,资源树 / Inline 栏都不适用(对比 11g 右侧 120px 栏)</li>
+        <li><b>5 项内容(推荐集)</b>:元数据 + 完成进度 + 工位地图 + 里程碑时间线 + AI 活动概览</li>
+        <li><b>工位地图是核心入口</b>——6 个工位卡片,带状态色,点击直接跳到对应工位</li>
+        <li><b>底部 AI 思考条是需求级</b>——显示需求维度的 AI 状态(如"总写入 124 行 / 7 快照"),不是工位级(如"AI 正在执行 T-05")</li>
+      </ol>
+      <pre>URL: /requirements/[id]/
+重定向逻辑: cookie last_zone ? last_zone : 'drafting'
+Shell 层 1: (workspace)/layout.tsx — StatusBar + Sidebar + AI 思考条(全局)
+主区: requirements/[id]/page.tsx — Overview 概览页(无 ZoneBar)
+进工位: 7 Tab 出现,主区变为工位布局</pre>
+    </div>
+  </div>
+</div>
+
+<!-- AI 思考条(底部 · Overview 简化版 · 显示需求级 AI 状态) -->
+<div class="ai-think-bar">
+  <div class="pulse-wrap"><span style="font-size:16px">🤖</span></div>
+  <div class="text">
+    <strong>AI 累计工作 1h 23min</strong> · 写入 124 行 · 23 Skill 调用 · 7 快照 · 1 PR 等待 review
+    <span class="meta">· 最近 12 分钟前 · 当前活跃度:低</span>
+  </div>
+  <div class="right-actions">
+    <button class="btn-secondary">📊 详细统计</button>
+    <button class="btn">→ 进入 EXECUTING</button>
+  </div>
+</div>
+
+<!-- 提示卡片:Overview 无 ZoneBar -->
+<div class="no-zone-bar">
+  ⚠️ 本原型无 ZoneBar · Overview 是仪表板 · 进入工位时 7 Tab 才出现
+</div>
+
+</body>
+</html>
