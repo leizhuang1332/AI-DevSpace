@@ -3,5 +3,5 @@
  * Currently ApiError / NotImplementedError / ApiErrorCode live in `./api.ts`.
  * This barrel is the future home for cross-cutting error utilities.
  */
-export { ApiError, NotImplementedError, ApiErrorCode } from './api.js'
-export type { ApiErrorT, NotImplementedErrorT } from './api.js'
+export { ApiError, NotImplementedError, ApiErrorCode } from './api'
+export type { ApiErrorT, NotImplementedErrorT } from './api'
