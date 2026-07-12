@@ -16,6 +16,8 @@ import { DraftingZone } from '@/components/drafting-zone'
 import { DraftingSkillRail } from '@/components/drafting-skill-rail'
 import { getClarifyingData } from '@/lib/clarifying'
 import { ClarifyingZone } from '@/components/clarifying-zone'
+import { getDesigningData } from '@/lib/designing'
+import { DesigningZone } from '@/components/designing-zone'
 import { ZoneShell } from '@/lib/zone-shell'
 
 /**
@@ -29,7 +31,8 @@ import { ZoneShell } from '@/lib/zone-shell'
  * - DRAFTING 工位(issue 18)渲染 `<DraftingZone />` Form 居中布局
  * - ANALYZING 工位(issue 19)渲染 `<AnalyzingZone />` Thinking 大屏 + 打字机流
  * - CLARIFYING 工位(issue 20)渲染 `<ClarifyingZone />` Q&A 主区
- *   其余 2 工位(21-22)走占位实现,issue 21-22 替换
+ * - DESIGNING 工位(issue 21)渲染 `<DesigningZone />` Compare 主区
+ *   其余 1 工位(22 wrap-up)走占位实现,issue 22 替换
  */
 export function generateStaticParams() {
   return ZONE_META.map((z) => ({ zone: z.route_segment }))
@@ -99,7 +102,21 @@ export default async function ZonePage({
     )
   }
 
-  // 其余 2 工位占位实现 — issue 21-22 替换
+  // DESIGNING 工位(issue 21):Compare 形态(主区全宽,符合 ADR-0011 R2 默认无资源树)
+  // - 左侧设计文档(markdown)+ 右侧 3 个候选方案卡片横向对比
+  // - 底部"取舍点详情 + AI 建议" + 自定义调整输入框
+  // - onSelect / onRegenerate 为 client 回调(默认 no-op),后续接 agent API
+  //   时包一层 client wrapper(类似 DRAFTING 的 DraftingSkillRail)注入回调。
+  if (zone.id === 'designing') {
+    const data = await getDesigningData(params.id)
+    return (
+      <ZoneShell id={params.id} zone={zone}>
+        <DesigningZone data={data} />
+      </ZoneShell>
+    )
+  }
+
+  // 其余 1 工位占位实现 — issue 22 (wrap-up) 替换
   const shellDesc =
     zone.has_resource_tree && zone.has_inline_rail
       ? '资源树 + Inline 栏(3 列)'
