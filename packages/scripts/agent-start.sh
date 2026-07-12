@@ -20,11 +20,14 @@ if [[ -f "$PID_FILE" ]]; then
   rm -f "$PID_FILE"
 fi
 
-# Pick prod build if compiled, else dev (tsx).
+# Pick prod build if compiled, else dev (tsx via pnpm exec).
 if [[ -f "$AGENT_DIR/dist/server.js" ]]; then
   CMD=(node "$AGENT_DIR/dist/server.js")
 else
-  CMD=(npx --prefix "$REPO_ROOT" tsx "$AGENT_DIR/src/server.ts")
+  # `pnpm exec tsx` resolves tsx from apps/agent/node_modules/.bin/
+  # (set in apps/agent/package.json devDependencies). More reliable than
+  # `npx --prefix` which loses PATH context after nohup fork.
+  CMD=(pnpm --filter @ai-devspace/agent exec tsx "$AGENT_DIR/src/server.ts")
 fi
 
 echo "agent-start: launching on port $PORT"
