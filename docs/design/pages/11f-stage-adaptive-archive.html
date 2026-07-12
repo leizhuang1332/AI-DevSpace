@@ -1,0 +1,723 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>11f · 阶段自适应·Archive 形态 · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{
+  --brand:#5e6ad2; --brand-50:#eef0fb; --brand-500:#5e6ad2; --brand-600:#525bc7; --brand-700:#4147a3;
+  --success:#16a34a; --warning:#f59e0b; --error:#ef4444; --info:#64748b;
+  --bg:#fbfbfd; --bg-elevated:#ffffff; --bg-subtle:#f5f5f7; --border:#ebebef; --border-strong:#d8d8de;
+  --text-1:#0f172a; --text-2:#475569; --text-3:#94a3b8;
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-6:24px; --space-8:32px;
+  --text-xs:11px; --text-sm:12px; --text-base:13px; --text-md:14px; --text-lg:16px; --text-xl:18px; --text-2xl:20px;
+  --radius-sm:4px; --radius-md:6px; --radius-lg:8px; --radius-xl:12px;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.04); --shadow-md:0 2px 4px rgba(0,0,0,.06); --shadow-lg:0 4px 12px rgba(0,0,0,.08);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg);color:var(--text-1);font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased}
+
+/* ======= Top dark nav ======= */
+.topnav{position:sticky;top:0;z-index:100;background:#0f172a;color:#fff;padding:var(--space-2) var(--space-6);font-size:var(--text-sm);display:flex;align-items:center;gap:var(--space-4)}
+.topnav .pill{background:var(--success);color:#fff;padding:2px 10px;border-radius:var(--radius-md);font-size:var(--text-xs);font-weight:500}
+.topnav a{color:#94a3b8;text-decoration:none;padding:4px 10px;border-radius:var(--radius-md);font-size:var(--text-sm)}
+.topnav a:hover{color:#fff;background:rgba(255,255,255,.06)}
+.topnav a.cur{color:#fff;background:var(--brand)}
+.topnav .spacer{flex:1}
+.topnav .meta{color:#64748b;font-size:var(--text-xs);font-family:'JetBrains Mono',monospace}
+
+/* ======= StatusBar ======= */
+.statusbar{position:sticky;top:34px;z-index:50;background:var(--bg-elevated);border-bottom:1px solid var(--border)}
+.statusbar .tabs{display:flex;align-items:center;height:40px;padding:0 var(--space-4);gap:2px}
+.statusbar .tab{display:flex;align-items:center;gap:6px;height:28px;padding:0 var(--space-3);font-size:var(--text-sm);color:var(--text-2);border-radius:var(--radius-md);cursor:pointer;white-space:nowrap}
+.statusbar .tab:hover{background:var(--bg-subtle)}
+.statusbar .tab.active{background:var(--brand-50);color:var(--brand-600);font-weight:500}
+.statusbar .tab .dot{width:6px;height:6px;border-radius:50%;background:var(--success)}
+.statusbar .info{display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 var(--space-4);border-top:1px solid var(--border);background:var(--bg-subtle);font-size:var(--text-sm);color:var(--text-2)}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(22,163,74,.6)}70%{box-shadow:0 0 0 6px rgba(22,163,74,0)}100%{box-shadow:0 0 0 0 rgba(22,163,74,0)}}
+.dot-pulse{width:8px;height:8px;border-radius:50%;background:var(--success);animation:pulse 1.4s infinite;display:inline-block}
+
+/* ======= Sidebar ======= */
+.shell{display:grid;grid-template-columns:56px 1fr;min-height:calc(100vh - 106px)}
+.sidebar{background:var(--bg-elevated);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:var(--space-3) 0;gap:2px}
+.sidebar .logo{width:32px;height:32px;border-radius:var(--radius-md);background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;margin-bottom:var(--space-3)}
+.sidebar a{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius-md);font-size:18px;text-decoration:none;color:var(--text-2);position:relative}
+.sidebar a:hover{background:var(--bg-subtle);color:var(--text-1)}
+.sidebar a.active{background:var(--brand-50);color:var(--brand-700)}
+.sidebar a.active::before{content:'';position:absolute;left:-12px;top:8px;bottom:8px;width:2px;background:var(--brand);border-radius:1px}
+
+.detail{display:grid;grid-template-columns:240px 1fr 120px;background:var(--bg);min-height:calc(100vh - 106px)}
+
+/* Resource tree */
+.tree{background:var(--bg-elevated);border-right:1px solid var(--border);padding:var(--space-3) 0;overflow:auto}
+.tree-section{padding:0 var(--space-3);margin-bottom:var(--space-3)}
+.tree-section-label{padding:var(--space-2) var(--space-2);font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:500;display:flex;align-items:center;justify-content:space-between}
+.tree-node{display:flex;align-items:center;gap:var(--space-2);height:28px;padding:0 var(--space-2);border-radius:var(--radius-md);font-size:var(--text-sm);color:var(--text-2);cursor:pointer}
+.tree-node:hover{background:var(--bg-subtle);color:var(--text-1)}
+.tree-node.active{background:var(--brand-50);color:var(--brand-700);font-weight:500}
+.tree-node .ic{font-size:14px;width:16px;text-align:center;color:var(--text-3)}
+.tree-node .status-dot{width:6px;height:6px;border-radius:50%;margin-left:auto}
+
+/* ======= Center · Archive 形态 ======= */
+.center{display:flex;flex-direction:column;background:var(--bg-elevated);overflow:hidden}
+
+/* Stage strip — 成功状态用绿色调 */
+.stage-strip{background:linear-gradient(90deg,#f0fdf4 0%,rgba(240,253,244,0.4) 60%);border-bottom:1px solid var(--border);padding:var(--space-3) var(--space-6);display:flex;align-items:center;justify-content:space-between}
+.stage-strip .ttl{display:flex;align-items:center;gap:var(--space-2);font-weight:600;font-size:var(--text-md);color:var(--success)}
+.stage-strip .ttl .badge{background:var(--success);color:#fff;font-size:var(--text-xs);font-weight:500;padding:2px 8px;border-radius:var(--radius-md)}
+.stage-strip .meta{font-family:'JetBrains Mono',monospace;font-size:var(--text-sm);color:#15803d;display:flex;align-items:center;gap:var(--space-3)}
+
+/* Toolbar */
+.center-toolbar{display:flex;align-items:center;justify-content:space-between;padding:var(--space-2) var(--space-6);border-bottom:1px solid var(--border);background:var(--bg-elevated);gap:var(--space-3)}
+.center-toolbar .left{display:flex;align-items:center;gap:var(--space-3)}
+.center-toolbar .left .crumb{font-size:var(--text-sm);color:var(--text-3);display:flex;align-items:center;gap:6px}
+.center-toolbar .left .crumb .cur{color:var(--text-1);font-weight:500}
+.center-toolbar .right{display:flex;gap:var(--space-2)}
+.btn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 var(--space-3);border-radius:var(--radius-md);font-size:var(--text-sm);font-weight:500;cursor:pointer;border:none;background:var(--brand);color:#fff;font-family:inherit}
+.btn:hover{background:var(--brand-600)}
+.btn-success{background:var(--success);color:#fff}
+.btn-success:hover{background:#15803d}
+.btn-secondary{background:var(--bg-elevated);color:var(--text-1);border:1px solid var(--border-strong)}
+.btn-secondary:hover{background:var(--bg-subtle)}
+.btn-ghost{background:transparent;color:var(--text-2)}
+.btn-ghost:hover{color:var(--text-1);background:var(--bg-subtle)}
+
+/* Main archive body */
+.archive-main{padding:var(--space-6);overflow:auto;flex:1;display:flex;flex-direction:column;gap:var(--space-4)}
+
+/* Report header */
+.report-hero{background:linear-gradient(135deg,#f0fdf4 0%,rgba(240,253,244,0.4) 100%);border:1px solid #bbf7d0;border-radius:var(--radius-xl);padding:var(--space-6);display:flex;align-items:center;gap:var(--space-6)}
+.report-hero .check{width:72px;height:72px;border-radius:50%;background:#16a34a;color:#fff;display:flex;align-items:center;justify-content:center;font-size:36px;flex-shrink:0;box-shadow:0 0 0 6px rgba(22,163,74,.15)}
+.report-hero .text{flex:1}
+.report-hero .text .ttl{font-size:var(--text-xl);font-weight:600;color:#15803d;margin-bottom:4px}
+.report-hero .text .desc{color:var(--text-2);font-size:var(--text-sm);line-height:1.6}
+.report-hero .text .desc strong{color:var(--text-1)}
+.report-hero .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-3);margin-top:var(--space-3)}
+.report-hero .stat{text-align:center;padding:var(--space-2);background:rgba(255,255,255,.6);border-radius:var(--radius-md)}
+.report-hero .stat .n{font-size:var(--text-xl);font-weight:600;color:#15803d;font-family:'JetBrains Mono',monospace;line-height:1.2}
+.report-hero .stat .l{font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-top:2px}
+
+/* Section card */
+.section{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}
+.section-hd{padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--bg-subtle)}
+.section-hd .ttl{font-size:var(--text-md);font-weight:600;display:flex;align-items:center;gap:var(--space-2)}
+.section-hd .meta{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-3)}
+.section-body{padding:var(--space-4)}
+
+/* AC status */
+.ac-list{display:flex;flex-direction:column;gap:var(--space-2)}
+.ac-item{display:flex;align-items:flex-start;gap:var(--space-3);padding:var(--space-3);background:var(--bg-subtle);border-radius:var(--radius-md);border-left:3px solid var(--success)}
+.ac-item.failed{border-left-color:var(--error)}
+.ac-item .check-box{width:18px;height:18px;border-radius:50%;background:var(--success);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;margin-top:1px}
+.ac-item.failed .check-box{background:var(--error)}
+.ac-item .body{flex:1}
+.ac-item .body .ttl{font-weight:500;font-size:var(--text-sm);color:var(--text-1);margin-bottom:2px}
+.ac-item .body .metric{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-3);display:flex;align-items:center;gap:var(--space-3)}
+.ac-item .body .metric .v{color:var(--success);font-weight:600}
+.ac-item.failed .body .metric .v{color:var(--error);font-weight:600}
+
+/* Artifact grid */
+.artifact-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:var(--space-3)}
+.artifact-card{background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3);transition:all .15s;cursor:pointer}
+.artifact-card:hover{border-color:var(--brand);box-shadow:var(--shadow-md);transform:translateY(-1px)}
+.artifact-card .hd{display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2)}
+.artifact-card .icon{width:32px;height:32px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff;font-weight:600;flex-shrink:0}
+.artifact-card .icon.sql{background:#0ea5e9}
+.artifact-card .icon.api{background:#8b5cf6}
+.artifact-card .icon.config{background:#f59e0b}
+.artifact-card .icon.doc{background:#10b981}
+.artifact-card .name{font-family:'JetBrains Mono',monospace;font-size:var(--text-sm);font-weight:500;color:var(--text-1)}
+.artifact-card .preview{background:var(--bg-elevated);border-radius:var(--radius-sm);padding:var(--space-2);font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-2);line-height:1.5;max-height:60px;overflow:hidden;margin:var(--space-2) 0}
+.artifact-card .ft{display:flex;align-items:center;justify-content:space-between;font-size:var(--text-xs);color:var(--text-3);padding-top:var(--space-2);border-top:1px solid var(--border)}
+.artifact-card .ft .status{display:flex;align-items:center;gap:4px}
+.artifact-card .ft .status .dot{width:6px;height:6px;border-radius:50%}
+.artifact-card .ft .status.ok .dot{background:var(--success)}
+.artifact-card .ft .status.warn .dot{background:var(--warning)}
+.artifact-card .ft .status.ok{color:#15803d}
+.artifact-card .ft .status.warn{color:#92400e}
+
+/* PR list */
+.pr-list{display:flex;flex-direction:column;gap:var(--space-2)}
+.pr-item{background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3);display:flex;align-items:center;gap:var(--space-3)}
+.pr-item .status{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+.pr-item .status.merged{background:#d1fae5;color:#065f46}
+.pr-item .status.open{background:#dbeafe;color:#1e40af}
+.pr-item .status.closed{background:#fee2e2;color:#991b1b}
+.pr-item .body{flex:1;min-width:0}
+.pr-item .body .ttl{font-size:var(--text-sm);color:var(--text-1);font-weight:500;margin-bottom:2px}
+.pr-item .body .meta{font-size:var(--text-xs);color:var(--text-3);display:flex;align-items:center;gap:var(--space-3);flex-wrap:wrap}
+.pr-item .body .meta .sha{font-family:'JetBrains Mono',monospace}
+.pr-item .body .meta .stats .a{color:var(--success);font-weight:500}
+.pr-item .body .meta .stats .r{color:var(--error);font-weight:500}
+.pr-item .actions{display:flex;gap:var(--space-2)}
+.pr-item .actions .mini{font-size:var(--text-xs);padding:4px 8px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-1);cursor:pointer}
+.pr-item .actions .mini:hover{border-color:var(--brand);color:var(--brand-600)}
+
+/* Decision log (Q&A 历史回顾) */
+.decision-list{display:flex;flex-direction:column;gap:var(--space-2)}
+.decision-row{display:grid;grid-template-columns:auto 1fr auto;gap:var(--space-3);align-items:center;padding:var(--space-2) var(--space-3);background:var(--bg-subtle);border-radius:var(--radius-md);font-size:var(--text-sm)}
+.decision-row .qid{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--brand-700);background:var(--brand-50);padding:2px 6px;border-radius:var(--radius-sm);font-weight:500}
+.decision-row .q{color:var(--text-1)}
+.decision-row .a{color:var(--text-2);font-size:var(--text-xs)}
+.decision-row .a strong{color:var(--text-1);font-weight:500}
+
+/* Inline rail */
+.rail{background:var(--bg-subtle);border-left:1px solid var(--border);padding:var(--space-3);overflow:auto;display:flex;flex-direction:column;gap:var(--space-3)}
+.rail-section{font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:500;margin-bottom:4px;display:flex;align-items:center;justify-content:space-between}
+.rail-card{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3);font-size:var(--text-sm);border-left:3px solid var(--success)}
+.rail-card.warn{border-left-color:var(--warning)}
+.rail-card .ttl{font-weight:500;font-size:var(--text-sm);margin-bottom:4px}
+.rail-card .body{color:var(--text-2);line-height:1.5;font-size:var(--text-xs)}
+.rail-card .act{display:inline-block;margin-top:6px;font-size:var(--text-xs);color:var(--brand-600);cursor:pointer}
+
+.note{margin:var(--space-6);padding:var(--space-4);background:#f0f9ff;border:1px solid #bae6fd;border-radius:var(--radius-md);font-size:var(--text-sm);color:#075985;line-height:1.7}
+.note b{color:#0c4a6e}
+.note pre{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);background:rgba(255,255,255,.5);padding:var(--space-3);border-radius:var(--radius-sm);overflow-x:auto;margin:var(--space-3) 0;color:var(--text-1)}
+.kbd{font-family:'JetBrains Mono',monospace;background:var(--bg-subtle);padding:1px 6px;border-radius:var(--radius-sm);font-size:11px;border:1px solid var(--border);color:var(--text-2)}
+</style>
+</head>
+<body>
+
+<!-- 顶部深色导航条 -->
+<div class="topnav">
+  <span class="pill">Exploration B · 方案 ① 阶段自适应</span>
+  <a href="10-overview-new-exploration.html">总览</a>
+  <a href="11a-stage-adaptive-draft.html">11a · DRAFT</a>
+  <a href="11b-stage-adaptive-clarifying.html">11b · CLARIFYING</a>
+  <a href="11c-stage-adaptive-designing.html">11c · DESIGNING</a>
+  <a href="11d-stage-adaptive-implementing.html">11d · IMPLEMENTING</a>
+  <a href="11e-stage-adaptive-analyzing.html">11e · ANALYZING</a>
+  <a href="11f-stage-adaptive-archive.html" class="cur">11f · Archive</a>
+  <span class="spacer"></span>
+  <span class="meta">/requirements/req-001 · Archive 形态</span>
+</div>
+
+<!-- StatusBar -->
+<header class="statusbar">
+  <div class="tabs">
+    <div class="tab active"><span class="dot" style="background:var(--success)"></span>退款功能 · 已完成</div>
+    <div class="tab"><span class="dot" style="background:var(--warning)"></span>会员等级 · 待澄清</div>
+    <div class="tab"><span class="dot" style="background:var(--success)"></span>订单导出 · 已完成</div>
+    <div class="tab" style="color:var(--text-3)">归档 · 4</div>
+  </div>
+  <div class="info">
+    <div style="display:flex;align-items:center;gap:var(--space-3)">
+      <strong style="color:var(--text-1);font-weight:500">退款功能优化</strong>
+      <span style="color:var(--text-3)">·</span>
+      <span>阶段 ⑥ 已完成 · 耗时 3 天 7 小时</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:var(--space-4)">
+      <span style="color:#15803d">✓ 3/3 AC 通过 · 4 PR 已合并 · 6 产物</span>
+      <span style="color:var(--text-3);font-size:var(--text-xs)">⌘K 命令</span>
+    </div>
+  </div>
+</header>
+
+<div class="shell">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="logo">A</div>
+    <a href="#" title="概览 ⌘1">🏠</a>
+    <a href="#" class="active" title="需求 ⌘2">📌</a>
+    <a href="#" title="仓库 ⌘3">📦</a>
+    <a href="#" title="知识 ⌘4">📚</a>
+    <a href="#" title="Skill ⌘5">🤖</a>
+    <span style="flex:1"></span>
+    <a href="#" title="设置 ⌘6">⚙️</a>
+  </nav>
+
+  <div class="detail">
+
+    <!-- LEFT: 资源树 -->
+    <aside class="tree">
+      <div class="tree-section">
+        <div class="tree-section-label"><span>概览</span></div>
+        <div class="tree-node"><span class="ic">📋</span>需求文档</div>
+        <div class="tree-node"><span class="ic">📊</span>进度概览</div>
+        <div class="tree-node active"><span class="ic">📦</span>回顾报告</div>
+      </div>
+
+      <div class="tree-section">
+        <div class="tree-section-label" style="color:#15803d"><span>已完成阶段</span></div>
+        <div class="tree-node"><span class="ic">📄</span>分析 (8/8)<span class="status-dot" style="background:var(--success)"></span></div>
+        <div class="tree-node"><span class="ic">❓</span>澄清 (5/5)<span class="status-dot" style="background:var(--success)"></span></div>
+        <div class="tree-node"><span class="ic">🎨</span>设计 (3/3)<span class="status-dot" style="background:var(--success)"></span></div>
+        <div class="tree-node"><span class="ic">📋</span>计划 (1/1)<span class="status-dot" style="background:var(--success)"></span></div>
+        <div class="tree-node"><span class="ic">▶</span>编码 (14/14)<span class="status-dot" style="background:var(--success)"></span></div>
+        <div class="tree-node"><span class="ic">📤</span>提交 (4/4 PR)<span class="status-dot" style="background:var(--success)"></span></div>
+      </div>
+
+      <div class="tree-section">
+        <div class="tree-section-label"><span>产物 (6)</span></div>
+        <div class="tree-node"><span class="ic">📄</span>refund.sql<span class="status-dot" style="background:var(--success)"></span></div>
+        <div class="tree-node"><span class="ic">📄</span>refund-api.yaml<span class="status-dot" style="background:var(--success)"></span></div>
+        <div class="tree-node"><span class="ic">📄</span>apollo.yaml<span class="status-dot" style="background:var(--success)"></span></div>
+        <div class="tree-node"><span class="ic">📄</span>退款流程图.svg<span class="status-dot" style="background:var(--success)"></span></div>
+        <div class="tree-node"><span class="ic">📄</span>state-machine.md<span class="status-dot" style="background:var(--success)"></span></div>
+        <div class="tree-node"><span class="ic">📄</span>rollback-plan.md<span class="status-dot" style="background:var(--success)"></span></div>
+      </div>
+
+      <div class="tree-section">
+        <div class="tree-section-label"><span>仓库 (2)</span></div>
+        <div class="tree-node"><span class="ic">📦</span>refund-service<span class="status-dot" style="background:var(--success)"></span></div>
+        <div class="tree-node"><span class="ic">📦</span>order-service<span class="status-dot" style="background:var(--success)"></span></div>
+      </div>
+    </aside>
+
+    <!-- CENTER: Archive 形态 -->
+    <section class="center">
+
+      <!-- 阶段条 -->
+      <div class="stage-strip">
+        <div class="ttl">
+          <span class="badge">⑥ 完成</span>
+          DONE · Archive 形态 · 回顾报告
+        </div>
+        <div class="meta">
+          <span>耗时 <strong style="color:#15803d">3 天 7 小时</strong></span>
+          <span>·</span>
+          <span>14 任务</span>
+          <span>·</span>
+          <span>4 PR</span>
+          <span>·</span>
+          <span>6 产物</span>
+        </div>
+      </div>
+
+      <!-- 工具条 -->
+      <div class="center-toolbar">
+        <div class="left">
+          <div class="crumb">
+            <span>退款功能优化</span>
+            <span style="color:var(--text-3)">/</span>
+            <span style="color:var(--text-3)">完成</span>
+            <span style="color:var(--text-3)">/</span>
+            <span class="cur">回顾报告</span>
+          </div>
+        </div>
+        <div class="right">
+          <button class="btn-ghost">📊 导出报告</button>
+          <button class="btn-secondary">📚 沉淀到知识库</button>
+          <button class="btn-secondary">📤 分享给团队</button>
+          <button class="btn-success">📦 归档此需求</button>
+        </div>
+      </div>
+
+      <!-- 主体 -->
+      <main class="archive-main">
+
+        <!-- 顶部回顾报告 hero -->
+        <div class="report-hero">
+          <div class="check">✓</div>
+          <div class="text">
+            <div class="ttl">退款功能优化 已完成</div>
+            <div class="desc">
+              起始 <strong>2026-07-08</strong> · 完成 <strong>2026-07-11</strong> · 耗时 <strong>3 天 7 小时</strong>
+              · 验收标准 <strong>3/3 通过</strong> · AI 自动完成 <strong>89%</strong> · 人工介入 <strong>11 次</strong>
+            </div>
+            <div class="stats">
+              <div class="stat"><div class="n">+847</div><div class="l">代码行</div></div>
+              <div class="stat"><div class="n">-213</div><div class="l">删除</div></div>
+              <div class="stat"><div class="n">14</div><div class="l">任务</div></div>
+              <div class="stat"><div class="n">38</div><div class="l">测试用例</div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- AC 通过情况 -->
+        <div class="section">
+          <div class="section-hd">
+            <span class="ttl">🎯 验收标准 · 3/3 通过</span>
+            <span class="meta">⌘⇧A AC 配置</span>
+          </div>
+          <div class="section-body">
+            <div class="ac-list">
+              <div class="ac-item">
+                <div class="check-box">✓</div>
+                <div class="body">
+                  <div class="ttl">AC1 · 退款成功率 ≥ 99%</div>
+                  <div class="metric">
+                    <span>实测 <span class="v">99.4%</span></span>
+                    <span>·</span>
+                    <span>压测 <span class="v">1000 QPS</span></span>
+                    <span>·</span>
+                    <span>采样 1 万次</span>
+                  </div>
+                </div>
+              </div>
+              <div class="ac-item">
+                <div class="check-box">✓</div>
+                <div class="body">
+                  <div class="ttl">AC2 · 平均退款时长 ≤ 30s</div>
+                  <div class="metric">
+                    <span>实测 <span class="v">18.4s</span></span>
+                    <span>·</span>
+                    <span>P99 <span class="v">28s</span></span>
+                    <span>·</span>
+                    <span>超时自动重试 1 次</span>
+                  </div>
+                </div>
+              </div>
+              <div class="ac-item">
+                <div class="check-box">✓</div>
+                <div class="body">
+                  <div class="ttl">AC3 · 退款失败时优惠券/积分回滚 100%</div>
+                  <div class="metric">
+                    <span>实测 <span class="v">100%</span></span>
+                    <span>·</span>
+                    <span>异常注入 500 次</span>
+                    <span>·</span>
+                    <span>关联 bug #312 已修复</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 产物清单 -->
+        <div class="section">
+          <div class="section-hd">
+            <span class="ttl">📦 产物清单 · 6</span>
+            <span class="meta">⌘⇧F 产物列表</span>
+          </div>
+          <div class="section-body">
+            <div class="artifact-grid">
+
+              <div class="artifact-card">
+                <div class="hd">
+                  <div class="icon sql">SQL</div>
+                  <div class="name">refund.sql</div>
+                </div>
+                <div class="preview">CREATE TABLE refund_order (
+  id BIGINT PRIMARY KEY,
+  order_id BIGINT NOT NULL...</div>
+                <div class="ft">
+                  <span class="status ok"><span class="dot"></span>已采纳</span>
+                  <span>2026-07-08</span>
+                </div>
+              </div>
+
+              <div class="artifact-card">
+                <div class="hd">
+                  <div class="icon api">API</div>
+                  <div class="name">refund-api.yaml</div>
+                </div>
+                <div class="preview">openapi: 3.0.0
+info:
+  title: 退款 API
+  version: 1.0.0
+paths:
+  /api/refunds...</div>
+                <div class="ft">
+                  <span class="status ok"><span class="dot"></span>已采纳</span>
+                  <span>2026-07-09</span>
+                </div>
+              </div>
+
+              <div class="artifact-card">
+                <div class="hd">
+                  <div class="icon config">CF</div>
+                  <div class="name">apollo.yaml</div>
+                </div>
+                <div class="preview">refund:
+  max_amount: 5000
+  auto_audit_timeout: 5s
+  retry_count: 3...</div>
+                <div class="ft">
+                  <span class="status warn"><span class="dot"></span>已审</span>
+                  <span>2026-07-09</span>
+                </div>
+              </div>
+
+              <div class="artifact-card">
+                <div class="hd">
+                  <div class="icon doc">SEQ</div>
+                  <div class="name">退款流程图.svg</div>
+                </div>
+                <div class="preview">[退款申请] → [自动审核] → [调用订单] → [调用库存] → [调用优惠券] → ...</div>
+                <div class="ft">
+                  <span class="status ok"><span class="dot"></span>已采纳</span>
+                  <span>2026-07-09</span>
+                </div>
+              </div>
+
+              <div class="artifact-card">
+                <div class="hd">
+                  <div class="icon doc">MD</div>
+                  <div class="name">state-machine.md</div>
+                </div>
+                <div class="preview"># 退款状态机
+PENDING → AUDITING → APPROVED → REFUNDING → SUCCESS
+                  ↓
+                FAILED (with rollback)...</div>
+                <div class="ft">
+                  <span class="status ok"><span class="dot"></span>已采纳</span>
+                  <span>2026-07-09</span>
+                </div>
+              </div>
+
+              <div class="artifact-card">
+                <div class="hd">
+                  <div class="icon doc">MD</div>
+                  <div class="name">rollback-plan.md</div>
+                </div>
+                <div class="preview"># 回滚方案
+1. 退款失败 → 优惠券回滚
+2. 退款失败 → 积分回滚
+3. 退款失败 → 库存回补...</div>
+                <div class="ft">
+                  <span class="status ok"><span class="dot"></span>已采纳</span>
+                  <span>2026-07-10</span>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        <!-- 关联 PR / Commit -->
+        <div class="section">
+          <div class="section-hd">
+            <span class="ttl">📤 关联 PR · 4 已合并</span>
+            <span class="meta">⌘⇧P PR 列表</span>
+          </div>
+          <div class="section-body">
+            <div class="pr-list">
+
+              <div class="pr-item">
+                <div class="status merged">✓</div>
+                <div class="body">
+                  <div class="ttl">refund-service: 实现退款查询接口 (Task #7-#9)</div>
+                  <div class="meta">
+                    <span class="sha">a3f5b2c</span>
+                    <span>·</span>
+                    <span>refund-service</span>
+                    <span>·</span>
+                    <span class="stats">+342 <span class="a">/</span> -98</span>
+                    <span>·</span>
+                    <span>14 tests ✓</span>
+                    <span>·</span>
+                    <span>2 review</span>
+                  </div>
+                </div>
+                <div class="actions">
+                  <span class="mini">📄 看 Diff</span>
+                  <span class="mini">🔗 打开 PR</span>
+                </div>
+              </div>
+
+              <div class="pr-item">
+                <div class="status merged">✓</div>
+                <div class="body">
+                  <div class="ttl">refund-service: 添加幂等与重试 (Task #10-#12)</div>
+                  <div class="meta">
+                    <span class="sha">b7c4d9e</span>
+                    <span>·</span>
+                    <span>refund-service</span>
+                    <span>·</span>
+                    <span class="stats">+218 <span class="a">/</span> -45</span>
+                    <span>·</span>
+                    <span>12 tests ✓</span>
+                    <span>·</span>
+                    <span>1 review</span>
+                  </div>
+                </div>
+                <div class="actions">
+                  <span class="mini">📄 看 Diff</span>
+                  <span class="mini">🔗 打开 PR</span>
+                </div>
+              </div>
+
+              <div class="pr-item">
+                <div class="status merged">✓</div>
+                <div class="body">
+                  <div class="ttl">refund-service: 集成测试 + 异常注入</div>
+                  <div class="meta">
+                    <span class="sha">c8e2a1f</span>
+                    <span>·</span>
+                    <span>refund-service</span>
+                    <span>·</span>
+                    <span class="stats">+187 <span class="a">/</span> -12</span>
+                    <span>·</span>
+                    <span>8 tests ✓</span>
+                    <span>·</span>
+                    <span>0 review</span>
+                  </div>
+                </div>
+                <div class="actions">
+                  <span class="mini">📄 看 Diff</span>
+                  <span class="mini">🔗 打开 PR</span>
+                </div>
+              </div>
+
+              <div class="pr-item">
+                <div class="status merged">✓</div>
+                <div class="body">
+                  <div class="ttl">order-service: 适配退款回调</div>
+                  <div class="meta">
+                    <span class="sha">d4b3e7a</span>
+                    <span>·</span>
+                    <span>order-service</span>
+                    <span>·</span>
+                    <span class="stats">+100 <span class="a">/</span> -58</span>
+                    <span>·</span>
+                    <span>4 tests ✓</span>
+                    <span>·</span>
+                    <span>1 review</span>
+                  </div>
+                </div>
+                <div class="actions">
+                  <span class="mini">📄 看 Diff</span>
+                  <span class="mini">🔗 打开 PR</span>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        <!-- 关键决策回顾 -->
+        <div class="section">
+          <div class="section-hd">
+            <span class="ttl">💬 关键决策回顾 · 5 次 AI 提问</span>
+            <span class="meta">⌘⇧D 对话历史</span>
+          </div>
+          <div class="section-body">
+            <div class="decision-list">
+
+              <div class="decision-row">
+                <span class="qid">Q1</span>
+                <span class="q">退款单笔金额上限?</span>
+                <span class="a">采纳: <strong>5000 元</strong> · ⏱ 14m</span>
+              </div>
+              <div class="decision-row">
+                <span class="qid">Q2</span>
+                <span class="q">退款审核流?</span>
+                <span class="a">采纳: <strong>自动审核 5s 超时转人工</strong> · ⏱ 22m</span>
+              </div>
+              <div class="decision-row">
+                <span class="qid">Q3</span>
+                <span class="q">退款失败时回滚策略?</span>
+                <span class="a">采纳: <strong>完全回滚(优惠券+积分+库存)</strong> · ⏱ 1h</span>
+              </div>
+              <div class="decision-row">
+                <span class="qid">Q4</span>
+                <span class="q">退款幂等实现?</span>
+                <span class="a">采纳: <strong>Idempotency-Key 头 + 业务键兜底</strong> · ⏱ 35m</span>
+              </div>
+              <div class="decision-row">
+                <span class="qid">Q5</span>
+                <span class="q">部分退款规则?</span>
+                <span class="a">采纳: <strong>单笔最多 3 次, 累计 ≤ 原订单金额</strong> · ⏱ 8m</span>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+      </main>
+
+    </section>
+
+    <!-- RIGHT: Inline 提示栏 -->
+    <aside class="rail">
+      <div>
+        <div class="rail-section"><span>回顾摘要</span></div>
+        <div class="rail-card">
+          <div class="ttl">✓ 需求已完成</div>
+          <div class="body">3 天 7 小时 · 14 任务 · 4 PR</div>
+        </div>
+      </div>
+
+      <div>
+        <div class="rail-section"><span>下一步</span></div>
+        <div class="rail-card warn">
+          <div class="ttl">📦 归档</div>
+          <div class="body">归档后只读, 不可编辑</div>
+          <div class="act">→ 操作</div>
+        </div>
+        <div class="rail-card">
+          <div class="ttl">📚 沉淀知识</div>
+          <div class="body">从本需求提取 3 条新知识</div>
+          <div class="act">→ 查看</div>
+        </div>
+        <div class="rail-card">
+          <div class="ttl">📊 导出报告</div>
+          <div class="body">生成可分享的 markdown 报告</div>
+          <div class="act">→ 导出</div>
+        </div>
+      </div>
+
+      <div>
+        <div class="rail-section"><span>沉淀建议</span></div>
+        <div class="rail-card">
+          <div class="ttl">💡 自动建议</div>
+          <div class="body">
+            · "退款幂等 pattern" → knowledge/patterns/<br>
+            · "bug #312 修复方案" → knowledge/bugs/<br>
+            · "高并发退款经验" → knowledge/domain/
+          </div>
+        </div>
+      </div>
+    </aside>
+
+  </div>
+</div>
+
+<!-- 底部设计说明 + ASCII 线框图 -->
+<div class="note">
+  <b>方案 ① Archive 形态 · 回顾报告</b><br>
+  主区 = <b>"完成报告"</b>风格：顶部<b>报告 hero</b>（成功打勾 + 起始/完成/耗时 + 4 个关键数字）+ 4 个 <b>Section</b>（AC 通过情况 / 产物清单 / 关联 PR / 关键决策回顾）。<br>
+  <b>绿色基调</b>表示成功状态，区别于其他形态。右栏把"归档 / 沉淀知识 / 导出报告"作为下一步入口。<br>
+  <br>
+  <b>线框图（该形态特征）:</b>
+<pre>┌────────────────────────────────────────────────────────────────────────────┐
+│ ⑥ 完成 · DONE · Archive 形态 · 回顾报告           3天7h · 14任务 · 4 PR · 6 产物│ stage strip
+├────────────────────────────────────────────────────────────────────────────┤
+│ ← 退款功能优化 / 完成 / 回顾报告         [📊导出] [📚沉淀] [📤分享] [📦归档]│ toolbar
+├────────────────────────────────────────────────────────────────────────────┤
+│ ┌─ 报告 hero ──────────────────────────────────────────────────────────┐ │
+│ │  ✓ 退款功能优化 已完成                                              │ │
+│ │  2026-07-08 → 2026-07-11 · 3天7h · 3/3 AC 通过 · AI 89% · 介入 11 次 │ │
+│ │  [+847/-213 代码] [14 任务] [38 测试] [4 PR]                         │ │
+│ └──────────────────────────────────────────────────────────────────────┘ │
+│                                                                              │
+│ ┌─ 🎯 验收标准 · 3/3 通过 ─────────────────────────────────────────────┐  │
+│ │ ✓ AC1 退款成功率 ≥ 99%           实测 99.4% · 压测 1000 QPS         │  │
+│ │ ✓ AC2 平均退款时长 ≤ 30s          实测 18.4s · P99 28s               │  │
+│ │ ✓ AC3 失败时优惠券/积分回滚 100%   实测 100% · 异常注入 500 次      │  │
+│ └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│ ┌─ 📦 产物清单 · 6 ───────────────────────────────────────────────────┐  │
+│ │ [SQL] refund.sql          已采纳 │ [API] refund-api.yaml 已采纳      │  │
+│ │ [CFG] apollo.yaml         已审   │ [SEQ] 退款流程图.svg   已采纳     │  │
+│ │ [MD]  state-machine.md    已采纳 │ [MD]  rollback-plan.md 已采纳    │  │
+│ └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│ ┌─ 📤 关联 PR · 4 已合并 ──────────────────────────────────────────────┐  │
+│ │ ✓ refund-service: 实现退款查询接口  a3f5b2c  +342/-98  14 tests    │  │
+│ │ ✓ refund-service: 添加幂等与重试     b7c4d9e  +218/-45  12 tests    │  │
+│ │ ✓ refund-service: 集成测试 + 异常注入 c8e2a1f  +187/-12   8 tests   │  │
+│ │ ✓ order-service:   适配退款回调      d4b3e7a  +100/-58   4 tests    │  │
+│ └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│ ┌─ 💬 关键决策回顾 · 5 次 AI 提问 ─────────────────────────────────────┐  │
+│ │ Q1 退款金额上限   → 5000 元         ⏱ 14m                            │  │
+│ │ Q2 退款审核流     → 自动审核 5s     ⏱ 22m                            │  │
+│ │ Q3 退款失败回滚   → 完全回滚        ⏱ 1h                             │  │
+│ │ Q4 退款幂等       → Idempotency-Key ⏱ 35m                            │  │
+│ │ Q5 部分退款规则   → 最多 3 次       ⏱ 8m                             │  │
+│ └─────────────────────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────────────────┘
+</pre>
+  <br>
+  <b>切换条件：</b>当前 status ∈ {SUBMITTING, DONE, ARCHIVED} 时显示此形态<br>
+  <b>关键交互：</b>[📦 归档] 把需求设为只读移入归档区 / [📚 沉淀] AI 自动从本需求提取知识库条目 / [📊 导出] 生成可分享的 markdown / [📤 分享] 复制链接<br>
+  <b>快捷键：</b><span class="kbd">⌘⇧A</span> AC 配置 · <span class="kbd">⌘⇧P</span> PR 列表 · <span class="kbd">⌘⇧F</span> 产物列表 · <span class="kbd">⌘⇧D</span> 对话历史 · <span class="kbd">⌘⇧E</span> 导出报告 · <span class="kbd">⌘⇧Z</span> 沉淀到知识库
+</div>
+
+</body>
+</html>

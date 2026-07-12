@@ -85,15 +85,17 @@
 | [11b-stage-adaptive-clarifying.html](../design/pages/11b-stage-adaptive-clarifying.html) | CLARIFYING Q&A | 视觉对照基线 |
 | [11c-stage-adaptive-designing.html](../design/pages/11c-stage-adaptive-designing.html) | DESIGNING Compare | 视觉对照基线 |
 | [11d-stage-adaptive-implementing.html](../design/pages/11d-stage-adaptive-implementing.html) | IMPLEMENTING Mission Control | 视觉对照基线（最复杂，3 列 DAG/Diff/AI 行为流）|
+| [11e-stage-adaptive-analyzing.html](../design/pages/11e-stage-adaptive-analyzing.html) | ANALYZING Thinking | 视觉对照基线（"观察屏"风格：思考流时间线 + 5+3+2 识别产物）|
+| [11f-stage-adaptive-archive.html](../design/pages/11f-stage-adaptive-archive.html) | Archive | 视觉对照基线（"回顾报告"风格：AC 通过 + 产物清单 + PR + 决策回顾）|
 
-**剩余 2 形态**（Thinking / Archive）在实施阶段补完原型。
+**全部 6 形态 HTML 原型已落盘**（11a ~ 11f），作为视觉对照基线。
 
 ### 与现有架构的契合
 
 - ✅ 顶层 shell（StatusBar + Sidebar）保持不变 → 不破坏 ADR-0007 路由拓扑
 - ✅ 资源树 240px + Inline 栏 120px 保留 → 不改 layout 拓扑
 - ✅ Linear 紫 #5e6ad2 + Inter + JetBrains Mono → 不引入新 token
-- ✅ HTML 原型作为单一事实源（ADR-0006）→ 4 个 HTML 已落盘
+- ✅ HTML 原型作为单一事实源（ADR-0006）→ **6 个 HTML 已全部落盘**（11a ~ 11f）
 - ✅ AI 不抢视觉（CONTEXT.md 决策 23）→ AI 在 Thinking / Mission Control 形态有专属位
 
 ## Consequences
@@ -200,14 +202,15 @@
 将拆分为：
 - `xx-requirement-detail-stage-adaptive-shell.md` — 形态切换框架 + status 驱动
 - `xx-form-morph-draft.md` — DRAFT Form 形态落地
+- `xx-thinking-morph-analyzing.md` — ANALYZING Thinking 形态落地
 - `xx-qa-morph-clarifying.md` — CLARIFYING Q&A 形态落地
 - `xx-compare-morph-designing.md` — DESIGNING Compare 形态落地
 - `xx-mission-control-morph.md` — IMPLEMENTING Mission Control 形态落地
-- `xx-thinking-morph-analyzing.md` — ANALYZING Thinking 形态（HTML 待补）
-- `xx-archive-morph.md` — Archive 形态（HTML 待补）
+- `xx-archive-morph.md` — SUBMITTING/DONE/ARCHIVED Archive 形态落地
 
 ## 变更记录
 
 | 日期 | 变更 | 作者 |
 |---|---|---|
 | 2026-07-12 | 初稿：基于调研 + 3 方案对比 + 4 个 HTML 原型落地，决定采用方案 ① 阶段自适应 | Brainstorming 会话 |
+| 2026-07-12 | 补完 11e ANALYZING + 11f Archive 两个 HTML 原型，6 形态原型齐备 | 本次迭代 |
