@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { ResourceTree } from '@/components/resource-tree'
 import { InlineRail } from '@/components/inline-rail'
 import type { DraftingSkill, PrdSection } from '@/lib/drafting'
+import type { WrapupTreeSummary } from '@/lib/wrapup'
 import type { ZoneMeta } from './zones'
 
 /**
@@ -49,6 +50,12 @@ export interface ZoneShellProps {
    */
   draftingSkills?: DraftingSkill[]
   /**
+   * WRAP-UP 工位专用:产物 / PR / 决策摘要(issue 22)。
+   * 传入时,资源树切换到 WRAP-UP 摘要视图(产物清单 + PR/Commit + 决策回顾)。
+   * 其它工位不传,资源树维持默认静态结构或 DRAFTING 的 PRD 大纲视图。
+   */
+  wrapupSummary?: WrapupTreeSummary
+  /**
    * 替换默认 InlineRail 的 client 组件 slot。
    * 提供时,ZoneShell 不再渲染默认 InlineRail,而是用此 slot 替代。
    * 适用于需要 client 交互(如 onSkillTrigger)的 zone。
@@ -65,6 +72,7 @@ export function ZoneShell({
   children,
   prdSections,
   draftingSkills,
+  wrapupSummary,
   inlineRailSlot,
 }: ZoneShellProps) {
   return (
@@ -76,7 +84,11 @@ export function ZoneShell({
       className={`grid min-h-[calc(100vh-${WORKSPACE_SHELL_OFFSET_PX}px)] bg-bg ${zoneShellGridClass(zone)}`}
     >
       {zone.has_resource_tree && (
-        <ResourceTree requirementId={id} prdSections={prdSections} />
+        <ResourceTree
+          requirementId={id}
+          prdSections={prdSections}
+          wrapupSummary={wrapupSummary}
+        />
       )}
       {children}
       {zone.has_inline_rail &&

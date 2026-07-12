@@ -18,6 +18,11 @@ import { getClarifyingData } from '@/lib/clarifying'
 import { ClarifyingZone } from '@/components/clarifying-zone'
 import { getDesigningData } from '@/lib/designing'
 import { DesigningZone } from '@/components/designing-zone'
+import {
+  getWrapupData,
+  extractWrapupTreeSummary,
+} from '@/lib/wrapup'
+import { WrapupZone } from '@/components/wrapup-zone'
 import { ZoneShell } from '@/lib/zone-shell'
 
 /**
@@ -32,7 +37,7 @@ import { ZoneShell } from '@/lib/zone-shell'
  * - ANALYZING 工位(issue 19)渲染 `<AnalyzingZone />` Thinking 大屏 + 打字机流
  * - CLARIFYING 工位(issue 20)渲染 `<ClarifyingZone />` Q&A 主区
  * - DESIGNING 工位(issue 21)渲染 `<DesigningZone />` Compare 主区
- *   其余 1 工位(22 wrap-up)走占位实现,issue 22 替换
+ * - WRAP-UP 工位(issue 22)渲染 `<WrapupZone />` Archive 形态
  */
 export function generateStaticParams() {
   return ZONE_META.map((z) => ({ zone: z.route_segment }))
@@ -116,7 +121,29 @@ export default async function ZonePage({
     )
   }
 
-  // 其余 1 工位占位实现 — issue 22 (wrap-up) 替换
+  // WRAP-UP 工位(issue 22):Archive 形态
+  // - 主区全宽(无 Inline 栏),资源树由 ZoneShell 自动渲染
+  //   (zone.has_resource_tree = true, has_inline_rail = false → grid-cols-[240px_1fr])
+  // - 资源树显示产物清单 + PR/Commit + 决策回顾(由 WrapupZone 派生 WrapupTreeSummary
+  //   注入 ResourceTree —— 避免 ResourceTree 重复拉数据)
+  // - 顶部回顾报告 hero + AC 通过情况 + 产物清单卡片 + PR 列表 + 决策回顾
+  //   + 变更统计 + 归档操作([📦 归档] / [🔄 重新打开])
+  // - onArchive / onReopen 为 client 回调(默认 no-op),后续接 agent API
+  //   时包一层 client wrapper 注入回调。
+  if (zone.id === 'wrapup') {
+    const data = await getWrapupData(params.id)
+    return (
+      <ZoneShell
+        id={params.id}
+        zone={zone}
+        wrapupSummary={extractWrapupTreeSummary(data)}
+      >
+        <WrapupZone data={data} />
+      </ZoneShell>
+    )
+  }
+
+  // 其余 1 工位占位实现 — 后续 issue 替换(目前 6 工位均已落地)
   const shellDesc =
     zone.has_resource_tree && zone.has_inline_rail
       ? '资源树 + Inline 栏(3 列)'
