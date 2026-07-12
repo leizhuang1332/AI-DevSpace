@@ -6,6 +6,8 @@ import {
 } from '@/lib/zones'
 import { getExecutingData } from '@/lib/executing'
 import { ExecutingZone } from '@/components/executing-zone'
+import { getAnalyzingData } from '@/lib/analyzing'
+import { AnalyzingZone } from '@/components/analyzing-zone'
 import {
   getDraftingData,
   extractPrdOutline,
@@ -23,7 +25,8 @@ import { ZoneShell } from '@/lib/zone-shell'
  *   PRD Markdown / 候命 Skill 列表)可以注入到 ResourceTree / InlineRail
  * - EXECUTING 工位(issue 17 样板)渲染 `<ExecutingZone />` 三列 Mission Control
  * - DRAFTING 工位(issue 18)渲染 `<DraftingZone />` Form 居中布局
- *   其余 4 工位 + 未对接工位(19-22)走占位实现,issue 19-22 替换
+ * - ANALYZING 工位(issue 19)渲染 `<AnalyzingZone />` Thinking 大屏 + 打字机流
+ *   其余 3 工位(20-22)走占位实现,issue 20-22 替换
  */
 export function generateStaticParams() {
   return ZONE_META.map((z) => ({ zone: z.route_segment }))
@@ -69,7 +72,18 @@ export default async function ZonePage({
     )
   }
 
-  // 其余 4 工位占位实现 — issue 19-22 替换
+  // ANALYZING 工位(issue 19):Thinking 大屏 + 打字机思考流
+  // 主区全宽(zone.has_resource_tree = false, has_inline_rail = false → grid-cols-1)
+  if (zone.id === 'analyzing') {
+    const data = await getAnalyzingData(params.id)
+    return (
+      <ZoneShell id={params.id} zone={zone}>
+        <AnalyzingZone data={data} />
+      </ZoneShell>
+    )
+  }
+
+  // 其余 3 工位占位实现 — issue 20-22 替换
   const shellDesc =
     zone.has_resource_tree && zone.has_inline_rail
       ? '资源树 + Inline 栏(3 列)'
