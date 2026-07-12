@@ -1,22 +1,23 @@
-import { cookies } from 'next/headers'
-import { redirect } from 'next/navigation'
-import { resolveDefaultZoneRouteSegment } from '@/lib/zones'
+import { OverviewPage } from '@/components/overview-page'
+import { getRequirementOverview } from '@/lib/requirement-overview'
 
 /**
- * /requirements/[id]/ 入口(ADR-0012 §8 重定向逻辑):
- * - cookie `last_zone` 存在且合法 → 用 cookie 指定的工位
- * - 否则默认 drafting(lifecycle 起点)
- * - 永不基于 meta.yaml.status 推断(决策 15 反对状态机)
+ * /requirements/[id]/ —— Overview 概览页(ADR-0012 §5 · 第 7 产品形态)
  *
- * 解析逻辑委托给 resolveDefaultZoneRouteSegment(纯函数,有单元测试)。
+ * 性质:仪表板,不是工位;无 ZoneBar、无资源树、无 Inline 栏(ADR §3)。
+ * 内容:5 项(元数据 + 完成进度 + 工位地图 + 里程碑 + AI 活动 — ADR §5 推荐集)
+ *
+ * 数据:从 getRequirementOverview 异步拉取(mock 期,后续接 agent API)。
+ *
+ * 注意:本路由不再做重定向 —— 重定向逻辑只用于尚未实现工位时的过渡,
+ * 现在 6 工位都已可访问,Overview 是默认落地。
+ * ZoneBar 的 Overview Tab 跳到本路由,会渲染概览页(ZoneBar 此时不渲染,见 ADR §5)。
  */
-export default function RequirementEntry({
+export default async function RequirementOverview({
   params,
 }: {
   params: { id: string }
 }) {
-  const cookieStore = cookies()
-  const lastZone = cookieStore.get('last_zone')?.value
-  const target = resolveDefaultZoneRouteSegment(lastZone)
-  redirect(`/requirements/${params.id}/${target}/`)
+  const data = await getRequirementOverview(params.id)
+  return <OverviewPage data={data} />
 }
