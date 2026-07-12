@@ -6,6 +6,7 @@ import {
   ZONE_META,
   ZONE_LIFECYCLE_ORDER,
   ZONE_STATUS_COLOR_CLASS,
+  REQUIREMENTS_ZONE_PATH_RE,
 } from '@/lib/zones'
 
 /**
@@ -21,14 +22,13 @@ import {
  * - 高度 44px(h-11)
  * - 状态色点 6px(w-1.5 h-1.5)(对应决策 22)
  * - 当前工位:border-b-2 border-brand-600 + text-brand-600 + font-semibold
+ *
+ * 路由正则与 useZone() 共享 REQUIREMENTS_ZONE_PATH_RE(`lib/zones.ts` 单源)。
  */
-
-// 仅捕获 /requirements/<id>/<zone>/ 这一层(id 不含 /,zone 不含 /)
-const ZONE_ROUTE_RE = /^\/requirements\/([^/]+)\/([^/]+)\/?$/
 
 export function ZoneBar() {
   const pathname = usePathname()
-  const match = pathname.match(ZONE_ROUTE_RE)
+  const match = pathname.match(REQUIREMENTS_ZONE_PATH_RE)
   if (!match) return null
   const id = match[1]
   const seg = match[2]

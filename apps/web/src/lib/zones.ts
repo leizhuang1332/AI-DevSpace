@@ -183,6 +183,20 @@ export function getZoneByRouteSegment(segment: string): ZoneMeta | null {
 }
 
 /**
+ * 共享路由正则 —— 单一事实源,避免与 ZoneBar/useZone 漂移(issue 16 · 复审)。
+ *
+ * 仅捕获 /requirements/<id>/<zone>/ 这一层(id 不含 /,zone 不含 /)
+ * - ZoneBar: 提取当前 zone 渲染 Tab
+ * - useZone: 推断客户端位置 + 提供给 ThinkBarSlot
+ */
+export const REQUIREMENTS_ZONE_PATH_RE =
+  /^\/requirements\/([^/]+)\/([^/]+)\/?$/
+
+/** Overview 路径 /requirements/<id>/ — 严格 3 段,避免吞 /<id>/<zone>/<extra>/ */
+export const REQUIREMENTS_OVERVIEW_PATH_RE =
+  /^\/requirements\/([^/]+)\/?$/
+
+/**
  * 解析 cookie 中的 last_zone → 合法 route_segment。
  *
  * 规则(ADR-0012 §8 重定向逻辑 + 决策 15):
