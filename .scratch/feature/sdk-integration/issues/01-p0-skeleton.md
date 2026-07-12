@@ -14,7 +14,7 @@ Stage: P0
 
 ## 范围
 
-- [ ] 装 `@anthropic-ai/claude-code` 到 `apps/agent/package.json`
+- [ ] 装 `@anthropic-ai/claude-agent-sdk` 到 `apps/agent/package.json`
 - [ ] 装 `better-sqlite3` 到 `apps/agent/package.json`（读 cc-switch.db）
 - [ ] `providers/AIProvider.ts` — 定义 `AIProvider` 接口 + `AISession` 接口 + `AIEvent` 联合类型（按 ADR-0010 Q2 完整字段）
 - [ ] `providers/ClaudeCodeProvider.ts` — 实现 `createSession(reqId, opts): AISession`，内部包 `query()`

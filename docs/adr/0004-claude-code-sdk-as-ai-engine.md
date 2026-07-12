@@ -20,7 +20,7 @@
 
 **通过 Claude Code SDK 调用 AI**。
 
-- Agent 守护进程通过 `@anthropic-ai/claude-code` SDK 调用（具体 API / 子进程管理 / 抽象边界详见 [ADR-0010](0010-claude-code-sdk-integration.md)）
+- Agent 守护进程通过 `@anthropic-ai/claude-agent-sdk` SDK 调用（具体 API / 子进程管理 / 抽象边界详见 [ADR-0010](0010-claude-code-sdk-integration.md)）
 - **每 query 一次 spawn**（不是每需求一个常驻子进程；sessionId resume 续上下文）
 - 一个需求可有 **N 个独立 session**，每个 session 是独立对话流 + 自己的 SDK sessionId
 - 多 SDK 切换通过 `AIProvider` 抽象 + session meta 的 `provider` 字段实现（详见 ADR-0010 Q7）

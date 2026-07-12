@@ -42,7 +42,7 @@ Depends on: ADR-0010
 
 ## 5. 前置 Spike
 
-`@anthropic-ai/claude-code` SDK 的实际行为需先验证（特别是 `model` 参数是否真接受 role 名 vs model id、sessionId resume 是否真能从中断点续），不能等所有 P0-P5 都写完才发现假设不成立。
+`@anthropic-ai/claude-agent-sdk` SDK 的实际行为需先验证（特别是 `model` 参数是否真接受 role 名 vs model id、sessionId resume 是否真能从中断点续），不能等所有 P0-P5 都写完才发现假设不成立。
 
 - **Spike 输出**：`apps/agent/spike/sdk-spike.ts`（最小 demo，能跑能记发现）
 - **Spike 文档**：`.scratch/feature/sdk-integration/spike-notes.md`

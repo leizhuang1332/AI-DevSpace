@@ -893,7 +893,7 @@ export class ClaudeCodeProvider implements AIProvider {
   readonly name = 'claude-code'
 
   async *run(messages: AIMessage[], context: { cwd: string; systemPrompt: string }): AsyncIterable<AIStreamEvent> {
-    // spawn @anthropic-ai/claude-code SDK 子进程
+    // spawn @anthropic-ai/claude-agent-sdk SDK 子进程
     const proc = spawn('claude-code', [
       '--system-prompt', context.systemPrompt,
       '--cwd', context.cwd,
@@ -1244,7 +1244,7 @@ apps/agent/                            # Node.js 守护进程
     "fastify": "^4.0.0",
     "@fastify/cors": "^9.0.0",
     "@fastify/sse": "^0.0.5",
-    "@anthropic-ai/claude-code": "^0.0.1",
+    "@anthropic-ai/claude-agent-sdk": "^0.0.1",
     "simple-git": "^3.0.0",
     "gray-matter": "^4.0.0",
     "yaml": "^2.0.0",

@@ -14,7 +14,7 @@ Stage: 2
 
 - [ ] Agent 端 `ClaudeCodeProvider`：
   - 抽象接口 `AIProvider`（`run(prompt, contextFiles): AsyncIterable<Chunk>`）
-  - ClaudeCodeProvider 实现：`@anthropic-ai/claude-code` SDK 调用
+  - ClaudeCodeProvider 实现：`@anthropic-ai/claude-agent-sdk` SDK 调用
   - subprocess 池管理：每需求一个长连接，切换不重启
   - 流式 chunk 类型：`{type: 'text' | 'tool_call' | 'tool_result' | 'file_change' | 'done', ...}`
 - [ ] Agent 端 `ConversationService`：

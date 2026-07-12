@@ -203,7 +203,7 @@ Feature: ai-devspace-mvp
 | Web | Next.js 14 (App Router) + TypeScript + Tailwind + shadcn/ui |
 | Web ↔ Agent | **HTTP REST + SSE**（Agent 用 `@fastify/sse`；Client → Agent 走 REST POST 发起请求，Agent → Client 走 SSE 长连推送 AI 输出 / 状态变更 / 错误） |
 | Agent | Node.js 20 + TypeScript + Fastify |
-| AI | `@anthropic-ai/claude-code` SDK（subprocess） |
+| AI | `@anthropic-ai/claude-agent-sdk` SDK（subprocess） |
 | Git | `simple-git` + 原生 `git worktree` |
 | FS | 原生 fs + `gray-matter`（YAML frontmatter） |
 | Markdown | `react-markdown` + `rehype-highlight` |

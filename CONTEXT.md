@@ -173,13 +173,50 @@ v1.0 工位清单：
 | 工位 | 用户动作 | 资源树 | Inline 栏 |
 |---|---|---|---|
 | **DRAFTING** | 写需求 PRD | ✅ PRD 章节 + AC + 仓库 | ✅ 保留 |
-| **ANALYZING** | 旁观 AI 解析 | ❌ 主区全宽 | ❌ 无 |
-| **CLARIFYING** | 回答 AI 提问 | ❌ 主区全宽 | ❌ 无 |
+| **ANALYZING** | PRD 准入校验 + 拆解聚合模块 | ❌ 主区全宽 | ❌ 无 |
+| **CLARIFYING** | 澄清聚合模块落地细节 | ❌ 主区全宽 | ❌ 无 |
 | **DESIGNING** | 评审候选方案 | ❌ 默认无 | ❌ 无 |
 | **EXECUTING** | 监督 AI 实施 | ✅ 任务 DAG + Diff + 产物 | ✅ 保留 |
 | **WRAP-UP** | 归档复盘 | ✅ 产物 + PR + 决策 | ❌ 无 |
 
-详见 [ADR-0011](docs/adr/0011-requirement-workbench-zone-adaptive.md) · [ADR-0012](docs/adr/0012-requirement-workbench-shell-topology.md)
+详见 [ADR-0011](docs/adr/0011-requirement-workbench-zone-adaptive.md) · [ADR-0012](docs/adr/0012-requirement-workbench-shell-topology.md) · [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md)
+
+### ANALYZING 工位(展开)
+
+ANALYZING 工位的核心职责是 **PRD 准入校验 + 拆解聚合模块**——把 DRAFTING 产出的粗粒度 PRD(业务语言)转化为可指导开发的技术概要(技术语言)+ 聚合模块清单。
+
+**与 CLARIFYING 的语义边界:**
+- ANALYZING = 准入校验(业务/性能/架构/合规) + 拆解为聚合模块(粗粒度)
+- CLARIFYING = 每个聚合模块的落地细节澄清(细粒度;定不下来就无法开发 / 开发会有 bug)
+
+**4 核心职能:**
+1. **解析参数配置面板**——启动前选 Skill / 选知识 / 选仓库分支 / 设优先级
+2. **解析过程观察**——AI 思考流 + 实时打字机 + 上下文插话
+3. **解析产物交互编辑**——识别子问题/风险/方案可编辑(增删改合并)
+4. **多会话并行观察**——顶部 Tab 切换(详见 ADR-0013 D7)
+
+**多会话:** 同个需求可开多个 ANALYZING 会话(不同 Skill 或不同角度,如架构/数据/接口),顶部 Tab 切换,每次只显示一个会话主区。
+
+**产物(技术概要 + 聚合模块清单):**
+
+```
+requirements/<req-id>/analysis/
+  ├─ technical-brief.md      ← 业务背景 + 架构叙述 + 技术栈说明(叙述性)
+  └─ modules.yaml            ← 聚合模块清单(结构化,可被 CLARIFYING 直接消费)
+```
+
+**主区布局(5 块,顶到底):**
+1. 准入仪表板(5 维度卡 + 总体结论) —— 详见 ADR-0013 D4
+2. 会话 Tab 导航
+3. 主区两列:思考流(左) + 识别产物(右,可编辑)
+4. 启动前解析参数配置面板(折叠为 ⚙️ 入口)
+5. 插话输入条(用户随时补充上下文 / 反向提问)
+
+**待裁决项(代替原"AI 主动提问"机制):** AI 识别出需确认的事项 → 写入"待裁决面板"(`requirements/<req-id>/analysis/adjudication.md`),**不主动推送**;用户主动来 ANALYZING 处理;StatusBar "待裁决 N" 常驻提醒;其他工位可点 StatusBar 数字跳转过来。
+
+**与 CLARIFYING 交接:** 直接共享 `analysis/modules.yaml`(双向引用,无快照 / 无冻结点)。用户回到 ANALYZING 修改后,CLARIFYING 下次进入自动 reload 最新版本。
+
+**准入维度可配置:** 每个 Skill 在 frontmatter 声明它需要检查的准入维度集合,不同 Skill 可能有不同维度集(如"退款分析" vs "会员分析");详见 ADR-0013 D10。
 
 ### Overview 概览页（需求工作台仪表板）
 
@@ -223,7 +260,7 @@ v1.0 工位清单：
 | 22 | 需求状态色 = 分组共享色（4 色 + 灰）；CLARIFYING 特殊（紫+警告红点）；MVP 不带数字徽章 | — |
 | 23 | AI 存在方式 = 形态 C（混合）：默认克制在场 + Cmd+K 唤起 + 极窄主动推送 + Inline 标记；**取消右栏常驻** | — |
 | 24 | AI 出现哲学 = "**不打扰，但陪伴；克制，在场**"——始终可见、关键时刻搭把手，不替用户决定下一步 | — |
-| 25 | AI 主动推送触发**只保留一类**：AI 提问等用户回答。完成 Skill / 错误 / 决策 / 下一步建议 → 全部不推 | — |
+| 25 | AI 主动推送触发**全部取消**(2026-07-12 v1.0.2 改写,详见 [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md) D3+D6)。原"AI 提问等用户回答"降级为"待裁决项沉淀",AI 输出物以文件标记形式落位,以 StatusBar "待裁决 N" + 工位仪表板常驻提醒,其他工位可点 StatusBar 跳转。彻底贯彻决策 24 哲学。 | [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md) |
 | 26 | Cmd+K 命令面板：三段式（命令 + AI 提问 ⌘I 切换 + 历史）；`/` 搜索 / `>` 命令前缀；默认绑当前需求，`⌘⇧K` 切全局 | — |
 | 27 | AI 回答形式：可执行结果卡片（落盘产物 + 摘要 + 动作按钮），不是聊天回复 | — |
 | 28 | 信息密度 = Linear 紧凑型；字号 9 档（11-32）；间距 4 倍数（4-48）；Inter + JetBrains Mono | — |
@@ -265,6 +302,30 @@ v1.0 工位清单：
 | 55 | **ZoneBar 7 Tab + Cmd+K 双通道** = Overview + 6 工位，排序 Overview → DRAFTING → ANALYZING → CLARIFYING → DESIGNING → EXECUTING → WRAP-UP；Overview 时无，工位时有；Cmd+K 命令面板新增工位搜索 | [ADR-0012](docs/adr/0012-requirement-workbench-shell-topology.md) |
 | 56 | **工位集合声明式注册表** = 全局 `~/.aidevspace/zones/*.yaml`，13 字段（5 身份 + 5 环境 + 1 装备 + 1 AI 思考条 + 2 触发器 + 1 备注）；v1.0 不开放 user 自定义 | [ADR-0012](docs/adr/0012-requirement-workbench-shell-topology.md) |
 | 57 | **`/requirements/[id]/` 默认行为** = 重定向到 cookie `last_zone`（用户上次停留工位）或默认 `drafting`；**永不基于 `meta.yaml.status` 推断**（决策 15 反对状态机） | [ADR-0012](docs/adr/0012-requirement-workbench-shell-topology.md) |
+
+---
+
+## v1.0.2 增量决策（10 轮 grilling 沉淀 · 2026-07-12）
+
+> 本节是 v1.0.1 锁定后的迭代记录，不修改上面 v1.0 / v1.0.1 决策（除决策 25 改写已标记）。所有增量由 [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md) 承载完整内容。
+
+| # | 决策 | 关联 ADR |
+| --- | ------ | ---------- |
+| 58 | **ANALYZING 工位新定位** = PRD 准入校验 + 拆解聚合模块；取代原"旁观 AI 解析" | [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md) D1 |
+| 59 | **ANALYZING 4 核心职能** = 解析参数配置 + 解析过程观察（含插话） + 解析产物交互编辑 + 多会话并行 | [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md) D2 |
+| 60 | **AI 提问全部留在 ANALYZING**（不切 CLARIFYING）；覆盖原决策 25 中"AI 提问触发切 CLARIFYING"的部分 | [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md) D3 |
+| 61 | **严重度五级** = 4 准入维度（资损/性能/架构/业务） + 1 上下文确认；任一 🔴 资损 → 总体 ❌ 失败 | [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md) D4 |
+| 62 | **新术语 4 个** = 聚合模块（Aggregate Module）/ PRD 准入校验（PRD Admissibility Check）/ 技术概要（Technical Brief）/ 待裁决项（Pending Adjudication Item） | [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md) D5 |
+| 63 | **AI 准入提问 = 待裁决项沉淀**（非主动推送）；改写原决策 25 语义；写入 `analysis/adjudication.md`，用户主动来裁决 | [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md) D6 |
+| 64 | **多会话形态** = 顶部 Tab 切换（类似浏览器 Tab）；准入仪表板全局共享不分子会话；HTML 原型 [11h-A](docs/design/pages/11h-A-zone-multisession-tabs.html) | [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md) D7 |
+| 65 | **技术概要产物** = 双文件：`technical-brief.md`（叙述） + `modules.yaml`（聚合模块清单）；一次性落盘 | [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md) D8 |
+| 66 | **ANALYZING → CLARIFYING 交接** = 直接共享 `modules.yaml`（双向引用）；无快照 / 无冻结 / 无交接仪式 | [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md) D9 |
+| 67 | **准入维度可配置** = 各 Skill 在 frontmatter `admission_dimensions:` 声明；不同 Skill 可能有不同维度集（全局默认 5 维度可被 Skill `add` / `skip` 覆盖） | [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md) D10 |
+| 68 | **裁决后流程** = 增量更新（默认，触发见 69）+ 一键重扫按钮（用户主动触发全量重走流程） | [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md) D11 |
+| 69 | **增量更新触发** = 批量提交（用户裁决多项 → 点 `[应用本次裁决]` 按钮 → AI 一次性应用） | [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md) D12 |
+| 70 | **回答载体** = 预设选项（AI 推测的 2-4 个常见答案）+ 自定义文本输入框；用户点选或填字 | [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md) D13 |
+| 71 | **重扫后产物处理** = 直接覆盖 `modules.yaml` + `technical-brief.md`；不依赖 git，由决策 47 自动 snapshot 机制保留 30 天 | [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md) D14 |
+| 72 | **已裁决项视觉状态** = 双区折叠（待裁决顶部展开 / 已裁决底部折叠可展开）；[应用本次裁决] 与 [🔄 重扫] 按钮并排在待裁决区底部 | [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md) D15 |
 
 ---
 

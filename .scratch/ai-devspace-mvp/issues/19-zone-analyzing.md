@@ -1,10 +1,24 @@
 ---
-Status: ready-for-agent
+Status: wontfix
 Type: task
 Stage: 2
+SupersededBy: ADR-0013
 ---
 
 # 19 - ANALYZING 工位组件(Thinking 布局 · AI 观察屏)
+
+> ⚠️ **本 issue 已被 [ADR-0013](../../docs/adr/0013-analyzing-zone-rewrite.md) 整体替代。**
+>
+> 原定位"旁观 AI 解析(Thinking 布局·AI 观察屏)"过轻,无法承载一个工位复杂度。
+> 2026-07-12 通过 10 轮 grilling 重设计,新定位 = **PRD 准入校验 + 拆解聚合模块**(详见 ADR-0013 D1-D10)。
+>
+> 原 HTML 原型 [11e-stage-adaptive-analyzing.html](../../docs/design/pages/11e-stage-adaptive-analyzing.html) 保留作存档,**不作为实施对照**。
+>
+> **新实施路径**:ADR-0013 §"落地 Issue" 列出了 8 个拆分 issue(19a-19h),将由对应工位组件实施任务承接。
+
+## 原始目标(存档)
+
+把 [ADR-0011 §6 ANALYZING 布局](../docs/adr/0011-requirement-workbench-zone-adaptive.md) 落地为工位组件。
 
 ## 目标
 

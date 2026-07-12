@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>11h-B · ANALYZING 多会话 · 并排 Grid · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{
+  --brand:#5e6ad2; --brand-50:#eef0fb; --brand-500:#5e6ad2; --brand-600:#525bc7; --brand-700:#4147a3;
+  --success:#16a34a; --warning:#f59e0b; --error:#ef4444; --info:#64748b;
+  --bg:#fbfbfd; --bg-elevated:#ffffff; --bg-subtle:#f5f5f7; --border:#ebebef; --border-strong:#d8d8de;
+  --text-1:#0f172a; --text-2:#475569; --text-3:#94a3b8;
+  --text-xs:11px; --text-sm:12px; --text-base:13px; --text-md:14px; --text-lg:16px;
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-6:24px;
+  --radius-sm:4px; --radius-md:6px; --radius-lg:8px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg);color:var(--text-1);font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased}
+.topnav{position:sticky;top:0;z-index:100;background:#0f172a;color:#fff;padding:var(--space-2) var(--space-6);font-size:var(--text-sm);display:flex;align-items:center;gap:var(--space-4)}
+.topnav .pill{background:var(--brand);color:#fff;padding:2px 10px;border-radius:var(--radius-md);font-size:var(--text-xs);font-weight:500}
+.topnav a{color:#94a3b8;text-decoration:none;padding:4px 10px;border-radius:var(--radius-md);font-size:var(--text-sm)}
+.topnav a.cur{color:#fff;background:var(--brand)}
+.topnav .spacer{flex:1}
+.topnav .meta{color:#64748b;font-size:var(--text-xs);font-family:'JetBrains Mono',monospace}
+
+.shell{display:grid;grid-template-columns:56px 1fr;min-height:calc(100vh - 34px)}
+.sidebar{background:var(--bg-elevated);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:var(--space-3) 0;gap:2px}
+.sidebar .logo{width:32px;height:32px;border-radius:var(--radius-md);background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;margin-bottom:var(--space-3)}
+.sidebar a{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius-md);font-size:18px;text-decoration:none;color:var(--text-2)}
+.sidebar a:hover{background:var(--bg-subtle)}
+.sidebar a.active{background:var(--brand-50);color:var(--brand-700)}
+
+.detail{display:flex;flex-direction:column;background:var(--bg);overflow:hidden}
+.statusbar{background:var(--bg-elevated);border-bottom:1px solid var(--border);padding:var(--space-2) var(--space-4);display:flex;align-items:center;gap:var(--space-4);font-size:var(--text-sm)}
+.statusbar .strong{font-weight:500}
+.statusbar .dim{color:var(--text-3)}
+.statusbar .right{margin-left:auto;display:flex;align-items:center;gap:var(--space-4);color:var(--text-2);font-size:var(--text-sm)}
+.dot-pulse{width:8px;height:8px;border-radius:50%;background:var(--brand);animation:pulse 1.4s infinite;display:inline-block}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(94,106,210,.6)}70%{box-shadow:0 0 0 6px rgba(94,106,210,0)}100%{box-shadow:0 0 0 0 rgba(94,106,210,0)}}
+.cursor::after{content:'▍';color:var(--brand);animation:blink 0.6s infinite;font-weight:600;margin-left:1px}
+@keyframes blink{50%{opacity:0}}
+
+.zonebar{background:var(--bg-elevated);border-bottom:1px solid var(--border);padding:0 var(--space-4);display:flex;align-items:center;gap:2px;height:44px}
+.zonebar .z{display:inline-flex;align-items:center;gap:6px;padding:0 var(--space-3);height:32px;border-radius:var(--radius-md);font-size:var(--text-sm);color:var(--text-2);cursor:pointer}
+.zonebar .z:hover{background:var(--bg-subtle)}
+.zonebar .z.act{color:var(--brand-700);font-weight:600;position:relative}
+.zonebar .z.act::after{content:'';position:absolute;left:var(--space-3);right:var(--space-3);bottom:0;height:2px;background:var(--brand);border-radius:1px}
+.zonebar .z .dot{width:6px;height:6px;border-radius:50%;background:var(--text-3)}
+.zonebar .z.act .dot{background:var(--brand);animation:pulse 1.4s infinite}
+.zonebar .spacer{flex:1}
+
+/* 准入仪表板 */
+.admission{background:linear-gradient(90deg,var(--brand-50) 0%,rgba(238,240,251,0.3) 100%);border-bottom:1px solid var(--border);padding:var(--space-3) var(--space-4);display:flex;align-items:center;gap:var(--space-3)}
+.admission .title{font-size:var(--text-md);font-weight:600;color:var(--brand-700);display:flex;align-items:center;gap:6px;margin-right:var(--space-2)}
+.admission .grid{display:grid;grid-template-columns:repeat(5,1fr);gap:var(--space-2);flex:1}
+.dim-card{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-2) var(--space-3);display:flex;align-items:center;gap:var(--space-2);cursor:pointer}
+.dim-card:hover{border-color:var(--brand-50);box-shadow:0 1px 3px rgba(94,106,210,.1)}
+.dim-card.crit{border-left:3px solid var(--error)}
+.dim-card.warn{border-left:3px solid var(--warning)}
+.dim-card.q{border-left:3px solid var(--info)}
+.dim-card.ok{border-left:3px solid var(--success)}
+.dim-card .ic{font-size:14px}
+.dim-card .n{font-family:'JetBrains Mono',monospace;font-size:var(--text-lg);font-weight:600;color:var(--text-1);line-height:1}
+.dim-card .l{font-size:var(--text-xs);color:var(--text-2);text-transform:uppercase;letter-spacing:.04em}
+.admission .verdict{background:var(--bg-elevated);border:2px solid var(--warning);border-radius:var(--radius-md);padding:var(--space-2) var(--space-3);text-align:center;font-size:var(--text-xs);color:var(--warning);font-weight:600;line-height:1.3;min-width:80px}
+.admission .verdict::before{content:'⚠ 待裁决';display:block;font-size:9px;color:var(--text-3);font-weight:400;margin-bottom:2px}
+
+/* 视图工具条 */
+.viewbar{background:var(--bg-elevated);border-bottom:1px solid var(--border);padding:var(--space-2) var(--space-4);display:flex;align-items:center;gap:var(--space-2);font-size:var(--text-sm)}
+.viewbar .label{color:var(--text-3);font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.04em;font-weight:600;margin-right:var(--space-2)}
+.viewbar .vt{display:inline-flex;gap:0;border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden}
+.viewbar .vt .v{padding:4px 10px;font-size:var(--text-xs);cursor:pointer;color:var(--text-2);border-right:1px solid var(--border)}
+.viewbar .vt .v:last-child{border-right:none}
+.viewbar .vt .v.act{background:var(--brand);color:#fff;font-weight:600}
+.viewbar .right{margin-left:auto;display:flex;align-items:center;gap:var(--space-2)}
+.btn{padding:4px 10px;border-radius:var(--radius-md);font-size:var(--text-xs);font-weight:500;cursor:pointer;border:1px solid var(--border);background:var(--bg-elevated);color:var(--text-1);font-family:inherit}
+.btn:hover{background:var(--bg-subtle)}
+.btn-primary{background:var(--brand);color:#fff;border-color:var(--brand)}
+.btn-primary:hover{background:var(--brand-600)}
+
+/* 并排 Grid */
+.session-grid{flex:1;display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:var(--space-3);padding:var(--space-4);overflow:hidden;background:var(--bg-subtle);transition:grid-template-columns .2s ease}
+.session-grid.full{flex:1}
+.session-cell{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;display:flex;flex-direction:column;cursor:pointer;position:relative}
+.session-cell:hover{border-color:var(--brand-50)}
+.session-cell.act{border-color:var(--brand);box-shadow:0 2px 8px rgba(94,106,210,.15)}
+.session-cell .cell-hd{padding:var(--space-2) var(--space-3);border-bottom:1px solid var(--border);background:var(--brand-50);color:var(--brand-700);font-weight:600;font-size:var(--text-sm);display:flex;align-items:center;justify-content:space-between;cursor:move}
+.session-cell .cell-hd .left{display:flex;align-items:center;gap:6px}
+.session-cell .cell-hd .badge{background:var(--brand);color:#fff;font-size:9px;padding:1px 5px;border-radius:8px;font-weight:600}
+.session-cell .cell-body{flex:1;overflow:auto;padding:var(--space-3);font-size:var(--text-xs);line-height:1.6}
+
+/* 单列放大模式 */
+.session-grid.zoom .session-cell:not(.act){display:none}
+
+/* 横向对比列 */
+.compare-cell{background:var(--bg-elevated);border:1px solid var(--warning);border-radius:var(--radius-lg);overflow:hidden;display:flex;flex-direction:column}
+.compare-cell .cell-hd{padding:var(--space-2) var(--space-3);border-bottom:1px solid var(--border);background:#fef3c7;color:#92400e;font-weight:600;font-size:var(--text-sm)}
+.compare-cell .cell-body{flex:1;overflow:auto;padding:var(--space-3);font-size:var(--text-xs)}
+
+/* 思考流(窄列版) */
+.stream-line{padding:3px 0;display:flex;gap:6px;font-size:11px;line-height:1.4}
+.stream-line .ts{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text-3);min-width:36px;margin-top:1px;flex-shrink:0}
+.stream-line .lbl{display:inline-block;background:var(--brand-50);color:var(--brand-700);padding:0 4px;border-radius:2px;font-size:9px;font-weight:600;margin-right:4px}
+.stream-line .lbl.warn{background:#fef3c7;color:#92400e}
+.stream-line .lbl.success{background:#d1fae5;color:#065f46}
+.stream-line.current{background:var(--brand-50);border-radius:var(--radius-sm);padding:3px 6px;margin:0 -6px}
+
+/* 产物(窄列版) */
+.section-label{font-size:9px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:600;margin:6px 0 3px}
+.section-label:first-child{margin-top:0}
+.item{display:flex;gap:4px;padding:3px 5px;background:var(--bg-subtle);border-radius:3px;margin-bottom:3px;border-left:2px solid var(--text-3);font-size:11px;line-height:1.4}
+.item.q{border-left-color:var(--brand)}
+.item.r{border-left-color:var(--warning)}
+.item .ttl{font-weight:500;color:var(--text-1);font-size:11px}
+.item .desc{color:var(--text-2);font-size:10px;margin-top:1px}
+
+/* 对比表 */
+.compare-table{width:100%;border-collapse:collapse;font-size:11px}
+.compare-table th,.compare-table td{padding:4px 6px;border-bottom:1px solid var(--border);text-align:left}
+.compare-table th{background:var(--bg-subtle);font-weight:600;font-size:10px;color:var(--text-2)}
+.compare-table td.num{font-family:'JetBrains Mono',monospace;font-weight:600}
+.compare-table td.max{color:var(--error);font-weight:700}
+.compare-table td.med{color:var(--warning);font-weight:600}
+.compare-table td.min{color:var(--success)}
+
+/* AI 思考条 */
+.ai-bar{padding:var(--space-3) var(--space-4);border-top:2px solid var(--brand);background:var(--bg-elevated);display:flex;align-items:center;gap:var(--space-3)}
+.ai-bar .pulse-wrap{width:28px;height:28px;border-radius:50%;background:var(--brand-50);display:flex;align-items:center;justify-content:center}
+.ai-bar .text{flex:1;font-size:var(--text-sm);color:var(--text-1)}
+.ai-bar .text strong{color:var(--brand-700)}
+.ai-bar .text .meta{color:var(--text-3);font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);margin-left:var(--space-2)}
+.ai-bar .right-actions{display:flex;gap:var(--space-2)}
+
+.note{margin:var(--space-6);padding:var(--space-4);background:#f0f9ff;border:1px solid #bae6fd;border-radius:var(--radius-md);font-size:var(--text-sm);color:#075985;line-height:1.7}
+.note b{color:#0c4a6e}
+.kbd{font-family:'JetBrains Mono',monospace;background:var(--bg-subtle);padding:1px 6px;border-radius:var(--radius-sm);font-size:11px;border:1px solid var(--border);color:var(--text-2)}
+</style>
+</head>
+<body>
+
+<div class="topnav">
+  <span class="pill">11h · 候选 B · 并排 Grid</span>
+  <a href="11h-zone-multisession-form-compare.html">← 4 候选对比</a>
+  <a href="11h-A-zone-multisession-tabs.html">A · Tab</a>
+  <a href="11h-B-zone-multisession-grid.html" class="cur">B · Grid</a>
+  <a href="11h-C-zone-multisession-hybrid.html">C · 混合</a>
+  <a href="11h-D-zone-multisession-drawer.html">D · 抽屉</a>
+  <span class="spacer"></span>
+  <span class="meta">点击会话列可放大查看 ↑</span>
+</div>
+
+<div class="shell">
+  <nav class="sidebar">
+    <div class="logo">A</div>
+    <a href="#" title="概览">🏠</a>
+    <a href="#" class="active" title="需求">📌</a>
+    <a href="#" title="仓库">📦</a>
+    <a href="#" title="知识">📚</a>
+    <a href="#" title="Skill">🤖</a>
+    <span style="flex:1"></span>
+    <a href="#" title="设置">⚙️</a>
+  </nav>
+
+  <div class="detail">
+
+    <div class="statusbar">
+      <span class="strong">退款功能优化</span>
+      <span class="dim">·</span>
+      <span class="dim">阶段 分析 · 3 会话并行 · 已运行 28s</span>
+      <div class="right">
+        <span style="display:flex;align-items:center;gap:6px"><span class="dot-pulse"></span>3 会话思考中</span>
+        <span class="dim">⌘K 命令</span>
+      </div>
+    </div>
+
+    <div class="zonebar">
+      <span class="z"><span class="dot"></span>概览</span>
+      <span class="z"><span class="dot"></span>DRAFTING</span>
+      <span class="z act"><span class="dot"></span>ANALYZING<span class="badge">3</span></span>
+      <span class="z"><span class="dot" style="background:var(--brand);width:6px;height:6px;border-radius:50%;border:1.5px solid var(--error)"></span>CLARIFYING</span>
+      <span class="z"><span class="dot"></span>DESIGNING</span>
+      <span class="z"><span class="dot"></span>EXECUTING</span>
+      <span class="z"><span class="dot"></span>WRAP-UP</span>
+      <span class="spacer"></span>
+    </div>
+
+    <!-- 准入仪表板 -->
+    <div class="admission">
+      <div class="title">🛡 PRD 准入</div>
+      <div class="grid">
+        <div class="dim-card crit"><span class="ic">🔴</span><div><div class="n">2</div><div class="l">资损</div></div></div>
+        <div class="dim-card warn"><span class="ic">🟠</span><div><div class="n">3</div><div class="l">性能</div></div></div>
+        <div class="dim-card warn"><span class="ic">🟡</span><div><div class="n">1</div><div class="l">架构</div></div></div>
+        <div class="dim-card ok"><span class="ic">🟢</span><div><div class="n">0</div><div class="l">业务</div></div></div>
+        <div class="dim-card q"><span class="ic">💬</span><div><div class="n">4</div><div class="l">上下文</div></div></div>
+      </div>
+      <div class="verdict">待裁决 10 项</div>
+    </div>
+
+    <!-- 视图工具条 -->
+    <div class="viewbar">
+      <span class="label">视图</span>
+      <div class="vt">
+        <span class="v" onclick="setLayout('zoom', null)">单列</span>
+        <span class="v act" onclick="setLayout('grid', null)">并排</span>
+      </div>
+      <span class="right">
+        <button class="btn">+ 新建会话</button>
+        <button class="btn btn-primary">📊 生成技术概要</button>
+      </span>
+    </div>
+
+    <!-- 并排 Grid (4 列: 3 会话 + 1 对比) -->
+    <div class="session-grid" id="grid">
+      <!-- 会话 1: 架构 -->
+      <div class="session-cell act" data-key="arch" onclick="setLayout('zoom', 'arch')">
+        <div class="cell-hd">
+          <span class="left">📐 架构角度 <span class="badge">3</span></span>
+          <span style="font-size:10px;color:var(--text-3)">17s</span>
+        </div>
+        <div class="cell-body">
+          <div class="section-label">🧠 思考流</div>
+          <div class="stream-line"><span class="ts">14:22:34</span><span><span class="lbl">SCAN</span>5 模块</span></div>
+          <div class="stream-line"><span class="ts">14:22:38</span><span><span class="lbl">INFER</span>依赖图</span></div>
+          <div class="stream-line"><span class="ts">14:22:40</span><span><span class="lbl success">DETECT</span>3 子问题</span></div>
+          <div class="stream-line"><span class="ts">14:22:43</span><span><span class="lbl warn">RISK</span>调用链 5 跳</span></div>
+          <div class="stream-line"><span class="ts">14:22:45</span><span><span class="lbl warn">RISK</span>幂等缺失</span></div>
+          <div class="stream-line"><span class="ts">14:22:47</span><span><span class="lbl warn">RISK</span>回滚复杂</span></div>
+          <div class="stream-line"><span class="ts">14:22:49</span><span><span class="lbl">OPT</span>2 方案</span></div>
+          <div class="stream-line current"><span class="ts">14:22:51</span><span><span class="lbl">THINK</span>拆分粒度 ▍</span></div>
+
+          <div class="section-label">📌 子问题 (3)</div>
+          <div class="item q"><span class="ttl">Q1 退款是否独立服务?</span></div>
+          <div class="item q"><span class="ttl">Q2 是否引入 Saga?</span></div>
+          <div class="item q"><span class="ttl">Q3 幂等网关部署哪层?</span></div>
+
+          <div class="section-label">⚠️ 风险 (5)</div>
+          <div class="item r"><span class="ttl">调用链 5 跳</span></div>
+          <div class="item r"><span class="ttl">无幂等网关</span></div>
+          <div class="item r"><span class="ttl">回滚跨 4 库</span></div>
+
+          <div class="section-label">🎨 方案 (2)</div>
+          <div class="item"><span class="ttl">A 单体改造 (2周)</span></div>
+          <div class="item"><span class="ttl">B Saga 编排 (3周)</span></div>
+        </div>
+      </div>
+
+      <!-- 会话 2: 数据 -->
+      <div class="session-cell" data-key="data" onclick="setLayout('zoom', 'data')">
+        <div class="cell-hd">
+          <span class="left">💾 数据角度 <span class="badge">5</span></span>
+          <span style="font-size:10px;color:var(--text-3)">14s</span>
+        </div>
+        <div class="cell-body">
+          <div class="section-label">🧠 思考流</div>
+          <div class="stream-line"><span class="ts">14:23:01</span><span><span class="lbl">START</span>PRD 接收</span></div>
+          <div class="stream-line"><span class="ts">14:23:02</span><span><span class="lbl">READ</span>5 业务目标</span></div>
+          <div class="stream-line"><span class="ts">14:23:04</span><span><span class="lbl">SCAN</span>3 模块</span></div>
+          <div class="stream-line"><span class="ts">14:23:05</span><span><span class="lbl">MATCH</span>知识 3 条</span></div>
+          <div class="stream-line"><span class="ts">14:23:07</span><span><span class="lbl success">DETECT</span>5 子问题</span></div>
+          <div class="stream-line"><span class="ts">14:23:09</span><span><span class="lbl warn">RISK</span>#247 (0.82)</span></div>
+          <div class="stream-line"><span class="ts">14:23:11</span><span><span class="lbl warn">RISK</span>#312 (0.91)</span></div>
+          <div class="stream-line"><span class="ts">14:23:12</span><span><span class="lbl">INFER</span>幂等必要</span></div>
+          <div class="stream-line"><span class="ts">14:23:14</span><span><span class="lbl">OPT</span>2 方案</span></div>
+          <div class="stream-line current"><span class="ts">14:23:15</span><span><span class="lbl">THINK</span>方案 B 回滚 ▍</span></div>
+
+          <div class="section-label">📌 子问题 (5)</div>
+          <div class="item q"><span class="ttl">Q1 退款金额上限?</span></div>
+          <div class="item q"><span class="ttl">Q2 退款审核流?</span></div>
+          <div class="item q"><span class="ttl">Q3 失败回滚策略?</span></div>
+          <div class="item q"><span class="ttl">Q4 退款幂等实现?</span></div>
+          <div class="item q"><span class="ttl">Q5 部分退款规则?</span></div>
+
+          <div class="section-label">⚠️ 风险 (3)</div>
+          <div class="item r"><span class="ttl">高并发重复 #247</span></div>
+          <div class="item r"><span class="ttl">优惠券未回滚 #312</span></div>
+          <div class="item r"><span class="ttl">退款链路长</span></div>
+
+          <div class="section-label">🎨 方案 (2)</div>
+          <div class="item"><span class="ttl">A 同步单阶段 250ms</span></div>
+          <div class="item"><span class="ttl">B 异步多阶段 80ms</span></div>
+        </div>
+      </div>
+
+      <!-- 会话 3: 接口 -->
+      <div class="session-cell" data-key="api" onclick="setLayout('zoom', 'api')">
+        <div class="cell-hd">
+          <span class="left">🔌 接口角度 <span class="badge">8</span></span>
+          <span style="font-size:10px;color:var(--text-3)">19s</span>
+        </div>
+        <div class="cell-body">
+          <div class="section-label">🧠 思考流</div>
+          <div class="stream-line"><span class="ts">14:24:12</span><span><span class="lbl">SCAN</span>12 接口</span></div>
+          <div class="stream-line"><span class="ts">14:24:15</span><span><span class="lbl">MATCH</span>OpenAPI</span></div>
+          <div class="stream-line"><span class="ts">14:24:17</span><span><span class="lbl success">DETECT</span>8 子问题</span></div>
+          <div class="stream-line"><span class="ts">14:24:19</span><span><span class="lbl warn">RISK</span>无幂等字段</span></div>
+          <div class="stream-line"><span class="ts">14:24:21</span><span><span class="lbl warn">RISK</span>老版本未兼容</span></div>
+          <div class="stream-line"><span class="ts">14:24:23</span><span><span class="lbl warn">RISK</span>错误码乱</span></div>
+          <div class="stream-line"><span class="ts">14:24:27</span><span><span class="lbl warn">RISK</span>无状态机</span></div>
+          <div class="stream-line"><span class="ts">14:24:29</span><span><span class="lbl">OPT</span>3 方案</span></div>
+          <div class="stream-line current"><span class="ts">14:24:31</span><span><span class="lbl">THINK</span>OpenAPI 兼容 ▍</span></div>
+
+          <div class="section-label">📌 子问题 (8)</div>
+          <div class="item q"><span class="ttl">Q1 通知接口版本?</span></div>
+          <div class="item q"><span class="ttl">Q2 老客户端兼容?</span></div>
+          <div class="item q"><span class="ttl">Q3 错误码规范?</span></div>
+          <div class="item q"><span class="ttl">Q4 回调幂等键?</span></div>
+          <div class="item q"><span class="ttl">Q5 状态机定义?</span></div>
+          <div class="item q"><span class="ttl">Q6 webhook 重试?</span></div>
+          <div class="item q"><span class="ttl">Q7 部分退款接口?</span></div>
+          <div class="item q"><span class="ttl">Q8 对账字段?</span></div>
+
+          <div class="section-label">⚠️ 风险 (6)</div>
+          <div class="item r"><span class="ttl">通知无幂等</span></div>
+          <div class="item r"><span class="ttl">老版本 12%</span></div>
+          <div class="item r"><span class="ttl">错误码乱</span></div>
+
+          <div class="section-label">🎨 方案 (3)</div>
+          <div class="item"><span class="ttl">A 扩展兼容 (2周)</span></div>
+          <div class="item"><span class="ttl">B 新版+弃用 (3周)</span></div>
+          <div class="item"><span class="ttl">C 双版本6月 (4周)</span></div>
+        </div>
+      </div>
+
+      <!-- 横向对比列 -->
+      <div class="compare-cell">
+        <div class="cell-hd">📊 横向对比</div>
+        <div class="cell-body">
+          <table class="compare-table">
+            <thead>
+              <tr><th>维度</th><th>架构</th><th>数据</th><th>接口</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>子问题</td><td class="num">3</td><td class="num">5</td><td class="num max">8</td></tr>
+              <tr><td>风险</td><td class="num max">5</td><td class="num med">3</td><td class="num">6</td></tr>
+              <tr><td>方案</td><td class="num">2</td><td class="num">2</td><td class="num max">3</td></tr>
+              <tr><td>耗时</td><td class="num">17s</td><td class="num min">14s</td><td class="num">19s</td></tr>
+              <tr><td>重点</td><td>拆分</td><td>幂等</td><td>兼容</td></tr>
+            </tbody>
+          </table>
+          <div class="section-label" style="margin-top:12px">📌 交叉洞察</div>
+          <div style="font-size:11px;line-height:1.6;color:var(--text-2)">
+            · <b>幂等</b> 在 3 会话都被提及 (架构缺网关 · 数据必做 · 接口无字段) → 高优<br>
+            · <b>调用链长</b> 跨 3 视角都识别为风险 → 共识<br>
+            · <b>方案数量</b>: 接口角度方案最多(3),架构最少(2),需权衡<br>
+          </div>
+          <div class="section-label" style="margin-top:12px">🎯 推荐</div>
+          <div style="font-size:11px;color:var(--brand-700);font-weight:600">采纳 数据角度 5 子问题作为主清单</div>
+          <div style="font-size:10px;color:var(--text-3);margin-top:2px">接口 8 项作为补充澄清 · 架构 5 风险纳入设计</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI 思考条 -->
+    <div class="ai-bar">
+      <div class="pulse-wrap"><span class="dot-pulse"></span></div>
+      <div class="text">
+        <strong>3 会话并行思考</strong> · 总进度 62% · 平均 17s
+        <span class="meta">· 点击某会话列可放大 · ⏸ 可暂停全部 · ↶ 可重置</span>
+      </div>
+      <div class="right-actions">
+        <button class="btn">📋 合并产物</button>
+        <button class="btn">⏸ 全部暂停</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="note">
+  <b>候选 B · 并排 Grid · 交互说明:</b><br>
+  · 点击 <b>任意会话列</b> → 进入"单列放大"模式,其他列隐藏,可深度查看<br>
+  · 再次点击视图切换的 <b>"并排"</b> → 恢复 4 列布局<br>
+  · 第 4 列 = <b>横向对比列</b>:表格 + 交叉洞察 + 推荐汇总<br>
+  · 准入仪表板 5 维度 <b>共享</b>(不分子会话)<br>
+  <br>
+  <b>该形态优点:</b> 差异对比直观;无需切换;辅助决策<br>
+  <b>该形态缺点:</b> 窄列难以深度编辑;每列空间小;视觉负担重
+</div>
+
+<script>
+function setLayout(mode, key) {
+  const grid = document.getElementById('grid');
+  const cells = document.querySelectorAll('.session-cell');
+  const vts = document.querySelectorAll('.viewbar .vt .v');
+
+  if (mode === 'zoom' && key) {
+    grid.classList.add('zoom');
+    cells.forEach(c => c.classList.toggle('act', c.dataset.key === key));
+    vts[0].classList.add('act');
+    vts[1].classList.remove('act');
+  } else {
+    grid.classList.remove('zoom');
+    cells.forEach(c => c.classList.remove('act'));
+    vts[0].classList.remove('act');
+    vts[1].classList.add('act');
+  }
+}
+</script>
+
+</body>
+</html>

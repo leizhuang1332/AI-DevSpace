@@ -1,5 +1,5 @@
 /**
- * SDK Spike — 验证 @anthropic-ai/claude-code query() 行为
+ * SDK Spike — 验证 @anthropic-ai/claude-agent-sdk query() 行为
  *
  * 目的：跑通 3 个关键假设，避免 P0-P5 写完才发现假设不成立
  *
@@ -10,7 +10,7 @@
  *
  * 运行：
  *   1. cd apps/agent
- *   2. pnpm add @anthropic-ai/claude-code better-sqlite3
+ *   2. pnpm add @anthropic-ai/claude-agent-sdk better-sqlite3
  *   3. pnpm add -D @types/better-sqlite3 tsx
  *   4. pnpm tsx spike/sdk-spike.ts
  *
