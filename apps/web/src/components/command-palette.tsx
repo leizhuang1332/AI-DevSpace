@@ -1,6 +1,8 @@
 'use client';
 import { useUIOverlay } from './ui-overlay-store';
-import { useEffect, useState } from 'react';
+import { ZONE_META, ZONE_STATUS_COLOR_CLASS, type ZoneMeta } from '@/lib/zones';
+import { usePathname, useRouter } from 'next/navigation';
+import { useEffect, useMemo, useState } from 'react';
 
 type Mode = 'command' | 'ai' | 'history';
 
@@ -11,6 +13,29 @@ interface Item {
   shortcut?: string[];
   section?: string;
 }
+
+/**
+ * Overview 是第 7 产品形态但**不是工位**(ADR-0012 §1)。
+ * 在 Cmd+K 里作为"切回仪表板"项,route 为 `/requirements/<id>/`。
+ */
+interface OverviewJump {
+  kind: 'overview';
+  id: 'overview';
+  label: string;
+  icon: string;
+  route: string;
+}
+
+interface ZoneJump {
+  kind: 'zone';
+  id: string;
+  label: string;
+  icon: string;
+  status_color: ZoneMeta['status_color'];
+  route: string;
+}
+
+type Jump = OverviewJump | ZoneJump;
 
 const ALL: Item[] = [
   { icon: '▶', label: '运行 code-stage Skill', desc: '继续执行下一个 Task（当前 #12 退款接口开发）', shortcut: ['⌘', 'R'], section: '需求操作' },
@@ -33,10 +58,83 @@ const HISTORY: Item[] = [
 const CMD_FILTERED = (q: string) => ALL.filter((i) => i.label.includes(q));
 const AI_SUGGEST = (q: string) => [{ icon: '✨', label: `AI: "${q}"` }];
 
+/**
+ * 从 `/requirements/<id>/<zone?>/` 解析 currentReqId。
+ * 严格要求两段(Overview 或具体 zone);更深路径(未知子路由)→ null,
+ * 避免误把 `drafting/foo` 中的 `foo` 当 id。
+ */
+function parseRequirementId(pathname: string): string | null {
+  const m = pathname.match(/^\/requirements\/([^/]+)(?:\/(?:[^/]+))?\/?$/)
+  return m ? m[1] : null
+}
+
+/**
+ * 工位 Cmd+K 匹配(ADR-0012 §7 · issue 14):
+ * - 匹配字段:id / name(大写)/ display_name(中文)/ route_segment
+ * - 大小写不敏感
+ * - 包含匹配(query 是字段子串)
+ * - 支持 `@zone` 前缀(ADR §7 表格):内部剥掉 `@` 再匹配
+ * - 空 query / 无 requirementId → []
+ * - 同时支持两种匹配风格:
+ *   1) 直接 includes("执行中" 匹配 display_name、"executing" 匹配 id)
+ *   2) 去元音 + includes("wrp" 匹配 "wrap-up"、"ana" 匹配 "analyzing")
+ *
+ * Overview 不是工位,但在 Cmd+K 里也作为"回仪表板"项匹配,便于用户在工位页快速回 Overview。
+ */
+const STRIP_VOWELS_RE = /[aeiou\-_\s]/g
+
+export function matchZoneJumps(query: string, requirementId: string | null): Jump[] {
+  if (!query || !requirementId) return []
+  // 剥掉 @zone / /zone 等前缀,只对核心搜索词做匹配
+  const stripped = query.replace(/^[@/]\s*/, '')
+  if (!stripped) return []
+  const q = stripped.toLowerCase()
+  const qStripped = q.replace(STRIP_VOWELS_RE, '')
+  const matchesZone = (z: ZoneMeta) => {
+    const targets = [
+      z.id.toLowerCase(),
+      z.name.toLowerCase(),
+      z.display_name.toLowerCase(),
+      z.route_segment.toLowerCase(),
+    ]
+    if (targets.some((t) => t.includes(q))) return true
+    // 缩写前缀场景:只对 ASCII 字段生效,避免破坏中文匹配
+    const asciiTargets = targets.filter((t) => /[a-z]/.test(t)).map((t) => t.replace(STRIP_VOWELS_RE, ''))
+    return asciiTargets.some((t) => t.includes(qStripped))
+  }
+
+  const zoneJumps: ZoneJump[] = ZONE_META.filter(matchesZone).map((z) => ({
+    kind: 'zone' as const,
+    id: z.id,
+    label: `切到 ${z.name} 工位`,
+    icon: z.icon,
+    status_color: z.status_color,
+    route: `/requirements/${requirementId}/${z.route_segment}/`,
+  }))
+
+  const overviewMatches = 'overview'.includes(q) || '概览'.includes(q)
+  const overview: OverviewJump[] = overviewMatches
+    ? [
+        {
+          kind: 'overview' as const,
+          id: 'overview' as const,
+          label: '回 Overview 概览页',
+          icon: '📊',
+          route: `/requirements/${requirementId}/`,
+        },
+      ]
+    : []
+
+  return [...overview, ...zoneJumps]
+}
+
 export function CommandPalette() {
   const { cmdK, close } = useUIOverlay();
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<Mode>('command');
+  const pathname = usePathname();
+  const router = useRouter();
+  const requirementId = useMemo(() => parseRequirementId(pathname), [pathname]);
 
   // Reset query when palette opens; ⌘I toggles AI mode
   useEffect(() => {
@@ -57,6 +155,16 @@ export function CommandPalette() {
   }, [cmdK]);
 
   if (!cmdK) return null;
+
+  // 命令模式 + 非命令前缀 + 非空 query → 工位搜索项(ADR-0012 §7)
+  const showZoneSearch =
+    mode === 'command' && !query.startsWith('>') && !query.startsWith('✨') && query.length > 0
+  const zoneJumps = showZoneSearch ? matchZoneJumps(query, requirementId) : []
+
+  const handleJump = (jump: Jump) => {
+    router.push(jump.route)
+    close()
+  }
 
   let items: Item[];
   if (mode === 'history') items = HISTORY;
@@ -140,11 +248,37 @@ export function CommandPalette() {
 
         {/* Results list */}
         <div className="max-h-[420px] overflow-y-auto py-1">
-          {items.length === 0 && (
+          {items.length === 0 && zoneJumps.length === 0 && (
             <div className="px-5 py-8 text-center text-sm text-text-3">
               {mode === 'ai' ? '输入自然语言提问 · AI 给出可执行结果卡片' : '无匹配命令'}
             </div>
           )}
+          {/* 工位搜索(ADR-0012 §7 · issue 14) */}
+          {zoneJumps.map((j) => (
+            <button
+              key={j.id}
+              type="button"
+              data-testid={`cmd-zone-${j.id}`}
+              data-zone-kind={j.kind}
+              onClick={() => handleJump(j)}
+              className="w-full flex items-center gap-3 px-5 py-2 text-left hover:bg-bg-subtle"
+            >
+              <div className="w-7 h-7 rounded-md bg-bg-subtle flex items-center justify-center text-sm text-text-2">
+                {j.icon}
+              </div>
+              <div className="flex-1">
+                <div className="text-text-1 text-md">{j.label}</div>
+                <div className="text-xs text-text-3">工位导航 · {j.route}</div>
+              </div>
+              {j.kind === 'zone' && (
+                <span
+                  aria-hidden="true"
+                  data-testid={`cmd-zone-dot-${j.id}`}
+                  className={`w-1.5 h-1.5 rounded-full ${ZONE_STATUS_COLOR_CLASS[j.status_color]}`}
+                />
+              )}
+            </button>
+          ))}
           {items.map((it, i) => (
             <Item key={i} item={it} />
           ))}
