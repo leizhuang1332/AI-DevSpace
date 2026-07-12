@@ -1,17 +1,20 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildServer } from '../server.js'
 
 let tmpRoot: string
 let app: Awaited<ReturnType<typeof buildServer>>
+let token: string
 
 beforeEach(async () => {
   tmpRoot = mkdtempSync(join(tmpdir(), 'aidev-routes-'))
   process.env.AIDEVSPACE_HOME = tmpRoot
   app = await buildServer()
   await app.ready()
+  // Read the auto-generated token from the workspace dir
+  token = readFileSync(join(tmpRoot, '.agent-token'), 'utf8')
 })
 
 afterEach(async () => {
@@ -19,6 +22,11 @@ afterEach(async () => {
   if (app) await app.close()
   if (existsSync(tmpRoot)) rmSync(tmpRoot, { recursive: true, force: true })
 })
+
+const auth = { 'x-aidevspace-token': '' as string }
+function withToken() {
+  return { ...auth, 'x-aidevspace-token': token }
+}
 
 describe('slice 14: server boot init', () => {
   it('buildServer 后根目录已被初始化', async () => {
@@ -31,7 +39,11 @@ describe('slice 14: server boot init', () => {
 
 describe('slice 12: GET /api/workspace', () => {
   it('返回 200 + 完整 WorkspaceInfo', async () => {
-    const res = await app.inject({ method: 'GET', url: '/api/workspace' })
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/workspace',
+      headers: withToken(),
+    })
     expect(res.statusCode).toBe(200)
     const body = res.json()
     expect(body.root).toBe(tmpRoot)
@@ -48,6 +60,7 @@ describe('slice 13: PATCH /api/workspace/config', () => {
     const res = await app.inject({
       method: 'PATCH',
       url: '/api/workspace/config',
+      headers: withToken(),
       payload: { theme: 'dark', silentWindowSeconds: 60 },
     })
     expect(res.statusCode).toBe(200)
@@ -55,7 +68,6 @@ describe('slice 13: PATCH /api/workspace/config', () => {
     expect(body.ok).toBe(true)
     expect(body.config.theme).toBe('dark')
     expect(body.config.silentWindowSeconds).toBe(60)
-    // 未提及的字段保留
     expect(body.config.typewriterSpeed).toBe('medium')
   })
 
@@ -63,7 +75,8 @@ describe('slice 13: PATCH /api/workspace/config', () => {
     const res = await app.inject({
       method: 'PATCH',
       url: '/api/workspace/config',
-      payload: { theme: { nested: 'object' } }, // 非法值
+      headers: withToken(),
+      payload: { theme: { nested: 'object' } },
     })
     expect(res.statusCode).toBe(400)
     const body = res.json()
@@ -75,6 +88,7 @@ describe('slice 13: PATCH /api/workspace/config', () => {
     const res = await app.inject({
       method: 'PATCH',
       url: '/api/workspace/config',
+      headers: withToken(),
       payload: {},
     })
     expect(res.statusCode).toBe(200)
@@ -86,6 +100,7 @@ describe('slice 14 (补): /api/workspace/open + uninstall 占位端点（返回 
     const res = await app.inject({
       method: 'POST',
       url: '/api/workspace/open',
+      headers: withToken(),
       payload: {},
     })
     expect(res.statusCode).toBe(501)
@@ -96,6 +111,7 @@ describe('slice 14 (补): /api/workspace/open + uninstall 占位端点（返回 
     const res = await app.inject({
       method: 'POST',
       url: '/api/workspace/uninstall',
+      headers: withToken(),
     })
     expect(res.statusCode).toBe(501)
     expect(res.json()).toMatchObject({ error: 'not_implemented' })
@@ -103,11 +119,11 @@ describe('slice 14 (补): /api/workspace/open + uninstall 占位端点（返回 
 })
 
 describe('slice 14 (补): GET /api/health 增强', () => {
-  it('响应含 workspaceRoot', async () => {
+  it('响应含 workspace 结构', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/health' })
     expect(res.statusCode).toBe(200)
     const body = res.json()
     expect(body.ok).toBe(true)
-    expect(body.workspaceRoot).toBe(tmpRoot)
+    expect(body.workspace.root).toBe(tmpRoot)
   })
 })
