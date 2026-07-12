@@ -1,0 +1,30 @@
+zone:
+  # ─── 身份(必填 · 5 字段) ───
+  id: clarifying
+  name: CLARIFYING
+  display_name: 澄清
+  icon: ❓
+  route_segment: clarifying
+
+  # ─── 环境(必填 · 5 字段) ───
+  has_resource_tree: false
+  has_inline_rail: false
+  main_layout: qa
+  status_color: purple-warn
+  status_pulse: false
+
+  # ─── 装备(必填 · 1 字段) ───
+  default_arming:
+    - question-handler
+    - context-recall
+
+  # ─── AI 思考条(必填 · 1 字段) ───
+  thinking_bar: required
+
+  # ─── 触发器(可选 · 2 字段) ───
+  entry_triggers:
+    - ai-asked-question
+  exit_triggers: []
+
+  # ─── 备注(可选 · 1 字段) ───
+  description: 回答 AI 的提问,提供决策信息

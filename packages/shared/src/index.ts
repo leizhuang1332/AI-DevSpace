@@ -1,5 +1,6 @@
 export * from './config-defaults.js'
 export * from './workspace.js'
+export * from './zones.js'
 export * from './sse.js'
 export * from './api.js'
 export * from './error.js'

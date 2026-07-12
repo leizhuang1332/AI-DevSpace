@@ -8,6 +8,7 @@ import { TokenManager } from './auth/TokenManager.js'
 import { authPlugin } from './auth/authPlugin.js'
 import { WorkspaceService } from './services/WorkspaceService.js'
 import { HealthService } from './services/HealthService.js'
+import { ZoneRegistry } from './services/ZoneRegistry.js'
 import { workspaceRoutes } from './routes/workspace.js'
 import { requirementRoutes } from './routes/requirement.js'
 import { bootstrapRoutes } from './routes/bootstrap.js'
@@ -24,10 +25,22 @@ function defaultWorkspaceRoot(): string {
   return process.env.AIDEVSPACE_HOME ?? join(homedir(), '.aidevspace')
 }
 
+/**
+ * 默认工位注册表目录:与 server.ts 同级的 zones/ 目录。
+ * 部署时可由 AIDEVSPACE_ZONES_DIR 或 BuildServerOptions.zonesDir 覆盖。
+ */
+function defaultZonesDir(): string {
+  const override = process.env.AIDEVSPACE_ZONES_DIR?.trim()
+  return override && override.length > 0
+    ? override
+    : join(dirname(fileURLToPath(import.meta.url)), 'zones')
+}
+
 export interface BuildServerOptions {
   workspaceRoot?: string
   logFilePath?: string
   agentVersion?: string
+  zonesDir?: string
 }
 
 /**
@@ -37,6 +50,7 @@ export interface BuildServerOptions {
 export async function buildServer(opts: BuildServerOptions = {}): Promise<FastifyInstance> {
   const workspaceRoot = opts.workspaceRoot ?? defaultWorkspaceRoot()
   const logFilePath = opts.logFilePath ?? defaultLogPath()
+  const zonesDir = opts.zonesDir ?? defaultZonesDir()
   const bootTime = new Date()
   mkdirSync(dirname(logFilePath), { recursive: true })
 
@@ -83,7 +97,19 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     throw err
   }
 
-  // 5. Routes
+  // 5. Zone registry (load + validate all built-in zone yaml at boot)
+  const zoneRegistry = new ZoneRegistry(zonesDir)
+  try {
+    const zones = await zoneRegistry.loadAllZones()
+    fastify.log.info(
+      `${zones.length} zones loaded: ${zones.map((z) => z.id).join(', ')}`,
+    )
+  } catch (err) {
+    fastify.log.error({ err, zonesDir }, 'zone registry load failed')
+    throw err
+  }
+
+  // 6. Routes
   const healthService = new HealthService({
     root: workspaceRoot,
     tokenManager,

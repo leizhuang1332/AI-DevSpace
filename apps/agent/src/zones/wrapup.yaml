@@ -1,0 +1,29 @@
+zone:
+  # ─── 身份(必填 · 5 字段) ───
+  id: wrapup
+  name: WRAP-UP
+  display_name: 归档
+  icon: 📦
+  route_segment: wrap-up
+
+  # ─── 环境(必填 · 5 字段) ───
+  has_resource_tree: true
+  has_inline_rail: false
+  main_layout: archive
+  status_color: gray
+  status_pulse: false
+
+  # ─── 装备(必填 · 1 字段) ───
+  default_arming:
+    - retrospective-writer
+    - knowledge-indexer
+
+  # ─── AI 思考条(必填 · 1 字段) ───
+  thinking_bar: minimal
+
+  # ─── 触发器(可选 · 2 字段) ───
+  entry_triggers: []
+  exit_triggers: []
+
+  # ─── 备注(可选 · 1 字段) ───
+  description: 归档复盘,沉淀知识库
