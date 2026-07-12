@@ -1,7 +1,13 @@
 # ADR-0007: workspace shell 三层 route group + 键盘监听归属
 
-**Status:** Accepted  
-**Date:** 2026-07-09  
+> ⚠️ **SUPERSEDED by [ADR-0012](0012-requirement-workbench-shell-topology.md) · 2026-07-12**
+>
+> 本 ADR 的核心拓扑(`(workspace)/requirements/[id]/layout.tsx` shell 层 2 = 资源树 + Inline 栏)被 11 轮 grilling 会话推翻。资源树 / Inline 栏下放到工位专属 shell,新增 Overview 概览页,ZoneBar 7 Tab 接管详情路由导航。
+>
+> **保留本 ADR 作 v1.0 探索存档**,新模型见 [ADR-0012](0012-requirement-workbench-shell-topology.md) + [ADR-0011](0011-requirement-workbench-zone-adaptive.md)。
+
+**Status:** Superseded by [ADR-0012](0012-requirement-workbench-shell-topology.md)
+**Date:** 2026-07-09 (original) · 2026-07-12 (superseded)
 **Deciders:** 项目负责人
 
 ## Context
