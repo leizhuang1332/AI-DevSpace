@@ -281,3 +281,63 @@ describe('AnalyzingZone · 完成提示(决策 15 非自动跳转)', () => {
     expect(screen.getByTestId('analyzing-stage-status').textContent).toBe('已暂停')
   })
 })
+
+// ============================================================================
+// 打字机 fake-timer 推进(issue 19b 验收 #14 子项)
+// 用 fake timer 推进 20ms / 字,断言 typed-len 增长。
+// React 18 commit 在 fake-timer 下有 MessageChannel 时序漂移,所以本测试
+// 用一个宽松的断言模式:推进 N 倍时间后,typed-len 至少应有所增长(具体值受 React
+// commit batch 影响),不严格等于 N * 1。
+// ============================================================================
+
+describe('AnalyzingZone · 打字机 fake-timer 推进(20ms/字)', () => {
+  afterEach(() => {
+    cleanup()
+    vi.useRealTimers()
+  })
+
+  it('初始 typed-len=1;fake-timer 推进 ≥ 100ms 后 typed-len ≥ 2(20ms/字)', async () => {
+    vi.useFakeTimers()
+    const data = await getAnalyzingData('req-001')
+    render(<AnalyzingZone data={data} />)
+
+    // 初始:打字机起步,typed-len=1
+    const initialTypedLen = Number(
+      screen.getByTestId('analyzing-chunk-current').getAttribute('data-typed-len'),
+    )
+    expect(initialTypedLen).toBe(1)
+
+    // 推进 100ms → 至少多打 1 个字(理论 5 个,但 React commit batch 不稳定)
+    await act(async () => {
+      vi.advanceTimersByTime(100)
+    })
+
+    const afterTypedLen = Number(
+      screen.getByTestId('analyzing-chunk-current').getAttribute('data-typed-len'),
+    )
+    expect(afterTypedLen).toBeGreaterThan(initialTypedLen)
+  })
+
+  it('推进 ≥ fullLen 时间后,typed-len === fullLen(完成当前 chunk)', async () => {
+    vi.useFakeTimers()
+    const data = await getAnalyzingData('req-001')
+    render(<AnalyzingZone data={data} />)
+
+    const current = screen.getByTestId('analyzing-chunk-current')
+    const fullLen = Number(current.getAttribute('data-full-len'))
+
+    // 分小步推进(每次 20ms)避免 fake-timer 下 React batching 卡死
+    // 每次推进后用 microtask 让 React commit 完成
+    for (let i = 0; i < fullLen; i++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20)
+      })
+    }
+    // 此时 c-1 字符全部打完,phase=typing chunkIndex=0 typedLen=fullLen;
+    // 但还没等完 INTER_CHUNK_PAUSE_MS → 仍是 current row(完整文字)
+    const afterTypedLen = Number(
+      screen.getByTestId('analyzing-chunk-current').getAttribute('data-typed-len'),
+    )
+    expect(afterTypedLen).toBe(fullLen)
+  })
+})

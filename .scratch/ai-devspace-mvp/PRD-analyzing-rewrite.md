@@ -551,36 +551,35 @@ session_id: sess-abc-123
 
 ## Further Notes
 
-### 依赖本 PRD 完成的子 Issue(对应 ADR-0013 §落地 Issue)
+### 拆分后的子 Issue(2026-07-12 /to-issues 切分结果)
 
-按 [ADR-0013](../docs/adr/0013-analyzing-zone-rewrite.md) §"落地 Issue(待拆分)",需拆分为 8 个实施 issue(由 agent 实施时创建在 `.scratch/ai-devspace-mvp/issues/`):
+经 `/to-issues` 切分后,8 个 horizontal 议题被合并为 **6 个 vertical slice**(每个跨所有层 — schema / API / UI / tests),可在 `.scratch/ai-devspace-mvp/issues/` 找到:
 
-| Issue | 主题 | 优先级 | 依赖 |
-|---|---|---|---|
-| 19a-analyzing-admission-dashboard.md | 准入仪表板 5 维度卡组件 | **P0** | — |
-| 19b-analyzing-session-tabs.md | 多会话 Tab 切换组件(基于 11h-A) | P1 | 19a |
-| 19c-analyzing-product-edit.md | 识别产物交互编辑(增/删/改/合并) | P1 | 19a |
-| 19d-analyzing-config-panel.md | 解析参数配置面板 | P2 | — |
-| 19e-analyzing-prompt-input.md | 插话输入条 | P2 | — |
-| 19f-analyzing-tech-brief-gen.md | 生成技术概要按钮(Markdown + YAML 双产物) + Agent `/generate-brief` endpoint | **P0** | 19a |
-| 19g-analyzing-adjudication-panel.md | 待裁决面板(双区折叠 + 预设选项 + 应用/重扫按钮) + Agent `/adjudicate` `/regenerate` endpoints | P2 | 19a, 19f |
-| 19h-analyzing-zone-yaml-update.md | 工位注册表更新(ZoneSchema 扩展 + zones.ts 中 ANALYZING 条目更新 + default_arming swap) | P3 | — |
+| Issue | Vertical Slice | 主题 | 优先级 | 依赖 |
+|---|---|---|---|---|
+| [19a](issues/19a-analyzing-zone-skeleton-admission-dashboard.md) | **VS1** | 工位骨架 + 准入校验仪表板 | **P0** | — |
+| [19b](issues/19b-analyzing-thinking-stream-interject.md) | **VS2** | 解析过程观察(思考流 + 打字机 + 插话) | P1 | 19a |
+| [19c](issues/19c-analyzing-session-tabs.md) | **VS3** | 多会话 Tab 切换 | P1 | 19a |
+| [19d](issues/19d-analyzing-product-edit.md) | **VS4** | 解析产物交互编辑(增/删/改/合并) | P1 | 19a |
+| [19e](issues/19e-analyzing-tech-brief-generation.md) | **VS5** | 技术概要生成(双产物落盘 + Agent `/generate-brief`) | **P0** | 19a, 19d |
+| [19f](issues/19f-analyzing-adjudication-crosszone-clarifying-handoff.md) | **VS6** | 待裁决面板 + 跨工位可见性 + CLARIFYING 交接 + Agent `/adjudicate` `/regenerate` | P0 | 19e |
 
-**实施顺序建议**(根据依赖关系):
+**实施顺序**(根据依赖关系):
 
 ```
-19h (注册表) ──┬── 19d (配置) ──┐
-              ├── 19e (插话) ──┤
-              └── 19a (仪表板) ──┬── 19b (Tab) ──┐
-                                  ├── 19c (编辑) ┤
-                                  └── 19f (概要) ──┴── 19g (裁决面板)
+19a (骨架+仪表板)
+  ├── 19b (思考流+插话)
+  ├── 19c (多会话 Tab)
+  ├── 19d (产物编辑)
+  │     └── 19e (技术概要生成)
+  │           └── 19f (待裁决+跨工位+交接)
+  └── (独立分支:19b / 19c / 19d 可并行)
 ```
 
 **MVP 优先级**:
-- P0:19a (准入仪表板), 19f (技术概要生成) — 核心
-- P1:19b (多会话), 19c (产物编辑) — 关键 UX
-- P2:19d (参数配置), 19e (插话), 19g (待裁决面板) — 增强
-- P3:19h (注册表更新) — 配套
+- P0:19a, 19e, 19f — 核心闭环(架构重塑)
+- P1:19b, 19c, 19d — 关键 UX 增强
+- 完整 PRD 56 条 stories 全部覆盖在 6 个 slice 内
 
 ### 关联 ADR / 决策
 

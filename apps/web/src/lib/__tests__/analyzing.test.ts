@@ -8,6 +8,8 @@ import {
   summarizeAnalyzingStats,
   resolveAdmissionDimensions,
   countPendingAdjudications,
+  deriveProducts,
+  loadSessionChunks,
   type AnalyzingChunk,
   type AnalyzingData,
 } from '@/lib/analyzing'
@@ -282,6 +284,80 @@ describe('resolveAdmissionDimensions', () => {
 // countPendingAdjudications — 读 analysis/adjudication.md 计数 applied: false 项
 // ============================================================================
 
+// ============================================================================
+// deriveProducts — 从 chunks 派生识别产物(issue 19b VS2 只读视图)
+// ============================================================================
+
+describe('deriveProducts', () => {
+  it('空 chunks → 三类均为空', () => {
+    const g = deriveProducts([])
+    expect(g.subproblems).toEqual([])
+    expect(g.risks).toEqual([])
+    expect(g.options).toEqual([])
+  })
+
+  it('按 kind 分类:subproblem → subproblems,risk → risks,option → options', () => {
+    const g = deriveProducts([
+      mk('q1', 'subproblem'),
+      mk('q2', 'subproblem'),
+      mk('r1', 'risk'),
+      mk('o1', 'option'),
+    ])
+    expect(g.subproblems).toHaveLength(2)
+    expect(g.risks).toHaveLength(1)
+    expect(g.options).toHaveLength(1)
+  })
+
+  it('narration 不被归入任一产品桶(仅作为思考流可见)', () => {
+    const g = deriveProducts([mk('n1', 'narration'), mk('n2', 'narration')])
+    expect(g.subproblems).toHaveLength(0)
+    expect(g.risks).toHaveLength(0)
+    expect(g.options).toHaveLength(0)
+  })
+
+  it('severity 从 tone 反查:warn→orange / err→red / success→green / info→blue', () => {
+    const g = deriveProducts([
+      { ...mk('q1', 'subproblem'), tone: 'warn' },
+      { ...mk('r1', 'risk'), tone: 'err' },
+      { ...mk('o1', 'option'), tone: 'success' },
+    ])
+    expect(g.subproblems[0].severity).toBe('orange')
+    expect(g.risks[0].severity).toBe('red')
+    expect(g.options[0].severity).toBe('green')
+  })
+
+  it('单行 text → title = text,无 description', () => {
+    const g = deriveProducts([{ ...mk('q1', 'subproblem'), text: '退款金额上限?' }])
+    expect(g.subproblems[0].title).toBe('退款金额上限?')
+    expect(g.subproblems[0].description).toBeUndefined()
+  })
+
+  it('多行 text → title = 第一行,description = 余下', () => {
+    const g = deriveProducts([
+      {
+        ...mk('r1', 'risk'),
+        text: '退款幂等键冲突\n可能导致重复退款\n影响金额计算',
+      },
+    ])
+    const item = g.risks[0]
+    expect(item.title).toBe('退款幂等键冲突')
+    expect(item.description).toBe('可能导致重复退款\n影响金额计算')
+  })
+
+  it('id 与原 chunk.id 一致(便于后续 VS4 编辑/删除)', () => {
+    const g = deriveProducts([mk('q-stable', 'subproblem')])
+    expect(g.subproblems[0].id).toBe('q-stable')
+  })
+
+  it('req-001 mock 样例 → 5 子问题 + 3 风险 + 2 方案(与 stats 一致)', async () => {
+    const data = await getAnalyzingData('req-001')
+    const g = deriveProducts(data.chunks)
+    expect(g.subproblems).toHaveLength(5)
+    expect(g.risks).toHaveLength(3)
+    expect(g.options).toHaveLength(2)
+  })
+})
+
 describe('countPendingAdjudications', () => {
   let tmpDir: string
 
@@ -366,6 +442,99 @@ describe('countPendingAdjudications', () => {
       ].join('\n'),
     )
     expect(countPendingAdjudications(tmpDir)).toBe(2)
+  })
+})
+
+// ============================================================================
+// loadSessionChunks — 读 analysis/sessions/<session-id>/chunks.jsonl(issue 19b 验收 #12)
+// ============================================================================
+
+describe('loadSessionChunks', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'analyzing-chunks-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('会话文件不存在 → 返回空数组(容错)', () => {
+    expect(loadSessionChunks(tmpDir, 'sess-arch')).toEqual([])
+  })
+
+  it('空文件 → 返回空数组', () => {
+    const sessionDir = join(tmpDir, 'sess-arch')
+    mkdirSync(sessionDir, { recursive: true })
+    writeFileSync(join(sessionDir, 'chunks.jsonl'), '')
+    expect(loadSessionChunks(tmpDir, 'sess-arch')).toEqual([])
+  })
+
+  it('3 行 JSONL → 3 条 chunk,字段正确还原', () => {
+    const sessionDir = join(tmpDir, 'sess-arch')
+    mkdirSync(sessionDir, { recursive: true })
+    writeFileSync(
+      join(sessionDir, 'chunks.jsonl'),
+      [
+        JSON.stringify({ id: 'c-1', ts: '14:23:01', label: 'START', kind: 'narration', tone: 'info', text: 'a' }),
+        JSON.stringify({ id: 'c-2', ts: '14:23:02', label: 'DETECT', kind: 'subproblem', tone: 'success', text: 'b' }),
+        JSON.stringify({ id: 'c-3', ts: '14:23:03', label: 'RISK', kind: 'risk', tone: 'warn', text: 'c' }),
+      ].join('\n'),
+    )
+    const chunks = loadSessionChunks(tmpDir, 'sess-arch')
+    expect(chunks).toHaveLength(3)
+    expect(chunks[0].id).toBe('c-1')
+    expect(chunks[1].kind).toBe('subproblem')
+    expect(chunks[2].tone).toBe('warn')
+  })
+
+  it('中间一行 JSON 损坏 → 跳过该行,继续读后续', () => {
+    const sessionDir = join(tmpDir, 'sess-arch')
+    mkdirSync(sessionDir, { recursive: true })
+    writeFileSync(
+      join(sessionDir, 'chunks.jsonl'),
+      [
+        JSON.stringify({ id: 'c-1', ts: '14:23:01', label: 'START', kind: 'narration', tone: 'info', text: 'a' }),
+        'NOT-JSON{',
+        JSON.stringify({ id: 'c-3', ts: '14:23:03', label: 'RISK', kind: 'risk', tone: 'warn', text: 'c' }),
+      ].join('\n'),
+    )
+    const chunks = loadSessionChunks(tmpDir, 'sess-arch')
+    expect(chunks).toHaveLength(2)
+    expect(chunks.map((c) => c.id)).toEqual(['c-1', 'c-3'])
+  })
+
+  it('最小字段集校验:缺关键字段 → 跳过该行', () => {
+    const sessionDir = join(tmpDir, 'sess-arch')
+    mkdirSync(sessionDir, { recursive: true })
+    writeFileSync(
+      join(sessionDir, 'chunks.jsonl'),
+      [
+        JSON.stringify({ id: 'c-1', ts: '14:23:01', label: 'START', kind: 'narration', tone: 'info', text: 'a' }),
+        // 缺 text → 跳过
+        JSON.stringify({ id: 'c-2', ts: '14:23:02', label: 'DETECT', kind: 'subproblem', tone: 'success' }),
+        JSON.stringify({ id: 'c-3', ts: '14:23:03', label: 'RISK', kind: 'risk', tone: 'warn', text: 'c' }),
+      ].join('\n'),
+    )
+    expect(loadSessionChunks(tmpDir, 'sess-arch').map((c) => c.id)).toEqual(['c-1', 'c-3'])
+  })
+
+  it('不同 sessionId → 互不干扰', () => {
+    const archDir = join(tmpDir, 'sess-arch')
+    const dataDir = join(tmpDir, 'sess-data')
+    mkdirSync(archDir, { recursive: true })
+    mkdirSync(dataDir, { recursive: true })
+    writeFileSync(
+      join(archDir, 'chunks.jsonl'),
+      JSON.stringify({ id: 'c-arch-1', ts: '14:23:01', label: 'START', kind: 'narration', tone: 'info', text: 'arch' }),
+    )
+    writeFileSync(
+      join(dataDir, 'chunks.jsonl'),
+      JSON.stringify({ id: 'c-data-1', ts: '14:23:01', label: 'START', kind: 'narration', tone: 'info', text: 'data' }),
+    )
+    expect(loadSessionChunks(tmpDir, 'sess-arch').map((c) => c.id)).toEqual(['c-arch-1'])
+    expect(loadSessionChunks(tmpDir, 'sess-data').map((c) => c.id)).toEqual(['c-data-1'])
   })
 })
 

@@ -117,6 +117,79 @@ export interface AnalyzingSummary {
 }
 
 // ---------------------------------------------------------------------------
+// 识别产物(ADR-0013 D2 ③ · issue 19b VS2 只读视图)
+// ---------------------------------------------------------------------------
+
+/**
+ * 识别产物单条 — 由 chunk.kind 派生
+ *
+ * - title:chunk.text 第一行(行首是 Q1· / A · 之类前缀,UI 显示时保留)
+ * - description:余下文字(若 text 含多行)
+ * - severity:从 chunk.tone 反查
+ */
+export interface AnalyzingProductItem {
+  id: string
+  title: string
+  description?: string
+  severity: 'red' | 'orange' | 'yellow' | 'green' | 'blue'
+}
+
+/** 三类产物的分组(对应原型 .identified-item 三类) */
+export interface AnalyzingProductGroup {
+  /** 📌 子问题(Q1 · 退款金额上限?...)*/
+  subproblems: AnalyzingProductItem[]
+  /** ⚠️ 风险点(高并发退款重复创建...)*/
+  risks: AnalyzingProductItem[]
+  /** 🎨 方案方向(A · 同步单阶段...)*/
+  options: AnalyzingProductItem[]
+}
+
+/** chunk.tone → 产品 severity 映射(issue 19b · 与 admission 维度同色系) */
+const TONE_TO_SEVERITY: Record<AnalyzingChunkTone, AnalyzingProductItem['severity']> = {
+  info: 'blue',
+  success: 'green',
+  warn: 'orange',
+  err: 'red',
+}
+
+/**
+ * 派生识别产物:扫描 chunks 按 kind 分类,生成 ProductList 只读视图。
+ *
+ * 设计要点:
+ * - 纯函数,便于单测
+ * - text 第一行作为 title;剩余行(若有)作为 description
+ * - severity 从 chunk.tone 反查,保证视觉一致
+ */
+export function deriveProducts(chunks: readonly AnalyzingChunk[]): AnalyzingProductGroup {
+  const subproblems: AnalyzingProductItem[] = []
+  const risks: AnalyzingProductItem[] = []
+  const options: AnalyzingProductItem[] = []
+
+  for (const c of chunks) {
+    if (c.kind === 'subproblem' || c.kind === 'risk' || c.kind === 'option') {
+      const item = chunkToProduct(c)
+      if (c.kind === 'subproblem') subproblems.push(item)
+      else if (c.kind === 'risk') risks.push(item)
+      else options.push(item)
+    }
+  }
+  return { subproblems, risks, options }
+}
+
+/** 单 chunk → product item 转换(text 第一行作为 title) */
+function chunkToProduct(chunk: AnalyzingChunk): AnalyzingProductItem {
+  const lines = chunk.text.split('\n')
+  const title = lines[0] ?? chunk.text
+  const description = lines.length > 1 ? lines.slice(1).join('\n').trim() : undefined
+  return {
+    id: chunk.id,
+    title,
+    description: description && description.length > 0 ? description : undefined,
+    severity: TONE_TO_SEVERITY[chunk.tone],
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 准入仪表板(ADR-0013 D4 / D10 · issue 19a VS1)
 // ---------------------------------------------------------------------------
 
@@ -298,6 +371,58 @@ export function resolveAdmissionDimensions(
     }
   }
   return [...filtered, ...dedupAdds]
+}
+
+// ---------------------------------------------------------------------------
+// analysis/sessions/<session-id>/chunks.jsonl 数据源(issue 19b · 验收 #12)
+// ---------------------------------------------------------------------------
+
+/**
+ * 从 `analysis/sessions/<session-id>/chunks.jsonl` 加载会话思考流。
+ *
+ * 文件格式:每行一个 JSON 对象,字段 `{ id, ts, label, tone, text, session_id }`,
+ * 按写入顺序追加(新 chunk 写在末尾 → 自然成为打字机下一条)。
+ *
+ * 设计要点:
+ * - 纯函数 + 纯文件 IO,无副作用,便于单元测试
+ * - 文件不存在 / 解析失败 → 返回 `[]`(容错)
+ * - 单行 JSON 解析失败 → 跳过该行,继续读后续(避免 1 行损坏毁全文件)
+ * - 与 `getAnalyzingData` 解耦:`getAnalyzingData` 负责顶层数据契约,本函数专注单文件加载
+ */
+export function loadSessionChunks(
+  analysisSessionsDir: string,
+  sessionId: string,
+): AnalyzingChunk[] {
+  const file = join(analysisSessionsDir, sessionId, 'chunks.jsonl')
+  if (!existsSync(file)) return []
+  let raw: string
+  try {
+    raw = readFileSync(file, 'utf8')
+  } catch {
+    return []
+  }
+  const result: AnalyzingChunk[] = []
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    try {
+      const obj = JSON.parse(trimmed) as Partial<AnalyzingChunk>
+      // 校验最小字段集(避免脏行污染下游)
+      if (
+        typeof obj.id === 'string' &&
+        typeof obj.ts === 'string' &&
+        typeof obj.label === 'string' &&
+        typeof obj.text === 'string' &&
+        typeof obj.kind === 'string' &&
+        typeof obj.tone === 'string'
+      ) {
+        result.push(obj as AnalyzingChunk)
+      }
+    } catch {
+      /* 单行损坏,跳过;继续读后续行 */
+    }
+  }
+  return result
 }
 
 // ---------------------------------------------------------------------------

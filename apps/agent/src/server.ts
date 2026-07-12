@@ -12,6 +12,7 @@ import { ZoneRegistry } from './services/ZoneRegistry.js'
 import { workspaceRoutes } from './routes/workspace.js'
 import { requirementRoutes } from './routes/requirement.js'
 import { bootstrapRoutes } from './routes/bootstrap.js'
+import { analysisRoutes } from './routes/analysis.js'
 import { createSseHub, type SseHub } from './sse/SseHub.js'
 import { sseRoutes } from './sse/requirementEventsRoute.js'
 
@@ -122,6 +123,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   fastify.get('/api/health', { config: { public: true } }, async () => healthService.collect())
   await fastify.register(workspaceRoutes, { workspace })
   await fastify.register(requirementRoutes)
+  await fastify.register(analysisRoutes, { hub })
   await fastify.register(bootstrapRoutes, { tokenManager, apiBase: 'http://localhost:7777' })
 
   fastify.addHook('onClose', async () => {

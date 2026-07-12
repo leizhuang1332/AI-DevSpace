@@ -1,10 +1,10 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  deriveProducts,
   type AnalyzingChunk,
-  type AnalyzingChunkTone,
   type AnalyzingData,
   type AnalyzingStats,
   type AnalyzingToolbar,
@@ -13,6 +13,9 @@ import {
 } from '@/lib/analyzing'
 import { EmptyState } from './empty-state'
 import { AdmissionDashboard } from './admission-dashboard'
+import { ThinkingStream, type ThinkingPhase } from './thinking-stream'
+import { ProductList } from './product-list'
+import { InterjectInput } from './interject-input'
 
 /**
  * ANALYZING 工位组件(ADR-0011 §6 ANALYZING 布局 · issue 19)
@@ -25,21 +28,28 @@ import { AdmissionDashboard } from './admission-dashboard'
  * ├────────────────────────────────────────────────┤
  * │ Toolbar(面包屑 + 复制/暂停/重置)                  │
  * ├────────────────────────────────────────────────┤
- * │ Top summary(大图标 + 标题 + 描述 + 三 stats)      │
+ * │ 准入仪表板(19a · ADR-0013 D4)                   │
  * ├────────────────────────────────────────────────┤
- * │ Thinking stream(打字机 20ms / 字,可跳过)          │
- * │  - 已完成 chunk 完整展示                          │
- * │  - 当前 chunk 逐字打字                            │
- * │  - 未来 chunk 占位显示                            │
- * │  - 完成时弹出"切到 CLARIFYING 吗?"(非自动跳转)    │
+ * │ 主区(两列):                                     │
+ * │ ┌──────────────┬──────────────────────────────┐│
+ * │ │ 思考流       │ Summary(图标+标题+stats)     ││
+ * │ │ 打字机 20ms  ├──────────────────────────────┤│
+ * │ │  - 跳过      │ 🎯 识别产物(子问题/风险/方案)││
+ * │ │  - 暂停/重置 │                              ││
+ * │ └──────────────┴──────────────────────────────┘│
+ * ├────────────────────────────────────────────────┤
+ * │ 💬 插话输入条(InterjectInput · 触发 SSE 推送新 chunk)│
  * └────────────────────────────────────────────────┘
  *
  * 设计要点:
- * - 'use client':打字机 / 暂停 / 重置 / 完成提示都是客户端交互
+ * - 'use client':打字机 / 暂停 / 重置 / 完成提示 / SSE 订阅都是客户端交互
  * - props.data 由 server 注入(从 getAnalyzingData),组件只关心渲染 + 客户端状态
  * - 打字机 20ms / 字(issue 19 验收 #2);chunk 间 200ms 间隔,模拟"思考停顿"
  * - 点击 ⏸ 暂停 / 继续;点击 ↶ 清空所有进度从 chunk-0 开始
  * - 点击思考流任意位置 → 当前 chunk 立即显示完整文字(issue 19 验收)
+ * - SSE 订阅 `/api/requirement/<id>/events` —— 收到 `analysis_chunk` 事件追加到 chunks
+ * - InterjectInput 提交 → POST `/api/requirements/<id>/analysis/interject` →
+ *   Agent 通过 SseHub 推送新 chunks → 上面 useEffect 订阅自动追加
  *
  * 状态机(single source of truth,避免 batching 双状态同步问题):
  *   idle     — 还没开始打字
@@ -54,11 +64,18 @@ export interface AnalyzingZoneProps {
 const TYPEWRITER_INTERVAL_MS = 20
 const INTER_CHUNK_PAUSE_MS = 200
 
-type Phase =
-  | { kind: 'idle' }
-  | { kind: 'typing'; chunkIndex: number; typedLen: number }
-  | { kind: 'pausing'; chunkIndex: number; typedLen: number }
-  | { kind: 'done' }
+/** 主区默认 session id(单会话阶段;VS3 多会话时由 props.data.activeSessionId 注入) */
+const DEFAULT_SESSION_ID = 'sess-default'
+
+/** SSE 端点路径(同 apps/agent/src/sse/requirementEventsRoute.ts) */
+function sseUrl(requirementId: string): string {
+  return `/api/requirement/${requirementId}/events`
+}
+
+/** 插话 REST 端点(issue 19b · 由 apps/agent/src/routes/analysis.ts 处理) */
+function interjectUrl(requirementId: string): string {
+  return `/api/requirements/${requirementId}/analysis/interject`
+}
 
 export function AnalyzingZone({ data }: AnalyzingZoneProps) {
   if (data.empty) {
@@ -101,13 +118,64 @@ function EmptyAnalyzing({ data }: { data: AnalyzingData }) {
 
 function AnalyzingContent({ data }: { data: AnalyzingData }) {
   const [paused, setPaused] = useState(false)
-  const [phase, setPhase] = useState<Phase>({ kind: 'idle' })
+  const [phase, setPhase] = useState<ThinkingPhase>({ kind: 'idle' })
   const [showCompletePrompt, setShowCompletePrompt] = useState(false)
   // 客户端 verdict 覆盖(issue 19a VS1:[接受风险] 按钮 → fail → pending)
   // TODO VS6:接入 server action(POST /analysis/adjudicate)
   const [verdictOverride, setVerdictOverride] = useState<AdmissionVerdict | null>(null)
 
-  const totalChunks = data.chunks.length
+  // -------------------------------------------------------------------------
+  // chunks 客户端副本 — SSE 推送的新 chunk 会被追加到这里
+  // 初始值用 server 注入的 data.chunks;reset 时回到 data.chunks 起点
+  // -------------------------------------------------------------------------
+  const [chunks, setChunks] = useState<AnalyzingChunk[]>(data.chunks)
+  const [interjectSubmitting, setInterjectSubmitting] = useState(false)
+  const [interjectError, setInterjectError] = useState<string | null>(null)
+
+  // 当 props.data.chunks 变化(SSR re-render / 路由切换)时,重新同步
+  const lastSyncedDataRef = useRef(data.chunks)
+  useEffect(() => {
+    if (lastSyncedDataRef.current !== data.chunks) {
+      lastSyncedDataRef.current = data.chunks
+      setChunks(data.chunks)
+    }
+  }, [data.chunks])
+
+  // -------------------------------------------------------------------------
+  // SSE 订阅(issue 19b D2 ② 插话后 AI 推送新 chunk)
+  // 用 EventSource 订阅 /api/requirement/<id>/events,监听 **命名事件**
+  // 'analysis_chunk'(服务端 publish 走 `event: analysis_chunk\ndata: ...`,
+  // 命名事件不会触发 EventSource 默认的 'message' 监听)
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof EventSource === 'undefined') return
+    const es = new EventSource(sseUrl(data.requirementId))
+    const onAnalysisChunk = (e: MessageEvent<string>): void => {
+      try {
+        const parsed = JSON.parse(e.data) as { type?: string; chunk?: AnalyzingChunk }
+        if (parsed.chunk) {
+          setChunks((prev) => {
+            // 去重:同一 chunk.id 不重复追加(SSE 可能重发)
+            if (prev.some((c) => c.id === parsed.chunk!.id)) return prev
+            return [...prev, parsed.chunk!]
+          })
+        }
+      } catch {
+        /* ignore malformed event */
+      }
+    }
+    es.addEventListener('analysis_chunk', onAnalysisChunk)
+    es.addEventListener('error', () => {
+      /* browser will auto-reconnect; nothing to do */
+    })
+    return () => {
+      es.removeEventListener('analysis_chunk', onAnalysisChunk)
+      es.close()
+    }
+  }, [data.requirementId])
+
+  const totalChunks = chunks.length
+  const products = deriveProducts(chunks)
   const currentAdmission = {
     ...data.admission,
     verdict: verdictOverride ?? data.admission.verdict,
@@ -115,13 +183,13 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
 
   // -------------------------------------------------------------------------
   // 打字机推进(state machine,useEffect 唯一驱动)
+  // 注意:依赖 chunks(而非 data.chunks),因为 chunks 是客户端可变副本
   // -------------------------------------------------------------------------
   useEffect(() => {
     if (paused) return
 
     if (phase.kind === 'idle') {
-      // 起步:开始打第一个 chunk(typedLen=1 是为视觉上"已经有字")
-      const first = data.chunks[0]
+      const first = chunks[0]
       if (!first) {
         setPhase({ kind: 'done' })
         return
@@ -131,18 +199,16 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
     }
 
     if (phase.kind === 'typing') {
-      const chunk = data.chunks[phase.chunkIndex]
+      const chunk = chunks[phase.chunkIndex]
       if (!chunk) {
         setPhase({ kind: 'done' })
         return
       }
       if (phase.typedLen < chunk.text.length) {
-        // 单次 setTimeout 推进一字符;effect 重跑会再设下一个。
-        // 用 setTimeout(而非 setInterval)便于 fake-timer 测试精确推进。
         const id = window.setTimeout(() => {
           setPhase((p) => {
             if (p.kind !== 'typing') return p
-            const c = data.chunks[p.chunkIndex]
+            const c = chunks[p.chunkIndex]
             if (!c) return { kind: 'done' }
             if (p.typedLen >= c.text.length) return p
             return { ...p, typedLen: p.typedLen + 1 }
@@ -150,7 +216,6 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
         }, TYPEWRITER_INTERVAL_MS)
         return () => window.clearTimeout(id)
       }
-      // 当前 chunk 字符打完 → 等 INTER_CHUNK_PAUSE_MS 再转 pausing(让用户看到完整文字)
       const id = window.setTimeout(() => {
         setPhase({ kind: 'pausing', chunkIndex: phase.chunkIndex, typedLen: chunk.text.length })
       }, INTER_CHUNK_PAUSE_MS)
@@ -160,18 +225,15 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
     if (phase.kind === 'pausing') {
       const id = window.setTimeout(() => {
         const nextIndex = phase.chunkIndex + 1
-        if (nextIndex >= data.chunks.length) {
+        if (nextIndex >= chunks.length) {
           setPhase({ kind: 'done' })
         } else {
-          // 推进:下一 chunk typedLen 从 1 开始
           setPhase({ kind: 'typing', chunkIndex: nextIndex, typedLen: 1 })
         }
       }, INTER_CHUNK_PAUSE_MS)
       return () => window.clearTimeout(id)
     }
-
-    // phase.kind === 'done' → 不需再做事
-  }, [paused, phase, data.chunks])
+  }, [paused, phase, chunks])
 
   // -------------------------------------------------------------------------
   // 完成 → 弹提示
@@ -186,7 +248,6 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   // 操作
   // -------------------------------------------------------------------------
   const reset = useCallback(() => {
-    // 重置同时清 paused,避免"已重置但不动"的错觉(spec issue 19:重置清空当前分析,从头开始)
     setShowCompletePrompt(false)
     setPaused(false)
     setPhase({ kind: 'idle' })
@@ -197,15 +258,42 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   }, [])
 
   const skipTypewriter = useCallback(() => {
-    // 函数式 setState —— 不读 closure phase,直接基于当前 state 更新
     setPhase((p) => {
       if (p.kind !== 'typing') return p
-      const chunk = data.chunks[p.chunkIndex]
+      const chunk = chunks[p.chunkIndex]
       if (!chunk) return p
       if (p.typedLen >= chunk.text.length) return p
       return { ...p, typedLen: chunk.text.length }
     })
-  }, [data.chunks])
+  }, [chunks])
+
+  // -------------------------------------------------------------------------
+  // 插话提交(issue 19b D2 ②):POST /analysis/interject → SSE 推 chunk → useEffect 追加
+  // -------------------------------------------------------------------------
+  const handleInterject = useCallback(
+    async (text: string) => {
+      setInterjectSubmitting(true)
+      setInterjectError(null)
+      try {
+        const res = await fetch(interjectUrl(data.requirementId), {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ text, session_id: DEFAULT_SESSION_ID }),
+        })
+        if (!res.ok && res.status !== 202) {
+          const errBody = (await res.json().catch(() => ({}))) as { reason?: string }
+          throw new Error(errBody.reason ?? `HTTP ${res.status}`)
+        }
+        // chunks 由 SSE listener 异步追加;无需 setState 这里
+      } catch (err) {
+        setInterjectError(err instanceof Error ? err.message : '提交失败')
+      } finally {
+        setInterjectSubmitting(false)
+      }
+    },
+    [data.requirementId],
+  )
 
   // 派生:当前 chunk 已揭示的 chunk 数(包含正在打字的 chunk)
   const revealedCount =
@@ -243,14 +331,41 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       </div>
       <div
         data-testid="analyzing-main"
-        className="flex-1 overflow-auto px-6 py-6 flex flex-col gap-5"
+        className="flex-1 overflow-hidden px-6 py-6 flex flex-col gap-5"
       >
-        <Summary summary={data.summary} stats={data.stats} />
-        <ThinkingStream
-          chunks={data.chunks}
-          phase={phase}
-          paused={paused}
-          onSkip={skipTypewriter}
+        {/* 主区两列 grid + 底部插话条(issue 19b D2 ②) */}
+        <div
+          data-testid="analyzing-grid"
+          className="grid grid-cols-1 lg:grid-cols-2 gap-5 flex-1 min-h-0"
+        >
+          <ThinkingStream
+            chunks={chunks}
+            phase={phase}
+            paused={paused}
+            onSkip={skipTypewriter}
+          />
+          <div
+            data-testid="analyzing-right-col"
+            className="flex flex-col gap-5 min-h-0"
+          >
+            <Summary summary={data.summary} stats={data.stats} />
+            <div className="flex-1 min-h-0">
+              <ProductList products={products} />
+            </div>
+          </div>
+        </div>
+        {interjectError && (
+          <div
+            data-testid="interject-error"
+            role="alert"
+            className="text-sm text-error bg-error/10 border border-error rounded-md px-3 py-2"
+          >
+            插话失败:{interjectError}
+          </div>
+        )}
+        <InterjectInput
+          onSubmit={handleInterject}
+          isSubmitting={interjectSubmitting}
         />
       </div>
 
@@ -499,175 +614,6 @@ function StatCell({
       <div className="text-xl font-semibold font-mono text-brand-700">{n}</div>
       <div className="text-xs text-text-3 uppercase tracking-wider mt-1">
         {label}
-      </div>
-    </div>
-  )
-}
-
-// ============================================================================
-// Thinking stream(打字机)
-// ============================================================================
-
-function ThinkingStream({
-  chunks,
-  phase,
-  paused,
-  onSkip,
-}: {
-  chunks: AnalyzingChunk[]
-  phase: Phase
-  paused: boolean
-  onSkip: () => void
-}) {
-  return (
-    <div
-      data-testid="analyzing-stream"
-      data-paused={paused ? 'true' : 'false'}
-      className="bg-bg-elevated border border-border rounded-lg overflow-hidden"
-    >
-      <div className="px-4 py-3 border-b border-border bg-bg-subtle flex items-center justify-between">
-        <span className="text-md font-semibold flex items-center gap-2">
-          🧠 思考流
-        </span>
-        <span
-          data-testid="analyzing-stream-progress"
-          className="font-mono text-xs text-text-3"
-        >
-          {progressText(chunks.length, phase)}
-          {paused && ' · 已暂停'}
-        </span>
-      </div>
-      <button
-        type="button"
-        data-testid="analyzing-stream-body"
-        onClick={onSkip}
-        aria-label="点击跳过当前 chunk 打字"
-        className="block w-full text-left px-5 py-4 text-sm text-text-1 leading-relaxed cursor-pointer hover:bg-brand-50/30 transition-colors"
-      >
-        {chunks.length === 0 ? (
-          <p className="text-text-3">暂无思考流</p>
-        ) : (
-          chunks.map((c, i) => (
-            <ChunkRow key={c.id} chunk={c} phase={phase} index={i} />
-          ))
-        )}
-      </button>
-    </div>
-  )
-}
-
-function progressText(total: number, phase: Phase): string {
-  if (phase.kind === 'idle') return `0/${total} chunks`
-  if (phase.kind === 'done') return `${total}/${total} chunks`
-  return `${phase.chunkIndex + 1}/${total} chunks`
-}
-
-function ChunkRow({
-  chunk,
-  phase,
-  index,
-}: {
-  chunk: AnalyzingChunk
-  phase: Phase
-  index: number
-}) {
-  // future:还没进入流区
-  if (
-    phase.kind === 'idle' ||
-    (phase.kind !== 'done' && index > phase.chunkIndex)
-  ) {
-    return (
-      <div
-        data-testid="analyzing-chunk-future"
-        data-chunk-id={chunk.id}
-        className="py-2 flex items-start gap-3 opacity-30"
-      >
-        <span className="font-mono text-xs text-text-3 min-w-[60px] mt-0.5">
-          {chunk.ts}
-        </span>
-        <span className="flex-1 text-text-3 select-none">·</span>
-      </div>
-    )
-  }
-
-  // 当前正在打字(chunkIndex === index 且 phase.kind === 'typing')
-  if (phase.kind === 'typing' && phase.chunkIndex === index) {
-    return (
-      <CurrentChunkRow chunk={chunk} typed={chunk.text.slice(0, phase.typedLen)} />
-    )
-  }
-
-  // 已完成(phase.kind === 'done' 或 index < chunkIndex)
-  return <DoneChunkRow chunk={chunk} />
-}
-
-const TONE_BG: Record<AnalyzingChunkTone, string> = {
-  info: 'bg-brand-50 text-brand-700',
-  success: 'bg-[#d1fae5] text-[#065f46]',
-  warn: 'bg-[#fef3c7] text-[#92400e]',
-  err: 'bg-[#fee2e2] text-[#991b1b]',
-}
-
-const TONE_BORDER: Record<AnalyzingChunkTone, string> = {
-  info: 'border-l-brand',
-  success: 'border-l-success',
-  warn: 'border-l-warning',
-  err: 'border-l-error',
-}
-
-function CurrentChunkRow({
-  chunk,
-  typed,
-}: {
-  chunk: AnalyzingChunk
-  typed: string
-}) {
-  return (
-    <div
-      data-testid="analyzing-chunk-current"
-      data-chunk-id={chunk.id}
-      data-tone={chunk.tone}
-      data-typed-len={typed.length}
-      data-full-len={chunk.text.length}
-      className="py-2 px-3 -mx-3 my-0.5 rounded-md bg-brand-50/60 border-l-[3px] border-l-brand flex items-start gap-3"
-    >
-      <span className="font-mono text-xs text-text-3 min-w-[60px] mt-0.5">
-        {chunk.ts}
-      </span>
-      <div className="flex-1">
-        <span
-          className={`inline-block text-xs font-medium px-1.5 py-px rounded-sm mr-2 ${TONE_BG[chunk.tone]}`}
-        >
-          {chunk.label}
-        </span>
-        <span className="text-text-1">{typed}</span>
-        <span
-          data-testid="analyzing-typewriter-cursor"
-          className="inline-block w-[1px] h-4 align-middle ml-0.5 bg-brand animate-pulse"
-        />
-      </div>
-    </div>
-  )
-}
-
-function DoneChunkRow({ chunk }: { chunk: AnalyzingChunk }) {
-  return (
-    <div
-      data-testid="analyzing-chunk-done"
-      data-chunk-id={chunk.id}
-      data-tone={chunk.tone}
-      className={`py-2 flex items-start gap-3 border-l-[3px] ${TONE_BORDER[chunk.tone]} pl-3 -ml-3`}
-    >
-      <span className="font-mono text-xs text-text-3 min-w-[60px] mt-0.5">
-        {chunk.ts}
-      </span>
-      <div className="flex-1">
-        <span
-          className={`inline-block text-xs font-medium px-1.5 py-px rounded-sm mr-2 ${TONE_BG[chunk.tone]}`}
-        >
-          {chunk.label}
-        </span>
-        <span className="text-text-1">{chunk.text}</span>
       </div>
     </div>
   )
