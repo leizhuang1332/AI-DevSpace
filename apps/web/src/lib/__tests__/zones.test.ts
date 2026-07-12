@@ -166,3 +166,37 @@ describe('resolveDefaultZoneRouteSegment', () => {
     expect(resolveDefaultZoneRouteSegment('wrapup')).toBe('drafting')
   })
 })
+
+// ============================================================================
+// ANALYZING 工位注册表(issue 19a VS1 验收 — ADR-0013 工位注册表更新)
+// ============================================================================
+
+describe('ANALYZING 工位注册表(issue 19a VS1)', () => {
+  const analyzing = ZONE_META.find((z) => z.id === 'analyzing')
+
+  it('ANALYZING display_name 改为"PRD 准入 + 技术概要"', () => {
+    expect(analyzing?.display_name).toBe('PRD 准入 + 技术概要')
+  })
+
+  it('ANALYZING main_layout 改为 admission-workbench', () => {
+    expect(analyzing?.main_layout).toBe('admission-workbench')
+  })
+
+  it('ANALYZING default_arming 含 admission-check + tech-brief-scaffold', () => {
+    expect(analyzing?.default_arming).toEqual(
+      expect.arrayContaining(['admission-check', 'tech-brief-scaffold']),
+    )
+  })
+
+  it('ANALYZING icon 改为 🧠(原 🔍)', () => {
+    expect(analyzing?.icon).toBe('🧠')
+  })
+
+  it('其他 5 工位 main_layout 未显式设置(undefined,保持向后兼容)', () => {
+    const others = ZONE_META.filter((z) => z.id !== 'analyzing')
+    for (const z of others) {
+      expect(z.main_layout).toBeUndefined()
+      expect(z.default_arming).toBeUndefined()
+    }
+  })
+})

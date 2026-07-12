@@ -1,12 +1,13 @@
 /**
- * ANALYZING 工位数据层(ADR-0011 §6 ANALYZING 布局 · issue 19)
+ * ANALYZING 工位数据层(ADR-0011 §6 ANALYZING 布局 · ADR-0013 工位重写 · issue 19)
  *
- * Thinking 大屏形态(对应原型 11e-stage-adaptive-analyzing.html,但本工位是
- * "主区全宽" —— 资源树 / Inline 栏都关掉,只显示思考屏本身):
+ * 形态从"旁观 AI 解析"重写为"PRD 准入 + 技术概要协作工作台"。
  *
- * - 顶部 stats:子问题 N / 风险点 N / 候选方案 N
- * - 中部思考流:SSE 推送 chunk,打字机效果(20ms / 字),可暂停 / 重置 / 跳过
- * - 底部操作:[⏸ 暂停] [↶ 重置]
+ * 顶层数据布局(issue 19a VS1):
+ * - admission: 准入仪表板(5 维度 + verdict + 待裁决 N)
+ * - sessions / session: 多会话(后续 slice 填充)
+ * - techBriefPath / modulesYamlPath / adjudicationPath: 产物路径(后续 slice 填充)
+ * - chunks / stats / summary / toolbar: 兼容原"观察屏"接口,本期不破坏
  *
  * 数据形态(对应 SSE chunk):
  * - 每个 chunk = 一行思考产物(label + text + ts + tone)
@@ -18,6 +19,14 @@
  * - 显式标注 async 为后续接 agent API 时的接口稳定
  * - 数据由 server 注入,组件只关心渲染 + 客户端打字机控制
  */
+
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import {
+  ADMISSION_DIMENSION_META,
+  DEFAULT_ADMISSION_DIMENSIONS,
+  type AdmissionDimensionId,
+} from '@ai-devspace/shared'
 
 // ---------------------------------------------------------------------------
 // 类型定义
@@ -107,6 +116,46 @@ export interface AnalyzingSummary {
   description: string
 }
 
+// ---------------------------------------------------------------------------
+// 准入仪表板(ADR-0013 D4 / D10 · issue 19a VS1)
+// ---------------------------------------------------------------------------
+
+/** 准入维度(SSR 数据 — 由 Skill frontmatter 装配) */
+export interface AdmissionDimension {
+  /** 维度 id;默认 5 维度来自 AdmissionDimensionIdSchema,Skill add 的可自由 string */
+  id: string
+  /** 中文标签(资损安全 / 性能 / ...) */
+  label: string
+  /** 维度图标 emoji(🔴 🟠 🟡 🟢 💬 等) */
+  icon: string
+  /** 严重度(决定卡片左侧 border 颜色) */
+  severity: 'red' | 'orange' | 'yellow' | 'green' | 'blue'
+  /** 当前激活项数(由 AI 识别产物聚合) */
+  count: number
+}
+
+/** 总体结论(仪表板右端徽章) */
+export type AdmissionVerdict = 'pass' | 'pending' | 'fail'
+
+/** 准入仪表板数据段 */
+export interface AdmissionData {
+  /** 当前激活的维度列表(顺序由 Skill 装配决定) */
+  dimensions: AdmissionDimension[]
+  /** 总体结论 */
+  verdict: AdmissionVerdict
+  /** 待裁决项数(由 analysis/adjudication.md 解析,applied: false 计数) */
+  pendingAdjudicationCount: number
+}
+
+/** Skill frontmatter 的 admission 段(SSR 解析结果,可选) */
+export interface SkillAdmissionFrontmatter {
+  admission_dimensions?: string[]
+  admission_override?: {
+    add?: string[]
+    skip?: string[]
+  }
+}
+
 /** ANALYZING 工位顶层数据 */
 export interface AnalyzingData {
   requirementId: string
@@ -118,6 +167,8 @@ export interface AnalyzingData {
   stats: AnalyzingStats
   /** 空数据(无需求 / 新建需求);UI 渲染引导去 DRAFTING */
   empty: boolean
+  /** 准入仪表板(issue 19a VS1 新增) */
+  admission: AdmissionData
 }
 
 // ---------------------------------------------------------------------------
@@ -168,8 +219,156 @@ export function emptyAnalyzing(requirementId: string): AnalyzingData {
       endedAt: null,
     },
     stats: { subproblems: 0, risks: 0, options: 0, total: 0 },
+    admission: buildAdmissionData({}),
     empty: true,
   }
+}
+
+/**
+ * admission 段构造器。
+ *
+ * - `dimensions`: 维度 id 列表(顺序固定,缺省时取默认 5 维度)
+ * - `counts`: 每维度 count,缺省视为 0(可只传部分维度,未传维度按 0 处理)
+ * - `pendingAdjudicationCount`: 仪表板右端徽章数(由 adjudication.md 计数)
+ * - `verdict`: pass / pending / fail(根据维度 severity 与 counts 派生)
+ */
+function buildAdmissionData(params: {
+  dimensions?: readonly string[]
+  counts?: Record<string, number>
+  pendingAdjudicationCount?: number
+  verdict?: AdmissionVerdict
+}): AdmissionData {
+  const ids =
+    params.dimensions && params.dimensions.length > 0
+      ? params.dimensions
+      : DEFAULT_ADMISSION_DIMENSIONS
+  const counts = params.counts ?? {}
+  const dimensions = ids.map((id) => {
+    const meta = ADMISSION_DIMENSION_META[id as AdmissionDimensionId]
+    if (meta) {
+      return {
+        id,
+        label: meta.label,
+        icon: meta.icon,
+        severity: meta.severity,
+        count: counts[id] ?? 0,
+      }
+    }
+    // Skill add 的自定义维度(没有 meta)→ 用占位
+    return { id, label: id, icon: '🔵', severity: 'blue' as const, count: counts[id] ?? 0 }
+  })
+  return {
+    dimensions,
+    verdict: params.verdict ?? 'pending',
+    pendingAdjudicationCount: params.pendingAdjudicationCount ?? 0,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Skill frontmatter 维度装配(ADR-0013 D10)
+// ---------------------------------------------------------------------------
+
+/**
+ * 装配准入维度集合:
+ * 1. 若 Skill 提供 admission_dimensions → 用它作为基底(子集化)
+ * 2. 否则 → 默认 5 维度
+ * 3. 应用 admission_override.add / .skip
+ * 4. add 中重复项去重(保留首次出现位置)
+ *
+ * 返回最终维度 id 列表(顺序固定),与 ADMISSION_DIMENSION_META 配合使用。
+ */
+export function resolveAdmissionDimensions(
+  frontmatter: SkillAdmissionFrontmatter | undefined,
+): string[] {
+  const base: readonly string[] =
+    frontmatter?.admission_dimensions && frontmatter.admission_dimensions.length > 0
+      ? frontmatter.admission_dimensions
+      : DEFAULT_ADMISSION_DIMENSIONS
+
+  const skip = new Set(frontmatter?.admission_override?.skip ?? [])
+  const filtered = base.filter((d) => !skip.has(d))
+
+  const adds = frontmatter?.admission_override?.add ?? []
+  const seen = new Set(filtered)
+  const dedupAdds: string[] = []
+  for (const id of adds) {
+    if (!seen.has(id)) {
+      seen.add(id)
+      dedupAdds.push(id)
+    }
+  }
+  return [...filtered, ...dedupAdds]
+}
+
+// ---------------------------------------------------------------------------
+// analysis/adjudication.md 计数(SSR 期 mock 路径由调用方注入)
+// ---------------------------------------------------------------------------
+
+/**
+ * 从 analysisDir 读 adjudication.md,计数未裁决项(`applied: false` 或未标 applied)。
+ * 文件不存在 / 解析失败 → 0(容错)。
+ */
+export function countPendingAdjudications(analysisDir: string): number {
+  try {
+    const file = join(analysisDir, 'adjudication.md')
+    if (!existsSync(file)) return 0
+    const text = readFileSync(file, 'utf8')
+    return countUnresolvedItems(text)
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * 纯函数:从 Markdown 文本里统计 `- item_id:` 起的 bullet,
+ * 若该 bullet 内 `applied: false` 或无 `applied:` 字段 → 计 1(视为待裁决)。
+ */
+export function countUnresolvedItems(text: string): number {
+  if (!text.trim()) return 0
+  let count = 0
+  // 按 bullet 行分割(- 开头,可能含 2 空格缩进)
+  const lines = text.split('\n')
+  let inItem = false
+  let hasAppliedFalse = false
+  let hasAppliedTrue = false
+  let hasAppliedField = false
+
+  const flush = () => {
+    if (inItem) {
+      // 保守策略:有 applied:true → 不计;其余(applied:false 或无 applied)→ 计
+      if (!hasAppliedTrue || hasAppliedFalse) {
+        count++
+      }
+    }
+    inItem = false
+    hasAppliedFalse = false
+    hasAppliedTrue = false
+    hasAppliedField = false
+  }
+
+  for (const line of lines) {
+    // bullet 起点
+    if (/^\s*-\s+item_id\s*:/.test(line)) {
+      flush()
+      inItem = true
+      hasAppliedFalse = false
+      hasAppliedTrue = false
+      hasAppliedField = false
+      continue
+    }
+    if (!inItem) continue
+
+    // bullet 内行
+    if (/^\s+applied\s*:\s*true\b/.test(line)) {
+      hasAppliedField = true
+      hasAppliedTrue = true
+    } else if (/^\s+applied\s*:\s*false\b/.test(line)) {
+      hasAppliedField = true
+      hasAppliedFalse = true
+    }
+  }
+  flush()
+  return count
 }
 
 // ---------------------------------------------------------------------------
@@ -352,19 +551,70 @@ const REFUND_ANALYZING: Omit<AnalyzingData, 'requirementId'> = {
     endedAt: null,
   },
   stats: summarizeAnalyzingStats(REFUND_ANALYZING_CHUNKS),
+  // issue 19a VS1 — admission 仪表板样例(2 资损 + 3 性能 + 1 架构 + 0 业务 + 4 上下文,
+  // 因有 🔴 资损 → 默认 verdict='fail';pendingAdjudicationCount=10 模拟"待裁决 10")
+  admission: buildAdmissionData({
+    counts: {
+      loss_prevention: 2,
+      performance: 3,
+      arch_conflict: 1,
+      business_reasonable: 0,
+      context_query: 4,
+    },
+    pendingAdjudicationCount: 10,
+    verdict: 'fail',
+  }),
 }
 
 /**
- * 拉取 ANALYZING 工位数据(mock 期 —— 后续替换为 `await fetch(...)`)。
+ * 拉取 ANALYZING 工位数据(SSR 期 mock —— 后续替换为 `await fetch(...)`)。
  *
  * - 已知 id(req-001)→ REFUND_ANALYZING 样例数据
  * - 未知 id / 新建需求 → emptyAnalyzing(id)
+ *
+ * options 用于接入真实数据源(后续 VS 接 server action):
+ * - `skillFrontmatter`: Skill SKILL.md frontmatter(读 admission_dimensions + admission_override)
+ * - `analysisDir`: 需求 analysis 目录(读 adjudication.md 计数)
+ *
+ * 不传 options 时,返回默认 5 维度 + 0 待裁决 + pending verdict。
  */
 export async function getAnalyzingData(
   requirementId: string,
+  options?: GetAnalyzingDataOptions,
 ): Promise<AnalyzingData> {
   if (requirementId === 'req-001') {
     return { ...REFUND_ANALYZING, requirementId }
   }
-  return emptyAnalyzing(requirementId)
+  // 未知 id / 新建需求 → 走 emptyAnalyzing,但仍通过装配函数(保留 wiring)
+  return emptyAnalyzingWithOptions(requirementId, options)
+}
+
+/** getAnalyzingData options —— 后续切 server action 时注入真实数据源 */
+export interface GetAnalyzingDataOptions {
+  skillFrontmatter?: SkillAdmissionFrontmatter
+  analysisDir?: string
+}
+
+/**
+ * emptyAnalyzing 的"接装配"版本 —— 即使是空需求,维度也走 resolveAdmissionDimensions,
+ * pendingAdjudicationCount 也走 countPendingAdjudications(容错返回 0)。
+ *
+ * 拆分函数而非 inline:让 getAnalyzingData 主线保持直白,装配逻辑单测容易。
+ */
+function emptyAnalyzingWithOptions(
+  requirementId: string,
+  options?: GetAnalyzingDataOptions,
+): AnalyzingData {
+  const dims = resolveAdmissionDimensions(options?.skillFrontmatter)
+  const pending = options?.analysisDir
+    ? countPendingAdjudications(options.analysisDir)
+    : 0
+  return {
+    ...emptyAnalyzing(requirementId),
+    admission: buildAdmissionData({
+      dimensions: dims,
+      pendingAdjudicationCount: pending,
+      verdict: 'pending',
+    }),
+  }
 }

@@ -9,8 +9,10 @@ import {
   type AnalyzingStats,
   type AnalyzingToolbar,
   type AnalyzingToolbarAction,
+  type AdmissionVerdict,
 } from '@/lib/analyzing'
 import { EmptyState } from './empty-state'
+import { AdmissionDashboard } from './admission-dashboard'
 
 /**
  * ANALYZING 工位组件(ADR-0011 §6 ANALYZING 布局 · issue 19)
@@ -101,8 +103,15 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   const [paused, setPaused] = useState(false)
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' })
   const [showCompletePrompt, setShowCompletePrompt] = useState(false)
+  // 客户端 verdict 覆盖(issue 19a VS1:[接受风险] 按钮 → fail → pending)
+  // TODO VS6:接入 server action(POST /analysis/adjudicate)
+  const [verdictOverride, setVerdictOverride] = useState<AdmissionVerdict | null>(null)
 
   const totalChunks = data.chunks.length
+  const currentAdmission = {
+    ...data.admission,
+    verdict: verdictOverride ?? data.admission.verdict,
+  }
 
   // -------------------------------------------------------------------------
   // 打字机推进(state machine,useEffect 唯一驱动)
@@ -225,6 +234,13 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
         onTogglePause={() => setPaused((p) => !p)}
         onReset={reset}
       />
+      {/* issue 19a VS1 — 准入仪表板(顶部 5 维度卡 + verdict 徽章 + 待裁决 N) */}
+      <div className="px-6 pt-4">
+        <AdmissionDashboard
+          admission={currentAdmission}
+          onAcceptRisk={() => setVerdictOverride('pending')}
+        />
+      </div>
       <div
         data-testid="analyzing-main"
         className="flex-1 overflow-auto px-6 py-6 flex flex-col gap-5"

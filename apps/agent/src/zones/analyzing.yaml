@@ -2,28 +2,33 @@ zone:
   # ─── 身份(必填 · 5 字段) ───
   id: analyzing
   name: ANALYZING
-  display_name: 分析中
-  icon: 🔍
+  display_name: PRD 准入 + 技术概要
+  icon: 🧠
   route_segment: analyzing
 
   # ─── 环境(必填 · 5 字段) ───
   has_resource_tree: false
   has_inline_rail: false
-  main_layout: observer
+  main_layout: admission-workbench       # 原 observer → admission-workbench(ADR-0013 D4)
   status_color: blue
-  status_pulse: true
+  status_pulse: true                     # 保持(蓝脉动)
 
-  # ─── 装备(必填 · 1 字段) ───
+  # ─── 装备(必填 · 1 字段 · ADR-0013 工位注册表 default_arming) ───
   default_arming:
-    - codebase-context
-    - dependency-graph
+    - admission-check                    # NEW: 准入校验 Skill(系统级)
+    - tech-brief-scaffold                # NEW: 技术概要生成 Skill
+    - requirement-brainstorm
+    - requirement-critique
 
   # ─── AI 思考条(必填 · 1 字段) ───
   thinking_bar: required
 
   # ─── 触发器(可选 · 2 字段) ───
-  entry_triggers: []
+  entry_triggers:
+    - "DRAFTING 工位 PRD 完成时,弹出建议:进入 ANALYZING 校验"
   exit_triggers: []
 
   # ─── 备注(可选 · 1 字段) ───
-  description: AI 旁观思考,展示推理过程
+  description: |
+    PRD 准入校验 + 拆解聚合模块,产出技术概要 + modules.yaml
+    覆盖决策 25 的 AI 提问切 CLARIFYING 部分(详见 ADR-0013 D3/D6)

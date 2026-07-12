@@ -46,6 +46,10 @@ export interface ZoneMeta {
   thinking_bar: ZoneThinkingBar
   /** 给 AI / 工具看的描述 */
   description: string
+  /** 工位主区布局标识(对应 shell 不同布局组件,ADR-0013 §工位注册表) */
+  main_layout?: string
+  /** 默认装备 Skill 列表(issue 19a VS1 · ADR-0013 工位注册表 default_arming) */
+  default_arming?: string[]
 }
 
 /** 6 工位元数据(按 lifecycle 顺序) */
@@ -66,15 +70,22 @@ export const ZONE_META: readonly ZoneMeta[] = [
   {
     id: 'analyzing',
     name: 'ANALYZING',
-    display_name: '分析中',
-    icon: '🔍',
+    display_name: 'PRD 准入 + 技术概要',
+    icon: '🧠',
     route_segment: 'analyzing',
     has_resource_tree: false,
     has_inline_rail: false,
     status_color: 'blue',
     status_pulse: true,
     thinking_bar: 'required',
-    description: 'AI 旁观思考,展示推理过程',
+    main_layout: 'admission-workbench',
+    default_arming: [
+      'admission-check',
+      'tech-brief-scaffold',
+      'requirement-brainstorm',
+      'requirement-critique',
+    ],
+    description: 'PRD 准入校验 + 拆解聚合模块,产出技术概要 + modules.yaml',
   },
   {
     id: 'clarifying',
