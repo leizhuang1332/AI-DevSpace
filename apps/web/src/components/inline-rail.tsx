@@ -1,8 +1,20 @@
 'use client';
 import { useState } from 'react';
+import type { DraftingSkill } from '@/lib/drafting';
 
 interface Props {
   requirementId: string;
+  /**
+   * DRAFTING 工位专用:候命 Skill 列表(由父组件 server 端注入)。
+   * 传入时,Inline 栏切换为"候命 Skill"section,覆盖默认的"AI 提示 / 检查 / 阻断"卡片列表。
+   * 期望的典型 Skill:requirement-brainstorm / requirement-clarify / schema-design(issue 18)。
+   */
+  draftingSkills?: DraftingSkill[];
+  /**
+   * 点击 Skill trigger 按钮时的回调(issue 18 验收 #5 "点击可唤起 Skill")。
+   * 实际唤起动作由调用方实现(本期 mock:打开 Cmd+K 浮层或聚焦主区 PRD)。
+   */
+  onSkillTrigger?: (skill: DraftingSkill) => void;
 }
 
 interface RailCard {
@@ -52,8 +64,21 @@ const BORDER_COLOR: Record<RailCard['type'], string> = {
   plain: 'var(--border)',
 };
 
-export function InlineRail({ requirementId }: Props) {
+export function InlineRail({ requirementId, draftingSkills, onSkillTrigger }: Props) {
   const [collapsed, setCollapsed] = useState(true);
+
+  if (draftingSkills) {
+    return (
+      <DraftingSkillRail
+        requirementId={requirementId}
+        skills={draftingSkills}
+        collapsed={collapsed}
+        setCollapsed={setCollapsed}
+        onSkillTrigger={onSkillTrigger}
+      />
+    );
+  }
+
   const cards = CARDS_BY_REQ[requirementId] ?? [];
 
   if (collapsed) {
@@ -95,6 +120,110 @@ export function InlineRail({ requirementId }: Props) {
           )}
         </div>
       ))}
+    </aside>
+  );
+}
+
+// ============================================================================
+// DRAFTING 专用视图:候命 Skill 列表(issue 18 · ADR-0011 §5 选项 C Inline 栏下放)
+// ============================================================================
+
+function DraftingSkillRail({
+  requirementId,
+  skills,
+  collapsed,
+  setCollapsed,
+  onSkillTrigger,
+}: {
+  requirementId: string
+  skills: DraftingSkill[]
+  collapsed: boolean
+  setCollapsed: (v: boolean) => void
+  onSkillTrigger?: (skill: DraftingSkill) => void
+}) {
+  if (collapsed) {
+    return (
+      <aside
+        data-testid="inline-rail"
+        data-rail-mode="drafting-skills"
+        data-requirement-id={requirementId}
+        data-skill-count={skills.length}
+        className="bg-bg-subtle border-l border-border p-3 w-12 flex flex-col items-center"
+      >
+        <button
+          onClick={() => setCollapsed(false)}
+          className="text-text-3 hover:text-text-1 text-xs"
+          aria-label="展开候命 Skill 列表"
+        >
+          ⟩
+        </button>
+      </aside>
+    );
+  }
+
+  return (
+    <aside
+      data-testid="inline-rail"
+      data-rail-mode="drafting-skills"
+      data-requirement-id={requirementId}
+      data-skill-count={skills.length}
+      className="bg-bg-subtle border-l border-border p-3 overflow-auto w-60"
+    >
+      <div className="flex items-center justify-between mb-3">
+        <span
+          data-testid="inline-rail-drafting-title"
+          className="text-xs uppercase tracking-wider text-text-3 font-medium"
+        >
+          候命 Skill
+        </span>
+        <button
+          onClick={() => setCollapsed(true)}
+          className="text-text-3 text-xs hover:text-text-1"
+          aria-label="折叠候命 Skill 列表"
+        >
+          ⟨ 折叠
+        </button>
+      </div>
+
+      <ul
+        data-testid="inline-rail-drafting-skills"
+        className="flex flex-col gap-2"
+      >
+        {skills.map((s) => (
+          <li
+            key={s.id}
+            data-testid="inline-rail-drafting-skill"
+            data-skill-id={s.id}
+            data-skill-name={s.name}
+            className="bg-bg-elevated rounded-md p-3 text-sm relative border-l-[3px] border-brand"
+          >
+            <div className="font-semibold text-text-1 mb-0.5 flex items-center gap-1.5">
+              <span aria-hidden>🤖</span>
+              <span className="font-mono text-xs">{s.name}</span>
+            </div>
+            <div className="text-text-2 leading-relaxed text-xs mb-1.5">
+              {s.description}
+            </div>
+            <button
+              type="button"
+              data-testid="inline-rail-drafting-skill-trigger"
+              data-skill-id={s.id}
+              onClick={() => onSkillTrigger?.(s)}
+              className="text-xs text-brand-600 hover:underline font-medium"
+            >
+              {s.trigger} →
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      <p
+        data-testid="inline-rail-drafting-tip"
+        className="text-[11px] text-text-3 mt-3 leading-relaxed"
+      >
+        这些 Skill 在 DRAFTING 工位候命 —— 点击或通过 <code className="font-mono">⌘K</code> 唤起。
+        它们不修改你的 PRD,只在你需要时辅助。
+      </p>
     </aside>
   );
 }

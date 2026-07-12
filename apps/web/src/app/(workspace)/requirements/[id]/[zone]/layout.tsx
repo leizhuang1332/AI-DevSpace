@@ -1,16 +1,15 @@
 import type { ReactNode } from 'react'
 import { notFound } from 'next/navigation'
 import { getZoneByRouteSegment } from '@/lib/zones'
-import { ZoneShell } from '@/lib/zone-shell'
 
 /**
- * 工位专属 shell(ADR-0012 §4):
- * - 未知 zone segment → notFound()(issue 13 验收第 3 条)
- * - 按 zone.has_resource_tree 决定是否渲染资源树
- * - 按 zone.has_inline_rail 决定是否渲染 Inline 栏
- * - 主区交给 page.tsx 的工位布局
+ * 工位路由的 layout:只做一件事 —— 未知 zone segment → notFound()。
  *
- * 可视部分委托给 ZoneShell(纯组件,便于测试)。
+ * 可视部分(ZoneShell + ResourceTree + InlineRail)由各 zone page.tsx 自行组装,
+ * 这样 page.tsx 可以把 zone-specific 数据(例如 DRAFTING 的 PRD 大纲 / 候命 Skill 列表)
+ * 注入到资源树 / Inline 栏,不需要在 layout 层做 zone 分支。
+ *
+ * 验收(issue 13):未知 route_segment → notFound(),由 layout 统一拦截。
  */
 export default function ZoneLayout({
   children,
@@ -21,10 +20,5 @@ export default function ZoneLayout({
 }) {
   const zone = getZoneByRouteSegment(params.zone)
   if (!zone) notFound()
-
-  return (
-    <ZoneShell id={params.id} zone={zone}>
-      {children}
-    </ZoneShell>
-  )
+  return <>{children}</>
 }

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { ResourceTree } from '@/components/resource-tree'
 import { InlineRail } from '@/components/inline-rail'
+import type { DraftingSkill, PrdSection } from '@/lib/drafting'
 import type { ZoneMeta } from './zones'
 
 /**
@@ -27,6 +28,28 @@ export function zoneShellGridClass(zone: ZoneMeta): string {
  *
  * 提取为纯组件便于测试;[id]/[zone]/layout.tsx 负责解析 + notFound 后调用它。
  */
+export interface ZoneShellProps {
+  id: string
+  zone: ZoneMeta
+  children: ReactNode
+  /**
+   * DRAFTING 工位专用:PRD 章节大纲。
+   * 传入时,资源树切换到 PRD 大纲视图(issue 18)。
+   * 其它工位不传,资源树维持默认静态结构。
+   */
+  prdSections?: PrdSection[]
+  /**
+   * DRAFTING 工位专用:候命 Skill 列表(issue 18)。
+   * 传入时,Inline 栏切换到 Skill 列表视图。
+   */
+  draftingSkills?: DraftingSkill[]
+  /**
+   * DRAFTING 工位专用:Skill trigger 点击回调。
+   * 实际唤起动作由 page.tsx 注入(本期 mock:打开 Cmd+K / 弹提示)。
+   */
+  onSkillTrigger?: (skill: DraftingSkill) => void
+}
+
 // ADR-0012 §3 + ADR-0007 继承:workspace shell 层 1 = StatusBar(28px) + ZoneBar(44px) = 72px
 const WORKSPACE_SHELL_OFFSET_PX = 72
 
@@ -34,11 +57,10 @@ export function ZoneShell({
   id,
   zone,
   children,
-}: {
-  id: string
-  zone: ZoneMeta
-  children: ReactNode
-}) {
+  prdSections,
+  draftingSkills,
+  onSkillTrigger,
+}: ZoneShellProps) {
   return (
     <div
       data-testid="zone-shell"
@@ -47,9 +69,17 @@ export function ZoneShell({
       data-has-inline-rail={String(zone.has_inline_rail)}
       className={`grid min-h-[calc(100vh-${WORKSPACE_SHELL_OFFSET_PX}px)] bg-bg ${zoneShellGridClass(zone)}`}
     >
-      {zone.has_resource_tree && <ResourceTree requirementId={id} />}
+      {zone.has_resource_tree && (
+        <ResourceTree requirementId={id} prdSections={prdSections} />
+      )}
       {children}
-      {zone.has_inline_rail && <InlineRail requirementId={id} />}
+      {zone.has_inline_rail && (
+        <InlineRail
+          requirementId={id}
+          draftingSkills={draftingSkills}
+          onSkillTrigger={onSkillTrigger}
+        />
+      )}
     </div>
   )
 }
