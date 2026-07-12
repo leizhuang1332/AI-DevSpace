@@ -9,14 +9,15 @@
 
 AI DevSpace 是一个 pnpm + Turborepo 管理的 monorepo，由以下子包组成：
 
-| 子包              | 角色                                                 | 端口   | 状态                   | 技术栈                                                      |
-| ----------------- | ---------------------------------------------------- | ------ | ---------------------- | ----------------------------------------------------------- |
-| `apps/web`        | Web 工作台（UI、交互、状态镜像）                     | `3333` | 已可启动               | Next.js 14 (App Router) · TypeScript · Tailwind · shadcn/ui |
-| `apps/agent`      | 本机 Agent 守护进程（SDK 调度、FS、git、Skill 加载） | `7777` | 骨架已落地（issue 01） | Node.js 20 · TypeScript · Fastify v5                        |
-| `packages/shared` | 跨端共享类型（SSE 事件、REST 契约、状态枚举）        | —      | 占位（待 issue 03+）   | TypeScript                                                  |
+| 子包                | 角色                                                 | 端口   | 状态               | 技术栈                                                      |
+| ------------------- | ---------------------------------------------------- | ------ | ------------------ | ----------------------------------------------------------- |
+| `apps/web`          | Web 工作台（UI、交互、状态镜像）                     | `3333` | 已可启动           | Next.js 14 (App Router) · TypeScript · Tailwind · shadcn/ui |
+| `apps/agent`        | 本机 Agent 守护进程（SDK 调度、FS、git、Skill 加载） | `7777` | 骨架已落地         | Node.js 20 · TypeScript · Fastify v5                        |
+| `packages/shared`   | 跨端共享类型（SSE 事件、REST 契约、状态枚举）        | —      | 已实装             | TypeScript + zod                                            |
+| `packages/scripts`  | 保活脚本（start/stop/watch/status）                  | —      | 已实装             | Bash 4+                                                     |
 
 Web 与 Agent 通过 localhost 上的 **HTTP REST + SSE** 通信：客户端 → Agent 走 REST，Agent → 客户端走 SSE
-长连推送 AI 输出 / 状态变更 / 错误。鉴权由 issue 03 引入（动态 Token + Origin 校验）。
+长连推送 AI 输出 / 状态变更 / 错误。issue 03 已落地鉴权（动态 Token + Origin 校验 + 公开 bootstrap 端点）。
 
 ## 目录结构
 
@@ -79,16 +80,51 @@ curl http://localhost:7777/api/health
 | `pnpm format`       | 用 Prettier 格式化仓库内可解析文件                      |
 | `pnpm format:check` | 仅检查不写入（CI 友好）                                 |
 
+## Agent 守护进程（issue 03）
+
+`apps/agent` 是本地守护进程，监听 `:7777`，提供 REST + SSE + Cookie 鉴权。
+
+| 命令              | 作用                                          |
+| ----------------- | --------------------------------------------- |
+| `pnpm agent:start` | nohup 后台拉起 + 5s 探端口                    |
+| `pnpm agent:stop`  | 优雅停（TERM → 5s → KILL）                    |
+| `pnpm agent:watch` | 常驻 5s 轮询，进程消失自动重拉                |
+| `pnpm agent:status` | 看 PID 活否                                  |
+| `pnpm dev:agent`   | dev 模式（tsx watch 热重载，不跑 watcher）    |
+
+环境变量：
+
+- `AIDEVSPACE_HOME` 默认 `~/.aidevspace`
+- `AGENT_LOG_FILE` 默认 `$AIDEVSPACE_HOME/logs/agent.log`
+- `PORT` 默认 `7777`
+
+快速验证 Agent 起来了：
+
+```bash
+pnpm agent:start && sleep 3
+TOK=$(curl -s http://localhost:7777/api/agent/bootstrap | python3 -c 'import sys, json; print(json.load(sys.stdin)["token"])')
+curl -sN -H "X-AIDevSpace-Token: $TOK" http://localhost:7777/api/requirement/REFUND-001/events | head -5
+pnpm agent:stop
+```
+
+### 平台支持
+
+- **macOS / Linux**：脚本 `set -euo pipefail`，Bash 4+。macOS 默认 bash 3.2 不满足，建议 `brew install bash`。
+- **Windows 不支持**（本期未提供 PowerShell 脚本；WSL 用户可走同套 sh）。
+
 ## 当前进度
 
-按 issue 顺序落地，地基阶段（`apps/*` 骨架 + monorepo 工具链）见
+按 issue 顺序落地，地基阶段（`apps/*` 骨架 + monorepo 工具链 + agent 骨架）见
 [`.scratch/ai-devspace-mvp/issues/`](.scratch/ai-devspace-mvp/issues/)。
 
-本仓库本次变更对应 issue 01，覆盖：
+本次变更合并 issue 01 + issue 02 + issue 03：
 
-- 新建 `apps/agent/`（Fastify v5 + `/api/health` 占位）
-- 顶层 `turbo.json` + `dev` / `dev:web` / `dev:agent` / `build` / `typecheck` / `test` / `lint` / `format` 脚本
-- 顶层 `.editorconfig` + ESLint v9 flat config + Prettier
+- 新建 `apps/agent/`：Fastify v5 + auth + SSE 通道 + 5x requirement 501 routes + `/api/agent/bootstrap` + health + pino dual-sink
+- 顶层 root scripts 加 `agent:start/stop/watch/status`
+- 保活脚本：`packages/scripts/agent-{start,stop,watch,status}.sh`
+- 共享 schema：`packages/shared/src/{sse,api}.ts`（Zod）
+- 设计 spec：`docs/superpowers/specs/2026-07-12-agent-skeleton-design.md`
+- 实施 plan：`docs/superpowers/plans/2026-07-12-agent-skeleton.md`
 - 顶层 README
 
 后续 issue（Agent SSE / workspace 初始化 / 需求 CRUD / 仓库 worktree / AI 对话面板 / 内置 Skill 等）按
