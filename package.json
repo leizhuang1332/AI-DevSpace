@@ -12,7 +12,11 @@
     "test": "turbo run test",
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\" --ignore-path .gitignore",
-    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\" --ignore-path .gitignore"
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\" --ignore-path .gitignore",
+    "agent:start": "bash packages/scripts/agent-start.sh",
+    "agent:stop": "bash packages/scripts/agent-stop.sh",
+    "agent:watch": "bash packages/scripts/agent-watch.sh",
+    "agent:status": "bash packages/scripts/agent-status.sh"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",

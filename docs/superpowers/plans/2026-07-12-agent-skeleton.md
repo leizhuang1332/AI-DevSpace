@@ -4,9 +4,9 @@
 
 **Goal:** 把 `apps/agent` 从 issue 02 末态（Fastify + `/api/health` + workspace）升级为 issue 03 定义的骨架：鉴权 + 7 条 REST 路由（含 5 条 501）+ SSE 长连通道 + 进程保活 + 文件日志。
 
-**Architecture:** Fastify 单进程 + 进程内 SseHub 桥（pin 后续 issue 06 SDK 集成）+ Auth Fastify plugin（preHandler 校验 cookie/header 双 sink）+ 同源 Origin 白名单。零新增运行依赖（仅 `@fastify/sse` 一个 npm 包）。保活走 bash 5s `kill -0` 轮询。
+**Architecture:** Fastify 单进程 + 进程内 SseHub 桥（pin 后续 issue 06 SDK 集成）+ Auth Fastify plugin（preHandler 校验 cookie/header 双 sink）+ 同源 Origin 白名单。SSE 用 `reply.hijack()` + `reply.raw.write(...)` 直接写 `event:` / `data:` 帧（不引 `@fastify/sse`，避免一处仅一行的封装噪音；后续如果需要 retry-id / 多 event type pipeline 再评估）。保活走 bash 5s `kill -0` 轮询。
 
-**Tech Stack:** Fastify 5、`@fastify/sse`、`@fastify/cors`（已有）、pino（Fastify 自带）、zod（`@ai-devspace/shared`）、Vitest 2。
+**Tech Stack:** Fastify 5、`@fastify/cors`（已有）、`@fastify/sse` 不安装、`fastify-plugin`（Task 3 已装）、pino（Fastify 自带）、zod（`@ai-devspace/shared`）、Vitest 2。
 
 **Spec reference:** `docs/superpowers/specs/2026-07-12-agent-skeleton-design.md`
 
@@ -73,7 +73,7 @@
 ## Task 1: 安装依赖 + 共享类型（sse / api / error）
 
 **Files:**
-- Modify: `apps/agent/package.json`（新增 `@fastify/sse` 依赖）
+- Modify: `apps/agent/package.json`（无新增运行依赖；本任务决定不引 `@fastify/sse`，改用 raw write，详见 Task 5 review 备注）
 - Create: `packages/shared/src/sse.ts`
 - Create: `packages/shared/src/api.ts`
 - Create: `packages/shared/src/error.ts`
@@ -81,18 +81,13 @@
 - Create: `packages/shared/src/__tests__/sse.test.ts`
 - Create: `packages/shared/src/__tests__/api.test.ts`
 
-### Step 1.1: 安装 `@fastify/sse`
+### Step 1.1: ~~安装 `@fastify/sse`~~ — 取消
 
-在 `/Users/Ray/TraeProjects/AI-DevSpace/apps/agent/package.json` 的 `dependencies` 末尾增加一行 `"@fastify/sse": "^2.0.0"`（与 fastify v5 兼容）。
+本步骤最初规划安装 `@fastify/sse` 封装 SSE 帧；Task 5 实现后 review 发现 SSE 帧就一个函数（`event: ${type}\ndata: ${JSON.stringify(ev)}\n\n`），封装噪音大于价值。决定**不安装 `@fastify/sse`**，改用 raw `reply.raw.write(...)`，减少一个依赖。
 
-然后：
+对应到 Task 1：原本计划 Step 1.1 安装 `@fastify/sse`；本步骤**已取消**。Task 1 implementer 跳过 Step 1.1 的 dep 安装。
 
-```bash
-cd /Users/Ray/TraeProjects/AI-DevSpace
-pnpm install
-```
-
-期望：lockfile 更新；`apps/agent/node_modules/@fastify/sse/` 出现。
+**若已 commit 含 `@fastify/sse` dep**（Task 1 的 `06d4b5d` 已装 `^0.5.0`），在 Task 5 review 修复 commit 里移除该 dep + lockfile 对应清理。
 
 ### Step 1.2: 写失败测试 — sse 类型
 
@@ -214,7 +209,7 @@ describe('BootstrapResponse', () => {
   it('accepts full payload', () => {
     const r = BootstrapResponse.safeParse({
       ok: true,
-      token: 'abc',
+      token: 'a'.repeat(43),  // 32-byte random base64url token, length 43
       cookieName: 'aidevspace_token',
       cookieAttributes: { SameSite: 'Strict', Path: '/', MaxAge: 2592000 },
       apiBase: 'http://localhost:7777',
@@ -746,11 +741,16 @@ cd /Users/Ray/TraeProjects/AI-DevSpace/apps/agent && pnpm test authPlugin.test.t
 
 ### Step 3.5: 实现 authPlugin.ts
 
+**3.5.0 加依赖** — 在 `apps/agent/package.json` 的 `dependencies` 末尾追加 `"fastify-plugin": "^5.0.0"`，然后 `pnpm install`。
+
+> **为什么需要 fastify-plugin**：Fastify 5 插件默认会创建 encapsulation scope，`onRequest` hook 只作用在插件内部注册的路由。auth 是 cross-cutting 必须全局生效，要用 `fastify-plugin` 的 `fp()` 包装来"逃出"封装。这是 Fastify 生态标准做法。
+
 创建 `apps/agent/src/auth/authPlugin.ts`：
 
 ```ts
+import fp from 'fastify-plugin'
 import { timingSafeEqual } from 'node:crypto'
-import type { FastifyInstance, FastifyPluginAsync } from 'fastify'
+import type { FastifyPluginAsync } from 'fastify'
 import { parseCookie } from './cookie.js'
 import type { TokenManager } from './TokenManager.js'
 
@@ -766,10 +766,7 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(ba, bb)
 }
 
-export const authPlugin: FastifyPluginAsync<AuthPluginOptions> = async (
-  fastify,
-  opts,
-) => {
+const authImpl: FastifyPluginAsync<AuthPluginOptions> = async (fastify, opts) => {
   const { tokenManager, allowedOrigins } = opts
   fastify.addHook('onRequest', async (req, reply) => {
     // Public bypass: routes declare { config: { public: true } }
@@ -791,6 +788,11 @@ export const authPlugin: FastifyPluginAsync<AuthPluginOptions> = async (
     }
   })
 }
+
+// `fp()` opts out of Fastify's plugin encapsulation so the onRequest hook
+// applies to sibling routes on the parent Fastify instance (auth is
+// cross-cutting, not just sub-tree-scoped).
+export const authPlugin = fp<AuthPluginOptions>(authImpl, { name: 'authPlugin' })
 ```
 
 ### Step 3.6: 跑全部 auth 测试
@@ -1066,114 +1068,187 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ### Step 5.1: 写失败测试
 
+> **重要：用 Node `http` 客户端做真请求，避开 `app.inject()` 的 hijack SSE 死锁。** `app.inject()` 在 `reply.hijack()` 后会等响应自然结束才返回；但 SSE 长连永远不结束，inject 会卡 5s 超时。
+
 创建 `apps/agent/src/__tests__/requirementEventsRoute.test.ts`：
 
 ```ts
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
-import { randomUUID } from 'node:crypto'
-import { mkdtempSync } from 'node:fs'
+import http from 'node:http'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TokenManager } from '../auth/TokenManager.js'
 import { authPlugin } from '../auth/authPlugin.js'
 import { createSseHub, type SseHub } from '../sse/SseHub.js'
 import { sseRoutes } from '../sse/requirementEventsRoute.js'
-import { createRequire } from 'node:module'
 
 let app: FastifyInstance
 let hub: SseHub
 let token: string
+let root: string
+let port: number
 
-const require = createRequire(import.meta.url)
+interface CapturedResponse {
+  statusCode: number
+  headers: Record<string, string | string[] | undefined>
+  body: string
+}
 
-function wait(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms))
+/** Open an SSE request, read until first event arrives or abortMs timeout. */
+function openSse(
+  urlPath: string,
+  headers: Record<string, string> = {},
+  readMs = 250,
+): Promise<CapturedResponse> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        method: 'GET',
+        hostname: '127.0.0.1',
+        port,
+        path: urlPath,
+        headers,
+      },
+      (res) => {
+        const chunks: Buffer[] = []
+        const timer = setTimeout(() => {
+          req.destroy()
+          resolve({
+            statusCode: res.statusCode ?? 0,
+            headers: res.headers as Record<string, string | string[] | undefined>,
+            body: Buffer.concat(chunks).toString('utf8'),
+          })
+        }, readMs)
+        res.on('data', (c) => chunks.push(c))
+        res.on('end', () => {
+          clearTimeout(timer)
+          resolve({
+            statusCode: res.statusCode ?? 0,
+            headers: res.headers as Record<string, string | string[] | undefined>,
+            body: Buffer.concat(chunks).toString('utf8'),
+          })
+        })
+        res.on('error', () => {
+          clearTimeout(timer)
+          resolve({
+            statusCode: res.statusCode ?? 0,
+            headers: res.headers as Record<string, string | string[] | undefined>,
+            body: Buffer.concat(chunks).toString('utf8'),
+          })
+        })
+      },
+    )
+    req.on('error', reject)
+    req.end()
+  })
 }
 
 describe('GET /api/requirement/:id/events', () => {
   beforeEach(async () => {
-    vi.useRealTimers()  // we want real timers for streaming tests
-    const root = mkdtempSync(join(tmpdir(), 'aidevsp-sse-'))
+    root = mkdtempSync(join(tmpdir(), 'aidevsp-sse-'))
     const tm = new TokenManager(root)
     token = await tm.ensure()
-    hub = createSseHub({ heartbeatMs: 60_000 })  // disable automatic heartbeat
+    hub = createSseHub({ heartbeatMs: 60_000 })
     app = Fastify({ logger: false })
     await app.register(authPlugin, { tokenManager: tm, allowedOrigins: ['http://localhost:3333'] })
     await app.register(sseRoutes, { hub })
     await app.ready()
+    const url = await app.listen({ port: 0, host: '127.0.0.1' })
+    port = new URL(url).port
   })
 
   afterEach(async () => {
     await app.close()
     await hub.close()
+    rmSync(root, { recursive: true, force: true })
   })
 
-  it('returns text/event-stream content type', async () => {
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/requirement/REFUND-001/events',
-      headers: { 'x-aidevspace-token': token },
+  it('returns 200 with text/event-stream content type', async () => {
+    const res = await openSse('/api/requirement/REFUND-001/events', {
+      'x-aidevspace-token': token,
     })
     expect(res.statusCode).toBe(200)
     expect(res.headers['content-type']).toMatch(/^text\/event-stream/)
   })
 
-  it('emits a hello event immediately', async () => {
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/requirement/REFUND-001/events',
-      headers: { 'x-aidevspace-token': token },
+  it('emits a hello event in the initial body chunk', async () => {
+    const res = await openSse('/api/requirement/REFUND-001/events', {
+      'x-aidevspace-token': token,
     })
     expect(res.body).toMatch(/event: hello/)
     expect(res.body).toMatch(/"reqId":"REFUND-001"/)
     expect(res.body).toMatch(/"sid":/)
   })
 
-  it('401 without token', async () => {
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/requirement/REFUND-001/events',
-    })
-    expect(res.statusCode).toBe(401)
-  })
-
-  it('emits X-Accel-Buffering: no', async () => {
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/requirement/REFUND-001/events',
-      headers: { 'x-aidevspace-token': token },
+  it('emits X-Accel-Buffering: no header', async () => {
+    const res = await openSse('/api/requirement/REFUND-001/events', {
+      'x-aidevspace-token': token,
     })
     expect(res.headers['x-accel-buffering']).toBe('no')
   })
 
-  it('subscribes to the reqId channel', () => {
-    // After a successful inject above (in beforeEach implicitly), we open one now:
-    expect(hub.stats().subscribers).toBe(0)
+  it('401 without token (does not open SSE)', async () => {
+    const res = await openSse('/api/requirement/REFUND-001/events', {})
+    expect(res.statusCode).toBe(401)
   })
 
   it('writes a publish() event to the stream body', async () => {
-    const p = app.inject({
-      method: 'GET',
-      url: '/api/requirement/REFUND-001/events',
-      headers: { 'x-aidevspace-token': token },
+    const chunks: Buffer[] = []
+    let done = false
+    await new Promise<void>((resolve) => {
+      const req = http.request(
+        {
+          method: 'GET',
+          hostname: '127.0.0.1',
+          port,
+          path: '/api/requirement/REFUND-001/events',
+          headers: { 'x-aidevspace-token': token },
+        },
+        (res) => {
+          res.on('data', (c) => {
+            chunks.push(c)
+            const body = Buffer.concat(chunks).toString('utf8')
+            if (body.includes('event: placeholder') && !done) {
+              done = true
+              req.destroy()
+              resolve()
+            }
+          })
+          res.on('end', () => resolve())
+        },
+      )
+      // small delay so the route registers the listener
+      setTimeout(() => {
+        hub.publish('REFUND-001', { type: 'placeholder', message: 'hello future' })
+      }, 50)
+      req.on('error', () => resolve())
+      req.end()
     })
-    // small tick so the route actually registers the listener
-    await wait(10)
-    hub.publish('REFUND-001', { type: 'placeholder', message: 'hello future' })
-    const res = await p
-    expect(res.body).toMatch(/event: placeholder/)
-    expect(res.body).toMatch(/hello future/)
+    const body = Buffer.concat(chunks).toString('utf8')
+    expect(body).toMatch(/event: placeholder/)
+    expect(body).toMatch(/hello future/)
+  })
+
+  it('unsubscribes from SseHub when client socket closes', async () => {
+    expect(hub.stats().subscribers).toBe(0)
+    await openSse('/api/requirement/REFUND-001/events', {
+      'x-aidevspace-token': token,
+    })
+    // openSse always destroys the socket after the read window; cleanup runs async.
+    // Wait one event-loop tick for the close handler to fire.
+    await new Promise((r) => setImmediate(r))
+    await new Promise((r) => setImmediate(r))
+    expect(hub.stats().subscribers).toBe(0)
   })
 })
 ```
 
-> 注：本测试用 `app.inject`（Fastify 5 的 streaming 注入）。`hello` 事件同步发出；`heartbeat` 在本测试 hub 里设了 60s 不会立刻触发。
-
 跑：
 
 ```bash
-cd /Users/Ray/TraeProjects/AI-DevSpace/apps/agent && pnpm test requirementEventsRoute.test.ts
+cd /Users/Ray/TraeProjects/AI-DevSpace/.worktrees/feat-issue-03-agent-skeleton/apps/agent && pnpm test requirementEventsRoute.test.ts 2>&1 | tee /tmp/sse-route-r.log
 ```
 
 期望：FAIL，`Cannot find module '../sse/requirementEventsRoute.js'`。
@@ -1233,15 +1308,15 @@ export const sseRoutes: FastifyPluginAsync<SseRoutesOptions> = async (fastify, o
 ### Step 5.3: 跑测试
 
 ```bash
-cd /Users/Ray/TraeProjects/AI-DevSpace/apps/agent && pnpm test requirementEventsRoute.test.ts
+cd /Users/Ray/TraeProjects/AI-DevSpace/.worktrees/feat-issue-03-agent-skeleton/apps/agent && pnpm test requirementEventsRoute.test.ts
 ```
 
-期望：5 passed（其中第 6 个 `subscribes to the reqId channel` 仅 sanity check stats，不强制断言）。
+期望：6 passed。
 
 ### Step 5.4: Commit
 
 ```bash
-cd /Users/Ray/TraeProjects/AI-DevSpace
+cd /Users/Ray/TraeProjects/AI-DevSpace/.worktrees/feat-issue-03-agent-skeleton
 git add apps/agent/src/sse/requirementEventsRoute.ts apps/agent/src/__tests__/requirementEventsRoute.test.ts
 git commit -m "feat(agent): SSE requirement events route (issue 03/5)
 

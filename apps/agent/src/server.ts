@@ -1,53 +1,127 @@
-import Fastify from 'fastify'
+import Fastify, { type FastifyInstance } from 'fastify'
 import cors from '@fastify/cors'
 import { fileURLToPath } from 'node:url'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { homedir } from 'node:os'
+import { TokenManager } from './auth/TokenManager.js'
+import { authPlugin } from './auth/authPlugin.js'
 import { WorkspaceService } from './services/WorkspaceService.js'
+import { HealthService } from './services/HealthService.js'
 import { workspaceRoutes } from './routes/workspace.js'
+import { requirementRoutes } from './routes/requirement.js'
+import { bootstrapRoutes } from './routes/bootstrap.js'
+import { createSseHub, type SseHub } from './sse/SseHub.js'
+import { sseRoutes } from './sse/requirementEventsRoute.js'
 
-// 占位 CORS 白名单 — 当前仅放行本机 Web（3333）。issue 03 引入动态 Token + Origin 鉴权时一并收紧。
-// 现阶段不视为安全边界；非浏览器客户端（如 CLI）需绕过 CORS 时后续单独讨论。
 const ALLOWED_ORIGINS: string[] = ['http://localhost:3333', 'http://127.0.0.1:3333']
 
-export async function buildServer() {
+function defaultLogPath(): string {
+  return join(homedir(), '.aidevspace', 'logs', 'agent.log')
+}
+
+function defaultWorkspaceRoot(): string {
+  return process.env.AIDEVSPACE_HOME ?? join(homedir(), '.aidevspace')
+}
+
+export interface BuildServerOptions {
+  workspaceRoot?: string
+  logFilePath?: string
+  agentVersion?: string
+}
+
+/**
+ * Build a fully-wired Fastify instance. The caller chooses whether to .listen().
+ * TokenManager.ensure() is awaited here so any 401-strict routes are safe.
+ */
+export async function buildServer(opts: BuildServerOptions = {}): Promise<FastifyInstance> {
+  const workspaceRoot = opts.workspaceRoot ?? defaultWorkspaceRoot()
+  const logFilePath = opts.logFilePath ?? defaultLogPath()
+  const bootTime = new Date()
+  mkdirSync(dirname(logFilePath), { recursive: true })
+
+  // Dual-sink logger: stdout (for dev/pm2 dashboards) + append file.
+  // Fastify's own logger option accepts a transport config — pino/file is bundled.
   const fastify = Fastify({
-    logger: { level: process.env.LOG_LEVEL ?? 'info' },
+    logger: {
+      level: process.env.LOG_LEVEL ?? 'info',
+      transport: {
+        targets: [
+          { target: 'pino/file', options: { destination: logFilePath, mkdir: false } },
+          { target: 'pino/file', options: { destination: 1 } }, // stdout fd
+        ],
+      },
+    },
   })
 
   await fastify.register(cors, {
     origin: ALLOWED_ORIGINS,
     credentials: true,
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
   })
 
-  // Workspace service 单例：boot 时 init（幂等）
-  const workspace = new WorkspaceService(WorkspaceService.resolveRoot())
+  // 1. Token
+  const tokenManager = new TokenManager(workspaceRoot, {
+    warn: (msg, ctx) => fastify.log.warn(ctx ?? {}, msg),
+  })
+  await tokenManager.ensure()
+
+  // 2. Auth plugin (registers onRequest hook; fp() wraps it for cross-cutting scope)
+  await fastify.register(authPlugin, { tokenManager, allowedOrigins: ALLOWED_ORIGINS })
+
+  // 3. SSE hub + routes
+  const hub: SseHub = createSseHub()
+  await fastify.register(sseRoutes, { hub })
+
+  // 4. Workspace (init idempotent)
+  const workspace = new WorkspaceService(workspaceRoot)
   try {
     await workspace.initWorkspace()
     fastify.log.info({ root: workspace.root }, 'workspace initialized')
   } catch (err) {
     fastify.log.error({ err, root: workspace.root }, 'workspace init failed')
-    throw err // 让 isMain 块的 catch 退出进程（spec §4.5）
+    throw err
   }
 
-  await workspaceRoutes(fastify, { workspace })
+  // 5. Routes
+  const healthService = new HealthService({
+    root: workspaceRoot,
+    tokenManager,
+    allowedOrigins: ALLOWED_ORIGINS,
+    logFilePath,
+    sseHubStats: () => hub.stats(),
+    bootTime,
+    agentVersion: opts.agentVersion ?? '0.0.0',
+  })
+  fastify.get('/api/health', { config: { public: true } }, async () => healthService.collect())
+  await fastify.register(workspaceRoutes, { workspace })
+  await fastify.register(requirementRoutes)
+  await fastify.register(bootstrapRoutes, { tokenManager, apiBase: 'http://localhost:7777' })
 
-  fastify.get('/api/health', async () => {
-    return { ok: true, name: 'agent', workspaceRoot: workspace.root }
+  fastify.addHook('onClose', async () => {
+    await hub.close()
   })
 
   return fastify
 }
 
-// 跨平台 isMain 检测（Windows 下 process.argv[1] 是反斜杠路径，import.meta.url 是 file:// URL）
+// Cross-platform isMain detection (Windows uses backslash in process.argv[1])
 const entryPath = process.argv[1] ? fileURLToPath(import.meta.url) : ''
 const isMain = entryPath === process.argv[1]
 
 if (isMain) {
   const port = Number(process.env.PORT ?? 7777)
   const host = process.env.HOST ?? '0.0.0.0'
-  const app = await buildServer()
+  const workspaceRoot = process.env.AIDEVSPACE_HOME ?? defaultWorkspaceRoot()
+  const logFilePath = process.env.AGENT_LOG_FILE ?? defaultLogPath()
+  const app = await buildServer({ workspaceRoot, logFilePath })
   try {
     await app.listen({ port, host })
     app.log.info(`agent listening on http://${host}:${port}`)
+    // Write PID file (best-effort, used by the bash watcher)
+    const pidPath = join(workspaceRoot, '.agent.pid')
+    mkdirSync(dirname(pidPath), { recursive: true })
+    writeFileSync(pidPath, String(process.pid))
   } catch (err) {
     app.log.error(err)
     process.exit(1)
