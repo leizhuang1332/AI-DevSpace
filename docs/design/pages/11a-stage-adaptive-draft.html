@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>11a · 阶段自适应 · DRAFT 形态 · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{
+  --brand:#5e6ad2;--brand-50:#eef0fb;--brand-100:#e0e3f7;--brand-500:#5e6ad2;--brand-600:#525bc7;--brand-700:#4147a3;
+  --success:#16a34a;--success-50:#f0fdf4;--warning:#f59e0b;--warning-50:#fffbeb;--error:#ef4444;--error-50:#fef2f2;--info:#64748b;
+  --bg:#fbfbfd;--bg-elevated:#ffffff;--bg-subtle:#f5f5f7;--border:#ebebef;--border-strong:#d8d8de;
+  --text-1:#0f172a;--text-2:#475569;--text-3:#94a3b8;
+  --space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:20px;--space-6:24px;--space-8:32px;
+  --text-xs:11px;--text-sm:12px;--text-base:13px;--text-md:14px;--text-lg:16px;--text-xl:18px;--text-2xl:20px;--text-3xl:24px;--text-4xl:32px;
+  --radius-sm:4px;--radius-md:6px;--radius-lg:8px;--radius-xl:12px;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.04);--shadow-md:0 2px 4px rgba(0,0,0,.06);--shadow-lg:0 4px 12px rgba(0,0,0,.08);
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg);color:var(--text-1);font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased}
+/* Top Nav */
+.topnav{position:sticky;top:0;z-index:100;background:#0f172a;color:#fff;padding:var(--space-2) var(--space-4);font-size:var(--text-sm);display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap}
+.topnav .badge{background:var(--brand);color:#fff;padding:3px 10px;border-radius:var(--radius-md);font-size:var(--text-xs);font-weight:600;white-space:nowrap}
+.topnav .form-name{color:#e2e8f0;font-weight:600;white-space:nowrap}
+.topnav a{color:#94a3b8;text-decoration:none;padding:4px 9px;border-radius:var(--radius-md);white-space:nowrap;font-size:var(--text-xs)}
+.topnav a:hover{color:#fff;background:rgba(255,255,255,.06)}
+.topnav a.cur{color:#fff;background:var(--brand)}
+.topnav .spacer{flex:1}
+.topnav .grp{display:flex;gap:2px;align-items:center;flex-wrap:wrap}
+.topnav .div{width:1px;height:15px;background:rgba(255,255,255,.14);margin:0 4px}
+/* StatusBar */
+.statusbar{position:sticky;top:36px;z-index:50;background:var(--bg-elevated);border-bottom:1px solid var(--border)}
+.statusbar .tabs{display:flex;align-items:center;height:40px;padding:0 var(--space-4);gap:2px}
+.statusbar .tab{display:flex;align-items:center;gap:6px;height:28px;padding:0 var(--space-3);font-size:var(--text-sm);color:var(--text-2);border-radius:var(--radius-md);cursor:pointer;white-space:nowrap}
+.statusbar .tab:hover{background:var(--bg-subtle)}
+.statusbar .tab.active{background:var(--brand-50);color:var(--brand-600);font-weight:500}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--brand);flex-shrink:0;display:inline-block}
+.statusbar .info{display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 var(--space-4);border-top:1px solid var(--border);background:var(--bg-subtle);font-size:var(--text-sm);color:var(--text-2)}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(94,106,210,.6)}70%{box-shadow:0 0 0 6px rgba(94,106,210,0)}100%{box-shadow:0 0 0 0 rgba(94,106,210,0)}}
+.dot-pulse{width:8px;height:8px;border-radius:50%;background:var(--brand);animation:pulse 1.4s infinite;display:inline-block}
+/* Shell + Sidebar */
+.shell{display:grid;grid-template-columns:56px 1fr;min-height:calc(100vh - 108px)}
+.sidebar{background:var(--bg-elevated);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:var(--space-3) 0;gap:2px}
+.sidebar .logo{width:32px;height:32px;border-radius:var(--radius-md);background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;margin-bottom:var(--space-3)}
+.sidebar a{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius-md);font-size:18px;text-decoration:none;color:var(--text-2)}
+.sidebar a:hover{background:var(--bg-subtle)}
+.sidebar a.active{background:var(--brand-50)}
+/* Detail 3-col */
+.detail{display:grid;grid-template-columns:240px 1fr 120px;background:var(--bg);min-height:calc(100vh - 108px)}
+/* Resource Tree */
+.tree{background:var(--bg-elevated);border-right:1px solid var(--border);padding:var(--space-3) 0;overflow:auto}
+.tree.weak{opacity:.66}
+.tree-section{padding:0 var(--space-3);margin-bottom:var(--space-2)}
+.tree-section-label{padding:var(--space-2);font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:600;display:flex;align-items:center;justify-content:space-between}
+.tree-section-label .count{background:var(--bg-subtle);color:var(--text-2);padding:1px 6px;border-radius:var(--radius-sm);font-size:var(--text-xs)}
+.tree-section.current .tree-section-label{color:var(--brand-600)}
+.tree-section.current .tree-section-label .count{background:var(--brand-50);color:var(--brand-600)}
+.tree-node{display:flex;align-items:center;gap:var(--space-2);height:26px;padding:0 var(--space-2);border-radius:var(--radius-md);font-size:var(--text-sm);color:var(--text-2);cursor:pointer}
+.tree-node:hover{background:var(--bg-subtle)}
+.tree-node.active{background:var(--brand-50);color:var(--brand-700);font-weight:500}
+.tree-node .ic{font-size:13px;width:16px;text-align:center}
+.tree-node .sd{width:6px;height:6px;border-radius:50%;margin-left:auto}
+/* Center */
+.center{display:flex;flex-direction:column;background:var(--bg);overflow:hidden}
+.center-toolbar{display:flex;align-items:center;justify-content:space-between;height:44px;padding:0 var(--space-6);border-bottom:1px solid var(--border);background:var(--bg-elevated)}
+.center-toolbar .crumb{font-size:var(--text-sm);color:var(--text-3);display:flex;align-items:center;gap:8px}
+.center-toolbar .crumb .cur{color:var(--text-1);font-weight:600}
+.center-toolbar .right{display:flex;gap:var(--space-2);align-items:center}
+.btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 var(--space-3);border-radius:var(--radius-md);font-size:var(--text-sm);font-weight:500;cursor:pointer;border:none;background:var(--brand);color:#fff;font-family:inherit}
+.btn:hover{background:var(--brand-600)}
+.btn-lg{height:38px;padding:0 var(--space-5);font-size:var(--text-md)}
+.btn-secondary{background:var(--bg-elevated);color:var(--text-1);border:1px solid var(--border-strong)}
+.btn-secondary:hover{background:var(--bg-subtle)}
+.btn-ghost{background:transparent;color:var(--text-2)}
+.btn-ghost:hover{color:var(--text-1);background:var(--bg-subtle)}
+.workarea{flex:1;overflow:auto;padding:var(--space-6)}
+/* Inline Rail */
+.rail{background:var(--bg-subtle);border-left:1px solid var(--border);padding:var(--space-3);overflow:auto;display:flex;flex-direction:column;gap:var(--space-4)}
+.rail-section{font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:600;margin-bottom:6px}
+.rail-card{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3);font-size:var(--text-xs);border-left:3px solid var(--success);margin-bottom:var(--space-2)}
+.rail-card.warn{border-left-color:var(--warning)}
+.rail-card.err{border-left-color:var(--error)}
+.rail-card .ttl{font-weight:600;font-size:var(--text-sm);margin-bottom:4px;color:var(--text-1)}
+.rail-card .body{color:var(--text-2);line-height:1.5}
+.rail-card code{font-family:var(--mono);color:var(--brand-600)}
+/* Note + wireframe */
+.note{margin:var(--space-6);padding:var(--space-4);background:#f0f9ff;border:1px solid #bae6fd;border-radius:var(--radius-lg);font-size:var(--text-sm);color:#075985}
+.note b{color:#0c4a6e}
+.note .wire{margin-top:var(--space-3);background:#0c2233;color:#7dd3fc;border-radius:var(--radius-md);padding:var(--space-3);overflow:auto;font-family:var(--mono);font-size:11px;line-height:1.35}
+.kbd{font-family:var(--mono);background:var(--bg-subtle);padding:1px 6px;border-radius:var(--radius-sm);font-size:11px;border:1px solid var(--border);color:var(--text-2)}
+/* ===== DRAFT 专属：Form 形态 ===== */
+.form{max-width:760px;margin:0 auto;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-xl);box-shadow:var(--shadow-md);padding:var(--space-6)}
+.form-head{margin-bottom:var(--space-5);border-bottom:1px solid var(--border);padding-bottom:var(--space-4)}
+.form-head .ttl{font-size:var(--text-2xl);font-weight:700;display:flex;align-items:center;gap:8px}
+.form-head .sub{font-size:var(--text-sm);color:var(--text-3);margin-top:6px}
+.field{margin-bottom:var(--space-5)}
+.field>label{display:block;font-size:var(--text-sm);font-weight:600;color:var(--text-2);margin-bottom:var(--space-2)}
+.inp{width:100%;height:38px;padding:0 var(--space-3);border:1px solid var(--border-strong);border-radius:var(--radius-md);font-size:var(--text-md);font-family:inherit;color:var(--text-1);background:var(--bg)}
+.inp:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-50)}
+.inp.sm{height:30px;font-size:var(--text-sm)}
+.editor{border:1px solid var(--border-strong);border-radius:var(--radius-md);overflow:hidden}
+.ed-toolbar{display:flex;align-items:center;gap:var(--space-3);padding:var(--space-2) var(--space-3);background:var(--bg-subtle);border-bottom:1px solid var(--border);font-size:var(--text-sm);color:var(--text-3)}
+.ed-toolbar b{color:var(--text-2)}
+.ed-toolbar .mono{margin-left:auto;font-family:var(--mono);font-size:var(--text-xs)}
+.ed-body{width:100%;min-height:190px;border:none;padding:var(--space-3);font-family:var(--mono);font-size:var(--text-sm);line-height:1.7;color:var(--text-1);resize:vertical;background:var(--bg-elevated)}
+.ed-body:focus{outline:none}
+.ac{display:flex;flex-direction:column;gap:var(--space-2)}
+.ac-item{display:flex;align-items:center;gap:var(--space-2)}
+.ac-item .cb{color:var(--brand);font-size:15px;width:18px;text-align:center}
+.ac-add{font-size:var(--text-sm);color:var(--brand-600);cursor:pointer;padding:var(--space-1) 0;font-weight:500}
+.chips{display:flex;flex-wrap:wrap;gap:var(--space-2)}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:6px 12px;border:1px solid var(--border-strong);border-radius:999px;font-size:var(--text-sm);color:var(--text-2);cursor:pointer;background:var(--bg)}
+.chip.on{background:var(--brand-50);border-color:var(--brand);color:var(--brand-700);font-weight:500}
+.form-foot{display:flex;align-items:center;gap:var(--space-2);border-top:1px solid var(--border);padding-top:var(--space-4);margin-top:var(--space-2)}
+</style>
+</head>
+<body>
+
+<!-- Top Nav -->
+<div class="topnav">
+  <span class="badge">Exploration B · 方案 ① 阶段自适应</span>
+  <span class="form-name">· DRAFT 形态（Form）</span>
+  <span class="spacer"></span>
+  <div class="grp">
+    <a href="11a-stage-adaptive-draft.html" class="cur">DRAFT</a>
+    <a href="11b-stage-adaptive-clarifying.html">CLARIFYING</a>
+    <a href="11c-stage-adaptive-designing.html">DESIGNING</a>
+    <a href="11d-stage-adaptive-implementing.html">IMPLEMENTING</a>
+    <span class="div"></span>
+    <a href="11-overview.html">① 总览</a>
+    <a href="12-object-hub.html">② 对象中心</a>
+    <a href="13-event-stream.html">③ 事件流</a>
+    <a href="00-overview.html">全部方案</a>
+  </div>
+</div>
+
+<!-- StatusBar -->
+<header class="statusbar">
+  <div class="tabs">
+    <div class="tab active"><span class="dot" style="background:var(--info)"></span>退款功能 · 草稿</div>
+    <div class="tab"><span class="dot" style="background:var(--warning)"></span>会员等级 · 待澄清</div>
+    <div class="tab"><span class="dot" style="background:var(--success)"></span>订单导出 · 已完成</div>
+  </div>
+  <div class="info">
+    <div style="display:flex;align-items:center;gap:var(--space-3)">
+      <strong style="color:var(--text-1);font-weight:600">退款功能优化</strong>
+      <span style="color:var(--text-3)">·</span>
+      <span>草稿 · 尚未创建</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:var(--space-4)">
+      <span style="color:var(--text-3)">⚪ AI 待启动</span>
+      <span style="color:var(--text-3);font-size:var(--text-xs)">⌘K 命令</span>
+    </div>
+  </div>
+</header>
+
+<div class="shell">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="logo">D</div>
+    <a href="#" title="概览">🏠</a>
+    <a href="#" class="active" title="需求">📌</a>
+    <a href="#" title="仓库">📦</a>
+    <a href="#" title="知识">📚</a>
+    <a href="#" title="Skill">🤖</a>
+    <span style="flex:1"></span>
+    <a href="#" title="设置">⚙️</a>
+  </nav>
+
+  <div class="detail">
+    <!-- LEFT: Resource Tree (草稿阶段弱化) -->
+    <aside class="tree weak">
+      <div class="tree-section current">
+        <div class="tree-section-label"><span>概览</span></div>
+        <div class="tree-node active"><span class="ic">📝</span>需求草稿<span class="sd" style="background:var(--info)"></span></div>
+      </div>
+      <div class="tree-section">
+        <div class="tree-section-label"><span>分析</span><span class="count">0</span></div>
+        <div class="tree-node"><span class="ic">🔍</span>待启动<span class="sd" style="background:var(--text-3)"></span></div>
+      </div>
+      <div class="tree-section">
+        <div class="tree-section-label"><span>设计</span><span class="count">0</span></div>
+      </div>
+      <div class="tree-section">
+        <div class="tree-section-label"><span>计划</span><span class="count">0</span></div>
+      </div>
+      <div class="tree-section">
+        <div class="tree-section-label"><span>产物</span><span class="count">0</span></div>
+      </div>
+      <div class="tree-section">
+        <div class="tree-section-label"><span>对话</span><span class="count">0</span></div>
+      </div>
+      <div class="tree-section">
+        <div class="tree-section-label"><span>仓库</span><span class="count">2</span></div>
+        <div class="tree-node"><span class="ic">📦</span>refund-service</div>
+        <div class="tree-node"><span class="ic">📦</span>order-service</div>
+      </div>
+    </aside>
+
+    <!-- CENTER: Form 形态 -->
+    <section class="center">
+      <div class="center-toolbar">
+        <div class="crumb"><span>需求</span><span>/</span><span class="cur">新建草稿</span></div>
+        <div class="right">
+          <span style="font-size:var(--text-xs);color:var(--text-3)">形态：📝 Form</span>
+        </div>
+      </div>
+      <main class="workarea">
+        <div class="form">
+          <div class="form-head">
+            <div class="ttl">📝 新建需求</div>
+            <div class="sub">填写 PRD 与验收标准 —— 提交后 AI 将据此进入「分析 → 澄清」阶段</div>
+          </div>
+
+          <div class="field">
+            <label>标题</label>
+            <input class="inp" value="退款功能优化">
+          </div>
+
+          <div class="field">
+            <label>PRD（Markdown）</label>
+            <div class="editor">
+              <div class="ed-toolbar"><b>B</b><b><i>I</i></b><b>H1</b><b>&lt;/&gt;</b><span>· 列表</span><span class="mono">Markdown 富文本</span></div>
+              <textarea class="ed-body"># 退款功能优化
+
+## 背景
+用户发起退款申请后，当前需人工审核，平均耗时约 2 天，投诉率高。
+
+## 目标
+- 退款流程自动化，减少人工介入
+- 提升退款到账速度与成功率
+
+## 验收标准
+- [ ] 退款成功率 ≥ 99%
+- [ ] 平均退款时长 ≤ 30s</textarea>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>验收标准（AC · 结构化）</label>
+            <div class="ac">
+              <div class="ac-item"><span class="cb">☑</span><input class="inp sm" value="退款成功率 ≥ 99%"></div>
+              <div class="ac-item"><span class="cb">☑</span><input class="inp sm" value="平均退款时长 ≤ 30s"></div>
+              <div class="ac-item"><span class="cb">☐</span><input class="inp sm" value="失败自动重试并通知用户"></div>
+              <div class="ac-add">＋ 添加验收标准</div>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>关联仓库（多选）</label>
+            <div class="chips">
+              <span class="chip on">✓ refund-service</span>
+              <span class="chip on">✓ order-service</span>
+              <span class="chip">＋ coupon-service</span>
+              <span class="chip">＋ 更多仓库…</span>
+            </div>
+          </div>
+
+          <div class="form-foot">
+            <button class="btn-ghost">取消</button>
+            <span style="flex:1"></span>
+            <button class="btn-secondary">保存草稿</button>
+            <button class="btn btn-lg">▶ 创建并启动 AI 分析</button>
+          </div>
+        </div>
+      </main>
+    </section>
+
+    <!-- RIGHT: Inline Rail -->
+    <aside class="rail">
+      <div>
+        <div class="rail-section">AI 提示</div>
+        <div class="rail-card">
+          <div class="ttl">💡 写好 PRD</div>
+          <div class="body">越清晰的<code>背景/目标/AC</code>，AI 澄清提问越少，直接进设计。</div>
+        </div>
+      </div>
+      <div>
+        <div class="rail-section">检查</div>
+        <div class="rail-card warn">
+          <div class="ttl">⚠ AC 建议可量化</div>
+          <div class="body">「失败自动重试」缺少阈值，建议补充重试次数。</div>
+        </div>
+      </div>
+      <div>
+        <div class="rail-section">阻断</div>
+        <div class="rail-card err">
+          <div class="ttl">⛔ 标题不能为空</div>
+          <div class="body">创建前必须填写标题（当前已填）。</div>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<!-- 设计说明 -->
+<div class="note">
+  <b>DRAFT 形态（Form）——</b> 主区是<strong>居中表单</strong>：标题 / PRD Markdown 富文本 / 结构化 AC checklist / 关联仓库多选 / 底部 <span class="kbd">▶ 创建并启动 AI 分析</span>。
+  资源树此阶段<b>弱化</b>（灰显、几乎全空），因为还没有分析/设计/产物 —— 焦点全在填写。<br>
+  <b>切换条件：</b> 点「创建并启动 AI 分析」→ status 变为 <b>ANALYZING</b>，主区切到 Thinking 形态；AI 提问后进入 <b>CLARIFYING</b>（见 11b）。
+  <pre class="wire">┌────────────────────────────────────────────────────────┐
+│ 📝 新建需求                                            │
+│ 标题: [退款功能优化_____________________________]    │
+│ PRD (Markdown):                                       │
+│ ┌──────────────────────────────────────────────────┐ │
+│ │ # 退款功能优化                                    │ │
+│ │ ## 背景 / ## 验收标准                             │ │
+│ │ - [ ] 退款成功率 ≥ 99%                            │ │
+│ │ - [ ] 平均退款时长 ≤ 30s                          │ │
+│ └──────────────────────────────────────────────────┘ │
+│ 关联仓库: [✓] refund-service [✓] order-service       │
+│                                                        │
+│ [取消]          [保存草稿] [▶ 创建并启动 AI 分析]     │
+└────────────────────────────────────────────────────────┘</pre>
+</div>
+
+</body>
+</html>

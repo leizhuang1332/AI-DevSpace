@@ -1,0 +1,731 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>12 · 需求详情页 · 方案 ② 对象中心 (Object Hub) · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{
+  --brand:#5e6ad2; --brand-50:#eef0fb; --brand-100:#dde0f5; --brand-500:#5e6ad2; --brand-600:#525bc7; --brand-700:#4147a3;
+  --success:#16a34a; --success-50:#dcfce7;
+  --warning:#f59e0b; --warning-50:#fef3c7;
+  --error:#ef4444; --error-50:#fee2e2;
+  --info:#64748b;
+  --bg:#fbfbfd; --bg-elevated:#ffffff; --bg-subtle:#f5f5f7; --border:#ebebef; --border-strong:#d8d8de;
+  --text-1:#0f172a; --text-2:#475569; --text-3:#94a3b8;
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-6:24px; --space-8:32px;
+  --text-xs:11px; --text-sm:12px; --text-base:13px; --text-md:14px; --text-lg:16px; --text-xl:18px; --text-2xl:20px;
+  --row-md:32px;
+  --radius-sm:4px; --radius-md:6px; --radius-lg:8px; --radius-xl:12px;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.04); --shadow-md:0 2px 4px rgba(0,0,0,.06); --shadow-lg:0 4px 12px rgba(0,0,0,.08);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg);color:var(--text-1);font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased}
+code,.mono{font-family:'JetBrains Mono','Fira Code',monospace}
+
+/* ============== TopNav ============== */
+.topnav{position:sticky;top:0;z-index:100;background:#0f172a;color:#fff;padding:var(--space-2) var(--space-6);font-size:var(--text-sm);display:flex;align-items:center;gap:var(--space-4)}
+.topnav .pill{background:rgba(94,106,210,.2);color:#c7ccff;padding:2px 8px;border-radius:var(--radius-md);font-size:var(--text-xs);font-weight:500;border:1px solid rgba(94,106,210,.4)}
+.topnav a{color:#94a3b8;text-decoration:none;padding:4px 10px;border-radius:var(--radius-md);font-size:var(--text-sm)}
+.topnav a:hover{color:#fff;background:rgba(255,255,255,.05)}
+.topnav a.cur{color:#fff;background:var(--brand)}
+.topnav .spacer{flex:1}
+.topnav .meta{color:#64748b;font-size:var(--text-xs)}
+
+/* ============== StatusBar ============== */
+.statusbar{position:sticky;top:34px;z-index:50;background:var(--bg-elevated);border-bottom:1px solid var(--border)}
+.statusbar .tabs{display:flex;align-items:center;height:40px;padding:0 var(--space-4);gap:2px}
+.statusbar .tab{display:flex;align-items:center;gap:6px;height:28px;padding:0 var(--space-3);font-size:var(--text-sm);color:var(--text-2);border-radius:var(--radius-md);cursor:pointer;white-space:nowrap}
+.statusbar .tab:hover{background:var(--bg-subtle)}.statusbar .tab.active{background:var(--brand-50);color:var(--brand-600);font-weight:500}
+.statusbar .tab .dot{width:6px;height:6px;border-radius:50%;background:var(--brand)}
+.statusbar .info{display:flex;align-items:center;justify-content:space-between;height:36px;padding:0 var(--space-4);border-top:1px solid var(--border);background:var(--bg-subtle);font-size:var(--text-sm);color:var(--text-2)}
+.statusbar .info .left{display:flex;align-items:center;gap:var(--space-3)}
+.statusbar .info .left strong{color:var(--text-1);font-weight:500}
+.statusbar .info .right{display:flex;align-items:center;gap:var(--space-4)}
+.statusbar .info .badge{background:var(--warning-50);color:#92400e;padding:2px 8px;border-radius:var(--radius-md);font-size:var(--text-xs);font-weight:500}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(94,106,210,.6)}70%{box-shadow:0 0 0 6px rgba(94,106,210,0)}100%{box-shadow:0 0 0 0 rgba(94,106,210,0)}}
+.dot-pulse{width:8px;height:8px;border-radius:50%;background:var(--brand);animation:pulse 1.4s infinite;display:inline-block}
+.dot-pulse.idle{background:var(--text-3);animation:none}
+
+/* ============== Shell ============== */
+.shell{display:grid;grid-template-columns:56px 1fr;min-height:calc(100vh - 110px)}
+.sidebar{background:var(--bg-elevated);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:var(--space-3) 0;gap:2px}
+.sidebar .logo{width:32px;height:32px;border-radius:var(--radius-md);background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;margin-bottom:var(--space-3)}
+.sidebar a{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius-md);font-size:18px;text-decoration:none;color:var(--text-2);position:relative}
+.sidebar a:hover{background:var(--bg-subtle);color:var(--text-1)}
+.sidebar a.active{background:var(--brand-50);color:var(--brand-700)}
+.sidebar a.active::before{content:'';position:absolute;left:-12px;top:8px;bottom:8px;width:2px;background:var(--brand);border-radius:1px}
+
+.detail{display:grid;grid-template-columns:240px 1fr 120px;background:var(--bg);min-height:calc(100vh - 110px)}
+
+/* ============== ResourceTree: 对象子节点版 ============== */
+.tree{background:var(--bg-elevated);border-right:1px solid var(--border);padding:var(--space-3) 0;overflow:auto}
+.tree-head{padding:0 var(--space-3);margin-bottom:var(--space-2);display:flex;align-items:center;justify-content:space-between;font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:500}
+.tree-head .obj-pill{font-family:'JetBrains Mono',monospace;color:var(--brand-600);background:var(--brand-50);padding:1px 6px;border-radius:var(--radius-sm);font-weight:500;text-transform:none;letter-spacing:0}
+.tree-section{padding:0 var(--space-3);margin-bottom:var(--space-2)}
+.tree-section-label{padding:var(--space-2) var(--space-2);font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:500;display:flex;align-items:center;justify-content:space-between;cursor:pointer}
+.tree-section-label .ic{font-size:10px;transition:transform .15s}
+.tree-section.collapsed .tree-node,.tree-section.collapsed .tree-meta-row{display:none}
+.tree-section.collapsed .tree-section-label .ic{transform:rotate(-90deg)}
+.tree-node{display:flex;align-items:center;gap:var(--space-2);height:26px;padding:0 var(--space-2);border-radius:var(--radius-md);font-size:var(--text-sm);color:var(--text-2);cursor:pointer;position:relative}
+.tree-node:hover{background:var(--bg-subtle);color:var(--text-1)}
+.tree-node.active{background:var(--brand-50);color:var(--brand-700);font-weight:500}
+.tree-node .ic{font-size:13px;width:16px;text-align:center;color:var(--text-3)}
+.tree-node.active .ic{color:var(--brand-600)}
+.tree-node .lbl{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tree-node .ct{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-3);margin-left:auto;padding:0 4px}
+.tree-node .ct.brand{color:var(--brand-600);background:var(--brand-50);border-radius:var(--radius-sm)}
+.tree-node .marker{position:absolute;right:6px;top:6px;width:6px;height:6px;border-radius:50%;background:var(--brand)}
+.tree-node .marker.unread{background:var(--warning)}
+.tree-node .marker.collapsed{background:var(--text-3);right:8px;top:9px}
+.tree-node .marker.active{background:var(--brand);box-shadow:0 0 0 2px var(--brand-50)}
+.tree-meta-row{display:flex;align-items:center;gap:6px;padding:0 var(--space-2);height:22px;font-size:var(--text-xs);color:var(--text-3)}
+
+/* ============== Center ============== */
+.center{display:flex;flex-direction:column;background:var(--bg-elevated);overflow:hidden}
+
+/* 元数据卡 */
+.meta-card{margin:var(--space-4);background:linear-gradient(135deg,#fafbff 0%,var(--bg-elevated) 100%);border:1px solid var(--border);border-radius:var(--radius-xl);padding:var(--space-4) var(--space-6);box-shadow:var(--shadow-sm)}
+.meta-card-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-3)}
+.meta-card-hd .title{font-size:var(--text-lg);font-weight:600;color:var(--text-1);display:flex;align-items:center;gap:var(--space-3)}
+.meta-card-hd .id{font-family:'JetBrains Mono',monospace;color:var(--text-3);font-size:var(--text-sm)}
+.meta-card-hd .title-actions{display:flex;gap:var(--space-2)}
+.meta-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-4) var(--space-6);border-top:1px dashed var(--border);padding-top:var(--space-3)}
+.meta-cell{display:flex;flex-direction:column;gap:4px}
+.meta-cell .lbl{font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:500}
+.meta-cell .val{font-size:var(--text-md);color:var(--text-1);font-weight:500;display:flex;align-items:center;gap:6px}
+.meta-cell .val .mono{color:var(--text-2);font-size:var(--text-sm);font-weight:400}
+
+/* Status badge */
+.badge{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 var(--space-2);border-radius:var(--radius-md);font-size:var(--text-xs);font-weight:500}
+.badge.dot::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor}
+.badge.brand{background:var(--brand-50);color:var(--brand-700)}
+.badge.success{background:var(--success-50);color:#166534}
+.badge.warning{background:var(--warning-50);color:#92400e}
+.badge.error{background:var(--error-50);color:#991b1b}
+.badge.neutral{background:var(--bg-subtle);color:var(--text-2)}
+
+/* Progress ring */
+.ring{position:relative;width:32px;height:32px;display:inline-block}
+.ring svg{transform:rotate(-90deg)}
+.ring .pct{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;color:var(--text-1)}
+
+/* Repo chips */
+.chip{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 8px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-md);font-size:var(--text-xs);color:var(--text-2);font-family:'JetBrains Mono',monospace}
+.chip.brand{background:var(--brand-50);color:var(--brand-700);border-color:var(--brand-100)}
+
+/* ============== Active View Tabs ============== */
+.view-tabs{display:flex;align-items:center;gap:2px;padding:0 var(--space-4);border-bottom:1px solid var(--border);background:var(--bg-elevated);position:sticky;top:0;z-index:10}
+.view-tab{display:flex;align-items:center;gap:6px;height:36px;padding:0 var(--space-3);font-size:var(--text-sm);color:var(--text-2);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;position:relative}
+.view-tab:hover{color:var(--text-1)}
+.view-tab.active{color:var(--brand-700);border-bottom-color:var(--brand);font-weight:500}
+.view-tab .ct{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);background:var(--bg-subtle);padding:1px 6px;border-radius:var(--radius-sm);color:var(--text-2)}
+.view-tab.active .ct{background:var(--brand-50);color:var(--brand-700)}
+.view-tab .red-dot{width:6px;height:6px;border-radius:50%;background:var(--error);position:absolute;top:8px;right:6px}
+
+/* ============== Main Content: AI 行为时间线 ============== */
+.workarea{flex:1;overflow:auto;padding:var(--space-4) var(--space-6)}
+.timeline-section{margin-bottom:var(--space-6)}
+.section-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-3)}
+.section-hd .ttl{font-size:var(--text-md);font-weight:600;color:var(--text-1);display:flex;align-items:center;gap:var(--space-2)}
+.section-hd .ttl .ct{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-3);font-weight:400}
+.section-hd .right{display:flex;align-items:center;gap:var(--space-2);font-size:var(--text-xs);color:var(--text-3)}
+.timeline-filters{display:flex;gap:4px}
+.filter-chip{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 8px;border-radius:var(--radius-md);font-size:var(--text-xs);color:var(--text-2);cursor:pointer;background:transparent;border:1px solid transparent}
+.filter-chip:hover{background:var(--bg-subtle)}
+.filter-chip.active{background:var(--brand-50);color:var(--brand-700);border-color:var(--brand-100)}
+
+/* Time groups */
+.tl-day{margin-bottom:var(--space-4)}
+.tl-day-hd{display:flex;align-items:center;gap:var(--space-2);font-size:var(--text-xs);color:var(--text-3);font-weight:500;text-transform:uppercase;letter-spacing:.04em;margin-bottom:var(--space-2)}
+.tl-day-hd .date{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-2);text-transform:none;letter-spacing:0;font-weight:500}
+.tl-day-hd .line{flex:1;height:1px;background:var(--border)}
+
+.tl-list{display:flex;flex-direction:column;gap:var(--space-1)}
+.tl-item{display:grid;grid-template-columns:64px 24px 1fr auto;gap:var(--space-3);padding:var(--space-2) var(--space-3);border-radius:var(--radius-md);cursor:pointer;align-items:flex-start}
+.tl-item:hover{background:var(--bg-subtle)}
+.tl-item.active{background:var(--brand-50);box-shadow:inset 2px 0 0 var(--brand)}
+.tl-time{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-3);padding-top:2px;text-align:right}
+.tl-icon{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;margin-top:1px}
+.tl-icon.ai{background:var(--brand-50);color:var(--brand-700)}
+.tl-icon.human{background:#f1f5f9;color:#475569}
+.tl-icon.status{background:var(--warning-50);color:#92400e}
+.tl-icon.artifact{background:var(--success-50);color:#166534}
+.tl-icon.tool{background:#e0f2fe;color:#075985}
+.tl-body{min-width:0}
+.tl-row1{display:flex;align-items:center;gap:6px;margin-bottom:2px;flex-wrap:wrap}
+.tl-tag{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:600}
+.tl-tag.ai{color:var(--brand-700)}
+.tl-tag.human{color:#475569}
+.tl-tag.status{color:#92400e}
+.tl-tag.artifact{color:#166534}
+.tl-tag.tool{color:#075985}
+.tl-phase{font-size:var(--text-xs);color:var(--text-3);background:var(--bg-subtle);padding:1px 6px;border-radius:var(--radius-sm);font-family:'JetBrains Mono',monospace}
+.tl-desc{font-size:var(--text-sm);color:var(--text-1);line-height:1.5}
+.tl-desc code{font-family:'JetBrains Mono',monospace;font-size:12px;background:var(--bg-subtle);padding:1px 5px;border-radius:var(--radius-sm);color:var(--text-1);border:1px solid var(--border)}
+.tl-desc .plus{color:var(--success);font-weight:600;font-family:'JetBrains Mono',monospace;font-size:var(--text-xs)}
+.tl-desc .minus{color:var(--error);font-weight:600;font-family:'JetBrains Mono',monospace;font-size:var(--text-xs)}
+.tl-desc .arrow{color:var(--text-3);margin:0 4px;font-family:'JetBrains Mono',monospace}
+.tl-right{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-3);display:flex;align-items:center;gap:var(--space-2);padding-top:3px}
+.tl-right .act{color:var(--brand-600);cursor:pointer}
+.tl-item.pause .tl-desc{color:var(--warning);font-weight:500}
+.tl-item .unread-dot{width:6px;height:6px;border-radius:50%;background:var(--brand);margin-top:8px}
+
+/* Inline expansion (active item) */
+.tl-expansion{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3);margin-top:var(--space-2);margin-left:88px;font-size:var(--text-sm);color:var(--text-2)}
+.tl-expansion .head{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-2);font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-3)}
+.tl-expansion pre{background:#0f172a;color:#e2e8f0;padding:var(--space-3);border-radius:var(--radius-md);overflow:auto;font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);line-height:1.6;max-height:200px}
+.tl-expansion pre .k{color:#a78bfa}
+.tl-expansion pre .s{color:#86efac}
+.tl-expansion pre .c{color:#64748b;font-style:italic}
+
+/* ============== AI 思考条 (永远在底部) ============== */
+.ai-bar{border-top:1px solid var(--border);background:linear-gradient(180deg,var(--bg-elevated) 0%,#fafbff 100%);padding:var(--space-3) var(--space-6);display:flex;align-items:center;gap:var(--space-3);position:relative}
+.ai-bar::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--brand),transparent);opacity:.5}
+.ai-bar .pulse-wrap{width:32px;height:32px;border-radius:50%;background:var(--brand-50);display:flex;align-items:center;justify-content:center;flex-shrink:0;border:1px solid var(--brand-100)}
+.ai-bar .pulse-wrap.idle{background:var(--bg-subtle);border-color:var(--border)}
+.ai-bar .pulse-wrap.idle .dot-pulse{background:var(--warning);animation:none}
+.ai-bar .ai-text{flex:1;min-width:0}
+.ai-bar .ai-text .top{display:flex;align-items:center;gap:6px;font-size:var(--text-sm);color:var(--text-1);font-weight:500}
+.ai-bar .ai-text .top .status-tag{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);padding:1px 6px;border-radius:var(--radius-sm);background:var(--brand-50);color:var(--brand-700);font-weight:500}
+.ai-bar .ai-text .top .status-tag.idle{background:var(--warning-50);color:#92400e}
+.ai-bar .ai-text .sub{font-size:var(--text-xs);color:var(--text-3);margin-top:2px;font-family:'JetBrains Mono',monospace}
+.ai-bar .ai-text .sub .ask{color:var(--warning);font-weight:500}
+.ai-bar .actions{display:flex;gap:var(--space-2);flex-shrink:0}
+.btn{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 var(--space-3);border-radius:var(--radius-md);font-size:var(--text-sm);font-weight:500;cursor:pointer;border:none;background:var(--brand);color:#fff;font-family:inherit}
+.btn:hover{background:var(--brand-600)}
+.btn-sm{height:24px;padding:0 8px;font-size:var(--text-xs)}
+.btn-secondary{background:var(--bg-elevated);color:var(--text-1);border:1px solid var(--border-strong)}
+.btn-secondary:hover{background:var(--bg-subtle)}
+.btn-ghost{background:transparent;color:var(--text-2);border:1px solid transparent}
+.btn-ghost:hover{color:var(--text-1);background:var(--bg-subtle)}
+.btn-warn{background:var(--warning-50);color:#92400e;border:1px solid #fcd34d}
+.btn-warn:hover{background:#fde68a}
+
+/* ============== Right Rail: 弱化"快捷入口" ============== */
+.rail{background:var(--bg-subtle);border-left:1px solid var(--border);padding:var(--space-3);overflow:auto;display:flex;flex-direction:column;gap:var(--space-3)}
+.rail-head{font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:500;display:flex;align-items:center;justify-content:space-between;padding:0 4px}
+.quick-actions{display:flex;flex-direction:column;gap:4px}
+.qa{display:flex;align-items:center;gap:8px;padding:var(--space-2);background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-md);cursor:pointer;font-size:var(--text-xs);color:var(--text-2);text-decoration:none}
+.qa:hover{border-color:var(--brand);color:var(--brand-700)}
+.qa .ic{font-size:14px;color:var(--text-3);width:18px;text-align:center}
+.qa:hover .ic{color:var(--brand-600)}
+.qa .label{flex:1;font-weight:500}
+.qa .kbd{font-family:'JetBrains Mono',monospace;background:var(--bg-subtle);padding:1px 5px;border-radius:var(--radius-sm);font-size:10px;color:var(--text-3);border:1px solid var(--border)}
+.qa.qa-warn{border-left:2px solid var(--warning);background:#fffbeb}
+.qa.qa-warn .ic{color:var(--warning)}
+.qa.qa-warn .label{color:#92400e;font-weight:500}
+.qa.qa-warn .ct{margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:10px;color:#92400e;background:#fde68a;padding:1px 6px;border-radius:var(--radius-sm);font-weight:600}
+
+.rail-note{font-size:var(--text-xs);color:var(--text-3);line-height:1.6;padding:var(--space-2);background:var(--bg-elevated);border:1px dashed var(--border);border-radius:var(--radius-md);font-style:italic}
+.rail-note b{color:var(--brand-700);font-style:normal;font-weight:500}
+
+/* ============== Note ============== */
+.note{margin:var(--space-4);padding:var(--space-4);background:#f0f9ff;border:1px solid #bae6fd;border-radius:var(--radius-md);font-size:var(--text-sm);color:#075985}
+.note b{color:#0c4a6e}
+.note .warn{background:#fef3c7;border:1px solid #fcd34d;color:#92400e;padding:var(--space-3);border-radius:var(--radius-md);margin-top:var(--space-3);display:block;line-height:1.6;white-space:pre-wrap;font-family:'JetBrains Mono',monospace;font-size:var(--text-xs)}
+.note ul{margin-left:var(--space-6);margin-top:6px}
+.note li{margin-top:2px;line-height:1.6}
+.kbd{font-family:'JetBrains Mono',monospace;background:var(--bg-subtle);padding:1px 6px;border-radius:var(--radius-sm);font-size:11px;border:1px solid var(--border);color:var(--text-2)}
+</style>
+</head>
+<body>
+
+<!-- ============== TopNav ============== -->
+<div class="topnav">
+  <span class="pill">Exploration B · 方案 ② 对象中心</span>
+  <a href="00-req-detail-compare.html">00 · 总览</a>
+  <a href="11a-skills-grid.html">11a · Skill 网格</a>
+  <a href="11b-skills-list.html">11b · Skill 列表</a>
+  <a href="11c-skills-detail.html">11c · Skill 详情</a>
+  <a href="11d-skills-editor.html">11d · Skill 编辑</a>
+  <a href="12-settings.html">12 · 设置</a>
+  <a href="13-command-palette.html">13 · ⌘K</a>
+  <span class="spacer"></span>
+  <span class="meta">需求详情页 · /requirements/req-001 · v0.2</span>
+</div>
+
+<!-- ============== StatusBar ============== -->
+<header class="statusbar">
+  <div class="tabs">
+    <div class="tab active"><span class="dot"></span>退款功能优化 · 实施中</div>
+    <div class="tab"><span class="dot" style="background:var(--warning)"></span>会员等级 · 待澄清</div>
+    <div class="tab"><span class="dot" style="background:var(--success)"></span>订单导出 · 已完成</div>
+    <div class="tab" style="color:var(--text-3)">归档 · 4</div>
+  </div>
+  <div class="info">
+    <div class="left">
+      <strong>退款功能优化</strong>
+      <span style="color:var(--text-3)">·</span>
+      <span>对象 ID <code class="mono" style="font-size:var(--text-xs);color:var(--text-2)">req-001</code></span>
+      <span style="color:var(--text-3)">·</span>
+      <span>创建 7-04 · 更新 14:24</span>
+    </div>
+    <div class="right">
+      <span style="display:flex;align-items:center;gap:6px"><span class="dot-pulse idle" style="background:var(--warning)"></span>AI 暂停 · 等 Q3 错误码决策</span>
+      <span class="badge">⚠ 2 待回答</span>
+    </div>
+  </div>
+</header>
+
+<!-- ============== Shell ============== -->
+<div class="shell">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="logo">A</div>
+    <a href="#" title="概览 ⌘1">🏠</a>
+    <a href="#" class="active" title="需求 ⌘2">📌</a>
+    <a href="#" title="仓库 ⌘3">📦</a>
+    <a href="#" title="知识 ⌘4">📚</a>
+    <a href="#" title="Skill ⌘5">🤖</a>
+    <span style="flex:1"></span>
+    <a href="#" title="设置 ⌘6">⚙️</a>
+  </nav>
+
+  <div class="detail">
+
+    <!-- LEFT: 资源树 (对象子节点版) -->
+    <aside class="tree">
+      <div class="tree-head">
+        <span>资源树</span>
+        <span class="obj-pill">对象子节点</span>
+      </div>
+
+      <div class="tree-section">
+        <div class="tree-section-label"><span>▾ 元数据</span><span class="ic">▾</span></div>
+        <div class="tree-node active"><span class="ic">📇</span><span class="lbl">基本信息卡</span><span class="marker active"></span></div>
+        <div class="tree-node"><span class="ic">🏷️</span><span class="lbl">标签 · 优先级</span></div>
+        <div class="tree-node"><span class="ic">👤</span><span class="lbl">负责人 · 协作</span></div>
+      </div>
+
+      <div class="tree-section">
+        <div class="tree-section-label"><span>▾ 描述</span><span class="ic">▾</span></div>
+        <div class="tree-node"><span class="ic">📝</span><span class="lbl">PRD 正文</span><span class="ct">1.2k</span></div>
+        <div class="tree-node"><span class="ic">✅</span><span class="lbl">验收标准 AC</span><span class="ct">4</span></div>
+        <div class="tree-node"><span class="ic">⚠️</span><span class="lbl">风险点</span><span class="ct">3</span></div>
+      </div>
+
+      <div class="tree-section">
+        <div class="tree-section-label"><span>▾ 子任务 DAG</span><span class="ic">▾</span></div>
+        <div class="tree-node"><span class="ic">🔀</span><span class="lbl">依赖图 (DAG)</span><span class="ct brand">14</span></div>
+        <div class="tree-node"><span class="ic">📋</span><span class="lbl">tasks.md</span></div>
+      </div>
+
+      <div class="tree-section">
+        <div class="tree-section-label"><span>▾ 产物</span><span class="ic">▾</span></div>
+        <div class="tree-node"><span class="ic">📦</span><span class="lbl">refund-api.yaml</span><span class="ct">v3</span><span class="marker unread"></span></div>
+        <div class="tree-node"><span class="ic">🗄️</span><span class="lbl">refund.sql</span><span class="ct">v2</span></div>
+        <div class="tree-node"><span class="ic">⚙️</span><span class="lbl">apollo.yaml</span></div>
+        <div class="tree-node"><span class="ic">📄</span><span class="lbl">03-service.md</span></div>
+      </div>
+
+      <div class="tree-section">
+        <div class="tree-section-label" style="color:var(--brand-600)"><span>▸ AI 行为</span><span class="ic" style="transform:rotate(-90deg)">▾</span></div>
+      </div>
+
+      <div class="tree-section">
+        <div class="tree-section-label"><span>▾ 仓库</span><span class="ic">▾</span></div>
+        <div class="tree-node"><span class="ic">📁</span><span class="lbl">refund-svc</span><span class="ct">+12</span></div>
+        <div class="tree-node"><span class="ic">📁</span><span class="lbl">order-svc</span><span class="ct">+3</span></div>
+      </div>
+
+      <div class="tree-section collapsed">
+        <div class="tree-section-label"><span>▸ 历史</span><span class="ic">▾</span></div>
+      </div>
+    </aside>
+
+    <!-- CENTER -->
+    <section class="center">
+
+      <!-- 元数据卡 -->
+      <div class="meta-card">
+        <div class="meta-card-hd">
+          <div class="title">
+            <span>退款功能优化</span>
+            <span class="id">req-001</span>
+            <span class="badge brand dot">实施中</span>
+            <span class="badge neutral">P1</span>
+            <span class="badge neutral">v0.3</span>
+          </div>
+          <div class="title-actions">
+            <button class="btn-ghost btn-sm">⋯</button>
+            <button class="btn-secondary btn-sm">📤 分享</button>
+            <button class="btn btn-sm">▶ 继续 AI</button>
+          </div>
+        </div>
+
+        <div class="meta-grid">
+          <!-- 1. 状态 -->
+          <div class="meta-cell">
+            <span class="lbl">状态</span>
+            <span class="val">
+              <span class="badge brand dot">实施中</span>
+              <span class="mono" style="font-size:var(--text-xs);color:var(--text-3)">IMPLEMENTING</span>
+            </span>
+          </div>
+          <!-- 2. 进度 -->
+          <div class="meta-cell">
+            <span class="lbl">进度</span>
+            <span class="val">
+              <span class="ring">
+                <svg width="32" height="32">
+                  <circle cx="16" cy="16" r="13" fill="none" stroke="var(--bg-subtle)" stroke-width="3"/>
+                  <circle cx="16" cy="16" r="13" fill="none" stroke="var(--brand)" stroke-width="3" stroke-dasharray="81.68" stroke-dashoffset="32.67" stroke-linecap="round"/>
+                </svg>
+                <span class="pct">60%</span>
+              </span>
+              <span class="mono" style="font-size:var(--text-xs);color:var(--text-3)">9/15 子任务</span>
+            </span>
+          </div>
+          <!-- 3. 阶段 -->
+          <div class="meta-cell">
+            <span class="lbl">阶段</span>
+            <span class="val">
+              <span class="badge brand">④ 编码</span>
+              <span class="mono" style="font-size:var(--text-xs);color:var(--text-3)">7/14 tasks</span>
+            </span>
+          </div>
+          <!-- 4. AC -->
+          <div class="meta-cell">
+            <span class="lbl">验收标准 AC</span>
+            <span class="val">
+              <span class="badge success">✓ 通过 3</span>
+              <span class="badge warning">⊘ 阻塞 1</span>
+              <span class="mono" style="font-size:var(--text-xs);color:var(--text-3)">共 4 条</span>
+            </span>
+          </div>
+          <!-- 5. 仓库 -->
+          <div class="meta-cell">
+            <span class="lbl">关联仓库</span>
+            <span class="val">
+              <span class="chip brand">📁 refund-svc</span>
+              <span class="chip">📁 order-svc</span>
+            </span>
+          </div>
+          <!-- 6. 负责人 -->
+          <div class="meta-cell">
+            <span class="lbl">负责人 / 协作</span>
+            <span class="val">
+              <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:18px;height:18px;border-radius:50%;background:#5e6ad2;color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;font-weight:600">LZ</span>雷主</span>
+              <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:18px;height:18px;border-radius:50%;background:#16a34a;color:#fff;font-size:10px;display:flex;align-items:center;justify-content:center;font-weight:600">AI</span>Claude</span>
+            </span>
+          </div>
+          <!-- 7. 创建时间 -->
+          <div class="meta-cell">
+            <span class="lbl">创建时间</span>
+            <span class="val">
+              <span class="mono" style="font-size:var(--text-sm);color:var(--text-2)">2026-07-04</span>
+              <span class="mono" style="font-size:var(--text-xs);color:var(--text-3)">8 天前</span>
+            </span>
+          </div>
+          <!-- 8. 最后更新 -->
+          <div class="meta-cell">
+            <span class="lbl">最后更新</span>
+            <span class="val">
+              <span class="mono" style="font-size:var(--text-sm);color:var(--text-2)">14:24:18</span>
+              <span class="mono" style="font-size:var(--text-xs);color:var(--text-3)">2 分钟前</span>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Active View Tabs -->
+      <div class="view-tabs">
+        <div class="view-tab">📝 描述</div>
+        <div class="view-tab">🔀 子任务 DAG <span class="ct">14</span></div>
+        <div class="view-tab">📦 产物 <span class="ct">4</span></div>
+        <div class="view-tab active">🤖 AI 行为 <span class="ct">12</span><span class="red-dot"></span></div>
+        <div class="view-tab">📁 仓库 <span class="ct">2</span></div>
+        <div class="view-tab">📜 历史 <span class="ct">23</span></div>
+        <span style="flex:1"></span>
+        <div style="font-size:var(--text-xs);color:var(--text-3);padding-right:var(--space-3)">⌘1~6 切视图</div>
+      </div>
+
+      <!-- Main: AI 行为时间线 -->
+      <main class="workarea">
+
+        <div class="timeline-section">
+          <div class="section-hd">
+            <div class="ttl">AI 行为时间线 <span class="ct">12 事件 · 按时间倒序</span></div>
+            <div class="right">
+              <div class="timeline-filters">
+                <span class="filter-chip active">全部 12</span>
+                <span class="filter-chip">🤖 AI 9</span>
+                <span class="filter-chip">👤 人 1</span>
+                <span class="filter-chip">📦 产物 1</span>
+                <span class="filter-chip">🔄 状态 1</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 今天 -->
+          <div class="tl-day">
+            <div class="tl-day-hd"><span class="date">今天 · 2026-07-12</span><span class="line"></span></div>
+
+            <div class="tl-list">
+              <!-- 当前选中: AI 暂停 -->
+              <div class="tl-item pause active">
+                <span class="tl-time">14:24</span>
+                <span class="tl-icon ai">⏸</span>
+                <div class="tl-body">
+                  <div class="tl-row1">
+                    <span class="tl-tag ai">AI · PAUSE</span>
+                    <span class="tl-phase">IMPL</span>
+                  </div>
+                  <div class="tl-desc">AI 暂停 · 等 Q3 错误码决策 · 已等待 <code>14m</code></div>
+                </div>
+                <span class="tl-right"><span class="act">→ 回答</span></span>
+              </div>
+
+              <!-- 展开详情 -->
+              <div class="tl-expansion">
+                <div class="head">
+                  <span>📋 AI 上下文 · 14:23 ~ 14:24</span>
+                  <span>↶ 撤回此暂停</span>
+                </div>
+                <pre><span class="c">// RefundController.java :: handleError()</span>
+<span class="k">public</span> Response&lt;?&gt; handleError(<span class="k">RefundError</span> err) {
+  <span class="c">// Q3 决策点: 错误码规范</span>
+  <span class="c">// 候选 A: HTTP 400 + 自定义 errorCode</span>
+  <span class="c">// 候选 B: 抛 BusinessException + GlobalHandler</span>
+  <span class="k">return</span> Response.fail(<span class="s">"REFUND_001"</span>, err.getMessage());
+  <span class="c">// ↑ 等待用户确认错误码策略</span>
+}</pre>
+              </div>
+
+              <div class="tl-item">
+                <span class="tl-time">14:23</span>
+                <span class="tl-icon tool">✏️</span>
+                <div class="tl-body">
+                  <div class="tl-row1">
+                    <span class="tl-tag tool">TOOL · EDIT</span>
+                    <span class="tl-phase">IMPL</span>
+                  </div>
+                  <div class="tl-desc"><code>RefundController.java</code><span class="arrow">→</span><span class="plus">+15</span> <span class="minus">-3</span></div>
+                </div>
+                <span class="tl-right"><span class="act">📄 看 Diff</span></span>
+              </div>
+
+              <div class="tl-item">
+                <span class="tl-time">14:23</span>
+                <span class="tl-icon ai">💭</span>
+                <div class="tl-body">
+                  <div class="tl-row1">
+                    <span class="tl-tag ai">AI · THINKING</span>
+                    <span class="tl-phase">IMPL</span>
+                  </div>
+                  <div class="tl-desc">Task #7 边界条件已覆盖第 2 次迭代 · 测试通过 <code>14/14</code></div>
+                </div>
+                <span class="tl-right"></span>
+              </div>
+
+              <div class="tl-item">
+                <span class="tl-time">14:20</span>
+                <span class="tl-icon artifact">📦</span>
+                <div class="tl-body">
+                  <div class="tl-row1">
+                    <span class="tl-tag artifact">ARTIFACT · ACCEPTED</span>
+                    <span class="tl-phase">IMPL</span>
+                  </div>
+                  <div class="tl-desc">采纳产物 <code>refund-api.yaml v3</code> · 由 AI 自动生成 · 用户确认</div>
+                </div>
+                <span class="tl-right"><span class="act">查看</span></span>
+              </div>
+
+              <div class="tl-item">
+                <span class="tl-time">14:18</span>
+                <span class="tl-icon status">🔄</span>
+                <div class="tl-body">
+                  <div class="tl-row1">
+                    <span class="tl-tag status">STATUS · TRANSITION</span>
+                    <span class="tl-phase">DESIGN→IMPL</span>
+                  </div>
+                  <div class="tl-desc">状态变更 <code>DESIGNING</code><span class="arrow">→</span><code>IMPLEMENTING</code> · 14 子任务已拆解</div>
+                </div>
+                <span class="tl-right"></span>
+              </div>
+
+              <div class="tl-item">
+                <span class="tl-time">14:00</span>
+                <span class="tl-icon ai">💡</span>
+                <div class="tl-body">
+                  <div class="tl-row1">
+                    <span class="tl-tag ai">AI · SUGGEST</span>
+                    <span class="tl-phase">DESIGN</span>
+                  </div>
+                  <div class="tl-desc">生成候选方案 A/B/C · 用户采纳 <code>方案 A (Strategy Pattern)</code></div>
+                </div>
+                <span class="tl-right"><span class="act">对比</span></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 昨天 -->
+          <div class="tl-day">
+            <div class="tl-day-hd"><span class="date">昨天 · 2026-07-11</span><span class="line"></span></div>
+
+            <div class="tl-list">
+              <div class="tl-item">
+                <span class="tl-time">17:30</span>
+                <span class="tl-icon human">👤</span>
+                <div class="tl-body">
+                  <div class="tl-row1">
+                    <span class="tl-tag human">HUMAN · ANSWER</span>
+                    <span class="tl-phase">DESIGN</span>
+                  </div>
+                  <div class="tl-desc">雷主回答 <code>Q2</code> 幂等问题 · 选型 = DB 唯一约束</div>
+                </div>
+                <span class="tl-right"></span>
+              </div>
+
+              <div class="tl-item">
+                <span class="tl-time">16:42</span>
+                <span class="tl-icon ai">❓</span>
+                <div class="tl-body">
+                  <div class="tl-row1">
+                    <span class="tl-tag ai">AI · ASK</span>
+                    <span class="tl-phase">DESIGN</span>
+                  </div>
+                  <div class="tl-desc">提问 Q2 幂等性 · 选项: 唯一约束 / Redis 锁 / 状态机</div>
+                </div>
+                <span class="tl-right"></span>
+              </div>
+
+              <div class="tl-item">
+                <span class="tl-time">15:00</span>
+                <span class="tl-icon status">📥</span>
+                <div class="tl-body">
+                  <div class="tl-row1">
+                    <span class="tl-tag status">STATUS · START</span>
+                    <span class="tl-phase">DESIGN</span>
+                  </div>
+                  <div class="tl-desc">状态变更 <code>DRAFT</code><span class="arrow">→</span><code>DESIGNING</code> · AI 启动设计阶段</div>
+                </div>
+                <span class="tl-right"></span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+      </main>
+
+      <!-- AI 思考条 (永远在底部) -->
+      <div class="ai-bar">
+        <div class="pulse-wrap idle">
+          <span class="dot-pulse" style="background:var(--warning)"></span>
+        </div>
+        <div class="ai-text">
+          <div class="top">
+            <span class="status-tag idle">⏸ PAUSED</span>
+            <span>AI 暂停 · 等 Q3 错误码决策</span>
+          </div>
+          <div class="sub">last action: <code style="font-family:'JetBrains Mono',monospace">Edit RefundController.java +15/-3</code> · 等待 <span class="ask">14m 23s</span> · 影响: Task #7 后续 3 子任务</div>
+        </div>
+        <div class="actions">
+          <button class="btn btn-sm">▶ 继续</button>
+          <button class="btn-warn btn-sm" style="height:28px;padding:0 10px;font-size:var(--text-sm)">⌘K 回答 Q3</button>
+          <button class="btn-secondary btn-sm">↶ 回滚</button>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- RIGHT: Inline Rail (弱化快捷入口) -->
+    <aside class="rail">
+      <div class="rail-head"><span>快捷入口</span><span style="font-family:'JetBrains Mono',monospace">⌘K</span></div>
+      <div class="quick-actions">
+        <a class="qa" href="13-command-palette.html">
+          <span class="ic">⌘</span>
+          <span class="label">命令面板</span>
+          <span class="kbd">⌘K</span>
+        </a>
+        <a class="qa">
+          <span class="ic">↶</span>
+          <span class="label">回滚</span>
+          <span class="kbd">⌘Z</span>
+        </a>
+        <a class="qa">
+          <span class="ic">📦</span>
+          <span class="label">产物列表</span>
+          <span class="kbd">⌘P</span>
+        </a>
+        <a class="qa">
+          <span class="ic">📁</span>
+          <span class="label">打开仓库</span>
+          <span class="kbd">⌘⇧R</span>
+        </a>
+      </div>
+
+      <div class="rail-head" style="margin-top:var(--space-2)"><span>待回答</span><span style="font-family:'JetBrains Mono',monospace;color:var(--warning)">2</span></div>
+      <div class="quick-actions">
+        <a class="qa qa-warn" href="13-command-palette.html">
+          <span class="ic">⚠</span>
+          <span class="label">Q3 错误码</span>
+          <span class="ct">14m</span>
+        </a>
+        <a class="qa qa-warn" href="13-command-palette.html">
+          <span class="ic">⚠</span>
+          <span class="label">Q5 幂等</span>
+          <span class="ct">2d</span>
+        </a>
+      </div>
+
+      <div class="rail-note">
+        <b>💡 弱化右栏：</b>方案 ② 不在右栏显示阶段/进度详情，仅保留「操作快捷入口」。详情看主区元数据卡。
+      </div>
+    </aside>
+
+  </div>
+</div>
+
+<!-- ============== 设计说明 ============== -->
+<div class="note">
+  <b>方案 ② · 对象中心 (Object Hub) — 设计说明</b><br>
+  · <b>核心哲学：</b>详情页 = 一个需求对象 (req-001) 的浏览器。所有内容是对象的"子节点"，可下钻。<br>
+  · <b>阶段被弱化：</b>阶段信息从主区主轴降级为「AI 行为流」的时间戳之一。<br>
+  · <b>6 个视图即 6 类子节点：</b>描述 / 子任务 DAG / 产物 / AI 行为 / 仓库 / 历史（资源树 6 段同名分组）<br>
+
+  <div class="warn">┌─────────────────────────────────────────────────────────────┐
+│ 退款功能优化 [●实施中] [60%]            [↶ 回滚] [⌘K 命令]  │ StatusBar
+├──────┬───────────────────────────────────────────┬──────────┤
+│ 资源 │  需求对象浏览器                            │ Inline   │
+│ 树   │  ──────────────────────────────────────  │ 提示栏   │
+│ (对  │  ┌── 元数据 ──────────────────────────┐  │ [弱化版] │
+│ 象   │  │ 状态: 实施中  进度: 60%  阶段: ④   │  │          │
+│ 子   │  │ 仓库: refund, order                 │  │ ⌘K      │
+│ 节   │  │ AC: 4 条 · 通过 3 条 · 阻塞 1 条    │  │ ↶ 回滚  │
+│ 点)  │  └─────────────────────────────────────┘  │ ⚠ 2 待答 │
+│      │                                            │          │
+│      │  活跃视图:                                  │          │
+│      │  [描述] [子任务 DAG] [产物 4]               │          │
+│      │  [AI 行为 12]● [仓库 2] [历史 23]           │          │
+│      │  ──────────────────────────────────────  │          │
+│      │                                            │          │
+│      │  AI 行为时间线 (默认显示, 按时间倒序)       │          │
+│      │  14:24 · AI · 暂停 - 等 Q3 错误码决策     │          │
+│      │  14:23 · AI · Edit RefundController +15-3 │          │
+│      │  14:23 · AI · Bash test 14 tests passed   │          │
+│      │  14:20 · 产物 · refund-api.yaml v3 已采纳 │          │
+│      │  14:18 · 状态 · DESIGNING→IMPLEMENTING    │          │
+│      │  14:00 · AI · 生成候选方案 A/B/C · 采纳 A │          │
+│      │                                            │          │
+│      │  ──────────────────────────────────────  │          │
+│      │                                            │          │
+│      │  AI 思考条 (始终在底部, 不消失):            │          │
+│      │  🟣 AI 暂停 · 等 Q3 错误码决策             │          │
+│      │  [▶ 继续] [⏸ 暂停] [⌘K 提问] [↶ 回滚]      │          │
+└──────┴───────────────────────────────────────────┴──────────┘</div>
+
+  <ul>
+    <li><b>优势：</b>阶段无关、对象一致性最强；任何时候看得到同一对象的全貌；可下钻、可对比；不强制推动流程。</li>
+    <li><b>代价：</b>DRAFT 与 IMPLEMENTING 长得一样，需主动选视图；AI 行为埋得深一点（默认显示在第一个非元数据 tab）。</li>
+    <li><b>与现有决策冲突：</b>无 · 完全兼容 CONTEXT.md 决策 15（不写状态机、不强制推动流程）。</li>
+    <li><b>右栏弱化：</b>从 03a/03c 的「进度+阶段+待回答」三段式，弱化为「⌘K + ↶ + ⚠」三个快捷入口。</li>
+    <li><b>快捷键：</b><span class="kbd">⌘1~6</span> 切 6 个视图 · <span class="kbd">⌘[ / ⌘]</span> 上下节点 · <span class="kbd">⌘K</span> 命令 · <span class="kbd">⌘Z</span> 回滚</li>
+  </ul>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>11b · 阶段自适应 · CLARIFYING 形态 · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{
+  --brand:#5e6ad2;--brand-50:#eef0fb;--brand-100:#e0e3f7;--brand-500:#5e6ad2;--brand-600:#525bc7;--brand-700:#4147a3;
+  --success:#16a34a;--success-50:#f0fdf4;--warning:#f59e0b;--warning-50:#fffbeb;--error:#ef4444;--error-50:#fef2f2;--info:#64748b;
+  --bg:#fbfbfd;--bg-elevated:#ffffff;--bg-subtle:#f5f5f7;--border:#ebebef;--border-strong:#d8d8de;
+  --text-1:#0f172a;--text-2:#475569;--text-3:#94a3b8;
+  --space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:20px;--space-6:24px;--space-8:32px;
+  --text-xs:11px;--text-sm:12px;--text-base:13px;--text-md:14px;--text-lg:16px;--text-xl:18px;--text-2xl:20px;--text-3xl:24px;--text-4xl:32px;
+  --radius-sm:4px;--radius-md:6px;--radius-lg:8px;--radius-xl:12px;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.04);--shadow-md:0 2px 4px rgba(0,0,0,.06);--shadow-lg:0 4px 12px rgba(0,0,0,.08);
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg);color:var(--text-1);font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased}
+.topnav{position:sticky;top:0;z-index:100;background:#0f172a;color:#fff;padding:var(--space-2) var(--space-4);font-size:var(--text-sm);display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap}
+.topnav .badge{background:var(--brand);color:#fff;padding:3px 10px;border-radius:var(--radius-md);font-size:var(--text-xs);font-weight:600;white-space:nowrap}
+.topnav .form-name{color:#e2e8f0;font-weight:600;white-space:nowrap}
+.topnav a{color:#94a3b8;text-decoration:none;padding:4px 9px;border-radius:var(--radius-md);white-space:nowrap;font-size:var(--text-xs)}
+.topnav a:hover{color:#fff;background:rgba(255,255,255,.06)}
+.topnav a.cur{color:#fff;background:var(--brand)}
+.topnav .spacer{flex:1}
+.topnav .grp{display:flex;gap:2px;align-items:center;flex-wrap:wrap}
+.topnav .div{width:1px;height:15px;background:rgba(255,255,255,.14);margin:0 4px}
+.statusbar{position:sticky;top:36px;z-index:50;background:var(--bg-elevated);border-bottom:1px solid var(--border)}
+.statusbar .tabs{display:flex;align-items:center;height:40px;padding:0 var(--space-4);gap:2px}
+.statusbar .tab{display:flex;align-items:center;gap:6px;height:28px;padding:0 var(--space-3);font-size:var(--text-sm);color:var(--text-2);border-radius:var(--radius-md);cursor:pointer;white-space:nowrap}
+.statusbar .tab:hover{background:var(--bg-subtle)}
+.statusbar .tab.active{background:var(--brand-50);color:var(--brand-600);font-weight:500}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--brand);flex-shrink:0;display:inline-block}
+.statusbar .info{display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 var(--space-4);border-top:1px solid var(--border);background:var(--bg-subtle);font-size:var(--text-sm);color:var(--text-2)}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(94,106,210,.6)}70%{box-shadow:0 0 0 6px rgba(94,106,210,0)}100%{box-shadow:0 0 0 0 rgba(94,106,210,0)}}
+.dot-pulse{width:8px;height:8px;border-radius:50%;background:var(--brand);animation:pulse 1.4s infinite;display:inline-block}
+.shell{display:grid;grid-template-columns:56px 1fr;min-height:calc(100vh - 108px)}
+.sidebar{background:var(--bg-elevated);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:var(--space-3) 0;gap:2px}
+.sidebar .logo{width:32px;height:32px;border-radius:var(--radius-md);background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;margin-bottom:var(--space-3)}
+.sidebar a{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius-md);font-size:18px;text-decoration:none;color:var(--text-2)}
+.sidebar a:hover{background:var(--bg-subtle)}
+.sidebar a.active{background:var(--brand-50)}
+.detail{display:grid;grid-template-columns:240px 1fr 120px;background:var(--bg);min-height:calc(100vh - 108px)}
+.tree{background:var(--bg-elevated);border-right:1px solid var(--border);padding:var(--space-3) 0;overflow:auto}
+.tree.weak{opacity:.72}
+.tree-section{padding:0 var(--space-3);margin-bottom:var(--space-2)}
+.tree-section-label{padding:var(--space-2);font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:600;display:flex;align-items:center;justify-content:space-between}
+.tree-section-label .count{background:var(--bg-subtle);color:var(--text-2);padding:1px 6px;border-radius:var(--radius-sm);font-size:var(--text-xs)}
+.tree-section.current .tree-section-label{color:var(--brand-600)}
+.tree-section.current .tree-section-label .count{background:var(--brand-50);color:var(--brand-600)}
+.tree-node{display:flex;align-items:center;gap:var(--space-2);height:26px;padding:0 var(--space-2);border-radius:var(--radius-md);font-size:var(--text-sm);color:var(--text-2);cursor:pointer}
+.tree-node:hover{background:var(--bg-subtle)}
+.tree-node.active{background:var(--brand-50);color:var(--brand-700);font-weight:500}
+.tree-node .ic{font-size:13px;width:16px;text-align:center}
+.tree-node .sd{width:6px;height:6px;border-radius:50%;margin-left:auto}
+.center{display:flex;flex-direction:column;background:var(--bg);overflow:hidden}
+.center-toolbar{display:flex;align-items:center;justify-content:space-between;height:44px;padding:0 var(--space-6);border-bottom:1px solid var(--border);background:var(--bg-elevated)}
+.center-toolbar .crumb{font-size:var(--text-sm);color:var(--text-3);display:flex;align-items:center;gap:8px}
+.center-toolbar .crumb .cur{color:var(--text-1);font-weight:600}
+.center-toolbar .right{display:flex;gap:var(--space-2);align-items:center}
+.btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 var(--space-3);border-radius:var(--radius-md);font-size:var(--text-sm);font-weight:500;cursor:pointer;border:none;background:var(--brand);color:#fff;font-family:inherit}
+.btn:hover{background:var(--brand-600)}
+.btn-lg{height:38px;padding:0 var(--space-5);font-size:var(--text-md)}
+.btn-secondary{background:var(--bg-elevated);color:var(--text-1);border:1px solid var(--border-strong)}
+.btn-secondary:hover{background:var(--bg-subtle)}
+.btn-ghost{background:transparent;color:var(--text-2)}
+.btn-ghost:hover{color:var(--text-1);background:var(--bg-subtle)}
+.workarea{flex:1;overflow:auto;padding:var(--space-6)}
+.rail{background:var(--bg-subtle);border-left:1px solid var(--border);padding:var(--space-3);overflow:auto;display:flex;flex-direction:column;gap:var(--space-4)}
+.rail-section{font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:600;margin-bottom:6px}
+.rail-card{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3);font-size:var(--text-xs);border-left:3px solid var(--success);margin-bottom:var(--space-2)}
+.rail-card.warn{border-left-color:var(--warning)}
+.rail-card.err{border-left-color:var(--error)}
+.rail-card .ttl{font-weight:600;font-size:var(--text-sm);margin-bottom:4px;color:var(--text-1)}
+.rail-card .body{color:var(--text-2);line-height:1.5}
+.rail-card code{font-family:var(--mono);color:var(--brand-600)}
+.note{margin:var(--space-6);padding:var(--space-4);background:#f0f9ff;border:1px solid #bae6fd;border-radius:var(--radius-lg);font-size:var(--text-sm);color:#075985}
+.note b{color:#0c4a6e}
+.note .wire{margin-top:var(--space-3);background:#0c2233;color:#7dd3fc;border-radius:var(--radius-md);padding:var(--space-3);overflow:auto;font-family:var(--mono);font-size:11px;line-height:1.35}
+.kbd{font-family:var(--mono);background:var(--bg-subtle);padding:1px 6px;border-radius:var(--radius-sm);font-size:11px;border:1px solid var(--border);color:var(--text-2)}
+/* ===== CLARIFYING 专属：Q&A 形态 ===== */
+.qa{max-width:820px;margin:0 auto}
+.qa-progress{display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-4);font-size:var(--text-sm);color:var(--text-2)}
+.qa-progress .bar{flex:1;height:6px;background:var(--bg-subtle);border-radius:999px;overflow:hidden}
+.qa-progress .bar>i{display:block;height:100%;width:60%;background:var(--brand);border-radius:999px}
+.focus{background:var(--bg-elevated);border:1px solid var(--brand);border-radius:var(--radius-xl);box-shadow:0 0 0 4px var(--brand-50);padding:var(--space-6);margin-bottom:var(--space-6)}
+.focus .kicker{font-size:var(--text-xs);color:var(--brand-600);font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:var(--space-3);display:flex;align-items:center;gap:6px}
+.focus .q{font-size:var(--text-xl);font-weight:600;line-height:1.5;margin-bottom:var(--space-5);display:flex;gap:10px}
+.focus .q .ai{color:var(--brand)}
+.ans{display:flex;flex-wrap:wrap;gap:var(--space-3);margin-bottom:var(--space-4)}
+.ans .opt{display:inline-flex;align-items:center;gap:6px;padding:10px 18px;border:1.5px solid var(--border-strong);border-radius:var(--radius-lg);font-size:var(--text-md);font-weight:500;cursor:pointer;background:var(--bg)}
+.ans .opt.yes{border-color:var(--success);color:var(--success)}
+.ans .opt.yes:hover{background:var(--success-50)}
+.ans .opt.no{border-color:var(--error);color:var(--error)}
+.ans .opt.no:hover{background:var(--error-50)}
+.ans .opt.custom{border-style:dashed;color:var(--text-2)}
+.ans .opt.custom:hover{border-color:var(--brand);color:var(--brand-600)}
+.ctx{font-size:var(--text-xs);color:var(--text-3);border-top:1px dashed var(--border);padding-top:var(--space-3);font-family:var(--mono)}
+.ctx a{color:var(--brand-600);text-decoration:none}
+.hist-hd{font-size:var(--text-md);font-weight:600;margin-bottom:var(--space-3);display:flex;align-items:center;gap:8px}
+.hist-hd .count{background:var(--bg-subtle);color:var(--text-2);padding:1px 8px;border-radius:999px;font-size:var(--text-xs)}
+.hist{display:flex;flex-direction:column;gap:var(--space-2)}
+.h-item{display:flex;align-items:center;gap:var(--space-3);padding:var(--space-3);background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-lg);cursor:pointer;font-size:var(--text-sm)}
+.h-item:hover{border-color:var(--border-strong);box-shadow:var(--shadow-sm)}
+.h-item .st{width:20px;text-align:center;font-size:14px}
+.h-item.done .st{color:var(--success)}
+.h-item.doing{border-color:var(--brand);background:var(--brand-50)}
+.h-item.doing .st{color:var(--brand)}
+.h-item.block{opacity:.6}
+.h-item .q{flex:1;color:var(--text-1)}
+.h-item .a{color:var(--text-3);font-family:var(--mono);font-size:var(--text-xs)}
+.h-item .arrow{color:var(--text-3)}
+</style>
+</head>
+<body>
+
+<div class="topnav">
+  <span class="badge">Exploration B · 方案 ① 阶段自适应</span>
+  <span class="form-name">· CLARIFYING 形态（Q&amp;A）</span>
+  <span class="spacer"></span>
+  <div class="grp">
+    <a href="11a-stage-adaptive-draft.html">DRAFT</a>
+    <a href="11b-stage-adaptive-clarifying.html" class="cur">CLARIFYING</a>
+    <a href="11c-stage-adaptive-designing.html">DESIGNING</a>
+    <a href="11d-stage-adaptive-implementing.html">IMPLEMENTING</a>
+    <span class="div"></span>
+    <a href="11-overview.html">① 总览</a>
+    <a href="12-object-hub.html">② 对象中心</a>
+    <a href="13-event-stream.html">③ 事件流</a>
+    <a href="00-overview.html">全部方案</a>
+  </div>
+</div>
+
+<header class="statusbar">
+  <div class="tabs">
+    <div class="tab active"><span class="dot" style="background:var(--warning)"></span>退款功能 · 待澄清</div>
+    <div class="tab"><span class="dot" style="background:var(--warning)"></span>会员等级 · 待澄清</div>
+    <div class="tab"><span class="dot" style="background:var(--success)"></span>订单导出 · 已完成</div>
+  </div>
+  <div class="info">
+    <div style="display:flex;align-items:center;gap:var(--space-3)">
+      <strong style="color:var(--text-1);font-weight:600">退款功能优化</strong>
+      <span style="color:var(--text-3)">·</span>
+      <span>待澄清 · Q4/5</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:var(--space-4)">
+      <span style="display:flex;align-items:center;gap:6px"><span class="dot-pulse"></span>AI 等待你回答</span>
+      <span style="color:var(--warning)">⚠ 1 待回答</span>
+      <span style="color:var(--text-3);font-size:var(--text-xs)">⌘K 命令</span>
+    </div>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="sidebar">
+    <div class="logo">D</div>
+    <a href="#" title="概览">🏠</a>
+    <a href="#" class="active" title="需求">📌</a>
+    <a href="#" title="仓库">📦</a>
+    <a href="#" title="知识">📚</a>
+    <a href="#" title="Skill">🤖</a>
+    <span style="flex:1"></span>
+    <a href="#" title="设置">⚙️</a>
+  </nav>
+
+  <div class="detail">
+    <aside class="tree weak">
+      <div class="tree-section">
+        <div class="tree-section-label"><span>概览</span></div>
+        <div class="tree-node"><span class="ic">📝</span>需求文档<span class="sd" style="background:var(--success)"></span></div>
+      </div>
+      <div class="tree-section current">
+        <div class="tree-section-label"><span>分析</span><span class="count">5</span></div>
+        <div class="tree-node"><span class="ic">🔍</span>子问题 · 5<span class="sd" style="background:var(--warning)"></span></div>
+        <div class="tree-node active"><span class="ic">💬</span>澄清 Q&amp;A<span class="sd" style="background:var(--brand)"></span></div>
+      </div>
+      <div class="tree-section">
+        <div class="tree-section-label"><span>设计</span><span class="count">0</span></div>
+      </div>
+      <div class="tree-section">
+        <div class="tree-section-label"><span>计划</span><span class="count">0</span></div>
+      </div>
+      <div class="tree-section">
+        <div class="tree-section-label"><span>产物</span><span class="count">0</span></div>
+      </div>
+      <div class="tree-section">
+        <div class="tree-section-label"><span>对话</span><span class="count">1</span></div>
+        <div class="tree-node"><span class="ic">💬</span>001-analyze<span class="sd" style="background:var(--brand)"></span></div>
+      </div>
+      <div class="tree-section">
+        <div class="tree-section-label"><span>仓库</span><span class="count">2</span></div>
+        <div class="tree-node"><span class="ic">📦</span>refund-service</div>
+        <div class="tree-node"><span class="ic">📦</span>order-service</div>
+      </div>
+    </aside>
+
+    <!-- CENTER: Q&A 形态 -->
+    <section class="center">
+      <div class="center-toolbar">
+        <div class="crumb"><span>退款功能优化</span><span>/</span><span class="cur">澄清对话</span></div>
+        <div class="right"><span style="font-size:var(--text-xs);color:var(--text-3)">形态：💬 Q&amp;A</span></div>
+      </div>
+      <main class="workarea">
+        <div class="qa">
+          <div class="qa-progress">
+            <span>澄清进度</span>
+            <div class="bar"><i></i></div>
+            <span style="font-family:var(--mono)">Q4 / 5</span>
+          </div>
+
+          <!-- 当前提问大焦点 -->
+          <div class="focus">
+            <div class="kicker"><span class="dot-pulse"></span>当前提问 · Q4</div>
+            <div class="q"><span class="ai">💬</span><span>退款失败时，是否要回滚已扣减的优惠券额度？</span></div>
+            <div class="ans">
+              <span class="opt yes">✓ 是，必须回滚</span>
+              <span class="opt no">✗ 否，保留扣减</span>
+              <span class="opt custom">💬 自定义回答…</span>
+            </div>
+            <div class="ctx">📎 上下文：<a href="#">design/02-api.md:15-23</a> · <a href="#">refund_flow 表结构</a></div>
+          </div>
+
+          <!-- 历史澄清列表（可点回到那一步） -->
+          <div class="hist-hd">历史澄清 <span class="count">已答 3 · 待答 2</span></div>
+          <div class="hist">
+            <div class="h-item done"><span class="st">✓</span><span class="q">Q1 · 退款单 ID 生成规则？</span><span class="a">→ 雪花算法</span><span class="arrow">›</span></div>
+            <div class="h-item done"><span class="st">✓</span><span class="q">Q2 · 退款审核流程？</span><span class="a">→ 自动审核 5s</span><span class="arrow">›</span></div>
+            <div class="h-item done"><span class="st">✓</span><span class="q">Q3 · 退款金额上限？</span><span class="a">→ 单笔 5000 元</span><span class="arrow">›</span></div>
+            <div class="h-item doing"><span class="st">▶</span><span class="q">Q4 · 退款失败回滚优惠券？</span><span class="a">← 正在回答</span><span class="arrow">›</span></div>
+            <div class="h-item block"><span class="st">⏸</span><span class="q">Q5 · 退款幂等策略？</span><span class="a">阻塞于 Q4</span><span class="arrow">›</span></div>
+          </div>
+        </div>
+      </main>
+    </section>
+
+    <aside class="rail">
+      <div>
+        <div class="rail-section">AI 提示</div>
+        <div class="rail-card">
+          <div class="ttl">💡 一次一问</div>
+          <div class="body">回答后 AI 立即推进到 <code>Q5</code>，全部答完自动进入设计阶段。</div>
+        </div>
+      </div>
+      <div>
+        <div class="rail-section">影响</div>
+        <div class="rail-card warn">
+          <div class="ttl">⚠ Q4 影响 Q5</div>
+          <div class="body">是否回滚决定幂等键设计，Q5 被阻塞。</div>
+        </div>
+      </div>
+      <div>
+        <div class="rail-section">阻断</div>
+        <div class="rail-card err">
+          <div class="ttl">⛔ 无法进入设计</div>
+          <div class="body">还有 2 个必答问题未完成。</div>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<div class="note">
+  <b>CLARIFYING 形态（Q&amp;A）——</b> 主区聚焦<strong>当前 AI 提问</strong>：一个大焦点卡（问题 + 候选答案按钮 + 上下文引用），下方是<strong>历史澄清列表</strong>（可点击回到任一步重答）。与 DRAFT 的表单完全不同 —— 这里是<b>一问一答的对话推进器</b>。<br>
+  <b>切换条件：</b> 全部问题答完 → status 变为 <b>DESIGNING</b>，主区切到 Compare 形态（见 11c）。回退某题会重新阻塞后续问题。
+  <pre class="wire">┌────────────────────────────────────────────────────────┐
+│ 当前提问 (Q4/5)                                        │
+│ ┌──────────────────────────────────────────────────┐ │
+│ │ 💬 AI 提问:                                      │ │
+│ │ 退款失败时是否要回滚已扣减的优惠券额度？           │ │
+│ │  [✓ 是, 必须回滚]  [✗ 否, 保留扣减]  [💬 自定义]  │ │
+│ │ 📎 上下文: design/02-api.md:15-23                  │ │
+│ └──────────────────────────────────────────────────┘ │
+│ 历史澄清 (4)                                          │
+│  ✓ Q1 退款单 ID 生成规则   → 雪花算法                │
+│  ✓ Q2 退款审核流程         → 自动审核 5s             │
+│  ✓ Q3 退款金额上限         → 单笔 5000 元             │
+│  ▶ Q4 退款失败回滚?       ← 正在回答                │
+│  ⏸ Q5 退款幂等策略        (阻塞 Q4)                  │
+└────────────────────────────────────────────────────────┘</pre>
+</div>
+
+</body>
+</html>

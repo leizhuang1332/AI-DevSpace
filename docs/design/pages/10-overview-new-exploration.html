@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>10 · 需求详情页重新设计 · 3 方案总览 · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{
+  --brand:#5e6ad2; --brand-50:#eef0fb; --brand-500:#5e6ad2; --brand-600:#525bc7; --brand-700:#4147a3;
+  --success:#16a34a; --warning:#f59e0b; --error:#ef4444; --info:#64748b;
+  --bg:#fbfbfd; --bg-elevated:#ffffff; --bg-subtle:#f5f5f7; --border:#ebebef; --border-strong:#d8d8de;
+  --text-1:#0f172a; --text-2:#475569; --text-3:#94a3b8;
+  --space-2:8px; --space-3:12px; --space-4:16px; --space-6:24px; --space-8:32px;
+  --text-xs:11px; --text-sm:12px; --text-base:13px; --text-md:14px; --text-lg:16px; --text-xl:18px; --text-2xl:20px;
+  --radius-md:6px; --radius-lg:8px; --radius-xl:12px;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.04); --shadow-md:0 2px 4px rgba(0,0,0,.06); --shadow-lg:0 4px 12px rgba(0,0,0,.08);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg);color:var(--text-1);font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased;padding:var(--space-8);max-width:1280px;margin:0 auto}
+
+/* Top dark nav */
+.topnav{position:fixed;top:0;left:0;right:0;z-index:100;background:#0f172a;color:#fff;padding:var(--space-2) var(--space-6);font-size:var(--text-sm);display:flex;align-items:center;gap:var(--space-4);box-shadow:0 2px 8px rgba(0,0,0,.1)}
+.topnav .pill{background:var(--brand);color:#fff;padding:2px 10px;border-radius:var(--radius-md);font-size:var(--text-xs);font-weight:500}
+.topnav a{color:#94a3b8;text-decoration:none;padding:4px 10px;border-radius:var(--radius-md)}
+.topnav a:hover{color:#fff;background:rgba(255,255,255,.06)}
+.topnav a.cur{color:#fff;background:var(--brand)}
+.topnav .spacer{flex:1}
+.topnav .meta{color:#64748b;font-size:var(--text-xs);font-family:'JetBrains Mono',monospace}
+
+h1{font-size:var(--text-2xl);font-weight:600;letter-spacing:-0.02em;margin-bottom:var(--space-2);margin-top:var(--space-8)}
+.sub{color:var(--text-3);font-size:var(--text-sm);margin-bottom:var(--space-8);line-height:1.6}
+
+.alert{background:#fef3c7;border:1px solid #fcd34d;border-radius:var(--radius-lg);padding:var(--space-4);margin-bottom:var(--space-8);font-size:var(--text-sm);color:#92400e;line-height:1.7}
+.alert b{color:#78350f}
+.alert code{font-family:'JetBrains Mono',monospace;background:rgba(255,255,255,.6);padding:1px 6px;border-radius:4px;font-size:12px}
+
+/* 3 列方案对比 */
+.section-title{font-size:var(--text-lg);font-weight:600;margin-bottom:var(--space-4);display:flex;align-items:center;gap:var(--space-2)}
+.section-title .count{font-family:'JetBrains Mono',monospace;font-size:var(--text-sm);color:var(--text-3);font-weight:400}
+
+.compare-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-6);margin-bottom:var(--space-8)}
+.scheme-card{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-xl);overflow:hidden;transition:all .2s;display:flex;flex-direction:column}
+.scheme-card:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg);border-color:var(--brand)}
+.scheme-card .thumb{aspect-ratio:16/10;background:var(--bg-subtle);border-bottom:1px solid var(--border);position:relative;overflow:hidden}
+.scheme-card .body{padding:var(--space-6);flex:1;display:flex;flex-direction:column}
+.scheme-card h3{font-size:var(--text-lg);font-weight:600;margin-bottom:var(--space-2);display:flex;align-items:center;gap:var(--space-2)}
+.tag{display:inline-block;padding:2px 8px;background:var(--brand-50);color:var(--brand-600);border-radius:var(--radius-md);font-size:var(--text-xs);font-weight:500}
+.tag.rec{background:#d1fae5;color:#065f46}
+.tag.warn{background:#fef3c7;color:#92400e}
+.tag.gray{background:var(--bg-subtle);color:var(--text-2)}
+.scheme-card p{color:var(--text-2);font-size:var(--text-sm);line-height:1.6;margin-bottom:var(--space-3)}
+.props{display:grid;grid-template-columns:1fr auto;gap:6px var(--space-3);font-size:var(--text-sm);color:var(--text-2);margin-bottom:var(--space-4)}
+.props b{color:var(--text-1);font-weight:500}
+.links{display:flex;flex-wrap:wrap;gap:6px;margin-top:auto}
+.links a{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);padding:4px 10px;background:var(--bg-subtle);color:var(--text-2);text-decoration:none;border-radius:var(--radius-md);border:1px solid var(--border)}
+.links a:hover{background:var(--brand-50);color:var(--brand-600);border-color:var(--brand)}
+
+/* 阶段对照表 */
+.stage-table{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-xl);padding:var(--space-6);margin-bottom:var(--space-8)}
+.stage-table h2{font-size:var(--text-lg);font-weight:600;margin-bottom:var(--space-4)}
+table{width:100%;border-collapse:collapse;font-size:var(--text-sm)}
+th,td{padding:var(--space-3);text-align:left;border-bottom:1px solid var(--border);vertical-align:top}
+th{color:var(--text-3);font-weight:500;font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.04em;background:var(--bg-subtle)}
+tr:last-child td{border-bottom:none}
+.scenario{font-weight:500;color:var(--text-1)}
+.adapt{color:var(--success);font-weight:500}
+.hub{color:var(--text-3)}
+.stream{color:var(--text-3)}
+
+footer{text-align:center;color:var(--text-3);font-size:var(--text-sm);padding:var(--space-8) 0;border-top:1px solid var(--border);margin-top:var(--space-8)}
+</style>
+</head>
+<body>
+
+<div class="topnav">
+  <span class="pill">Exploration B · 需求详情页重新设计 · 3 方案</span>
+  <a href="10-overview-new-exploration.html" class="cur">总览</a>
+  <a href="11a-stage-adaptive-draft.html">11a · DRAFT</a>
+  <a href="11b-stage-adaptive-clarifying.html">11b · CLARIFYING</a>
+  <a href="11c-stage-adaptive-designing.html">11c · DESIGNING</a>
+  <a href="11d-stage-adaptive-implementing.html">11d · IMPLEMENTING</a>
+  <a href="12-object-hub.html">12 · 对象中心</a>
+  <a href="13-event-stream.html">13 · 事件流</a>
+  <span class="spacer"></span>
+  <span class="meta">Exploration B · 基于全生命周期视角</span>
+</div>
+
+<h1>需求详情页重新设计 · 3 方案对比</h1>
+<p class="sub">
+  基于调研（30+ 产品 + 12 个方法论 + 12 个 AI 原生工具）发现的"<b>详情页应承载全生命周期 6 大场景</b>"，
+  重新构思的 3 个候选方案。共享同一个 StatusBar + Sidebar + ResourceTree + InlineRail 骨架，差异只在主区。
+</p>
+
+<div class="alert">
+  <b>📌 重要背景：</b>本次重新设计的<b>出发点</b>是上一轮 3 方案（<code>03a/03b/03c-req-detail-*</code>）把详情页窄化为"任务执行页"，
+  忽略了全生命周期（发现→澄清→设计→拆分→执行→测试→归档）。这 3 个<b>新方案</b>从全局出发重新构思。
+  旧方案仍保留作探索存档。详见 <code>docs/superpowers/specs/2026-07-12-requirement-detail-page-redesign.md</code>。
+</div>
+
+<div class="section-title">3 个候选方案 <span class="count">· 点击查看每个方案的 HTML 原型</span></div>
+
+<div class="compare-grid">
+
+  <!-- 方案 ① -->
+  <div class="scheme-card">
+    <div class="thumb">
+      <svg width="100%" height="100%" viewBox="0 0 400 250" style="display:block">
+        <rect width="400" height="250" fill="#f5f5f7"/>
+        <!-- 6 个形态缩略 -->
+        <text x="14" y="22" font-size="10" fill="#5e6ad2" font-weight="600">FORM (DRAFT)</text>
+        <rect x="14" y="30" width="120" height="100" fill="#fff" stroke="#ebebef"/>
+        <rect x="20" y="40" width="100" height="8" fill="#eef0fb"/>
+        <rect x="20" y="54" width="108" height="20" fill="#f5f5f7"/>
+        <rect x="20" y="80" width="108" height="40" fill="#f5f5f7"/>
+        <rect x="20" y="125" width="60" height="0" fill="#5e6ad2"/>
+
+        <text x="146" y="22" font-size="10" fill="#5e6ad2" font-weight="600">Q&A (CLARIFYING)</text>
+        <rect x="146" y="30" width="120" height="100" fill="#fff" stroke="#ebebef"/>
+        <rect x="152" y="40" width="108" height="22" fill="#fef3c7" stroke="#f59e0b" stroke-width="1"/>
+        <text x="156" y="55" font-size="8" fill="#92400e">Q3 错误码?</text>
+        <rect x="152" y="68" width="50" height="14" fill="#5e6ad2"/>
+        <rect x="208" y="68" width="50" height="14" fill="#fff" stroke="#ebebef"/>
+        <rect x="152" y="90" width="108" height="6" fill="#f5f5f7"/>
+        <rect x="152" y="102" width="108" height="6" fill="#f5f5f7"/>
+        <rect x="152" y="114" width="80" height="6" fill="#f5f5f7"/>
+
+        <text x="278" y="22" font-size="10" fill="#5e6ad2" font-weight="600">COMPARE (DESIGNING)</text>
+        <rect x="278" y="30" width="108" height="100" fill="#fff" stroke="#ebebef"/>
+        <rect x="282" y="38" width="32" height="80" fill="#eef0fb" stroke="#5e6ad2" stroke-width="1"/>
+        <rect x="316" y="38" width="32" height="80" fill="#fff" stroke="#ebebef"/>
+        <rect x="350" y="38" width="32" height="80" fill="#fff" stroke="#ebebef"/>
+        <text x="298" y="80" font-size="6" fill="#525bc7" text-anchor="middle" font-weight="600">A</text>
+        <text x="332" y="80" font-size="6" fill="#94a3b8" text-anchor="middle">B</text>
+        <text x="366" y="80" font-size="6" fill="#94a3b8" text-anchor="middle">C</text>
+
+        <text x="14" y="148" font-size="10" fill="#5e6ad2" font-weight="600">MISSION CONTROL (IMPL)</text>
+        <rect x="14" y="156" width="240" height="80" fill="#fff" stroke="#ebebef"/>
+        <rect x="20" y="162" width="50" height="68" fill="#f5f5f7"/>
+        <circle cx="32" cy="174" r="4" fill="#16a34a"/>
+        <circle cx="32" cy="194" r="4" fill="#16a34a"/>
+        <circle cx="62" cy="214" r="4" fill="#5e6ad2"/>
+        <circle cx="32" cy="234" r="4" fill="#94a3b8"/>
+        <line x1="32" y1="174" x2="32" y2="194" stroke="#16a34a" stroke-width="1"/>
+        <line x1="32" y1="194" x2="62" y2="214" stroke="#5e6ad2" stroke-width="1.5" stroke-dasharray="2,1"/>
+        <line x1="62" y1="214" x2="32" y2="234" stroke="#94a3b8" stroke-width="1"/>
+
+        <rect x="76" y="162" width="100" height="68" fill="#fff" stroke="#ebebef"/>
+        <rect x="80" y="166" width="92" height="6" fill="#eef0fb"/>
+        <rect x="80" y="176" width="92" height="6" fill="#f0fdf4"/>
+        <rect x="80" y="186" width="92" height="6" fill="#f0fdf4"/>
+        <rect x="80" y="196" width="92" height="6" fill="#f0fdf4"/>
+        <rect x="80" y="206" width="92" height="6" fill="#f0fdf4"/>
+        <rect x="80" y="216" width="92" height="6" fill="#fef2f2"/>
+        <rect x="80" y="226" width="92" height="6" fill="#fff" stroke="#ebebef"/>
+
+        <rect x="182" y="162" width="68" height="68" fill="#fff" stroke="#ebebef"/>
+        <rect x="186" y="166" width="60" height="14" fill="#fef3c7"/>
+        <rect x="186" y="184" width="60" height="6" fill="#f5f5f7"/>
+        <rect x="186" y="194" width="60" height="6" fill="#f5f5f7"/>
+        <rect x="186" y="204" width="60" height="6" fill="#f5f5f7"/>
+        <rect x="186" y="214" width="60" height="6" fill="#f5f5f7"/>
+
+        <rect x="266" y="148" width="120" height="88" fill="#fff" stroke="#ebebef"/>
+        <text x="278" y="160" font-size="9" fill="#5e6ad2" font-weight="600">ARCHIVE</text>
+        <rect x="272" y="166" width="40" height="32" fill="#f0fdf4" stroke="#16a34a"/>
+        <rect x="316" y="166" width="40" height="32" fill="#f0fdf4" stroke="#16a34a"/>
+        <rect x="272" y="202" width="40" height="32" fill="#f0fdf4" stroke="#16a34a"/>
+        <rect x="316" y="202" width="40" height="32" fill="#f5f5f7"/>
+      </svg>
+    </div>
+    <div class="body">
+      <h3>① 阶段自适应 <span class="tag rec">推荐</span></h3>
+      <p>主区有 <b>6 个形态模板</b>，由当前 status 自动切换：DRAFT 表单 / CLARIFYING Q&A / DESIGNING 候选对比 / IMPLEMENTING Mission Control / SUBMITTING-DONE 归档。资源树 / Inline 栏不变。</p>
+      <div class="props"><b>承载全生命周期</b><span>★★★★★</span></div>
+      <div class="props"><b>像操作台</b><span>★★★★★</span></div>
+      <div class="props"><b>AI thinking 一等公民</b><span>★★★★★</span></div>
+      <div class="props"><b>与 9 态契合度</b><span>★★★★★ (1:1)</span></div>
+      <div class="props"><b>实现复杂度</b><span style="color:var(--warning)">高 (6 套模板)</span></div>
+      <div class="links">
+        <a href="11a-stage-adaptive-draft.html">11a · DRAFT</a>
+        <a href="11b-stage-adaptive-clarifying.html">11b · CLARIFYING</a>
+        <a href="11c-stage-adaptive-designing.html">11c · DESIGNING</a>
+        <a href="11d-stage-adaptive-implementing.html">11d · IMPLEMENTING</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- 方案 ② -->
+  <div class="scheme-card">
+    <div class="thumb">
+      <svg width="100%" height="100%" viewBox="0 0 400 250" style="display:block">
+        <rect width="400" height="250" fill="#f5f5f7"/>
+        <!-- 元数据卡 -->
+        <rect x="14" y="14" width="372" height="50" fill="#fff" stroke="#ebebef"/>
+        <circle cx="32" cy="39" r="10" fill="#5e6ad2"/>
+        <text x="32" y="43" font-size="9" fill="#fff" text-anchor="middle" font-weight="600">60%</text>
+        <rect x="50" y="28" width="100" height="6" fill="#0f172a"/>
+        <rect x="50" y="40" width="60" height="6" fill="#94a3b8"/>
+
+        <!-- tabs -->
+        <rect x="14" y="76" width="372" height="26" fill="#fff" stroke="#ebebef"/>
+        <rect x="20" y="82" width="50" height="14" fill="#f5f5f7"/>
+        <rect x="76" y="82" width="50" height="14" fill="#f5f5f7"/>
+        <rect x="132" y="82" width="50" height="14" fill="#eef0fb" stroke="#5e6ad2"/>
+        <rect x="188" y="82" width="50" height="14" fill="#f5f5f7"/>
+
+        <!-- 时间线 -->
+        <rect x="14" y="108" width="372" height="100" fill="#fff" stroke="#ebebef"/>
+        <rect x="20" y="116" width="360" height="22" fill="#f5f5f7"/>
+        <rect x="20" y="120" width="3" height="14" fill="#f59e0b"/>
+        <rect x="28" y="142" width="360" height="22" fill="#f5f5f7"/>
+        <rect x="28" y="146" width="3" height="14" fill="#5e6ad2"/>
+        <rect x="20" y="168" width="360" height="22" fill="#f5f5f7"/>
+        <rect x="20" y="172" width="3" height="14" fill="#5e6ad2"/>
+        <rect x="28" y="194" width="360" height="14" fill="#fff" stroke="#ebebef"/>
+
+        <!-- AI 条 -->
+        <rect x="14" y="214" width="372" height="22" fill="#fff" stroke="#5e6ad2" stroke-width="1.5"/>
+        <circle cx="32" cy="225" r="5" fill="#5e6ad2"/>
+        <rect x="46" y="222" width="120" height="6" fill="#0f172a"/>
+      </svg>
+    </div>
+    <div class="body">
+      <h3>② 对象中心</h3>
+      <p>详情页是<b>需求对象的浏览器</b>。主区始终是"元数据卡 + 6 个子节点视图 tabs"。AI 行为作为子节点 + 底部固定 AI 思考条。所有阶段长得一样。</p>
+      <div class="props"><b>承载全生命周期</b><span>★★★</span></div>
+      <div class="props"><b>像操作台</b><span>★★★</span></div>
+      <div class="props"><b>AI thinking 一等公民</b><span>★★★★</span></div>
+      <div class="props"><b>与 9 态契合度</b><span>★★ (弱化状态)</span></div>
+      <div class="props"><b>实现复杂度</b><span style="color:var(--text-2)">中 (1 套 + 6 视图)</span></div>
+      <div class="links">
+        <a href="12-object-hub.html">12 · 对象中心</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- 方案 ③ -->
+  <div class="scheme-card">
+    <div class="thumb">
+      <svg width="100%" height="100%" viewBox="0 0 400 250" style="display:block">
+        <rect width="400" height="250" fill="#f5f5f7"/>
+        <!-- 筛选器 -->
+        <rect x="14" y="14" width="372" height="24" fill="#fff" stroke="#ebebef"/>
+        <rect x="20" y="20" width="30" height="12" fill="#eef0fb"/>
+        <rect x="56" y="20" width="30" height="12" fill="#f5f5f7"/>
+        <rect x="92" y="20" width="30" height="12" fill="#f5f5f7"/>
+        <rect x="128" y="20" width="30" height="12" fill="#f5f5f7"/>
+
+        <!-- 5 个事件卡 -->
+        <rect x="14" y="48" width="372" height="36" fill="#fff" stroke="#ebebef"/>
+        <rect x="20" y="56" width="3" height="22" fill="#f59e0b"/>
+        <rect x="30" y="58" width="40" height="6" fill="#0f172a"/>
+        <rect x="30" y="70" width="80" height="4" fill="#94a3b8"/>
+
+        <rect x="14" y="88" width="372" height="36" fill="#fff" stroke="#ebebef"/>
+        <rect x="20" y="96" width="3" height="22" fill="#5e6ad2"/>
+        <rect x="30" y="98" width="60" height="6" fill="#0f172a"/>
+        <rect x="30" y="110" width="100" height="4" fill="#94a3b8"/>
+
+        <rect x="14" y="128" width="372" height="36" fill="#fff" stroke="#ebebef"/>
+        <rect x="20" y="136" width="3" height="22" fill="#5e6ad2"/>
+        <rect x="30" y="138" width="50" height="6" fill="#0f172a"/>
+
+        <rect x="14" y="168" width="372" height="36" fill="#fff" stroke="#ebebef"/>
+        <rect x="20" y="176" width="3" height="22" fill="#16a34a"/>
+        <rect x="30" y="178" width="50" height="6" fill="#0f172a"/>
+
+        <rect x="14" y="208" width="372" height="36" fill="#fff" stroke="#ebebef"/>
+        <rect x="20" y="216" width="3" height="22" fill="#64748b"/>
+        <rect x="30" y="218" width="60" height="6" fill="#0f172a"/>
+
+        <!-- AI 条 -->
+        <rect x="14" y="250" width="372" height="0" fill="#5e6ad2"/>
+      </svg>
+    </div>
+    <div class="body">
+      <h3>③ 事件流中心</h3>
+      <p>详情页是<b>该需求的全部历史事件时间线</b>。一切（状态/AI/产物/代码/评论）都是事件卡。主区=事件流，按类型筛选。资源树极简化。</p>
+      <div class="props"><b>承载全生命周期</b><span>★★★★</span></div>
+      <div class="props"><b>像操作台</b><span>★★★</span></div>
+      <div class="props"><b>AI thinking 一等公民</b><span>★★★★★</span></div>
+      <div class="props"><b>与 9 态契合度</b><span>★★★★ (状态作为事件)</span></div>
+      <div class="props"><b>实现复杂度</b><span style="color:var(--success)">低 (1 套事件卡)</span></div>
+      <div class="links">
+        <a href="13-event-stream.html">13 · 事件流</a>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="stage-table">
+  <h2>全生命周期 6 大场景 × 3 方案对照</h2>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:18%">场景</th>
+        <th style="width:14%">触发 status</th>
+        <th style="width:22%">① 阶段自适应</th>
+        <th style="width:22%">② 对象中心</th>
+        <th style="width:22%">③ 事件流</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="scenario">① 创建 / 编辑需求</td>
+        <td>DRAFT</td>
+        <td class="adapt">Form 形态 · 居中表单 + PRD Markdown + AC 结构化输入</td>
+        <td class="hub">"描述"视图 · 同形态可填字段</td>
+        <td class="stream">事件流空空如也 · 缺引导</td>
+      </tr>
+      <tr>
+        <td class="scenario">② 看 AI 怎么分析</td>
+        <td>ANALYZING</td>
+        <td class="adapt">Thinking 形态 · AI 实时识别产物 + 打字机流</td>
+        <td class="hub">"AI 行为"视图 · 时间线倒序</td>
+        <td class="stream">事件流实时增加 AI 行为事件</td>
+      </tr>
+      <tr>
+        <td class="scenario">③ 回答 AI 提问</td>
+        <td>CLARIFYING</td>
+        <td class="adapt">Q&A 形态 · 当前问题大焦点 + 历史澄清记录</td>
+        <td class="hub">"AI 行为"或"历史"视图 · 找澄清事件</td>
+        <td class="stream">事件流里有 Q&A 事件 · 但需滚动找</td>
+      </tr>
+      <tr>
+        <td class="scenario">④ 评审 AI 设计</td>
+        <td>DESIGNING</td>
+        <td class="adapt">Compare 形态 · 候选方案 A/B/C 横向对比</td>
+        <td class="hub">"描述"或"产物"视图 · 看采纳结果</td>
+        <td class="stream">事件流有"生成方案"事件 · 但不易对比</td>
+      </tr>
+      <tr>
+        <td class="scenario">⑤ 监督 AI 实施</td>
+        <td>IMPLEMENTING / PLANNING</td>
+        <td class="adapt">Mission Control · DAG + Diff 流 + AI 行为流 3 列</td>
+        <td class="hub">"AI 行为"视图 · 但 DAG/Diff 不直观</td>
+        <td class="stream">事件流时间线 · DAG/Diff 需切换查看</td>
+      </tr>
+      <tr>
+        <td class="scenario">⑥ 归档 / 复盘</td>
+        <td>DONE / SUBMITTING / ARCHIVED</td>
+        <td class="adapt">Archive 形态 · 产物清单 + PR/Commit + 回顾报告</td>
+        <td class="hub">"产物"/"历史"/"仓库"视图</td>
+        <td class="stream">事件流本身是回顾报告</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="alert">
+  <b>🎯 调研结论：</b>无论选哪个方案，详情页都该有 <b>AI 思考过程作为一等公民</b>（非评论流）、<b>代码/产物关联区</b>（差异化锚点）、<b>AC 结构化字段</b>、<b>键盘流</b>、<b>AI 不抢视觉</b>。
+  这些是 30+ 产品调研得出的共识。具体怎么排版，3 方案各有取舍。
+</div>
+
+<footer>
+  看完了？告诉我：选哪个方案（或要杂交哪些元素），以及想看哪些细节的 HTML 补充。<br>
+  完整调研报告：<code style="font-family:'JetBrains Mono',monospace">docs/superpowers/specs/2026-07-12-requirement-detail-page-redesign.md</code>
+</footer>
+
+</body>
+</html>

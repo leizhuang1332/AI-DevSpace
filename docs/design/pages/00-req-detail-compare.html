@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>需求详情页 · 3 方案对比 · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{
+  --brand:#5e6ad2; --brand-50:#eef0fb; --brand-500:#5e6ad2; --brand-600:#525bc7; --brand-700:#4147a3;
+  --success:#16a34a; --warning:#f59e0b; --error:#ef4444; --info:#64748b;
+  --bg:#fbfbfd; --bg-elevated:#ffffff; --bg-subtle:#f5f5f7; --border:#ebebef; --border-strong:#d8d8de;
+  --text-1:#0f172a; --text-2:#475569; --text-3:#94a3b8;
+  --space-2:8px; --space-3:12px; --space-4:16px; --space-6:24px; --space-8:32px;
+  --text-sm:12px; --text-base:13px; --text-md:14px; --text-lg:16px; --text-xl:18px; --text-2xl:20px;
+  --radius-md:6px; --radius-lg:8px; --radius-xl:12px;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.04); --shadow-md:0 2px 4px rgba(0,0,0,.06); --shadow-lg:0 4px 12px rgba(0,0,0,.08);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg);color:var(--text-1);font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased;padding:var(--space-8);max-width:1280px;margin:0 auto}
+h1{font-size:var(--text-2xl);font-weight:600;letter-spacing:-0.02em;margin-bottom:var(--space-2)}
+.sub{color:var(--text-3);font-size:var(--text-sm);margin-bottom:var(--space-8)}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-6);margin-bottom:var(--space-8)}
+.card{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-xl);overflow:hidden;box-shadow:var(--shadow-sm);transition:all .2s}
+.card:hover{transform:translateY(-2px);box-shadow:var(--shadow-lg);border-color:var(--brand)}
+.card .thumb{aspect-ratio:16/10;background:var(--bg-subtle);border-bottom:1px solid var(--border);position:relative;overflow:hidden}
+.card .body{padding:var(--space-6)}
+.card h3{font-size:var(--text-lg);font-weight:600;margin-bottom:var(--space-2);display:flex;align-items:center;gap:var(--space-2)}
+.tag{display:inline-block;padding:2px 8px;background:var(--brand-50);color:var(--brand-600);border-radius:var(--radius-md);font-size:var(--text-sm);font-weight:500}
+.tag.rec{background:#fef3c7;color:#92400e}
+.tag.warn{background:#fee2e2;color:#991b1b}
+.card p{color:var(--text-2);font-size:var(--text-sm);line-height:1.6;margin-bottom:var(--space-3)}
+.props{display:grid;grid-template-columns:1fr auto;gap:6px var(--space-3);font-size:var(--text-sm);color:var(--text-2);margin-bottom:var(--space-4)}
+.props b{color:var(--text-1);font-weight:500}
+.cta{display:block;text-align:center;padding:var(--space-3);background:var(--brand);color:#fff;text-decoration:none;border-radius:var(--radius-md);font-size:var(--text-md);font-weight:500}
+.cta:hover{background:var(--brand-600)}
+.compare{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-xl);padding:var(--space-6)}
+.compare h2{font-size:var(--text-lg);font-weight:600;margin-bottom:var(--space-4)}
+table{width:100%;border-collapse:collapse;font-size:var(--text-sm)}
+th,td{padding:10px var(--space-3);text-align:left;border-bottom:1px solid var(--border)}
+th{color:var(--text-3);font-weight:500;font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.04em}
+tr:last-child td{border-bottom:none}
+.stars{letter-spacing:1px}
+.bar{height:6px;background:var(--bg-subtle);border-radius:3px;overflow:hidden;width:120px;display:inline-block;vertical-align:middle}
+.bar i{display:block;height:100%;background:var(--brand)}
+.nav{display:flex;gap:var(--space-3);margin-bottom:var(--space-6);font-size:var(--text-sm)}
+.nav a{color:var(--text-2);text-decoration:none;padding:6px 12px;border-radius:var(--radius-md)}
+.nav a:hover{background:var(--bg-subtle);color:var(--text-1)}
+.nav a.cur{background:var(--brand-50);color:var(--brand-600);font-weight:500}
+</style>
+</head>
+<body>
+
+<div class="nav">
+  <a href="00-req-detail-compare.html" class="cur">3 方案对比</a>
+  <a href="03a-req-detail-task-driven.html">A · 任务驱动</a>
+  <a href="03b-req-detail-file-driven.html">B · 文件驱动</a>
+  <a href="03c-req-detail-timeline-driven.html">C · 时间轴驱动</a>
+</div>
+
+<h1>需求详情页 · 重新设计候选</h1>
+<p class="sub">基于现有 <code style="font-family:'JetBrains Mono',monospace">docs/design/pages/03-requirement-workspace.html</code> 的三栏骨架，保留顶层架构（StatusBar / Sidebar / ResourceTree / InlineRail），重新设计主工作区的核心范式。<b>设计目标：①日常开发流程；②阶段感知；③AI 融入；④操作台感。</b></p>
+
+<div class="grid">
+
+  <div class="card">
+    <div class="thumb">
+      <svg width="100%" height="100%" viewBox="0 0 400 250" style="display:block">
+        <rect width="400" height="250" fill="#f5f5f7"/>
+        <rect x="20" y="20" width="60" height="210" fill="#fff" stroke="#ebebef"/>
+        <text x="50" y="38" font-size="8" fill="#94a3b8" text-anchor="middle">资源树</text>
+        <rect x="80" y="20" width="240" height="20" fill="#f5f5f7"/>
+        <rect x="80" y="40" width="240" height="20" fill="#fff" stroke="#5e6ad2" stroke-width="1.5"/>
+        <rect x="80" y="60" width="240" height="20" fill="#fff" stroke="#ebebef"/>
+        <rect x="80" y="80" width="240" height="20" fill="#fff" stroke="#ebebef"/>
+        <rect x="80" y="100" width="240" height="60" fill="#eef0fb" stroke="#5e6ad2" stroke-width="1.5"/>
+        <text x="92" y="116" font-size="9" fill="#525bc7">▶ Task #7</text>
+        <text x="92" y="130" font-size="8" fill="#475569">退款查询接口开发</text>
+        <rect x="80" y="160" width="240" height="20" fill="#fff" stroke="#ebebef"/>
+        <rect x="320" y="20" width="60" height="210" fill="#f5f5f7"/>
+        <text x="350" y="135" font-size="8" fill="#94a3b8" text-anchor="middle">Inline</text>
+      </svg>
+    </div>
+    <div class="body">
+      <h3>A · 任务驱动 <span class="tag rec">推荐</span></h3>
+      <p>主工作区是「任务清单」+ 当前任务工作台。每个 Task = 可执行卡片。AI 围绕任务工作，不围绕文件工作。Linear ticket 范式。</p>
+      <div class="props"><b>像操作台</b><span class="stars">★★★★★</span></div>
+      <div class="props"><b>阶段信息</b><span>任务列表含阶段分组</span></div>
+      <div class="props"><b>AI 融入</b><span>任务内有 AI 工作面板</span></div>
+      <a class="cta" href="03a-req-detail-task-driven.html">查看 A 方案 →</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="thumb">
+      <svg width="100%" height="100%" viewBox="0 0 400 250" style="display:block">
+        <rect width="400" height="250" fill="#f5f5f7"/>
+        <rect x="20" y="20" width="80" height="210" fill="#fff" stroke="#ebebef"/>
+        <text x="60" y="38" font-size="8" fill="#94a3b8" text-anchor="middle">资源树（扩展）</text>
+        <rect x="100" y="20" width="240" height="20" fill="#f5f5f7"/>
+        <rect x="100" y="40" width="240" height="210" fill="#fff" stroke="#ebebef"/>
+        <text x="220" y="125" font-size="11" fill="#0f172a" text-anchor="middle" font-weight="600">design/02-api.md</text>
+        <text x="220" y="142" font-size="9" fill="#94a3b8" text-anchor="middle">Markdown 内容渲染</text>
+        <rect x="340" y="20" width="40" height="210" fill="#f5f5f7"/>
+        <text x="360" y="135" font-size="7" fill="#94a3b8" text-anchor="middle">Inline</text>
+      </svg>
+    </div>
+    <div class="body">
+      <h3>B · 文件驱动</h3>
+      <p>资源树主导，主区是 markdown/diff/code 渲染。任务进度作为侧栏状态。VSCode / JetBrains 风格。</p>
+      <div class="props"><b>像操作台</b><span class="stars">★★</span></div>
+      <div class="props"><b>阶段信息</b><span>资源树底部进度条</span></div>
+      <div class="props"><b>AI 融入</b><span>AI 提问浮窗</span></div>
+      <a class="cta" href="03b-req-detail-file-driven.html" style="background:var(--text-2)">查看 B 方案 →</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="thumb">
+      <svg width="100%" height="100%" viewBox="0 0 400 250" style="display:block">
+        <rect width="400" height="250" fill="#f5f5f7"/>
+        <rect x="20" y="14" width="360" height="22" fill="#fff" stroke="#ebebef"/>
+        <circle cx="40" cy="25" r="5" fill="#16a34a"/>
+        <text x="50" y="28" font-size="8" fill="#16a34a">分析</text>
+        <circle cx="90" cy="25" r="5" fill="#16a34a"/>
+        <text x="100" y="28" font-size="8" fill="#16a34a">设计</text>
+        <circle cx="140" cy="25" r="5" fill="#16a34a"/>
+        <text x="150" y="28" font-size="8" fill="#16a34a">计划</text>
+        <circle cx="190" cy="25" r="5" fill="#5e6ad2"/>
+        <text x="200" y="28" font-size="8" fill="#5e6ad2" font-weight="600">编码</text>
+        <circle cx="240" cy="25" r="5" fill="#94a3b8"/>
+        <text x="250" y="28" font-size="8" fill="#94a3b8">测试</text>
+        <circle cx="290" cy="25" r="5" fill="#94a3b8"/>
+        <text x="300" y="28" font-size="8" fill="#94a3b8">提交</text>
+        <rect x="20" y="40" width="80" height="195" fill="#fff" stroke="#ebebef"/>
+        <text x="60" y="140" font-size="8" fill="#94a3b8" text-anchor="middle">资源树</text>
+        <rect x="100" y="40" width="240" height="195" fill="#fff" stroke="#ebebef"/>
+        <rect x="120" y="60" width="200" height="60" fill="#eef0fb" stroke="#5e6ad2" stroke-width="1.5"/>
+        <text x="135" y="78" font-size="9" fill="#525bc7">▶ 当前阶段: 编码</text>
+        <rect x="340" y="40" width="40" height="195" fill="#f5f5f7"/>
+      </svg>
+    </div>
+    <div class="body">
+      <h3>C · 时间轴驱动</h3>
+      <p>阶段轴横向贯穿；当前阶段聚焦，前后阶段折叠。Vibecoding 流程显性化。注意：需放宽 CONTEXT.md 决策 15。</p>
+      <div class="props"><b>像操作台</b><span class="stars">★★★★</span></div>
+      <div class="props"><b>阶段信息</b><span class="stars">★★★★★</span></div>
+      <div class="props"><b>AI 融入</b><span>阶段内 AI 区</span></div>
+      <a class="cta" href="03c-req-detail-timeline-driven.html" style="background:var(--text-2)">查看 C 方案 →</a>
+    </div>
+  </div>
+
+</div>
+
+<div class="compare">
+  <h2>横向对比</h2>
+  <table>
+    <thead><tr><th>维度</th><th>A 任务驱动</th><th>B 文件驱动</th><th>C 时间轴</th></tr></thead>
+    <tbody>
+      <tr><td>像操作台</td><td>★★★★★</td><td>★★</td><td>★★★★</td></tr>
+      <tr><td>像 IDE / 阅读</td><td>★★</td><td>★★★★★</td><td>★★</td></tr>
+      <tr><td>阶段信息显性</td><td>中（任务列表）</td><td>弱（左下小条）</td><td>★★★★★</td></tr>
+      <tr><td>不强制推动流程</td><td>✓（任务自定）</td><td>✓</td><td>⚠（阶段暗示）</td></tr>
+      <tr><td>AI 融入工作流</td><td>高（任务内 AI 区）</td><td>中（AI 提问浮窗）</td><td>中（当前阶段内）</td></tr>
+      <tr><td>与现有决策冲突</td><td>无</td><td>无</td><td>决策 15 需放松</td></tr>
+      <tr><td>实现复杂度</td><td>中</td><td>低</td><td>高</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<p class="sub" style="margin-top:var(--space-8);text-align:center">
+  三个方案共享同一个 <code style="font-family:'JetBrains Mono',monospace">StatusBar + Sidebar + 三栏骨架</code>，差异只在主工作区。点击上方任一方案查看完整原型。
+</p>
+
+</body>
+</html>
