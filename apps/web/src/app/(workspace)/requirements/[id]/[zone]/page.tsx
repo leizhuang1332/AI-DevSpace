@@ -4,18 +4,22 @@ import {
   ZONE_META,
   ZONE_STATUS_COLOR_LABEL,
 } from '@/lib/zones'
+import { getExecutingData } from '@/lib/executing'
+import { ExecutingZone } from '@/components/executing-zone'
 
 /**
- * 工位主区(占位实现 — issue 17+ 替换为真实工位布局组件)。
+ * 工位主区。
  *
  * - generateStaticParams 预生成 6 个合法路由
  * - 未知 route_segment 已被 [zone]/layout.tsx 拦下,这里再做一次 notFound 兜底
+ * - EXECUTING 工位(issue 17 样板)渲染 `<ExecutingZone />` 三列 Mission Control;
+ *   其余 5 工位 + 未对接工位(18-22)走占位实现,issue 17+ 替换
  */
 export function generateStaticParams() {
   return ZONE_META.map((z) => ({ zone: z.route_segment }))
 }
 
-export default function ZonePage({
+export default async function ZonePage({
   params,
 }: {
   params: { id: string; zone: string }
@@ -23,6 +27,13 @@ export default function ZonePage({
   const zone = getZoneByRouteSegment(params.zone)
   if (!zone) notFound()
 
+  // EXECUTING 工位样板:三列 Mission Control 布局
+  if (zone.id === 'executing') {
+    const data = await getExecutingData(params.id)
+    return <ExecutingZone data={data} />
+  }
+
+  // 其余 5 工位占位实现 — issue 18-22 替换
   const shellDesc =
     zone.has_resource_tree && zone.has_inline_rail
       ? '资源树 + Inline 栏(3 列)'
@@ -64,7 +75,7 @@ export default function ZonePage({
         </dl>
 
         <p className="text-text-3 text-xs mt-6">
-          占位实现 — 真实工位布局由 issue 17 (EXECUTING) / 18 (DRAFTING) / 19-22 (其他) 替换。
+          占位实现 — 真实工位布局由 issue 18 (DRAFTING) / 19 (ANALYZING) / 20-22 (其他) 替换。
         </p>
       </header>
     </main>

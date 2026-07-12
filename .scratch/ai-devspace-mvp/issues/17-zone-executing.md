@@ -1,5 +1,5 @@
 ---
-Status: ready-for-agent
+Status: ready-for-human
 Type: task
 Stage: 2
 ---
