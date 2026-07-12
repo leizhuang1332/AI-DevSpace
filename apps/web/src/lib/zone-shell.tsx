@@ -27,6 +27,10 @@ export function zoneShellGridClass(zone: ZoneMeta): string {
  * 工位专属 shell 的可视部分(不负责解析 / 404 判定)。
  *
  * 提取为纯组件便于测试;[id]/[zone]/layout.tsx 负责解析 + notFound 后调用它。
+ *
+ * 关于 client 函数 prop:本组件是 Server Component,不能直接接收函数 prop。
+ * 凡是 zone 需要函数回调(issue 18 Skill 点击),调用方(page.tsx)需通过
+ * inlineRailSlot 注入 client wrapper 组件。
  */
 export interface ZoneShellProps {
   id: string
@@ -41,13 +45,15 @@ export interface ZoneShellProps {
   /**
    * DRAFTING 工位专用:候命 Skill 列表(issue 18)。
    * 传入时,Inline 栏切换到 Skill 列表视图。
+   * 注意:Skill 点击的函数回调必须由 client wrapper 注入,不能从 page.tsx 直接传。
    */
   draftingSkills?: DraftingSkill[]
   /**
-   * DRAFTING 工位专用:Skill trigger 点击回调。
-   * 实际唤起动作由 page.tsx 注入(本期 mock:打开 Cmd+K / 弹提示)。
+   * 替换默认 InlineRail 的 client 组件 slot。
+   * 提供时,ZoneShell 不再渲染默认 InlineRail,而是用此 slot 替代。
+   * 适用于需要 client 交互(如 onSkillTrigger)的 zone。
    */
-  onSkillTrigger?: (skill: DraftingSkill) => void
+  inlineRailSlot?: ReactNode
 }
 
 // ADR-0012 §3 + ADR-0007 继承:workspace shell 层 1 = StatusBar(28px) + ZoneBar(44px) = 72px
@@ -59,7 +65,7 @@ export function ZoneShell({
   children,
   prdSections,
   draftingSkills,
-  onSkillTrigger,
+  inlineRailSlot,
 }: ZoneShellProps) {
   return (
     <div
@@ -73,13 +79,13 @@ export function ZoneShell({
         <ResourceTree requirementId={id} prdSections={prdSections} />
       )}
       {children}
-      {zone.has_inline_rail && (
-        <InlineRail
-          requirementId={id}
-          draftingSkills={draftingSkills}
-          onSkillTrigger={onSkillTrigger}
-        />
-      )}
+      {zone.has_inline_rail &&
+        (inlineRailSlot ?? (
+          <InlineRail
+            requirementId={id}
+            draftingSkills={draftingSkills}
+          />
+        ))}
     </div>
   )
 }

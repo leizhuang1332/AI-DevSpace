@@ -11,6 +11,7 @@ import {
   extractPrdOutline,
 } from '@/lib/drafting'
 import { DraftingZone } from '@/components/drafting-zone'
+import { DraftingSkillRail } from '@/components/drafting-skill-rail'
 import { ZoneShell } from '@/lib/zone-shell'
 
 /**
@@ -54,12 +55,14 @@ export default async function ZonePage({
         id={params.id}
         zone={zone}
         prdSections={extractPrdOutline(data.prdMarkdown)}
-        draftingSkills={data.skills}
-        // 本期 mock:打开 Cmd+K 命令面板(后续接 agent API 时改为真正唤起 Skill)
-        onSkillTrigger={() => {
-          // TODO(后续):从 server 端无法触发 client 命令面板,改为 client-side SkillLauncher
-          // 当前 mock 实现:InlineRail 收到回调后由 host 自行决定(此处仅占位)
-        }}
+        // 用 client 包装器替代默认 InlineRail —— 因为 Skill 点击需要函数回调
+        // (server component 不能直接传函数 prop)
+        inlineRailSlot={
+          <DraftingSkillRail
+            requirementId={params.id}
+            skills={data.skills}
+          />
+        }
       >
         <DraftingZone data={data} />
       </ZoneShell>
