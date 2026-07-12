@@ -146,6 +146,15 @@ importers:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@20.19.43)(jsdom@25.0.1)
 
+  packages/scripts:
+    devDependencies:
+      eslint:
+        specifier: ^9.18.0
+        version: 9.39.4(jiti@1.21.7)
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@20.19.43)(jsdom@25.0.1)
+
   packages/shared:
     dependencies:
       zod:
