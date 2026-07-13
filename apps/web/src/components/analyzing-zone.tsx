@@ -4,6 +4,8 @@ import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   deriveProducts,
+  type AnalysisSession,
+  type AnalysisSessionAngle,
   type AnalyzingChunk,
   type AnalyzingData,
   type AnalyzingStats,
@@ -13,6 +15,7 @@ import {
 } from '@/lib/analyzing'
 import { EmptyState } from './empty-state'
 import { AdmissionDashboard } from './admission-dashboard'
+import { SessionTabs } from './session-tabs'
 import { ThinkingStream, type ThinkingPhase } from './thinking-stream'
 import { ProductList } from './product-list'
 import { InterjectInput } from './interject-input'
@@ -20,7 +23,9 @@ import { InterjectInput } from './interject-input'
 /**
  * ANALYZING 工位组件(ADR-0011 §6 ANALYZING 布局 · issue 19)
  *
- * 视觉对照基线:[11e-stage-adaptive-analyzing.html](../../../../docs/design/pages/11e-stage-adaptive-analyzing.html)
+ * 视觉对照基线:
+ * - [11e-stage-adaptive-analyzing.html](../../../../docs/design/pages/11e-stage-adaptive-analyzing.html)(原"观察屏")
+ * - [11h-A-zone-multisession-tabs.html](../../../../docs/design/pages/11h-A-zone-multisession-tabs.html)(多会话 Tab,VS3 基线)
  *
  * 布局(主区全宽,无资源树 / 无 Inline 栏 —— ZoneShell 自动 grid-cols-1):
  * ┌────────────────────────────────────────────────┐
@@ -28,9 +33,11 @@ import { InterjectInput } from './interject-input'
  * ├────────────────────────────────────────────────┤
  * │ Toolbar(面包屑 + 复制/暂停/重置)                  │
  * ├────────────────────────────────────────────────┤
- * │ 准入仪表板(19a · ADR-0013 D4)                   │
+ * │ 准入仪表板(19a · ADR-0013 D4 · 全局共享)        │
  * ├────────────────────────────────────────────────┤
- * │ 主区(两列):                                     │
+ * │ SessionTabs(19c · ADR-0013 D7 · 多会话 Tab)    │
+ * ├────────────────────────────────────────────────┤
+ * │ 主区(两列,按 activeSessionId 切换):            │
  * │ ┌──────────────┬──────────────────────────────┐│
  * │ │ 思考流       │ Summary(图标+标题+stats)     ││
  * │ │ 打字机 20ms  ├──────────────────────────────┤│
@@ -38,11 +45,11 @@ import { InterjectInput } from './interject-input'
  * │ │  - 暂停/重置 │                              ││
  * │ └──────────────┴──────────────────────────────┘│
  * ├────────────────────────────────────────────────┤
- * │ 💬 插话输入条(InterjectInput · 触发 SSE 推送新 chunk)│
+ * │ 💬 插话输入条(InterjectInput · 按 active 会话推送新 chunk)│
  * └────────────────────────────────────────────────┘
  *
  * 设计要点:
- * - 'use client':打字机 / 暂停 / 重置 / 完成提示 / SSE 订阅都是客户端交互
+ * - 'use client':打字机 / 暂停 / 重置 / 完成提示 / SSE 订阅 / Tab 切换都是客户端交互
  * - props.data 由 server 注入(从 getAnalyzingData),组件只关心渲染 + 客户端状态
  * - 打字机 20ms / 字(issue 19 验收 #2);chunk 间 200ms 间隔,模拟"思考停顿"
  * - 点击 ⏸ 暂停 / 继续;点击 ↶ 清空所有进度从 chunk-0 开始
@@ -50,6 +57,11 @@ import { InterjectInput } from './interject-input'
  * - SSE 订阅 `/api/requirement/<id>/events` —— 收到 `analysis_chunk` 事件追加到 chunks
  * - InterjectInput 提交 → POST `/api/requirements/<id>/analysis/interject` →
  *   Agent 通过 SseHub 推送新 chunks → 上面 useEffect 订阅自动追加
+ * - VS3 新增:
+ *   - 渲染 SessionTabs(sessions / activeId / onSwitch / onCreate / onClose)
+ *   - 切换 Tab 时主区 chunks 按 activeSessionId 重新加载;打字机 / 暂停独立工作
+ *   - 主区滚动位置按 sessionStorage `analysis-scroll-<sid>` 持久化
+ *   - activeId 默认 = props.data.activeSessionId(cookie `last_session_id` 决定,见 server)
  *
  * 状态机(single source of truth,避免 batching 双状态同步问题):
  *   idle     — 还没开始打字
@@ -64,8 +76,13 @@ export interface AnalyzingZoneProps {
 const TYPEWRITER_INTERVAL_MS = 20
 const INTER_CHUNK_PAUSE_MS = 200
 
-/** 主区默认 session id(单会话阶段;VS3 多会话时由 props.data.activeSessionId 注入) */
-const DEFAULT_SESSION_ID = 'sess-default'
+/** sessionStorage key 模板:每会话独立滚动位置(issue 19c 验收 #5) */
+function scrollStorageKey(sessionId: string): string {
+  return `analysis-scroll-${sessionId}`
+}
+
+/** 客户端 cookie 名:上次 active session id(SSR 通过 cookies() 注入 lastSessionId) */
+const LAST_SESSION_COOKIE = 'last_session_id'
 
 /** SSE 端点路径(同 apps/agent/src/sse/requirementEventsRoute.ts) */
 function sseUrl(requirementId: string): string {
@@ -125,21 +142,67 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   const [verdictOverride, setVerdictOverride] = useState<AdmissionVerdict | null>(null)
 
   // -------------------------------------------------------------------------
-  // chunks 客户端副本 — SSE 推送的新 chunk 会被追加到这里
-  // 初始值用 server 注入的 data.chunks;reset 时回到 data.chunks 起点
+  // 多会话状态(issue 19c VS3 · ADR-0013 D7)
+  // - sessions:完整会话列表(本 slice 仅前端 mock;后端落盘推迟到 VS5)
+  // - activeSessionId:当前 active 会话 id(初始来自 server)
+  // - chunksBySessionId:每个会话的 chunks map(mock 简化版:所有会话共用 data.chunks)
   // -------------------------------------------------------------------------
-  const [chunks, setChunks] = useState<AnalyzingChunk[]>(data.chunks)
+  const [sessions, setSessions] = useState<AnalysisSession[]>(
+    data.sessions.length > 0 ? data.sessions : [
+      {
+        id: 'default',
+        label: '架构',
+        angle: 'architecture',
+        detectedCount: 0,
+        isStreaming: false,
+      },
+    ],
+  )
+  const [activeSessionId, setActiveSessionId] = useState<string>(
+    data.activeSessionId || (sessions[0]?.id ?? 'default'),
+  )
+
+  // -------------------------------------------------------------------------
+  // chunks 客户端副本 — SSE 推送的新 chunk 会被追加到这里
+  // 初始值用 server 注入的 data.chunks(对应当前 active 会话);reset 时回到起点
+  //
+  // VS3 多会话(MOCK 局限):为简化本 slice 的 UI 实现,所有会话初始化时共用
+  // data.chunks 的副本(真实 D7 要求"每 session 是独立对话流 + 自己的 chunks
+  // jsonl",本 slice 仅前端 mock,后端落盘推迟到 VS5 与 sessions 持久化一并接入)。
+  // SSE 推送时仅追加到 active 会话;新建会话初始化为 []。
+  // -------------------------------------------------------------------------
+  const [chunksBySessionId, setChunksBySessionId] = useState<Record<string, AnalyzingChunk[]>>(
+    () => {
+      const map: Record<string, AnalyzingChunk[]> = {}
+      for (const s of sessions) map[s.id] = data.chunks
+      return map
+    },
+  )
+  const chunks = chunksBySessionId[activeSessionId] ?? []
+  const setChunks = useCallback(
+    (updater: AnalyzingChunk[] | ((prev: AnalyzingChunk[]) => AnalyzingChunk[])) => {
+      setChunksBySessionId((prev) => {
+        const current = prev[activeSessionId] ?? []
+        const next = typeof updater === 'function' ? updater(current) : updater
+        return { ...prev, [activeSessionId]: next }
+      })
+    },
+    [activeSessionId],
+  )
   const [interjectSubmitting, setInterjectSubmitting] = useState(false)
   const [interjectError, setInterjectError] = useState<string | null>(null)
 
-  // 当 props.data.chunks 变化(SSR re-render / 路由切换)时,重新同步
+  // 主区滚动容器 ref(用于滚动位置持久化,issue 19c 验收 #5)
+  const mainScrollRef = useRef<HTMLDivElement>(null)
+
+  // 当 props.data.chunks 变化(SSR re-render / 路由切换)时,重新同步 active 会话 chunks
   const lastSyncedDataRef = useRef(data.chunks)
   useEffect(() => {
     if (lastSyncedDataRef.current !== data.chunks) {
       lastSyncedDataRef.current = data.chunks
-      setChunks(data.chunks)
+      setChunksBySessionId((prev) => ({ ...prev, [activeSessionId]: data.chunks }))
     }
-  }, [data.chunks])
+  }, [data.chunks, activeSessionId, setChunks])
 
   // -------------------------------------------------------------------------
   // SSE 订阅(issue 19b D2 ② 插话后 AI 推送新 chunk)
@@ -172,7 +235,7 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       es.removeEventListener('analysis_chunk', onAnalysisChunk)
       es.close()
     }
-  }, [data.requirementId])
+  }, [data.requirementId, setChunks])
 
   const totalChunks = chunks.length
   const products = deriveProducts(chunks)
@@ -184,6 +247,7 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   // -------------------------------------------------------------------------
   // 打字机推进(state machine,useEffect 唯一驱动)
   // 注意:依赖 chunks(而非 data.chunks),因为 chunks 是客户端可变副本
+  // 切换会话时 chunks 数组引用变化 → 重置 phase 从 idle 开始,打字机独立工作
   // -------------------------------------------------------------------------
   useEffect(() => {
     if (paused) return
@@ -269,6 +333,7 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
 
   // -------------------------------------------------------------------------
   // 插话提交(issue 19b D2 ②):POST /analysis/interject → SSE 推 chunk → useEffect 追加
+  // VS3:session_id 用当前 activeSessionId
   // -------------------------------------------------------------------------
   const handleInterject = useCallback(
     async (text: string) => {
@@ -279,7 +344,7 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ text, session_id: DEFAULT_SESSION_ID }),
+          body: JSON.stringify({ text, session_id: activeSessionId }),
         })
         if (!res.ok && res.status !== 202) {
           const errBody = (await res.json().catch(() => ({}))) as { reason?: string }
@@ -292,7 +357,118 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
         setInterjectSubmitting(false)
       }
     },
-    [data.requirementId],
+    [data.requirementId, activeSessionId],
+  )
+
+  // -------------------------------------------------------------------------
+  // SessionTabs 回调(issue 19c VS3)
+  // -------------------------------------------------------------------------
+
+  /** 切换会话:保存当前会话滚动位置 → 切换 activeSessionId → 恢复新会话滚动位置
+   * 打字机 phase 与 paused 状态**保留**(per-session 切换不应让 UI 跳变,但 chunks
+   * 引用已变 → phase.chunkIndex 会越界 → 自然落到 'idle' 重启,符合"独立工作"语义) */
+  const handleSwitchSession = useCallback(
+    (sessionId: string) => {
+      if (sessionId === activeSessionId) return
+      // 保存当前会话的滚动位置到 sessionStorage
+      const el = mainScrollRef.current
+      if (el && typeof window !== 'undefined') {
+        try {
+          window.sessionStorage.setItem(
+            scrollStorageKey(activeSessionId),
+            String(el.scrollTop),
+          )
+        } catch {
+          /* sessionStorage may be unavailable; ignore */
+        }
+      }
+      setActiveSessionId(sessionId)
+      // 重置打字机 phase(切换后会话的 chunks 长度/内容不同,phase 必须重置)
+      setPhase({ kind: 'idle' })
+      // 写入 cookie `last_session_id`,下次 SSR 默认值
+      if (typeof document !== 'undefined') {
+        document.cookie = `${LAST_SESSION_COOKIE}=${encodeURIComponent(sessionId)}; path=/; max-age=31536000; samesite=lax`
+      }
+      // 恢复新会话的滚动位置(下一次渲染后,从 mainScrollRef 读取并设置)
+      // 通过微任务延迟到 DOM 更新后再写 scrollTop
+      queueMicrotask(() => {
+        const nextEl = mainScrollRef.current
+        if (!nextEl || typeof window === 'undefined') return
+        try {
+          const saved = window.sessionStorage.getItem(scrollStorageKey(sessionId))
+          if (saved !== null) {
+            const n = Number(saved)
+            if (Number.isFinite(n)) nextEl.scrollTop = n
+          } else {
+            nextEl.scrollTop = 0
+          }
+        } catch {
+          /* ignore */
+        }
+      })
+    },
+    [activeSessionId],
+  )
+
+  /** 新建会话:追加到列表末尾,自动切到该会话 */
+  const handleCreateSession = useCallback(
+    (params: { label: string; angle: AnalysisSessionAngle }) => {
+      // 本 slice 仅前端 mock:生成稳定 id 后追加 + 切到新会话
+      // 后端落盘推迟到 VS5(analysis/sessions/_index.yaml 写入)
+      const newId = `sess-${params.angle}-${Date.now().toString(36)}`
+      const newSession: AnalysisSession = {
+        id: newId,
+        label: params.label,
+        angle: params.angle,
+        detectedCount: 0,
+        isStreaming: false,
+      }
+      setSessions((prev) => [...prev, newSession])
+      // 新会话初始 chunks = 空数组(与 empty 数据一致)
+      setChunksBySessionId((prev) => ({ ...prev, [newId]: [] }))
+      // 直接切到新会话(不调用 handleSwitchSession,因为旧会话无需存滚动位置)
+      setActiveSessionId(newId)
+      setPhase({ kind: 'idle' })
+      if (typeof document !== 'undefined') {
+        document.cookie = `${LAST_SESSION_COOKIE}=${encodeURIComponent(newId)}; path=/; max-age=31536000; samesite=lax`
+      }
+    },
+    [],
+  )
+
+  /** 关闭会话:从 sessions 中移除 + chunks map 中清理 + 自动切到邻居 */
+  const handleCloseSession = useCallback(
+    (sessionId: string) => {
+      if (sessions.length <= 1) return // 最后一个 Tab 不可关闭
+      const idx = sessions.findIndex((s) => s.id === sessionId)
+      if (idx < 0) return
+      const nextSessions = sessions.filter((s) => s.id !== sessionId)
+      setSessions(nextSessions)
+      // 清理 chunks map + sessionStorage
+      setChunksBySessionId((prev) => {
+        const next = { ...prev }
+        delete next[sessionId]
+        return next
+      })
+      if (typeof window !== 'undefined') {
+        try {
+          window.sessionStorage.removeItem(scrollStorageKey(sessionId))
+        } catch {
+          /* ignore */
+        }
+      }
+      // 如果关闭的就是 active → 切到邻居(关闭非首项用左邻居,关闭首项用新首项)
+      if (activeSessionId === sessionId) {
+        const neighborIdx = idx === 0 ? 0 : idx - 1
+        const neighbor = nextSessions[neighborIdx]
+        setActiveSessionId(neighbor.id)
+        setPhase({ kind: 'idle' })
+        if (typeof document !== 'undefined') {
+          document.cookie = `${LAST_SESSION_COOKIE}=${encodeURIComponent(neighbor.id)}; path=/; max-age=31536000; samesite=lax`
+        }
+      }
+    },
+    [sessions, activeSessionId],
   )
 
   // 派生:当前 chunk 已揭示的 chunk 数(包含正在打字的 chunk)
@@ -322,16 +498,28 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
         onTogglePause={() => setPaused((p) => !p)}
         onReset={reset}
       />
-      {/* issue 19a VS1 — 准入仪表板(顶部 5 维度卡 + verdict 徽章 + 待裁决 N) */}
+      {/* issue 19a VS1 — 准入仪表板(顶部 5 维度卡 + verdict 徽章 + 待裁决 N · 全局共享) */}
       <div className="px-6 pt-4">
         <AdmissionDashboard
           admission={currentAdmission}
           onAcceptRisk={() => setVerdictOverride('pending')}
         />
       </div>
+      {/* issue 19c VS3 — 多会话 Tab(横向浏览器风格,主区按 activeSessionId 切换) */}
+      <div className="mt-3">
+        <SessionTabs
+          sessions={sessions}
+          activeId={activeSessionId}
+          onSwitch={handleSwitchSession}
+          onCreate={handleCreateSession}
+          onClose={handleCloseSession}
+        />
+      </div>
       <div
+        ref={mainScrollRef}
         data-testid="analyzing-main"
-        className="flex-1 overflow-hidden px-6 py-6 flex flex-col gap-5"
+        data-active-session-id={activeSessionId}
+        className="flex-1 overflow-auto px-6 py-6 flex flex-col gap-5"
       >
         {/* 主区两列 grid + 底部插话条(issue 19b D2 ②) */}
         <div

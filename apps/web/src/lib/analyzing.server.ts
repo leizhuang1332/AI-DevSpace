@@ -30,11 +30,14 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type {
+  AnalysisSession,
+  AnalysisSessionAngle,
   AnalyzingChunk,
   AnalyzingData,
   SkillAdmissionFrontmatter,
 } from './analyzing'
 import {
+  ANALYSIS_SESSION_ANGLE_META,
   REFUND_ANALYZING,
   buildAdmissionData,
   emptyAnalyzing,
@@ -198,6 +201,16 @@ export async function getAnalyzingData(
 export interface GetAnalyzingDataOptions {
   skillFrontmatter?: SkillAdmissionFrontmatter
   analysisDir?: string
+  /**
+   * 需求 analysis/sessions/ 目录(读 _index.yaml + 各会话 chunks.jsonl)。
+   * 不传 → 走 mock(默认 1 个"架构"会话)。
+   */
+  analysisSessionsDir?: string
+  /**
+   * 上次访问的 active session id(cookie 注入)—— 优先级高于 sessions[0].id。
+   * 不存在或不在 sessions 列表中 → 退回到 sessions[0].id。
+   */
+  lastSessionId?: string
 }
 
 /**
@@ -214,6 +227,7 @@ function emptyAnalyzingWithOptions(
   const pending = options?.analysisDir
     ? countPendingAdjudications(options.analysisDir)
     : 0
+  const sessionsBundle = loadSessionsBundle(options?.analysisSessionsDir, options?.lastSessionId)
   return {
     ...emptyAnalyzing(requirementId),
     admission: buildAdmissionData({
@@ -221,5 +235,215 @@ function emptyAnalyzingWithOptions(
       pendingAdjudicationCount: pending,
       verdict: 'pending',
     }),
+    sessions: sessionsBundle.sessions,
+    activeSessionId: sessionsBundle.activeSessionId,
   }
+}
+
+// ---------------------------------------------------------------------------
+// 多会话(ADR-0013 D7 · issue 19c VS3)
+// ---------------------------------------------------------------------------
+
+/**
+ * 多会话加载结果:包含 sessions 列表 + 默认 activeSessionId。
+ *
+ * - 文件不存在 → 返回默认单会话 `{ id: 'default', label: '架构', angle: 'architecture', detectedCount: 0, isStreaming: false }`
+ * - 解析失败 → 同上(容错)
+ * - lastSessionId 命中 → activeSessionId = lastSessionId,否则 sessions[0].id
+ */
+export interface SessionsBundle {
+  sessions: AnalysisSession[]
+  activeSessionId: string
+}
+
+/**
+ * 默认单会话(issue 19c 验收 #13:文件不存在时返回 `{ id: 'default', label: '架构', ... }`)。
+ */
+export function defaultSessionsBundle(): SessionsBundle {
+  return {
+    sessions: [
+      {
+        id: 'default',
+        label: '架构',
+        angle: 'architecture',
+        detectedCount: 0,
+        isStreaming: false,
+      },
+    ],
+    activeSessionId: 'default',
+  }
+}
+
+/**
+ * 加载多会话数据:从 analysisSessionsDir/_index.yaml 读会话列表 + 解析默认 active。
+ *
+ * - sessionsDir 不存在 / _index.yaml 不存在 → 返回 defaultSessionsBundle()
+ * - _index.yaml 解析失败 → 返回 defaultSessionsBundle()(容错)
+ * - sessions 解析成功但数组为空 → 返回 defaultSessionsBundle()
+ * - lastSessionId 命中 sessions 中某项 → activeSessionId = lastSessionId
+ * - 否则 → activeSessionId = sessions[0].id
+ */
+export function loadSessionsBundle(
+  sessionsDir: string | undefined,
+  lastSessionId: string | undefined,
+): SessionsBundle {
+  const fallback = defaultSessionsBundle()
+  if (!sessionsDir) return fallback
+
+  const indexFile = join(sessionsDir, '_index.yaml')
+  if (!existsSync(indexFile)) return fallback
+
+  let raw: string
+  try {
+    raw = readFileSync(indexFile, 'utf8')
+  } catch {
+    return fallback
+  }
+  const sessions = parseSessionsIndexYaml(raw)
+  if (sessions.length === 0) return fallback
+
+  const active =
+    (lastSessionId && sessions.some((s) => s.id === lastSessionId)
+      ? sessions.find((s) => s.id === lastSessionId)
+      : null) ?? sessions[0]
+
+  return { sessions, activeSessionId: active.id }
+}
+
+/**
+ * 解析 analysis/sessions/_index.yaml —— 受限格式:
+ *
+ * ```yaml
+ * sessions:
+ *   - id: sess-default
+ *     label: 架构
+ *     angle: architecture
+ *     detected_count: 3
+ *     is_streaming: false
+ *     created_at: 2026-07-12T14:00:00+08:00
+ * ```
+ *
+ * 设计要点:
+ * - 极简解析器(只为这个受控格式):不引第三方依赖,解析失败返回 []
+ * - 字段缺失时给默认值(id 缺失 → 跳过该 entry;其他字段缺失 → 默认值)
+ * - angle 受 ANALYSIS_SESSION_ANGLE_META 约束,未知值回落到 'custom'
+ * - 单行解析失败 → 跳过该 entry,继续(避免一行脏数据毁全文件)
+ *
+ * 这是 constrcutive 的格式定义(由本仓库写入),不追求通用 YAML。
+ */
+export function parseSessionsIndexYaml(text: string): AnalysisSession[] {
+  if (!text.trim()) return []
+  const lines = text.split('\n')
+  const result: AnalysisSession[] = []
+  let inSessions = false
+  let current: Partial<AnalysisSession> | null = null
+
+  const flush = () => {
+    if (current && typeof current.id === 'string') {
+      result.push({
+        id: current.id,
+        label: typeof current.label === 'string' ? current.label : current.id,
+        angle:
+          typeof current.angle === 'string' &&
+          current.angle in ANALYSIS_SESSION_ANGLE_META
+            ? (current.angle as AnalysisSessionAngle)
+            : 'custom',
+        detectedCount:
+          typeof current.detectedCount === 'number' ? current.detectedCount : 0,
+        isStreaming: Boolean(current.isStreaming),
+      })
+    }
+    current = null
+  }
+
+  for (const line of lines) {
+    // 去除尾注 + 注释
+    const cleaned = line.replace(/#.*$/, '')
+    if (!cleaned.trim()) continue
+
+    // top-level key: "sessions:"
+    const topMatch = /^([A-Za-z_][\w-]*)\s*:\s*$/.exec(cleaned)
+    if (topMatch) {
+      flush()
+      inSessions = topMatch[1] === 'sessions'
+      continue
+    }
+
+    // list 起点:"  - key: val" 或 "  - key: val"
+    const listStart = /^\s*-\s+/.exec(cleaned)
+    if (listStart && inSessions) {
+      flush()
+      // 可能同一行有首个 key
+      const afterDash = cleaned.slice(listStart[0].length).trim()
+      current = {}
+      if (afterDash) {
+        const kv = /^([A-Za-z_][\w-]*)\s*:\s*(.*)$/.exec(afterDash)
+        if (kv) assignField(current, kv[1], kv[2])
+      }
+      continue
+    }
+
+    // list 项内字段:"    key: val"
+    if (current && inSessions) {
+      const kv = /^\s+([A-Za-z_][\w-]*)\s*:\s*(.*)$/.exec(cleaned)
+      if (kv) {
+        assignField(current, kv[1], kv[2])
+        continue
+      }
+    }
+  }
+  flush()
+  return result
+}
+
+/**
+ * 解析 `_index.yaml` 单字段 → 写入 current 对象。
+ *
+ * - `id` / `label` / `angle` → 字符串(去除引号)
+ * - `detected_count` / `is_streaming` → 推断类型(detectedCount: number,isStreaming: bool)
+ * - 其他字段(例如 `created_at`)→ 忽略(本 slice 不用)
+ */
+function assignField(
+  current: Partial<AnalysisSession>,
+  key: string,
+  rawValue: string,
+): void {
+  const value = stripQuotes(rawValue.trim())
+  switch (key) {
+    case 'id':
+      current.id = value
+      return
+    case 'label':
+      current.label = value
+      return
+    case 'angle':
+      current.angle = value as AnalysisSessionAngle
+      return
+    case 'detected_count':
+      current.detectedCount = parseIntOr(value, 0)
+      return
+    case 'is_streaming':
+      current.isStreaming = value === 'true'
+      return
+    default:
+      return
+  }
+}
+
+/** 去除字符串两端单/双引号(用于 `"foo"` / `'foo'` 形式) */
+function stripQuotes(s: string): string {
+  if (s.length >= 2) {
+    const first = s[0]
+    const last = s[s.length - 1]
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+      return s.slice(1, -1)
+    }
+  }
+  return s
+}
+
+/** 解析整数,失败 → fallback */
+function parseIntOr(s: string, fallback: number): number {
+  const n = Number(s)
+  return Number.isFinite(n) ? Math.trunc(n) : fallback
 }

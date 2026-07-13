@@ -14,6 +14,9 @@ import {
   getAnalyzingData,
   countPendingAdjudications,
   loadSessionChunks,
+  loadSessionsBundle,
+  parseSessionsIndexYaml,
+  defaultSessionsBundle,
 } from '@/lib/analyzing.server'
 
 // ============================================================================
@@ -606,5 +609,336 @@ describe('getAnalyzingData · admission 段', () => {
     })
     expect(data.admission.dimensions.map((d) => d.id)).not.toContain('business_reasonable')
     expect(data.admission.dimensions).toHaveLength(4)
+  })
+})
+
+// ============================================================================
+// parseSessionsIndexYaml — 多会话 _index.yaml 解析(issue 19c 验收 #13)
+// ============================================================================
+
+describe('parseSessionsIndexYaml', () => {
+  it('空字符串 → 空数组', () => {
+    expect(parseSessionsIndexYaml('')).toEqual([])
+  })
+
+  it('解析多会话条目:id / label / angle / detected_count / is_streaming', () => {
+    const yaml = [
+      'sessions:',
+      '  - id: sess-default',
+      '    label: 架构',
+      '    angle: architecture',
+      '    detected_count: 3',
+      '    is_streaming: false',
+      '    created_at: 2026-07-12T14:00:00+08:00',
+      '  - id: sess-data',
+      '    label: 数据',
+      '    angle: data',
+      '    detected_count: 5',
+      '    is_streaming: true',
+      '    created_at: 2026-07-12T14:10:00+08:00',
+    ].join('\n')
+    const sessions = parseSessionsIndexYaml(yaml)
+    expect(sessions).toHaveLength(2)
+    expect(sessions[0]).toEqual({
+      id: 'sess-default',
+      label: '架构',
+      angle: 'architecture',
+      detectedCount: 3,
+      isStreaming: false,
+    })
+    expect(sessions[1]).toEqual({
+      id: 'sess-data',
+      label: '数据',
+      angle: 'data',
+      detectedCount: 5,
+      isStreaming: true,
+    })
+  })
+
+  it('id 缺失的条目 → 跳过(其余正常)', () => {
+    const yaml = [
+      'sessions:',
+      '  - label: 漏 id',
+      '    angle: custom',
+      '  - id: sess-ok',
+      '    label: 正常',
+      '    angle: data',
+    ].join('\n')
+    const sessions = parseSessionsIndexYaml(yaml)
+    expect(sessions).toHaveLength(1)
+    expect(sessions[0].id).toBe('sess-ok')
+  })
+
+  it('未声明字段用默认值(label 缺失 → id;angle 未知 → custom;detectedCount 缺失 → 0;isStreaming 缺失 → false)', () => {
+    const yaml = [
+      'sessions:',
+      '  - id: sess-min',
+    ].join('\n')
+    const sessions = parseSessionsIndexYaml(yaml)
+    expect(sessions).toHaveLength(1)
+    expect(sessions[0]).toEqual({
+      id: 'sess-min',
+      label: 'sess-min',
+      angle: 'custom',
+      detectedCount: 0,
+      isStreaming: false,
+    })
+  })
+
+  it('注释行(以 # 开头)被忽略', () => {
+    const yaml = [
+      '# 这是注释',
+      'sessions:',
+      '  # 会话 1',
+      '  - id: sess-a',
+      '    label: A # 行尾注释',
+      '    angle: data',
+      '  - id: sess-b',
+      '    label: B',
+      '    angle: architecture',
+    ].join('\n')
+    const sessions = parseSessionsIndexYaml(yaml)
+    expect(sessions.map((s) => s.id)).toEqual(['sess-a', 'sess-b'])
+    expect(sessions[0].label).toBe('A')
+  })
+
+  it('字符串值带双引号 → 去除引号', () => {
+    const yaml = [
+      'sessions:',
+      '  - id: "sess-q"',
+      '    label: \'带引号\'',
+      '    angle: data',
+    ].join('\n')
+    const sessions = parseSessionsIndexYaml(yaml)
+    expect(sessions[0].id).toBe('sess-q')
+    expect(sessions[0].label).toBe('带引号')
+  })
+})
+
+// ============================================================================
+// loadSessionsBundle — sessions/_index.yaml 加载(issue 19c 验收 #13)
+// ============================================================================
+
+describe('loadSessionsBundle', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'analyzing-sessions-bundle-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('sessionsDir 未传 → 返回默认单会话 (id=default,label=架构)', () => {
+    const bundle = loadSessionsBundle(undefined, undefined)
+    expect(bundle).toEqual({
+      sessions: [
+        {
+          id: 'default',
+          label: '架构',
+          angle: 'architecture',
+          detectedCount: 0,
+          isStreaming: false,
+        },
+      ],
+      activeSessionId: 'default',
+    })
+  })
+
+  it('sessionsDir 不存在 → 返回默认单会话', () => {
+    const bundle = loadSessionsBundle('/nonexistent/path', undefined)
+    expect(bundle.sessions).toHaveLength(1)
+    expect(bundle.activeSessionId).toBe('default')
+  })
+
+  it('_index.yaml 文件不存在 → 返回默认单会话', () => {
+    const bundle = loadSessionsBundle(tmpDir, undefined)
+    expect(bundle.sessions).toHaveLength(1)
+    expect(bundle.activeSessionId).toBe('default')
+  })
+
+  it('_index.yaml 解析失败 → 返回默认单会话(容错)', () => {
+    writeFileSync(join(tmpDir, '_index.yaml'), ':::broken:::')
+    const bundle = loadSessionsBundle(tmpDir, undefined)
+    expect(bundle.sessions).toHaveLength(1)
+    expect(bundle.activeSessionId).toBe('default')
+  })
+
+  it('_index.yaml sessions 数组为空 → 返回默认单会话', () => {
+    writeFileSync(join(tmpDir, '_index.yaml'), 'sessions: []\n')
+    const bundle = loadSessionsBundle(tmpDir, undefined)
+    expect(bundle.sessions).toHaveLength(1)
+    expect(bundle.activeSessionId).toBe('default')
+  })
+
+  it('_index.yaml 含 3 个会话 → activeSessionId = sessions[0].id(无 cookie)', () => {
+    const yaml = [
+      'sessions:',
+      '  - id: sess-a',
+      '    label: A',
+      '    angle: architecture',
+      '  - id: sess-b',
+      '    label: B',
+      '    angle: data',
+      '  - id: sess-c',
+      '    label: C',
+      '    angle: interface',
+    ].join('\n')
+    writeFileSync(join(tmpDir, '_index.yaml'), yaml)
+    const bundle = loadSessionsBundle(tmpDir, undefined)
+    expect(bundle.sessions.map((s) => s.id)).toEqual(['sess-a', 'sess-b', 'sess-c'])
+    expect(bundle.activeSessionId).toBe('sess-a')
+  })
+
+  it('lastSessionId 命中 sessions 列表 → activeSessionId = lastSessionId(覆盖 sessions[0])', () => {
+    const yaml = [
+      'sessions:',
+      '  - id: sess-a',
+      '    label: A',
+      '  - id: sess-b',
+      '    label: B',
+      '  - id: sess-c',
+      '    label: C',
+    ].join('\n')
+    writeFileSync(join(tmpDir, '_index.yaml'), yaml)
+    const bundle = loadSessionsBundle(tmpDir, 'sess-c')
+    expect(bundle.activeSessionId).toBe('sess-c')
+  })
+
+  it('lastSessionId 不在 sessions 列表中 → 回退 sessions[0].id', () => {
+    const yaml = [
+      'sessions:',
+      '  - id: sess-a',
+      '    label: A',
+      '  - id: sess-b',
+      '    label: B',
+    ].join('\n')
+    writeFileSync(join(tmpDir, '_index.yaml'), yaml)
+    const bundle = loadSessionsBundle(tmpDir, 'sess-deleted')
+    expect(bundle.activeSessionId).toBe('sess-a')
+  })
+})
+
+// ============================================================================
+// defaultSessionsBundle — 默认单会话
+// ============================================================================
+
+describe('defaultSessionsBundle', () => {
+  it('返回 id=default / label=架构 / angle=architecture 的单会话 + active=default', () => {
+    expect(defaultSessionsBundle()).toEqual({
+      sessions: [
+        {
+          id: 'default',
+          label: '架构',
+          angle: 'architecture',
+          detectedCount: 0,
+          isStreaming: false,
+        },
+      ],
+      activeSessionId: 'default',
+    })
+  })
+})
+
+// ============================================================================
+// getAnalyzingData — sessions 段集成(issue 19c 验收 #13)
+// ============================================================================
+
+describe('getAnalyzingData · sessions 段', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'analyzing-get-sessions-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('未传 analysisSessionsDir → 默认单会话 [架构]', async () => {
+    const data = await getAnalyzingData('UNKNOWN-SESS-1')
+    expect(data.sessions).toEqual([
+      {
+        id: 'default',
+        label: '架构',
+        angle: 'architecture',
+        detectedCount: 0,
+        isStreaming: false,
+      },
+    ])
+    expect(data.activeSessionId).toBe('default')
+  })
+
+  it('传 analysisSessionsDir 但 _index.yaml 不存在 → 默认单会话 [架构]', async () => {
+    const data = await getAnalyzingData('UNKNOWN-SESS-2', { analysisSessionsDir: tmpDir })
+    expect(data.sessions).toHaveLength(1)
+    expect(data.activeSessionId).toBe('default')
+  })
+
+  it('传 analysisSessionsDir + 有效 _index.yaml → 解析为多 sessions', async () => {
+    writeFileSync(
+      join(tmpDir, '_index.yaml'),
+      [
+        'sessions:',
+        '  - id: sess-arch',
+        '    label: 架构',
+        '    angle: architecture',
+        '    detected_count: 3',
+        '    is_streaming: false',
+        '  - id: sess-data',
+        '    label: 数据',
+        '    angle: data',
+        '    detected_count: 5',
+        '    is_streaming: true',
+      ].join('\n'),
+    )
+    const data = await getAnalyzingData('UNKNOWN-SESS-3', { analysisSessionsDir: tmpDir })
+    expect(data.sessions).toHaveLength(2)
+    expect(data.sessions[0]).toMatchObject({ id: 'sess-arch', angle: 'architecture' })
+    expect(data.sessions[1]).toMatchObject({ id: 'sess-data', detectedCount: 5, isStreaming: true })
+  })
+
+  it('lastSessionId 命中 → activeSessionId = lastSessionId', async () => {
+    writeFileSync(
+      join(tmpDir, '_index.yaml'),
+      [
+        'sessions:',
+        '  - id: sess-a',
+        '    label: A',
+        '  - id: sess-b',
+        '    label: B',
+      ].join('\n'),
+    )
+    const data = await getAnalyzingData('UNKNOWN-SESS-4', {
+      analysisSessionsDir: tmpDir,
+      lastSessionId: 'sess-b',
+    })
+    expect(data.activeSessionId).toBe('sess-b')
+  })
+
+  it('lastSessionId 不命中 → 回退 sessions[0].id', async () => {
+    writeFileSync(
+      join(tmpDir, '_index.yaml'),
+      [
+        'sessions:',
+        '  - id: sess-a',
+        '    label: A',
+        '  - id: sess-b',
+        '    label: B',
+      ].join('\n'),
+    )
+    const data = await getAnalyzingData('UNKNOWN-SESS-5', {
+      analysisSessionsDir: tmpDir,
+      lastSessionId: 'sess-deleted',
+    })
+    expect(data.activeSessionId).toBe('sess-a')
+  })
+
+  it('req-001 mock → sessions 含 3 个会话(架构/数据/接口),activeSessionId = sess-data', async () => {
+    const data = await getAnalyzingData('req-001')
+    expect(data.sessions).toHaveLength(3)
+    expect(data.sessions.map((s) => s.id)).toEqual(['sess-arch', 'sess-data', 'sess-interface'])
+    expect(data.activeSessionId).toBe('sess-data')
   })
 })

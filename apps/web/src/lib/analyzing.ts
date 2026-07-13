@@ -233,7 +233,52 @@ export interface SkillAdmissionFrontmatter {
   }
 }
 
-/** ANALYZING 工位顶层数据 */
+// ---------------------------------------------------------------------------
+// 多会话(ADR-0013 D7 · issue 19c VS3)
+// ---------------------------------------------------------------------------
+
+/** 会话分析角度(决定 SessionTabs 默认标签 / icon) */
+export type AnalysisSessionAngle = 'architecture' | 'data' | 'interface' | 'custom'
+
+/**
+ * ANALYZING 单个会话(对应 SessionTabs 的一个 Tab)
+ *
+ * - id:会话唯一标识(对应 `analysis/sessions/<id>/chunks.jsonl`)
+ * - label:用户可见的会话名(默认按 angle 给出:"架构" / "数据" / "接口";自定义会话 = 用户输入)
+ * - angle:分析角度,影响默认 icon 与排序
+ * - detectedCount:已识别子问题数(Tab 数字徽章)
+ * - isStreaming:会话是否仍在流式生成(决定徽章上的 "运行中" 标识)
+ */
+export interface AnalysisSession {
+  id: string
+  label: string
+  angle: AnalysisSessionAngle
+  detectedCount: number
+  isStreaming: boolean
+}
+
+/** 会话角度默认元数据(issue 19c · 给 SessionTabs 用作 icon) */
+export const ANALYSIS_SESSION_ANGLE_META: Record<
+  AnalysisSessionAngle,
+  { label: string; icon: string }
+> = {
+  architecture: { label: '架构', icon: '📐' },
+  data: { label: '数据', icon: '💾' },
+  interface: { label: '接口', icon: '🔌' },
+  custom: { label: '自定义', icon: '✨' },
+}
+
+/**
+ * ANALYZING 工位顶层数据
+ *
+ * ADR-0013 D2 ① / D4 / D7 对齐:
+ * - admission(19a VS1 准入仪表板 5 维度)
+ * - sessions / activeSessionId(19c VS3 多会话 Tab)
+ * - chunks(当前 active 会话思考流,VS2 打字机)
+ *
+ * 不破坏原"观察屏"接口(chunks / stats / summary / toolbar)——下游组件改造
+ * 内部实现即可,数据契约向后兼容。
+ */
 export interface AnalyzingData {
   requirementId: string
   toolbar: AnalyzingToolbar
@@ -246,6 +291,10 @@ export interface AnalyzingData {
   empty: boolean
   /** 准入仪表板(issue 19a VS1 新增) */
   admission: AdmissionData
+  /** 多会话列表(issue 19c VS3 新增,Tab 切换的数据源) */
+  sessions: AnalysisSession[]
+  /** 当前 active 会话 id(issue 19c VS3 新增,主区按此过滤) */
+  activeSessionId: string
 }
 
 // ---------------------------------------------------------------------------
@@ -298,6 +347,8 @@ export function emptyAnalyzing(requirementId: string): AnalyzingData {
     stats: { subproblems: 0, risks: 0, options: 0, total: 0 },
     admission: buildAdmissionData({}),
     empty: true,
+    sessions: [],
+    activeSessionId: '',
   }
 }
 
@@ -576,6 +627,31 @@ export const REFUND_ANALYZING: Omit<AnalyzingData, 'requirementId'> = {
     pendingAdjudicationCount: 10,
     verdict: 'fail',
   }),
+  // issue 19c VS3 — 多会话样例(架构 / 数据 / 接口 3 个 Tab,主区显示"数据"会话)
+  sessions: [
+    {
+      id: 'sess-arch',
+      label: '架构',
+      angle: 'architecture',
+      detectedCount: 3,
+      isStreaming: false,
+    },
+    {
+      id: 'sess-data',
+      label: '数据',
+      angle: 'data',
+      detectedCount: 5,
+      isStreaming: true,
+    },
+    {
+      id: 'sess-interface',
+      label: '接口',
+      angle: 'interface',
+      detectedCount: 8,
+      isStreaming: false,
+    },
+  ],
+  activeSessionId: 'sess-data',
 }
 
 // 注:`getAnalyzingData` 与 `GetAnalyzingDataOptions` 已搬到 `analyzing.server.ts`。

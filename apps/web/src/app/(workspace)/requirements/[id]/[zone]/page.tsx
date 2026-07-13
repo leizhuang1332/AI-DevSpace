@@ -1,3 +1,4 @@
+import { cookies } from 'next/headers'
 import { notFound } from 'next/navigation'
 import {
   getZoneByRouteSegment,
@@ -85,8 +86,14 @@ export default async function ZonePage({
 
   // ANALYZING 工位(issue 19):Thinking 大屏 + 打字机思考流
   // 主区全宽(zone.has_resource_tree = false, has_inline_rail = false → grid-cols-1)
+  // VS3 多会话(issue 19c):activeSessionId 默认值 = cookie `last_session_id`
+  // (客户端切 Tab 时写入;SSR 通过 cookies() 注入)
   if (zone.id === 'analyzing') {
-    const data = await getAnalyzingData(params.id)
+    const cookieStore = cookies()
+    const lastSessionId = cookieStore.get('last_session_id')?.value
+    const data = await getAnalyzingData(params.id, {
+      ...(lastSessionId ? { lastSessionId } : {}),
+    })
     return (
       <ZoneShell id={params.id} zone={zone}>
         <AnalyzingZone data={data} />
