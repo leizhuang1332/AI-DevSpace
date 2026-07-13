@@ -151,10 +151,10 @@ Content-Type: application/json
 ```ts
 export type ExecutingAiStatus =
   | { kind: 'idle' }
-  | { kind: 'running' }
-  | { kind: 'retrying'; category: 'A' | 'C' | 'D'; retry: number; maxRetries: number; delayMs: number }
-  | { kind: 'failed'; category: 'A' | 'B' | 'C' | 'D' | 'E'; code: string; message: string }
-  | { kind: 'cancelled'; reason: string }
+  | { kind: 'running'; startedAt: string }
+  | { kind: 'retrying'; category: 'A' | 'C' | 'D'; retry: number; maxRetries: number; delayMs: number; startedAt: string }
+  | { kind: 'failed'; category: 'A' | 'B' | 'C' | 'D' | 'E'; code: string; message: string; failedAt: string }
+  | { kind: 'cancelled'; reason: string; cancelledAt: string }
 
 export interface UseExecutingSseOptions {
   reqId: string
@@ -164,18 +164,35 @@ export interface UseExecutingSseOptions {
 
 export function useExecutingSse(opts: UseExecutingSseOptions): {
   status: ExecutingAiStatus
-  retry: () => Promise<void>
+  retry: () => Promise<void>  // 抛出错误时由调用方 push toast
   cancel: () => Promise<void>  // 本期 no-op,return undefined
 }
 ```
 
+**reducer 状态转换表**(显式):
+
+| 当前状态 | 收到事件 | 下一状态 |
+| --- | --- | --- |
+| `idle` | `running` 标志(本期由父组件在 `send()` 触发时设置) | `running` |
+| `running` | SSE `retrying` | `retrying` |
+| `running` | SSE `query_succeeded` 或 `done{reason:'end_turn'}` | `idle` |
+| `running` | SSE `query_failed` 或 `done{reason:'error'}` | `failed` |
+| `running` | SSE `done{reason:'cancelled'}` | `cancelled` |
+| `retrying` | SSE `retrying`(后续重试) | `retrying`(更新 retry/maxRetries) |
+| `retrying` | SSE `query_succeeded` | `idle` |
+| `retrying` | SSE `query_failed` | `failed` |
+| `retrying` | SSE `done{reason:'cancelled'}` | `cancelled` |
+| `failed` | 用户点重试(调用 `retry()` 成功后) | `running`(新 runId) |
+| `cancelled` | 用户点重试(调用 `retry()` 成功后) | `running`(新 runId) |
+| 任意 | 事件 `runId` 与当前不匹配 | **丢弃**(防 stale) |
+
 **实现要点**:
+
 - 内部 `useReducer`,初始 `{ kind: 'idle' }`
 - `enabled && sessionId` 时 `new EventSource(...)`,cleanup 时 `close()`
-- reducer 收到的事件 → status 转换(见 §4.2 时序图)
-- `retry()` → `fetch POST /sessions/:sid/retry`,5s 超时,失败 toast「重试请求失败」
+- `retry()` 内部:`fetch POST /sessions/:sid/retry`(5s 超时);成功 → 旧 EventSource close → 新 EventSource open → reducer 收新 runId 事件;**失败抛 Error,由调用方 push `err` tone toast「重试请求失败」**(hook 不直接管 toast)
 - 严格 cleanup 顺序:旧 EventSource close → 新 EventSource open,避免双重订阅
-- 旧 `runId` 的迟到事件丢弃(防 stale)
+- 旧 `runId` 的迟到事件丢弃(防 stale,见转换表最后一行)
 
 ### 3.6 Web:`components/toast.tsx` + `toast-host.tsx`
 
@@ -233,30 +250,80 @@ function AIEventColumn({ events, cancelledAt }: { events: AIEvent[]; cancelledAt
 **ExecutingZone 顶层接线**:
 ```ts
 export function ExecutingZone({ data }: { data: ExecutingData }) {
-  const sessionId = data.sessionId  // 来自 props(本期先用 mock,真实接入下一 slice)
-  const reqId = data.requirementId
+  // ExecutingData 扩展(本期 spec 内做):
+  //   - 新增可选字段 sessionId?: string | null(本期 server 端注入;
+  //     真实接线下一 slice 由 RSC 拉取 SessionStore 填充;无值时退化为 null,
+  //     useExecutingSse 内部不订阅,UI 徽章/按钮退化为初始 idle)
+  //   - 新增可选字段 reqId?: string(默认取 data.requirementId)
+  const sessionId = data.sessionId ?? null
+  const reqId = data.reqId ?? data.requirementId
   const { status, retry } = useExecutingSse({ reqId, sessionId, enabled: true })
   const [toasts, setToasts] = useState<ToastItem[]>([])
 
-  // status 变化时推 toast(retrying 进入时)
+  // status 变化时推 toast:retrying 进入时
   useEffect(() => {
     if (status.kind === 'retrying') {
-      setToasts((cur) => [...cur, { id: crypto.randomUUID(), message: `⚠️ 连接异常,重试中 ${status.retry}/${status.maxRetries}`, tone: 'warn', durationMs: 3000 }])
+      setToasts((cur) => [
+        ...cur,
+        {
+          id: crypto.randomUUID(),
+          message: `⚠️ 连接异常,重试中 ${status.retry}/${status.maxRetries}`,
+          tone: 'warn',
+          durationMs: 3000,
+        },
+      ])
     }
   }, [status])
+
+  // 重试按钮包装:失败时 push err toast
+  const handleRetry = useCallback(async () => {
+    try {
+      await retry()
+    } catch (err) {
+      setToasts((cur) => [
+        ...cur,
+        {
+          id: crypto.randomUUID(),
+          message: `❌ 重试请求失败:${err instanceof Error ? err.message : String(err)}`,
+          tone: 'err',
+          durationMs: 5000,
+        },
+      ])
+    }
+  }, [retry])
 
   return (
     <main>
       <StageStrip stage={data.stage} status={status} />
-      <Toolbar toolbar={data.toolbar} onRetry={retry} canRetry={status.kind === 'failed'} />
+      <Toolbar toolbar={data.toolbar} onRetry={handleRetry} canRetry={status.kind === 'failed'} />
       <div>
         <DagColumn ... />
         <DiffColumn ... />
-        <AIEventColumn events={data.aiEvents} cancelledAt={status.kind === 'cancelled' ? status.reason : null} />
+        <AIEventColumn
+          events={data.aiEvents}
+          cancelledAt={status.kind === 'cancelled' ? status.cancelledAt : null}
+        />
       </div>
-      <ToastHost items={toasts} onDismiss={(id) => setToasts((cur) => cur.filter(t => t.id !== id))} />
+      <ToastHost items={toasts} onDismiss={(id) => setToasts((cur) => cur.filter((t) => t.id !== id))} />
     </main>
   )
+}
+```
+
+**ExecutingData 扩展的 type 改动**(`apps/web/src/lib/executing.ts`):
+```ts
+export interface ExecutingData {
+  // ... 既有字段保持不变
+  requirementId: string
+  empty: boolean
+  stage: StageData
+  toolbar: ToolbarData
+  dag: { tasks: DagTask[]; block: { title: string; meta: string } }
+  diff: { files: DiffFile[]; cumulativeText: string }
+  aiEvents: AIEvent[]
+  // 本期新增(可选):
+  sessionId?: string | null  // null = 还没启动 query;undefined = mock 数据
+  reqId?: string             // 默认从 requirementId 取
 }
 ```
 
@@ -264,7 +331,7 @@ export function ExecutingZone({ data }: { data: ExecutingData }) {
 
 ### 4.1 失败重试完整路径
 
-```
+```text
 时间轴
 ─────────────────────────────────────────────────────────────────────
 Web                          Agent                          SDK
@@ -319,7 +386,7 @@ POST /sessions/s-123/retry  →                                │
 
 ### 4.2 取消路径(cancelled 终态可被消费,UI 不主动触发)
 
-```
+```text
                               ← AISession.cancel()(其他入口,如 SDK timeout)
                               ← internalController.abort()
                               ← classifyError → 'cancelled'
