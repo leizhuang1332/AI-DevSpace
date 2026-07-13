@@ -1,0 +1,44 @@
+apps/agent/src/log/SessionLogger.ts
+  s_5ecfdb591ee8af::t_80e568221c9bf6 1-64,67-70,76-127
+  s_5ecfdb591ee8af::t_3db65486d8e642 65-66,71-75
+.superpowers/sdd/task-4-report.md
+  s_5ecfdb591ee8af::t_0fcd175d014f80 1-52
+apps/agent/src/__tests__/SessionLogger.test.ts
+  s_5ecfdb591ee8af::t_e07b2fbc90e90f 1-76
+apps/agent/src/__tests__/GlobalLogger.test.ts
+  s_5ecfdb591ee8af::t_57cb4054450662 1-55
+apps/agent/src/log/GlobalLogger.ts
+  s_5ecfdb591ee8af::t_55abf636ac0a4a 1-47
+apps/agent/src/__tests__/SessionStore.test.ts
+  s_d450b22fdfea66::t_139ad7150a569f 115-126
+apps/agent/src/__tests__/sessionPaths.test.ts
+  s_d450b22fdfea66::t_df27d95cddae5e 18,46-51
+apps/agent/src/session/SessionStore.ts
+  s_d450b22fdfea66::t_52e56d0b72cabd 54-55
+apps/agent/src/session/sessionPaths.ts
+  s_d450b22fdfea66::t_2a461725639105 39-43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "ad6616a8b06fb1af83ee8e13e285f3d4c5d835dc",
+  "prompts": {},
+  "sessions": {
+    "s_5ecfdb591ee8af": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "217fbfe9-6c93-48f5-afca-a64a3dc1ee05",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    },
+    "s_d450b22fdfea66": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a72e20491d592d22d",
+        "model": "unknown"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
