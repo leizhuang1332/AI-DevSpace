@@ -1,0 +1,19 @@
+docs/superpowers/plans/2026-07-13-p4-error-ui-surface-plan.md
+  s_a2a637ad44d5a7::t_e3f318648c102c 1-2041
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "b65bef607fd530aedf811f718837beb195813307",
+  "prompts": {},
+  "sessions": {
+    "s_a2a637ad44d5a7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6333dd15-1461-436c-9d27-b958c9dce262",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
