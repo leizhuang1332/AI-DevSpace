@@ -13,6 +13,8 @@ import {
   type AnalyzingToolbarAction,
   type AdmissionVerdict,
 } from '@/lib/analyzing'
+import type { ProductChange } from '@/lib/products'
+import { updateProduct } from '@/lib/products-actions'
 import { EmptyState } from './empty-state'
 import { AdmissionDashboard } from './admission-dashboard'
 import { SessionTabs } from './session-tabs'
@@ -361,6 +363,22 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   )
 
   // -------------------------------------------------------------------------
+  // 产物变更(issue 19d VS4):Server Action updateProduct → 写 products.yaml →
+  // revalidatePath 触发 admission / products 刷新
+  // -------------------------------------------------------------------------
+  const [productError, setProductError] = useState<string | null>(null)
+  const handleProductAction = useCallback(
+    async (change: ProductChange) => {
+      setProductError(null)
+      const result = await updateProduct(data.requirementId, activeSessionId, change)
+      if (!result.ok) {
+        setProductError(result.error)
+      }
+    },
+    [data.requirementId, activeSessionId],
+  )
+
+  // -------------------------------------------------------------------------
   // SessionTabs 回调(issue 19c VS3)
   // -------------------------------------------------------------------------
 
@@ -538,7 +556,7 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
           >
             <Summary summary={data.summary} stats={data.stats} />
             <div className="flex-1 min-h-0">
-              <ProductList products={products} />
+              <ProductList products={products} onAction={handleProductAction} />
             </div>
           </div>
         </div>
@@ -549,6 +567,15 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
             className="text-sm text-error bg-error/10 border border-error rounded-md px-3 py-2"
           >
             插话失败:{interjectError}
+          </div>
+        )}
+        {productError && (
+          <div
+            data-testid="product-error"
+            role="alert"
+            className="text-sm text-error bg-error/10 border border-error rounded-md px-3 py-2"
+          >
+            产物编辑失败:{productError}
           </div>
         )}
         <InterjectInput

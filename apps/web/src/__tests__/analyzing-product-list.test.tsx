@@ -135,8 +135,9 @@ describe('ProductList · 空态', () => {
 // ============================================================================
 
 describe('ProductList · 只读约束', () => {
-  it('卡片无 ✏️ / 🗑 / 合并 / + 编辑按钮(等 VS4)', () => {
-    render(<ProductList products={sampleGroup()} />)
+  it('editable=false 时,卡片无 ✏️ / 🗑 / 合并 / + 编辑按钮(显式只读模式)', () => {
+    // VS4 起 ProductList 默认 editable=true;此处显式传 false 验证"只读回退路径"
+    render(<ProductList products={sampleGroup()} editable={false} />)
     // 整张列表不应出现"编辑"/"删除"/"合并"/"新增"等按钮文案
     const root = screen.getByTestId('product-list')
     expect(root.textContent).not.toContain('编辑')
