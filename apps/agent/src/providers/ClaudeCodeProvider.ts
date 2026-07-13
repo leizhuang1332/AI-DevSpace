@@ -125,80 +125,85 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
   }
 
   /**
-   * 解析 model —— Q9.1:
-   *   1. opts.model 存在? → 查 (providerId, role) → model id
-   *   2. 否则 → ProviderIndex.models.main (current provider)
-   * 解析失败 → throw (上层决定 fallback 还是 4xx)
+   * 解析 model id —— Q9.1:
+   *   1. selection 存在? → 查 (providerId, role) → model id;provider 不存在或 role 没配 → fallback
+   *   2. selection 缺失 / fallback → current provider.models.main
+   * 失败 → 返回 null(让 SDK 自己默认)
    */
-  function resolveModel(selection: ModelSelection | undefined): ProviderIndex | undefined {
-    if (!selection) {
-      const current = ccSwitch.getCurrent()
-      if (!current) return undefined
-      return current
+  function resolveModelId(selection: ModelSelection | undefined): string | null {
+    let provider: ProviderIndex | undefined
+    if (selection) {
+      provider = ccSwitch.getById(selection.providerId) ?? undefined
     }
-    const p = ccSwitch.getById(selection.providerId)
-    if (!p) return undefined
-    const modelId = p.models[selection.role]
-    if (!modelId) return undefined
-    return p
+    if (!provider) {
+      provider = ccSwitch.getCurrent() ?? undefined
+    }
+    if (!provider) return null
+    if (selection) {
+      const roleModel = provider.models[selection.role]
+      if (roleModel) return roleModel
+    }
+    return provider.models.main ?? null
   }
 
   /**
-   * SdkAdapter:包装 SDK query()。
-   * - model 从 opts / current provider 解析;SDK 接受 role 名 或 model id (spike A1/A2 已验证)
+   * 构造 per-session SdkAdapter —— 闭包捕获该 session 已解析的 modelId。
+   * - model 从 selection 解析(Q9.1);空时 fallback 到 'sonnet'
    * - cwd 透传;P0 默认 process.cwd()
    * - resume 透传 sdkSessionId (Q3)
    * - abortController 由 signal 包出 (Q8.2)
    * - appendSystemPrompt(Q5.1) + hooks(Q6.1) 由 AISession.send 阶段计算后透传
    */
-  const adapter: SdkAdapter = {
-    async *runTurn({ prompt, resume, appendSystemPrompt, signal }): AsyncIterable<SdkMessageEnvelope> {
-      const q = await getQuery()
+  function buildAdapter(sessionModelId: string | null): SdkAdapter {
+    return {
+      async *runTurn({ prompt, resume, appendSystemPrompt, signal }): AsyncIterable<SdkMessageEnvelope> {
+        const q = await getQuery()
 
-      // 构造 SDK Options —— 用 model + (optional) resume + cwd + env (baseUrl/apiKey)
-      const provider = ccSwitch.getCurrent()
-      const sdkOptions: Record<string, unknown> = {}
-      if (provider) {
-        // 透传 baseUrl + apiKey 到 SDK 子进程 env (SDK 文档:env 替换而非合并)
-        const env: Record<string, string> = {}
-        if (provider.baseUrl) env['ANTHROPIC_BASE_URL'] = provider.baseUrl
-        if (provider.apiKey) env['ANTHROPIC_AUTH_TOKEN'] = provider.apiKey
-        if (Object.keys(env).length > 0) sdkOptions['env'] = env
-      }
-      if (resume) sdkOptions['resume'] = resume
-      if (appendSystemPrompt && appendSystemPrompt.length > 0) {
-        sdkOptions['appendSystemPrompt'] = appendSystemPrompt
-      }
-      // Q6:wire PreToolUse hook —— SDK 期望 { hooks: HookCallbackMatcher[] }
-      // HookCallbackMatcher = { matcher?, hooks: HookCallback[] }
-      if (permissionHook) {
-        sdkOptions['hooks'] = {
-          PreToolUse: [{ hooks: [permissionHook.callback] }],
+        // 构造 SDK Options —— 用 model + (optional) resume + cwd + env (baseUrl/apiKey)
+        const provider = ccSwitch.getCurrent()
+        const sdkOptions: Record<string, unknown> = {}
+        if (provider) {
+          // 透传 baseUrl + apiKey 到 SDK 子进程 env (SDK 文档:env 替换而非合并)
+          const env: Record<string, string> = {}
+          if (provider.baseUrl) env['ANTHROPIC_BASE_URL'] = provider.baseUrl
+          if (provider.apiKey) env['ANTHROPIC_AUTH_TOKEN'] = provider.apiKey
+          if (Object.keys(env).length > 0) sdkOptions['env'] = env
         }
-      }
-      const controller = new AbortController()
-      if (signal) {
-        if (signal.aborted) controller.abort(signal.reason)
-        else signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true })
-      }
-      sdkOptions['abortController'] = controller
-      sdkOptions['cwd'] = process.cwd()
-      // model 字段:resolve 后拿到 model id 字符串(SDK 接受 model id,见 spike A2)
-      sdkOptions['model'] = resolveModelId(ccSwitch) ?? 'sonnet'
+        if (resume) sdkOptions['resume'] = resume
+        if (appendSystemPrompt && appendSystemPrompt.length > 0) {
+          sdkOptions['appendSystemPrompt'] = appendSystemPrompt
+        }
+        // Q6:wire PreToolUse hook —— SDK 期望 { hooks: HookCallbackMatcher[] }
+        // HookCallbackMatcher = { matcher?, hooks: HookCallback[] }
+        if (permissionHook) {
+          sdkOptions['hooks'] = {
+            PreToolUse: [{ hooks: [permissionHook.callback] }],
+          }
+        }
+        const controller = new AbortController()
+        if (signal) {
+          if (signal.aborted) controller.abort(signal.reason)
+          else signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true })
+        }
+        sdkOptions['abortController'] = controller
+        sdkOptions['cwd'] = process.cwd()
+        // model 字段:selection 在 createSession 阶段已解析为 model id 字符串(SDK 接受 model id,见 spike A2)
+        sdkOptions['model'] = sessionModelId ?? 'sonnet'
 
-      if (debug) {
-        console.log(
-          `[ClaudeCodeProvider] runTurn model=${sdkOptions['model']} resume=${resume ?? '<none>'} cwd=${sdkOptions['cwd']} promptAppended=${appendSystemPrompt ? 'yes' : 'no'} hookWired=${permissionHook ? 'yes' : 'no'}`,
-        )
-      }
+        if (debug) {
+          console.log(
+            `[ClaudeCodeProvider] runTurn model=${sdkOptions['model']} resume=${resume ?? '<none>'} cwd=${sdkOptions['cwd']} promptAppended=${appendSystemPrompt ? 'yes' : 'no'} hookWired=${permissionHook ? 'yes' : 'no'}`,
+          )
+        }
 
-      const stream = q({ prompt, options: sdkOptions })
-      for await (const raw of stream) {
-        const env = toEnvelope(raw)
-        if (env) yield env
-        // 没识别的 SDK message 也吃掉 —— 不让 raw 漏出去
-      }
-    },
+        const stream = q({ prompt, options: sdkOptions })
+        for await (const raw of stream) {
+          const env = toEnvelope(raw)
+          if (env) yield env
+          // 没识别的 SDK message 也吃掉 —— 不让 raw 漏出去
+        }
+      },
+    }
   }
 
   return {
@@ -212,9 +217,14 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
         )
       }
 
+      // Q9.1:在 session 创建阶段把 (providerId, role) 解析成 model id,
+      // 由 per-session adapter 闭包捕获 —— send() 时直接用
+      const modelId = resolveModelId(createOpts.model)
+
       // requirement 上下文:从 meta.yaml 读;provider 这里拿不到 fs,所以让 AISession 用 process.cwd() 兜底
       const requirement: AssemblerRequirement | undefined = undefined
 
+      const adapter = buildAdapter(modelId)
       const session = new AiSession({
         id: localSid,
         reqId,
@@ -236,18 +246,6 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
       cachedQuery = null
     },
   }
-}
-
-/**
- * 解析 model id:Q9.1 ——
- *   1. (无 selection) → current provider.models.main
- *   2. (有 selection) → (providerId, role) → model id
- * 失败 → 返回 null(让 SDK 自己默认)
- */
-function resolveModelId(ccSwitch: CcSwitchClient): string | null {
-  const current = ccSwitch.getCurrent()
-  if (!current) return null
-  return current.models.main ?? null
 }
 
 /** 类型辅助 —— 重导出供 route 直接消费 */
