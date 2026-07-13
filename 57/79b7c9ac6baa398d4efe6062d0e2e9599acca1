@@ -1,0 +1,29 @@
+apps/web/src/lib/analyzing.server.ts
+  s_8d8023a53e3677::t_d1c6d36d057bd9 1-167,172-225
+  s_8d8023a53e3677::t_c3956b7a1c2014 168-171
+apps/web/src/lib/analyzing.ts
+  s_8d8023a53e3677::t_410bcbbf56ad10 2-3
+  s_8d8023a53e3677::t_b17e917152315b 22-26,312,382-383,536,581-583
+apps/web/src/__tests__/analyzing-zone.test.tsx
+  s_8d8023a53e3677::t_1f63f564afc4e2 8
+apps/web/src/app/(workspace)/requirements/[id]/[zone]/page.tsx
+  s_8d8023a53e3677::t_f229f95a1a4d5f 9
+apps/web/src/lib/__tests__/analyzing.test.ts
+  s_8d8023a53e3677::t_7ee67bbcd4e142 13-17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "5779b7c9ac6baa398d4efe6062d0e2e9599acca1",
+  "prompts": {},
+  "sessions": {
+    "s_8d8023a53e3677": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7079e98d-ad62-4b43-9397-16789f6b6fda",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
