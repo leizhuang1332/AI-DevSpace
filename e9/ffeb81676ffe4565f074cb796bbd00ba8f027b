@@ -1,0 +1,37 @@
+apps/agent/src/routes/spike.ts
+  s_5ecfdb591ee8af::t_f233e7d98e62d3 222
+  s_5ecfdb591ee8af::t_6fc00b6d8c7d9e 2,5-7,9-16,24,26-28,39-42,58-106,108,148-164,180-181,183-212,214-221,223,225-235,237-245,247-254,262
+apps/agent/src/__tests__/spikeRoutes.test.ts
+  s_5ecfdb591ee8af::t_3ca294d16b29d2 58-59,65
+  s_5ecfdb591ee8af::t_f233e7d98e62d3 229
+  s_5ecfdb591ee8af::t_104799a39b65f8 2,5,8,13-14,17,25-26,28,35,61-62,64,72,83,91,108-112,117-118,133-134,136-143,148,150,152-153,155-158,164-165,168-169,171,174-175,179-180,186-187,190-192,195,207,212,215,218-228,230-236,238-254,257-270,272-288,290,293-321,323-340,342-351,356,359-361,365,371,374-382,387-391,393
+  s_5ecfdb591ee8af::t_704457df17a90b 77-80,87-88,90
+  s_5ecfdb591ee8af::t_ac6abf6dfda7c6 89,97-99,101-102
+  s_5ecfdb591ee8af::t_b8724640e1c1df 113-115,120-123,126
+  s_5ecfdb591ee8af::t_bf1302bcc3267f 32-34,36-37,42-47,51-55,60,63,66,68-71,96
+  s_5ecfdb591ee8af::t_dc474c00377eb8 85-86,93-95,100
+  s_5ecfdb591ee8af::t_55dd9764514707 92,103-107
+apps/agent/src/server.ts
+  s_5ecfdb591ee8af::t_d93d5c98c51de2 22-26
+  s_5ecfdb591ee8af::t_9f0d5f0a90024f 133-158,174,177-184,189
+apps/agent/src/__tests__/ResumeManager.test.ts
+  s_5ecfdb591ee8af::t_a7ce6951022e4f 59,79,99
+apps/agent/src/session/ResumeManager.ts
+  s_5ecfdb591ee8af::t_624a55041302db 62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "e9ffeb81676ffe4565f074cb796bbd00ba8f027b",
+  "prompts": {},
+  "sessions": {
+    "s_5ecfdb591ee8af": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "217fbfe9-6c93-48f5-afca-a64a3dc1ee05",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
