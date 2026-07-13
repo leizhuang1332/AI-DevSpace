@@ -1,0 +1,50 @@
+apps/agent/src/__tests__/SessionStore.test.ts
+  s_62379104396fa6::t_ff231399d357b7 1-126
+apps/agent/src/__tests__/MessagesMirror.test.ts
+  s_62379104396fa6::t_1d91da1f56b18d 1-124
+apps/agent/src/__tests__/SessionRecorder.test.ts
+  s_62379104396fa6::t_4d987d020dc63c 164-181
+  s_62379104396fa6::t_b09963d4972824 1-163,182
+apps/agent/src/session/SessionRecorder.ts
+  s_62379104396fa6::t_0bad96c38d4972 1-5,8-9,12-19,21-43,45-61,73-74,77-78,80-90,92-94,97-100,103-106,109-112,115-117,119-129,134-168
+  s_62379104396fa6::t_4633b38235a469 44
+  s_62379104396fa6::t_ca4ba39f4a85ce 6-7,10-11,20
+  s_62379104396fa6::t_a33a3197ff75d1 62-72,75-76,79,91,95-96,101-102,107-108,113-114,118,130-133
+apps/agent/src/session/ResumeManager.ts
+  s_62379104396fa6::t_c7d9183651cd27 1-92
+apps/agent/src/__tests__/ResumeManager.test.ts
+  s_62379104396fa6::t_9a9974990000f2 1-118
+apps/agent/src/session/MessagesMirror.ts
+  s_62379104396fa6::t_f45a31be6265bc 1-95
+apps/agent/src/session/SessionStore.ts
+  s_62379104396fa6::t_88d1f793370f26 23
+  s_62379104396fa6::t_ecabb427dac311 178
+  s_62379104396fa6::t_6aa54051c098e9 124
+  s_62379104396fa6::t_450ffff7076a91 18
+  s_62379104396fa6::t_23503b8228376d 1-17,19-22,24-122,125-177,179-189
+  s_62379104396fa6::t_ce4ca2eadd4ab4 123
+apps/agent/src/session/sessionPaths.ts
+  s_62379104396fa6::t_0515bb967c7060 10,17
+  s_62379104396fa6::t_2386694d8f9ba4 46,51
+  s_62379104396fa6::t_244c20d972a45d 1-9,11-16,18,24-25,27-45,47-50,52-64
+  s_62379104396fa6::t_0d99b98e26ace5 19-23,26
+apps/agent/src/__tests__/sessionPaths.test.ts
+  s_62379104396fa6::t_92d7b658db2982 6
+  s_62379104396fa6::t_c17e5e50aea5b6 1-5,7-67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "5c48c4efe6dcc51e41e0c861b2738bf1c236dd5e",
+  "prompts": {},
+  "sessions": {
+    "s_62379104396fa6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7a16d1a0-06b2-4630-98e5-09e816f663f6",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
