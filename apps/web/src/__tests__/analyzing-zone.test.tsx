@@ -3,9 +3,9 @@ import { render, screen, cleanup, act, within, fireEvent } from '@testing-librar
 import { AnalyzingZone } from '@/components/analyzing-zone'
 import {
   emptyAnalyzing,
-  getAnalyzingData,
   type AnalyzingData,
 } from '@/lib/analyzing'
+import { getAnalyzingData } from '@/lib/analyzing.server'
 
 // 注:打字机是 setTimeout 链 + 单一 phase 状态机(详见组件实现)。它在真实浏览器
 // 中流畅运行(20ms / 字,200ms chunk 间暂停),但 fake timers + React 18 commit

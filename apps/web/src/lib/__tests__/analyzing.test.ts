@@ -4,15 +4,17 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   emptyAnalyzing,
-  getAnalyzingData,
   summarizeAnalyzingStats,
   resolveAdmissionDimensions,
-  countPendingAdjudications,
   deriveProducts,
-  loadSessionChunks,
   type AnalyzingChunk,
   type AnalyzingData,
 } from '@/lib/analyzing'
+import {
+  getAnalyzingData,
+  countPendingAdjudications,
+  loadSessionChunks,
+} from '@/lib/analyzing.server'
 
 // ============================================================================
 // summarizeAnalyzingStats — 纯函数(从 chunks 聚合 stats)

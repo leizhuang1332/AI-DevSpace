@@ -6,7 +6,7 @@ import {
 } from '@/lib/zones'
 import { getExecutingData } from '@/lib/executing'
 import { ExecutingZone } from '@/components/executing-zone'
-import { getAnalyzingData } from '@/lib/analyzing'
+import { getAnalyzingData } from '@/lib/analyzing.server'
 import { AnalyzingZone } from '@/components/analyzing-zone'
 import {
   getDraftingData,

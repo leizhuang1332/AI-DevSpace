@@ -1,5 +1,6 @@
 /**
- * ANALYZING 工位数据层(ADR-0011 §6 ANALYZING 布局 · ADR-0013 工位重写 · issue 19)
+ * ANALYZING 工位数据层 — client-safe 部分(ADR-0011 §6 ANALYZING 布局 ·
+ *   ADR-0013 工位重写 · issue 19)
  *
  * 形态从"旁观 AI 解析"重写为"PRD 准入 + 技术概要协作工作台"。
  *
@@ -18,10 +19,13 @@
  * - 纯函数 + 类型化,便于单元测试
  * - 显式标注 async 为后续接 agent API 时的接口稳定
  * - 数据由 server 注入,组件只关心渲染 + 客户端打字机控制
+ *
+ * 模块拆分说明(issue 19a/19b · Webpack `UnhandledSchemeError` 修复):
+ * 本文件只保留 client-safe 内容(types / 纯函数 / mock 常量)。RSC 端的数据获取与
+ * 文件 IO 已搬到 `./analyzing.server.ts`(详见该文件顶注)。client component
+ * 只能引用本文件;引用 `./analyzing.server.ts` 会失败或越界到服务端代码。
  */
 
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import {
   ADMISSION_DIMENSION_META,
   DEFAULT_ADMISSION_DIMENSIONS,
@@ -305,7 +309,7 @@ export function emptyAnalyzing(requirementId: string): AnalyzingData {
  * - `pendingAdjudicationCount`: 仪表板右端徽章数(由 adjudication.md 计数)
  * - `verdict`: pass / pending / fail(根据维度 severity 与 counts 派生)
  */
-function buildAdmissionData(params: {
+export function buildAdmissionData(params: {
   dimensions?: readonly string[]
   counts?: Record<string, number>
   pendingAdjudicationCount?: number
@@ -374,127 +378,10 @@ export function resolveAdmissionDimensions(
 }
 
 // ---------------------------------------------------------------------------
-// analysis/sessions/<session-id>/chunks.jsonl 数据源(issue 19b · 验收 #12)
-// ---------------------------------------------------------------------------
-
-/**
- * 从 `analysis/sessions/<session-id>/chunks.jsonl` 加载会话思考流。
- *
- * 文件格式:每行一个 JSON 对象,字段 `{ id, ts, label, tone, text, session_id }`,
- * 按写入顺序追加(新 chunk 写在末尾 → 自然成为打字机下一条)。
- *
- * 设计要点:
- * - 纯函数 + 纯文件 IO,无副作用,便于单元测试
- * - 文件不存在 / 解析失败 → 返回 `[]`(容错)
- * - 单行 JSON 解析失败 → 跳过该行,继续读后续(避免 1 行损坏毁全文件)
- * - 与 `getAnalyzingData` 解耦:`getAnalyzingData` 负责顶层数据契约,本函数专注单文件加载
- */
-export function loadSessionChunks(
-  analysisSessionsDir: string,
-  sessionId: string,
-): AnalyzingChunk[] {
-  const file = join(analysisSessionsDir, sessionId, 'chunks.jsonl')
-  if (!existsSync(file)) return []
-  let raw: string
-  try {
-    raw = readFileSync(file, 'utf8')
-  } catch {
-    return []
-  }
-  const result: AnalyzingChunk[] = []
-  for (const line of raw.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    try {
-      const obj = JSON.parse(trimmed) as Partial<AnalyzingChunk>
-      // 校验最小字段集(避免脏行污染下游)
-      if (
-        typeof obj.id === 'string' &&
-        typeof obj.ts === 'string' &&
-        typeof obj.label === 'string' &&
-        typeof obj.text === 'string' &&
-        typeof obj.kind === 'string' &&
-        typeof obj.tone === 'string'
-      ) {
-        result.push(obj as AnalyzingChunk)
-      }
-    } catch {
-      /* 单行损坏,跳过;继续读后续行 */
-    }
-  }
-  return result
-}
-
-// ---------------------------------------------------------------------------
 // analysis/adjudication.md 计数(SSR 期 mock 路径由调用方注入)
+// 注:`countPendingAdjudications` 与 `countUnresolvedItems` 已搬到
+// `analyzing.server.ts`(本文件不再做文件 IO)。
 // ---------------------------------------------------------------------------
-
-/**
- * 从 analysisDir 读 adjudication.md,计数未裁决项(`applied: false` 或未标 applied)。
- * 文件不存在 / 解析失败 → 0(容错)。
- */
-export function countPendingAdjudications(analysisDir: string): number {
-  try {
-    const file = join(analysisDir, 'adjudication.md')
-    if (!existsSync(file)) return 0
-    const text = readFileSync(file, 'utf8')
-    return countUnresolvedItems(text)
-  } catch {
-    return 0
-  }
-}
-
-/**
- * 纯函数:从 Markdown 文本里统计 `- item_id:` 起的 bullet,
- * 若该 bullet 内 `applied: false` 或无 `applied:` 字段 → 计 1(视为待裁决)。
- */
-export function countUnresolvedItems(text: string): number {
-  if (!text.trim()) return 0
-  let count = 0
-  // 按 bullet 行分割(- 开头,可能含 2 空格缩进)
-  const lines = text.split('\n')
-  let inItem = false
-  let hasAppliedFalse = false
-  let hasAppliedTrue = false
-  let hasAppliedField = false
-
-  const flush = () => {
-    if (inItem) {
-      // 保守策略:有 applied:true → 不计;其余(applied:false 或无 applied)→ 计
-      if (!hasAppliedTrue || hasAppliedFalse) {
-        count++
-      }
-    }
-    inItem = false
-    hasAppliedFalse = false
-    hasAppliedTrue = false
-    hasAppliedField = false
-  }
-
-  for (const line of lines) {
-    // bullet 起点
-    if (/^\s*-\s+item_id\s*:/.test(line)) {
-      flush()
-      inItem = true
-      hasAppliedFalse = false
-      hasAppliedTrue = false
-      hasAppliedField = false
-      continue
-    }
-    if (!inItem) continue
-
-    // bullet 内行
-    if (/^\s+applied\s*:\s*true\b/.test(line)) {
-      hasAppliedField = true
-      hasAppliedTrue = true
-    } else if (/^\s+applied\s*:\s*false\b/.test(line)) {
-      hasAppliedField = true
-      hasAppliedFalse = true
-    }
-  }
-  flush()
-  return count
-}
 
 // ---------------------------------------------------------------------------
 // Mock 数据源 — 对应原型 11e ANALYZING(退款功能优化)
@@ -646,7 +533,7 @@ const REFUND_ANALYZING_CHUNKS: AnalyzingChunk[] = [
   },
 ]
 
-const REFUND_ANALYZING: Omit<AnalyzingData, 'requirementId'> = {
+export const REFUND_ANALYZING: Omit<AnalyzingData, 'requirementId'> = {
   empty: false,
   toolbar: {
     crumb: [
@@ -691,55 +578,6 @@ const REFUND_ANALYZING: Omit<AnalyzingData, 'requirementId'> = {
   }),
 }
 
-/**
- * 拉取 ANALYZING 工位数据(SSR 期 mock —— 后续替换为 `await fetch(...)`)。
- *
- * - 已知 id(req-001)→ REFUND_ANALYZING 样例数据
- * - 未知 id / 新建需求 → emptyAnalyzing(id)
- *
- * options 用于接入真实数据源(后续 VS 接 server action):
- * - `skillFrontmatter`: Skill SKILL.md frontmatter(读 admission_dimensions + admission_override)
- * - `analysisDir`: 需求 analysis 目录(读 adjudication.md 计数)
- *
- * 不传 options 时,返回默认 5 维度 + 0 待裁决 + pending verdict。
- */
-export async function getAnalyzingData(
-  requirementId: string,
-  options?: GetAnalyzingDataOptions,
-): Promise<AnalyzingData> {
-  if (requirementId === 'req-001') {
-    return { ...REFUND_ANALYZING, requirementId }
-  }
-  // 未知 id / 新建需求 → 走 emptyAnalyzing,但仍通过装配函数(保留 wiring)
-  return emptyAnalyzingWithOptions(requirementId, options)
-}
-
-/** getAnalyzingData options —— 后续切 server action 时注入真实数据源 */
-export interface GetAnalyzingDataOptions {
-  skillFrontmatter?: SkillAdmissionFrontmatter
-  analysisDir?: string
-}
-
-/**
- * emptyAnalyzing 的"接装配"版本 —— 即使是空需求,维度也走 resolveAdmissionDimensions,
- * pendingAdjudicationCount 也走 countPendingAdjudications(容错返回 0)。
- *
- * 拆分函数而非 inline:让 getAnalyzingData 主线保持直白,装配逻辑单测容易。
- */
-function emptyAnalyzingWithOptions(
-  requirementId: string,
-  options?: GetAnalyzingDataOptions,
-): AnalyzingData {
-  const dims = resolveAdmissionDimensions(options?.skillFrontmatter)
-  const pending = options?.analysisDir
-    ? countPendingAdjudications(options.analysisDir)
-    : 0
-  return {
-    ...emptyAnalyzing(requirementId),
-    admission: buildAdmissionData({
-      dimensions: dims,
-      pendingAdjudicationCount: pending,
-      verdict: 'pending',
-    }),
-  }
-}
+// 注:`getAnalyzingData` 与 `GetAnalyzingDataOptions` 已搬到 `analyzing.server.ts`。
+// 本文件只保留 client-safe 的纯函数与 mock 常量 —— 任何 client component
+// 不应触发 `getAnalyzingData`(数据应经由 RSC 注入 props)。
