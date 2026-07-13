@@ -1,0 +1,111 @@
+docs/design/drafting-workbench-context.md
+  s_687860947eba26::t_0bd53e00928efb 1-512
+docs/design/pages/19-final-drafting.html
+  s_1b09ca02c228cf::t_92bcdb87e5121c 1-444
+.scratch/ai-devspace-mvp/issues/23-zone-drafting-redesign.md
+  s_8bbc23fafea2d2::t_e48a7210f1e82e 1-163
+.scratch/drafting-redesign/issues/01-foundation-data-and-zone-metadata.md
+  s_0b660ae66a947a::t_1743ccff982204 1-26
+.scratch/drafting-redesign/issues/02-prd-top-pane-skeleton-launch.md
+  s_4c1a46dd23e4c6::t_4f0a6860eefa8e 1-26
+.scratch/drafting-redesign/issues/03-prd-anchor-bar.md
+  s_4c1a46dd23e4c6::t_dba20696046ce0 1-24
+.scratch/drafting-redesign/issues/04-aux-cards-pane-drag-divider.md
+  s_4c1a46dd23e4c6::t_24d74ee1978dde 1-24
+.scratch/drafting-redesign/issues/05-aux-drawer.md
+  s_4c1a46dd23e4c6::t_4c453baf22e5bb 1-26
+.scratch/drafting-redesign/issues/06-aux-create-upload-mock-conversion.md
+  s_4c1a46dd23e4c6::t_cee8719d25a60c 1-25
+.scratch/drafting-redesign/issues/07-relative-link-to-drawer.md
+  s_4c1a46dd23e4c6::t_3ff585b786fa9b 1-24
+.scratch/drafting-redesign/issues/08-repo-bottom-bar-soft-warning.md
+  s_4c1a46dd23e4c6::t_6df51a3cd91242 1-24
+docs/design/drafting-workbench-decisions.md
+  s_0f6e9c00e32dda::t_6f506fc2a2d006 1-251
+docs/design/pages/19a-drafting-files-equal.html
+  s_0f6e9c00e32dda::t_257a6ddef0a5b2 1-422
+docs/design/pages/19b-2a-tree-prd-only.html
+  s_0f6e9c00e32dda::t_a74a0fdbe153a9 1-300
+docs/design/pages/19b-2b-tree-unified.html
+  s_0f6e9c00e32dda::t_c86c5a86719cde 1-312
+docs/design/pages/19b-2c-no-tree-anchor.html
+  s_0f6e9c00e32dda::t_8fba84740cfbc5 1-290
+docs/design/pages/19b-drafting-prd-top-files-bottom.html
+  s_0f6e9c00e32dda::t_ba224923891c64 1-413
+docs/design/pages/19b-shared.css
+  s_0f6e9c00e32dda::t_b08c92add27db2 1-17
+docs/design/pages/19c-2a-prd-compress.html
+  s_0f6e9c00e32dda::t_d875cc4cd7e39d 1-294
+docs/design/pages/19c-2b-drawer.html
+  s_0f6e9c00e32dda::t_b49afcffe7511a 1-363
+docs/design/pages/19c-2c-modal.html
+  s_0f6e9c00e32dda::t_641d93d4dc19ab 1-357
+docs/design/pages/19c-2d-fullscreen.html
+  s_0f6e9c00e32dda::t_f4779985d8856c 1-272
+docs/design/pages/19c-drafting-ide-file-tree.html
+  s_7651a4547f2b25::t_1b6dcd518bd96e 1-389
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "8da911ad3afcfc6cb728c1504a542e70bc5a6d1a",
+  "prompts": {},
+  "sessions": {
+    "s_0b660ae66a947a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ab0ffddb55f12e353",
+        "model": "unknown"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    },
+    "s_0f6e9c00e32dda": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "26131ce6-9564-40b7-b847-6e67d63c3fbf",
+        "model": "unknown"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    },
+    "s_1b09ca02c228cf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "394013d5-9858-4595-9892-c517bfeb05ae",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    },
+    "s_4c1a46dd23e4c6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b99fad97-5877-4357-befe-60970d17620e",
+        "model": "unknown"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    },
+    "s_687860947eba26": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cc572745-27a6-440b-85f6-15a36a77c665",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    },
+    "s_7651a4547f2b25": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1a884db6-b681-4210-a30d-4a7809febf5a",
+        "model": "unknown"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    },
+    "s_8bbc23fafea2d2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "622645e1-f4f4-42a6-9560-37ce2eff603f",
+        "model": "unknown"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
