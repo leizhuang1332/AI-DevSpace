@@ -1,0 +1,24 @@
+docs/superpowers/specs/2026-07-13-p4-error-ui-surface-design.md
+  s_a2a637ad44d5a7::t_70cfe76d703d20 175,190
+  s_a2a637ad44d5a7::t_30af1b6e57f52c 154-157,167,172-174,176-188,193,195
+  s_a2a637ad44d5a7::t_1a04ae2de058e8 253-259,263,266-274,278-294,298,302-305,307,313-326
+  s_a2a637ad44d5a7::t_2477a044997dfc 334
+  s_a2a637ad44d5a7::t_7bc1cabb968914 389
+  s_a2a637ad44d5a7::t_d47c4a9940f0c3 327-329
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "2ede3a7c20d4ffc374ae26d69a30204860deefd5",
+  "prompts": {},
+  "sessions": {
+    "s_a2a637ad44d5a7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6333dd15-1461-436c-9d27-b958c9dce262",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
