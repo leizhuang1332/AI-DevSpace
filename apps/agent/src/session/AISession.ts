@@ -19,7 +19,19 @@ import type {
   ModelSelection,
 } from '../providers/AIProvider.js'
 import type { AIEvent, DoneReason } from '../providers/AIEvent.js'
+import type { CircuitBreaker } from '../error/CircuitBreaker.js'
+import { executeWithRetry, RetryFailure } from '../error/RetryStrategy.js'
+import { classifyError } from '../error/ErrorClassifier.js'
+import type { SessionQueryLogInput, SessionLogger } from '../log/SessionLogger.js'
+import type { GlobalLogger } from '../log/GlobalLogger.js'
 import type { SystemPromptAssembler, AssemblerRequirement } from '../prompt/SystemPromptAssembler.js'
+
+export interface SdkUsage {
+  input: number | null
+  output: number | null
+  cacheRead: number | null
+  cacheCreation: number | null
+}
 
 /** SDK 适配器接口 —— ClaudeCodeProvider 提供;测试时可注入 mock */
 export interface SdkAdapter {
@@ -63,12 +75,18 @@ export type SdkMessageEnvelope =
       sessionId?: string
       /** 'end_turn' | 'max_tokens' | 'cancelled' */
       reason?: 'end_turn' | 'max_tokens' | 'cancelled'
+      /** Token usage summary from SDK result */
+      usage?: SdkUsage
     }
   | {
       kind: 'error'
       sessionId?: string
       errorCode?: string
       message?: string
+      /** HTTP status (for transport-level error classification) */
+      status?: number
+      /** Underlying cause (kept as unknown so adapters can attach SDK detail) */
+      error?: unknown
       recoverable?: boolean
     }
 
@@ -92,6 +110,20 @@ export interface AiSessionDeps {
   assembler?: SystemPromptAssembler
   /** 当前 requirement 上下文(Q5 assembleDynamic 需要) */
   requirement?: AssemblerRequirement
+  /** SDK 初始 session id —— 用于断点续传,首次 send() 时使用 */
+  initialSdkSessionId?: string
+  /** Provider 共享的 FIFO 限流器 —— 注入后每轮 send() 走 breaker.run() */
+  circuitBreaker?: CircuitBreaker
+  /** 重试 sleep 钩子 —— 测试可注入,默认走 abortableSleep */
+  retrySleep?: (ms: number, signal?: AbortSignal) => Promise<void>
+  /** Session-level query 日志 —— 每次 send() 结束后调用一次 */
+  sessionLogger?: SessionLogger
+  /** 用户取消(队列中或运行中)的回调 —— 供上层清理 resume / 释放资源 */
+  onCancelled?: (context: { localSid: string; reqId: string; reason: string }) => void | Promise<void>
+  /** 时钟注入 —— 便于测试,默认 Date.now() */
+  nowMs?: () => number
+  /** 全局结构化日志 —— retryExhausted / queryFailed 调用 */
+  globalLogger?: GlobalLogger
 }
 
 /** events() 中表示「流关闭」的 sentinel —— 与 AIEvent 类型互斥 */
@@ -123,6 +155,20 @@ export class AiSession implements IAISession {
   #assembler: SystemPromptAssembler | undefined
   /** Q5:requirement 上下文 */
   #requirement: AssemblerRequirement | undefined
+  /** 外部 signal —— 通常是上层注入的 AbortController.signal */
+  #externalSignal: AbortSignal | undefined
+  /** Provider 共享的 FIFO 限流器 */
+  #circuitBreaker: CircuitBreaker | undefined
+  /** 重试 sleep 钩子 */
+  #retrySleep: ((ms: number, signal?: AbortSignal) => Promise<void>) | undefined
+  /** Session-level query 日志 */
+  #sessionLogger: SessionLogger | undefined
+  /** 用户取消回调 */
+  #onCancelled: ((context: { localSid: string; reqId: string; reason: string }) => void | Promise<void>) | undefined
+  /** 时钟注入 */
+  #nowMs: () => number
+  /** 全局结构化日志 */
+  #globalLogger: GlobalLogger | undefined
 
   constructor(deps: AiSessionDeps) {
     this.id = deps.id
@@ -133,6 +179,15 @@ export class AiSession implements IAISession {
     this.#debug = deps.debug ?? false
     this.#assembler = deps.assembler
     this.#requirement = deps.requirement
+    this.#externalSignal = deps.signal
+    this.#circuitBreaker = deps.circuitBreaker
+    this.#retrySleep = deps.retrySleep
+    this.#sessionLogger = deps.sessionLogger
+    this.#onCancelled = deps.onCancelled
+    this.#nowMs = deps.nowMs ?? (() => Date.now())
+    this.#globalLogger = deps.globalLogger
+    // 初始 SDK session id —— 用于断点续传
+    this.#sdkSessionId = deps.initialSdkSessionId
     this.model = deps.resolveModel?.()
 
     // 不在 constructor 构造 #internalController —— 每次 send() 时 new 一个,
@@ -259,7 +314,12 @@ export class AiSession implements IAISession {
     const controller = new AbortController()
     this.#internalController = controller
     const signal = controller.signal
-    const resume = this.#sdkSessionId // 续上下文
+    // 联动外部 signal:外部 abort 时也带过来
+    const abortFromExternal = (): void => {
+      controller.abort(this.#externalSignal?.reason)
+    }
+    if (this.#externalSignal?.aborted) abortFromExternal()
+    else this.#externalSignal?.addEventListener('abort', abortFromExternal, { once: true })
 
     // Q5 装配:base(per-session 缓存) + dynamic(per-query)
     let appendSystemPrompt: string | undefined
@@ -292,41 +352,183 @@ export class AiSession implements IAISession {
       }
     }
 
-    try {
-      const stream = this.#adapter.runTurn({ prompt: text, resume, signal, appendSystemPrompt })
-      for await (const env of stream) {
-        if (env.sessionId) this.#sdkSessionId = env.sessionId
-        const events = mapSdkEnvelope(env)
-        for (const ev of events) this.#push(ev)
-        if (env.kind === 'result' || env.kind === 'error') {
-          // result / error 终止;走 state machine
-          this.#state = env.kind === 'error' ? 'errored' : 'idle'
-          // done 事件已经在 mapSdkEnvelope 推过了
-          return
-        }
+    const startedAt = this.#nowMs()
+    let outputText = ''
+    let sawOutputWithoutResume = false
+    let attempts = 1
+    let retryDelaysMs: number[] = []
+    let usage: SdkUsage | null = null
+    let status: SessionQueryLogInput['status'] = 'succeeded'
+    let finalError: SessionQueryLogInput['error'] = null
+
+    const execute = async (): Promise<void> => {
+      const result = await executeWithRetry(
+        async () => await this.#runAttempt({
+          text,
+          appendSystemPrompt,
+          signal,
+          onText: (chunk) => { outputText += chunk },
+          markOutput: () => { if (!this.#sdkSessionId) sawOutputWithoutResume = true },
+        }),
+        {
+          signal,
+          sleep: this.#retrySleep,
+          canRetry: (error) => {
+            if (sawOutputWithoutResume) return false
+            // SDK 主动报 error envelope 是 deterministic,不参与 retry
+            if (error && typeof error === 'object' && (error as { __sdkError?: boolean }).__sdkError) return false
+            return true
+          },
+          onRetry: async ({ classification, retry, maxRetries, delayMs }) => {
+            // retrying 只对 A/C/D 分类发出(B/E/cancelled 不会进入此分支)
+            const cat = classification.category
+            if (cat !== 'A' && cat !== 'C' && cat !== 'D') return
+            this.#push({
+              type: 'retrying',
+              category: cat,
+              retry,
+              maxRetries,
+              delayMs,
+              message: '连接异常,正在重试',
+            })
+          },
+        },
+      )
+      attempts = result.attempts
+      retryDelaysMs = result.retryDelaysMs
+      usage = result.value.usage
+      if (result.value.reason === 'cancelled') {
+        status = 'cancelled'
+        await this.#onCancelled?.({
+          localSid: this.id,
+          reqId: this.reqId,
+          reason: String(signal.reason ?? 'cancelled'),
+        })
       }
-      // 流正常结束但没拿到 result → 视为 end_turn
-      this.#push({ type: 'done', reason: 'end_turn', sessionId: this.#sdkSessionId })
+    }
+
+    try {
+      if (this.#circuitBreaker) await this.#circuitBreaker.run(execute, signal)
+      else await execute()
       this.#state = 'idle'
-    } catch (err) {
-      // 区分用户取消 vs SDK 异常:
-      // - signal.aborted → 用户主动 cancel(),emit done{reason:'cancelled'}
-      // - 其他 → 真正的 SDK 抛错,emit error + done{reason:'error'}
-      if (signal.aborted) {
+    } catch (error) {
+      const failure = error instanceof RetryFailure
+        ? error
+        : new RetryFailure(classifyError(error, signal), attempts, retryDelaysMs)
+      attempts = failure.attempts
+      retryDelaysMs = failure.retryDelaysMs
+      // 从 failure.original 透传 envelope 的 recoverable 标记
+      const envelopeRecoverable =
+        failure.classification.original && typeof failure.classification.original === 'object'
+          ? (failure.classification.original as { recoverable?: boolean }).recoverable
+          : undefined
+      if (failure.classification.category === 'cancelled' || signal.aborted) {
+        status = 'cancelled'
         this.#push({ type: 'done', reason: 'cancelled', sessionId: this.#sdkSessionId })
         this.#state = 'idle'
-        return
+        await this.#onCancelled?.({
+          localSid: this.id,
+          reqId: this.reqId,
+          reason: String(signal.reason ?? 'cancelled'),
+        })
+      } else {
+        status = failure.classification.category === 'E' ? 'business_error' : 'failed'
+        finalError = {
+          category: failure.classification.category,
+          code: failure.classification.code,
+          message: failure.classification.message,
+        }
+        if (failure.classification.category !== 'E') {
+          const context = {
+            reqId: this.reqId,
+            sessionId: this.id,
+            category: failure.classification.category,
+            code: failure.classification.code,
+            attempts: failure.attempts,
+          }
+          if (failure.classification.retryable) this.#globalLogger?.retryExhausted(context)
+          else this.#globalLogger?.queryFailed(context)
+        }
+        this.#push({
+          type: 'error',
+          code: finalError.code,
+          message: finalError.message,
+          // 若来源是 SDK envelope 且标记 recoverable,透传;否则默认 false(终态)
+          recoverable: envelopeRecoverable ?? false,
+          category: finalError.category,
+        })
+        this.#push({ type: 'done', reason: 'error', sessionId: this.#sdkSessionId })
+        this.#state = failure.classification.category === 'E' ? 'idle' : 'errored'
       }
-      const message = err instanceof Error ? err.message : String(err)
-      this.#push({ type: 'error', code: 'sdk_throw', message, recoverable: false })
-      this.#push({ type: 'done', reason: 'error', sessionId: this.#sdkSessionId })
-      this.#state = 'errored'
     } finally {
+      // 清理外部 signal listener
+      this.#externalSignal?.removeEventListener('abort', abortFromExternal)
       // 本轮 controller 退役 —— 下次 send() 时 new 一个干净的
       if (this.#internalController === controller) {
         this.#internalController = null
       }
+      await this.#sessionLogger?.logQuery({
+        localSid: this.id,
+        reqId: this.reqId,
+        durationMs: this.#nowMs() - startedAt,
+        attempts,
+        retryDelaysMs,
+        status,
+        inputText: text,
+        outputText,
+        incomplete: status !== 'succeeded',
+        tokens: usage,
+        error: finalError,
+      })
     }
+  }
+
+  /** 单次 attempt:跑一次 SDK stream;遇到 error envelope 时抛出可分类对象 */
+  async #runAttempt(input: {
+    text: string
+    appendSystemPrompt: string | undefined
+    signal: AbortSignal
+    onText: (text: string) => void
+    markOutput: () => void
+  }): Promise<{ reason: DoneReason; usage: SdkUsage | null }> {
+    const stream = this.#adapter.runTurn({
+      prompt: input.text,
+      resume: this.#sdkSessionId,
+      signal: input.signal,
+      appendSystemPrompt: input.appendSystemPrompt,
+    })
+    for await (const env of stream) {
+      if (env.sessionId) this.#sdkSessionId = env.sessionId
+      if (env.kind === 'error') {
+        // 标记为 deterministic SDK error envelope —— 不参与 retry(分类器可能误判为 transient)
+        throw {
+          __sdkError: true,
+          code: env.errorCode ?? 'sdk_error',
+          status: env.status,
+          message: env.message ?? 'unknown error',
+          cause: env.error,
+          recoverable: env.recoverable,
+        }
+      }
+      const events = mapSdkEnvelope(env)
+      for (const event of events) {
+        if (event.type === 'text') {
+          input.onText(event.text)
+          input.markOutput()
+        }
+        this.#push(event)
+      }
+      if (env.kind === 'result') {
+        const reason: DoneReason = env.reason === 'max_tokens'
+          ? 'max_tokens'
+          : env.reason === 'cancelled'
+            ? 'cancelled'
+            : 'end_turn'
+        return { reason, usage: env.usage ?? null }
+      }
+    }
+    this.#push({ type: 'done', reason: 'end_turn', sessionId: this.#sdkSessionId })
+    return { reason: 'end_turn', usage: null }
   }
 
   /** 取消当前轮 —— 复用 AbortController.signal */

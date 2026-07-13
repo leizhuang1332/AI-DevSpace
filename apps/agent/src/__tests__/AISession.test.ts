@@ -10,9 +10,18 @@
  *  - close() 后再 send / events() → throw
  */
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { AiSession, type SdkAdapter, type SdkMessageEnvelope } from '../session/AISession.js'
 import type { AIEvent } from '../providers/AIEvent.js'
+import { CircuitBreaker } from '../error/CircuitBreaker.js'
+import type { SessionLogger } from '../log/SessionLogger.js'
+
+/** Deferred helper —— for limiting / abort testing */
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve: () => void = () => {}
+  const promise = new Promise<void>((done) => { resolve = done })
+  return { promise, resolve }
+}
 
 /** 一个可手动控制的 adapter factory:yield list 顺序触发 */
 function makeAdapter(messages: SdkMessageEnvelope[], opts: { delayMs?: number } = {}): SdkAdapter {
@@ -145,7 +154,7 @@ describe('AiSession', () => {
     const eventsP = collectEvents(session)
     await session.send('q')
     const events = await eventsP
-    expect(events[0]).toEqual({
+    expect(events[0]).toMatchObject({
       type: 'error',
       code: 'rate_limit',
       message: 'slow down',
@@ -313,5 +322,150 @@ describe('AiSession', () => {
     // 第二次 send:resume 应当带上 sdk-xyz
     await session.send('q2')
     expect(captured.resume).toBe('sdk-xyz')
+  })
+
+
+  // ---- Task 6: 初始 resume / 重试 / 取消 / 日志 / 限流 协同 ----
+
+  it('uses initialSdkSessionId on the first turn', async () => {
+    const resumes: Array<string | undefined> = []
+    const session = new AiSession({
+      id: 's-1',
+      reqId: 'r-1',
+      topic: 't',
+      kind: 'chat',
+      initialSdkSessionId: 'sdk-old',
+      adapter: {
+        async *runTurn({ resume }) {
+          resumes.push(resume)
+          yield { kind: 'result', sessionId: resume, reason: 'end_turn' }
+        },
+      },
+    })
+    await session.send('q')
+    expect(resumes).toEqual(['sdk-old'])
+  })
+
+  it('retries transient throws and emits retrying before success', async () => {
+    let calls = 0
+    const session = new AiSession({
+      id: 's-1',
+      reqId: 'r-1',
+      topic: 't',
+      kind: 'chat',
+      retrySleep: async () => {},
+      adapter: {
+        async *runTurn() {
+          calls++
+          if (calls < 3) throw { status: 429, message: 'slow down' }
+          yield { kind: 'result', sessionId: 'sdk-1', reason: 'end_turn' }
+        },
+      },
+    })
+    const eventsP = collectEvents(session)
+    await session.send('q')
+    const events = await eventsP
+    const retries = events.filter((event) => event.type === 'retrying')
+    expect(retries).toHaveLength(2)
+    expect(retries[0]).toMatchObject({ category: 'A', retry: 1, delayMs: 1000 })
+    expect(retries[1]).toMatchObject({ category: 'A', retry: 2, delayMs: 3000 })
+    expect(session.state).toBe('idle')
+  })
+
+  it('does not retry auth failures and moves to errored', async () => {
+    let calls = 0
+    const session = new AiSession({
+      id: 's-1',
+      reqId: 'r-1',
+      topic: 't',
+      kind: 'chat',
+      retrySleep: async () => {},
+      adapter: {
+        async *runTurn() {
+          calls++
+          throw { status: 401, message: 'invalid api key' }
+        },
+      },
+    })
+    const eventsP = collectEvents(session)
+    await session.send('q')
+    const events = await eventsP
+    expect(calls).toBe(1)
+    expect(events).toContainEqual(expect.objectContaining({ type: 'error', category: 'B' }))
+    expect(session.state).toBe('errored')
+  })
+
+  it('keeps the session idle after an E business error', async () => {
+    const session = new AiSession({
+      id: 's-1',
+      reqId: 'r-1',
+      topic: 't',
+      kind: 'chat',
+      adapter: makeAdapter([{ kind: 'error', errorCode: 'error_max_turns', message: 'max turns' }]),
+    })
+    const eventsP = collectEvents(session)
+    await session.send('q')
+    const events = await eventsP
+    expect(events).toContainEqual(expect.objectContaining({ type: 'error', category: 'E' }))
+    expect(session.state).toBe('idle')
+  })
+
+  it('aborts a queued turn and invokes onCancelled without retrying', async () => {
+    const breaker = new CircuitBreaker({ limit: 1 })
+    const blocker = deferred()
+    const first = breaker.run(async () => { await blocker.promise })
+    const onCancelled = vi.fn(async () => {})
+    const session = new AiSession({
+      id: 's-1',
+      reqId: 'r-1',
+      topic: 't',
+      kind: 'chat',
+      circuitBreaker: breaker,
+      onCancelled,
+      adapter: makeAdapter([{ kind: 'result', reason: 'end_turn' }]),
+    })
+    const eventsP = collectEvents(session)
+    const sendP = session.send('q')
+    await Promise.resolve()
+    await session.cancel('user')
+    await sendP
+    const events = await eventsP
+    expect(events.at(-1)).toMatchObject({ type: 'done', reason: 'cancelled' })
+    expect(onCancelled).toHaveBeenCalledWith(
+      expect.objectContaining({ localSid: 's-1', reason: 'user' }),
+    )
+    blocker.resolve()
+    await first
+  })
+
+  it('writes one query summary after completion', async () => {
+    const logQuery = vi.fn(async () => {})
+    const session = new AiSession({
+      id: 's-1',
+      reqId: 'r-1',
+      topic: 't',
+      kind: 'chat',
+      sessionLogger: { logQuery } as unknown as SessionLogger,
+      nowMs: (() => { let n = 0; return () => n++ === 0 ? 100 : 150 })(),
+      adapter: makeAdapter([
+        { kind: 'assistant', text: 'answer', sessionId: 'sdk-1' },
+        {
+          kind: 'result',
+          reason: 'end_turn',
+          sessionId: 'sdk-1',
+          usage: { input: 3, output: 2, cacheRead: 1, cacheCreation: 0 },
+        },
+      ]),
+    })
+    await session.send('question')
+    expect(logQuery).toHaveBeenCalledWith(expect.objectContaining({
+      localSid: 's-1',
+      reqId: 'r-1',
+      attempts: 1,
+      inputText: 'question',
+      outputText: 'answer',
+      status: 'succeeded',
+      durationMs: 50,
+    }))
   })
 })
