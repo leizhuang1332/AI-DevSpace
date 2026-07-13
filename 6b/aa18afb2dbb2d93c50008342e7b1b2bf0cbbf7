@@ -1,0 +1,55 @@
+apps/agent/src/__tests__/CcSwitchClient.test.ts
+  s_fde3a2baa5e2d1::t_9a5bcc5cfc62a2 148
+  s_fde3a2baa5e2d1::t_828cbe98002de0 1-147,149-165
+apps/agent/src/providers/ClaudeCodeProvider.ts
+  s_fde3a2baa5e2d1::t_128bb81d6513fd 1-13,16-21,24-226
+  s_fde3a2baa5e2d1::t_94871053b06b73 14-15,22-23
+apps/agent/src/routes/spike.ts
+  s_fde3a2baa5e2d1::t_af59b072e3cdd5 1-165
+apps/agent/src/__tests__/spikeRoutes.test.ts
+  s_fde3a2baa5e2d1::t_c78a87379ba837 6-7,20,48-49,53,80-84,90-94,97-109,111-114,117,181-182
+  s_fde3a2baa5e2d1::t_a9b91de946518a 1-5,8,11-12,14,16,18-19,21-47,50-52,54-79,115-116,118,168-171,174-175,177-180,183-186,194-229
+  s_fde3a2baa5e2d1::t_74ae3024c8df9a 230-239,241,243-248,254-256,258,260-263,267-279,281-301
+  s_fde3a2baa5e2d1::t_b0a13ce89f3a8c 9-10,13,15,17,85-89,95-96,110,119-167,172-173,176,187-193,240,242,249-253,257,259,264-266,280
+apps/agent/src/providers/AIEvent.ts
+  s_fde3a2baa5e2d1::t_5c15aca1ded1da 1-22
+apps/agent/src/__tests__/AISession.test.ts
+  s_fde3a2baa5e2d1::t_3b4cf1e9c0acbe 238,240-258,260,263,265,268,270
+  s_fde3a2baa5e2d1::t_bd5d182e02de57 259
+  s_fde3a2baa5e2d1::t_4dce2c1a3e8ea3 31-35
+  s_fde3a2baa5e2d1::t_91e1b9f3969769 1-30,36-237,239,271-284
+  s_fde3a2baa5e2d1::t_af81786acaaefc 261-262,264,266-267,269
+apps/agent/src/session/AISession.ts
+  s_fde3a2baa5e2d1::t_7820de2ab37965 10,12,16-20,26-30,34-63,79,82-84,86-87,101,106-107,114-115,121,145-164,167,171,173,176,183-184,188,192,201-202,206-207,246,249,304,311,317-318,321,323-324,328,334-336,344,353
+  s_fde3a2baa5e2d1::t_cf296576c6dec1 273-274,277-278,294
+  s_fde3a2baa5e2d1::t_7ddc1806fd2eff 1-9,11,13-15,21-25,31-33,64-78,80-81,85,88-100,102-103,108-113,116-117,120,122-144,165-166,168-170,172,174-175,177-182,185-187,189-191,193-200,203-205,208-238,243-245,247-248,250-272,275-276,279-293,295-303,305-310,312-316,319-320,322,325-327,329-333,337-343,345-350
+  s_fde3a2baa5e2d1::t_61ed84c989d134 239-242
+  s_fde3a2baa5e2d1::t_39a5e51b90dab3 104-105,118-119
+  s_fde3a2baa5e2d1::t_753e0226714402 351-352
+  s_fde3a2baa5e2d1::t_f15e6e1b485585 354-356
+  s_fde3a2baa5e2d1::t_6cdd3f4386f89e 357-358
+apps/agent/src/providers/CcSwitchClient.ts
+  s_fde3a2baa5e2d1::t_0e869e18983447 1-188
+apps/agent/src/providers/AIProvider.ts
+  s_fde3a2baa5e2d1::t_42a62c6d6689fc 1-110
+apps/agent/src/server.ts
+  s_fde3a2baa5e2d1::t_263ee3af431edb 16
+  s_fde3a2baa5e2d1::t_6fbf283c390352 19-20
+  s_fde3a2baa5e2d1::t_c0b841c50ef7fd 116-134,149,154-155
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "6baa18afb2dbb2d93c50008342e7b1b2bf0cbbf7",
+  "prompts": {},
+  "sessions": {
+    "s_fde3a2baa5e2d1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6ffb5fff-b817-4f6c-8028-055e82e6ac55",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
