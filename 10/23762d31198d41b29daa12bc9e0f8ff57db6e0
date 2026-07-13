@@ -1,0 +1,21 @@
+apps/agent/src/__tests__/ErrorClassifier.test.ts
+  s_5ecfdb591ee8af::t_ad30e68f4445cd 1-38
+apps/agent/src/error/ErrorClassifier.ts
+  s_5ecfdb591ee8af::t_d02250f92d20d7 1-96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "1023762d31198d41b29daa12bc9e0f8ff57db6e0",
+  "prompts": {},
+  "sessions": {
+    "s_5ecfdb591ee8af": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "217fbfe9-6c93-48f5-afca-a64a3dc1ee05",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
