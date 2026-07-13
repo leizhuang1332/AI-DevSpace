@@ -1,0 +1,21 @@
+apps/agent/src/__tests__/ClaudeCodeProvider.test.ts
+  s_7651a4547f2b25::t_4167676362a1fc 1-123
+apps/agent/src/providers/ClaudeCodeProvider.ts
+  s_7651a4547f2b25::t_2e662166492df3 128-131,133-136,138-146,150-151,157-196,199-206,220-223,227
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "567ca9e34b82f012a07c3e1fe9cc9dfdf4cac300",
+  "prompts": {},
+  "sessions": {
+    "s_7651a4547f2b25": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1a884db6-b681-4210-a30d-4a7809febf5a",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
