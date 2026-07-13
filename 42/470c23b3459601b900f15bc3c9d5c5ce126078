@@ -1,0 +1,23 @@
+.superpowers/sdd/task-6-report.md
+  s_5ecfdb591ee8af::t_47967ec8fda59f 1-122
+apps/agent/src/__tests__/AISession.test.ts
+  s_5ecfdb591ee8af::t_412edef848051c 13,16-24,157,326-470
+apps/agent/src/session/AISession.ts
+  s_5ecfdb591ee8af::t_30335e0ad3f085 22-26,29-35,78-79,86-89,113-126,158-171,182-190,317-322,355-406,408-412,414-426,429-461,464-465,470-528,530-531
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "42470c23b3459601b900f15bc3c9d5c5ce126078",
+  "prompts": {},
+  "sessions": {
+    "s_5ecfdb591ee8af": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "217fbfe9-6c93-48f5-afca-a64a3dc1ee05",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
