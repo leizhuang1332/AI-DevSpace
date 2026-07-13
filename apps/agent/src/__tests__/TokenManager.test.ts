@@ -14,7 +14,8 @@ afterEach(() => {
 })
 
 describe('TokenManager.ensure', () => {
-  it('creates a 43-char base64url token file with mode 0600 on first call', async () => {
+  // Windows 上 fs.chmod 是 no-op,POSIX 权限位断言必然失败 —— 跳到 Linux/macOS CI 覆盖
+  it.skipIf(process.platform === 'win32')('creates a 43-char base64url token file with mode 0600 on first call', async () => {
     const tm = new TokenManager(root)
     const token = await tm.ensure()
     expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/)

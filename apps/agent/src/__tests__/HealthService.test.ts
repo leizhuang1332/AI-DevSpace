@@ -80,7 +80,8 @@ describe('HealthService.collect', () => {
     }
   })
 
-  it('reports tokenFileMode from filesystem stat', async () => {
+  // Windows 上 fs.chmod 是 no-op,fs.stat 拿不到 POSIX 权限位 —— 跳到 Linux/macOS CI 覆盖
+  it.skipIf(process.platform === 'win32')('reports tokenFileMode from filesystem stat', async () => {
     const root = tmpRoot()
     try {
       const tm = new TokenManager(root)
