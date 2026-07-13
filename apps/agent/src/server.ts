@@ -19,6 +19,11 @@ import { sseRoutes } from './sse/requirementEventsRoute.js'
 import { createCcSwitchClient, createNullCcSwitchClient } from './providers/CcSwitchClient.js'
 import type { CcSwitchClient } from './providers/CcSwitchClient.js'
 import { createClaudeCodeProvider } from './providers/ClaudeCodeProvider.js'
+import { SessionStore } from './session/SessionStore.js'
+import { MessagesMirror } from './session/MessagesMirror.js'
+import { CircuitBreaker } from './error/CircuitBreaker.js'
+import { SessionLogger } from './log/SessionLogger.js'
+import { GlobalLogger } from './log/GlobalLogger.js'
 
 const ALLOWED_ORIGINS: string[] = ['http://localhost:3333', 'http://127.0.0.1:3333']
 
@@ -125,7 +130,32 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     fastify.log.error({ err }, 'cc-switch client init failed; spike routes will warn')
     ccSwitch = createNullCcSwitchClient()
   }
-  const provider = createClaudeCodeProvider({ ccSwitch, debug: false })
+
+  // 5c. 持久化 + 日志依赖(P4 Task 8)
+  const sessionStore = new SessionStore({ root: workspaceRoot })
+  const messagesMirror = new MessagesMirror({ root: workspaceRoot })
+  const globalLogger = new GlobalLogger(fastify.log)
+  const sessionLogger = new SessionLogger({
+    root: workspaceRoot,
+    onWriteError: (error, input) => globalLogger.sessionLogWriteFailed(error, {
+      reqId: input.reqId,
+      sessionId: input.localSid,
+    }),
+  })
+  const circuitBreaker = new CircuitBreaker({ limit: 5 })
+
+  const provider = createClaudeCodeProvider({
+    ccSwitch,
+    debug: false,
+    circuitBreaker,
+    sessionLogger,
+    globalLogger,
+    onSessionCancelled: async ({ localSid }) => {
+      await sessionStore.updateSession(localSid, {
+        last_cancel_at: new Date().toISOString(),
+      })
+    },
+  })
 
   // 6. Routes
   const healthService = new HealthService({
@@ -141,13 +171,22 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   await fastify.register(workspaceRoutes, { workspace })
   await fastify.register(requirementRoutes)
   await fastify.register(analysisRoutes, { hub })
-  await fastify.register(spikeRoutes, { hub, provider, ccSwitch })
+  await fastify.register(spikeRoutes, { hub, provider, ccSwitch, store: sessionStore, mirror: messagesMirror })
   await fastify.register(bootstrapRoutes, { tokenManager, apiBase: 'http://localhost:7777' })
+
+  // 7. 启动 / 配置变更日志
+  globalLogger.agentStarted({ root: workspaceRoot, version: opts.agentVersion ?? '0.0.0' })
+  const configured = ccSwitch.getCurrent()
+  globalLogger.configChanged({
+    provider: configured?.name ?? null,
+    model: configured?.models.main ?? null,
+  })
 
   fastify.addHook('onClose', async () => {
     await hub.close()
     await provider.shutdown()
     ccSwitch.close()
+    globalLogger.agentStopped({ reason: 'server_close' })
   })
 
   return fastify

@@ -56,6 +56,7 @@ describe('ResumeManager.tryResume', () => {
     expect(res.recovered).toBe(false)
     expect(calls).toHaveLength(1)
     expect(calls[0].reqId).toBe('REQ-1')
+    expect(calls[0].opts.localSid).toBe(meta.sid)
     expect(calls[0].opts.resume).toBe('sdk-valid')
     expect(calls[0].opts.topic).toBe('t')
     expect(calls[0].opts.kind).toBe('chat')
@@ -75,6 +76,7 @@ describe('ResumeManager.tryResume', () => {
 
     expect(probe).toHaveBeenCalledWith('sdk-gone')
     expect(res.recovered).toBe(true)
+    expect(calls[0].opts.localSid).toBe(meta.sid)
     expect(calls[0].opts.resume).toBeUndefined()
 
     // meta 落盘更新
@@ -94,6 +96,7 @@ describe('ResumeManager.tryResume', () => {
 
     expect(res.recovered).toBe(false)
     expect(probe).not.toHaveBeenCalled()
+    expect(calls[0].opts.localSid).toBe(meta.sid)
     expect(calls[0].opts.resume).toBeUndefined()
   })
 

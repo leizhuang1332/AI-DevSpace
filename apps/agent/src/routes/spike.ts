@@ -1,24 +1,19 @@
 /**
- * Spike Routes —— ADR-0010 P0 验收
+ * Spike Routes —— ADR-0010 P0 + P4 (typed SSE / 持久化 / 取消)
  *
  * 端点:
- *   - POST /api/spike/run —— 启动一次 SDK query,把 AIEvent 通过 SseHub 推到 /api/spike/events 订阅者
- *   - GET  /api/spike/events —— SSE 订阅;订阅时发 hello,接收 spike.run 的 AIEvent 流
+ *   - POST /api/spike/run —— 启动 SDK query,把 AIEvent typed 推到订阅者;meta+messages 落盘
+ *   - GET  /api/spike/events —— SSE 订阅;订阅时发 hello,接收 typed 流
+ *   - POST /api/spike/session/:id/cancel —— 202 + cancel('user');不在 liveSessions → 404
  *
- * 通道策略:Q10.2 在 P5 才做 N 条独立 SSE;P0 阶段先 1 条全局 spike 通道
- * —— 即 SseHub.subscribe 的 reqId 统一为常量 'spike'。
- *
- * 请求体:
- *   POST /api/spike/run
- *     {
- *       "prompt": "hi",
- *       "reqId"?: "spike"   // 默认 'spike',P5 后才让 web 端用真实 reqId
- *     }
- *
- * 设计要点:
- * - **同步 ack + 异步流**:run 接口立即返回 202 + runId;events 通过 SSE 异步推到订阅者
- * - **CC-Switch 启动日志**:route 注册时打印「cc-switch 当前 provider / model.main」
- *   (issue 验收第 1 条)
+ * 关键不变量:
+ *   - meta 先于 createSession 落盘(失败也能拿到 sessionId 做诊断)
+ *   - provider.createSession 失败 → publish query_failed typed event,不污染 liveSessions
+ *   - AIEvent → typed SseEvent 通过 mapAiEventToSse 转换:
+ *       retrying   → SseEvent.retrying
+ *       error      → SseEvent.query_failed (category !== 'E')
+ *       done{cancelled} → SseEvent.query_cancelled
+ *       其他 AIEvent → SseEvent.ai_event(typed envelope)
  */
 
 import { randomUUID } from 'node:crypto'
@@ -26,8 +21,11 @@ import type { FastifyPluginAsync } from 'fastify'
 import type { SseEvent } from '@ai-devspace/shared'
 import type { SseHub } from '../sse/SseHub.js'
 import type { AIEvent } from '../providers/AIEvent.js'
-import type { AIProvider } from '../providers/AIProvider.js'
+import type { AIProvider, AISession } from '../providers/AIProvider.js'
 import type { CcSwitchClient } from '../providers/CcSwitchClient.js'
+import type { SessionStore } from '../session/SessionStore.js'
+import type { MessagesMirror } from '../session/MessagesMirror.js'
+import { attachRecorder } from '../session/SessionRecorder.js'
 
 /** P0 阶段固定通道 id;P5 会改成 per-session N 通道 */
 export const SPIKE_CHANNEL = 'spike'
@@ -38,6 +36,10 @@ export interface SpikeRoutesOptions {
   provider: AIProvider
   /** 单例 CcSwitchClient —— Agent 启动时构造一次;route 用于打印启动日志 */
   ccSwitch: CcSwitchClient
+  /** Q7.1 会话 meta CRUD —— POST /run 时落盘 meta.yaml(失败也能拿 sessionId) */
+  store: SessionStore
+  /** Q7.4 messages.jsonl 镜像 —— SessionRecorder attach 后异步写 */
+  mirror: MessagesMirror
 }
 
 interface RunBody {
@@ -53,8 +55,57 @@ function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.trim().length > 0
 }
 
+/**
+ * 把 AIEvent typed 映射成 SseEvent。
+ *
+ * 规则(brief Step 6):
+ *  - retrying → retrying variant(独立)
+ *  - error & category !== 'E' → query_failed(retryable 由 recoverable 决定)
+ *  - done{reason:'cancelled'} → query_cancelled(独立)
+ *  - 其余(包含 error category=E) → ai_event envelope(由 typed AIEvent 自然承载)
+ */
+export function mapAiEventToSse(
+  runId: string,
+  reqId: string,
+  sessionId: string,
+  event: AIEvent,
+  ts: number = Date.now(),
+): SseEvent {
+  if (event.type === 'retrying') {
+    return {
+      type: 'retrying',
+      runId,
+      reqId,
+      sessionId,
+      ts,
+      category: event.category,
+      retry: event.retry,
+      maxRetries: event.maxRetries,
+      delayMs: event.delayMs,
+      message: event.message,
+    }
+  }
+  if (event.type === 'error' && event.category !== 'E') {
+    return {
+      type: 'query_failed',
+      runId,
+      reqId,
+      sessionId,
+      ts,
+      category: event.category ?? 'B',
+      code: event.code,
+      message: event.message,
+      retryable: event.recoverable,
+    }
+  }
+  if (event.type === 'done' && event.reason === 'cancelled') {
+    return { type: 'query_cancelled', runId, reqId, sessionId, ts }
+  }
+  return { type: 'ai_event', runId, reqId, sessionId, ts, event }
+}
+
 export const spikeRoutes: FastifyPluginAsync<SpikeRoutesOptions> = async (fastify, opts) => {
-  const { hub, provider, ccSwitch } = opts
+  const { hub, provider, ccSwitch, store, mirror } = opts
 
   // 启动日志 —— issue 验收第 1 条
   const current = ccSwitch.getCurrent()
@@ -94,6 +145,23 @@ export const spikeRoutes: FastifyPluginAsync<SpikeRoutesOptions> = async (fastif
     reply.raw.on('close', cleanup)
   })
 
+  // live session registry —— 用于 cancel endpoint 查找
+  const liveSessions = new Map<string, AISession>()
+
+  // POST /api/spike/session/:id/cancel —— 命中 live → cancel('user');不在 live → 404
+  fastify.post<{ Params: { id: string } }>(
+    '/api/spike/session/:id/cancel',
+    { config: { public: true } },
+    async (req, reply) => {
+      const session = liveSessions.get(req.params.id)
+      if (!session) {
+        return reply.code(404).send({ error: 'session_not_running', sessionId: req.params.id })
+      }
+      void session.cancel('user')
+      return reply.code(202).send({ status: 'cancelling', sessionId: session.id })
+    },
+  )
+
   // POST /api/spike/run —— 启动 SDK query(public: 同上,spike 阶段免 auth)
   fastify.post<{ Body: RunBody }>('/api/spike/run', { config: { public: true } }, async (req, reply) => {
     const body = req.body ?? {}
@@ -109,37 +177,81 @@ export const spikeRoutes: FastifyPluginAsync<SpikeRoutesOptions> = async (fastif
       '[spike] /run starting SDK query',
     )
 
-    // 异步推流 —— 不阻塞 POST 返回
-    void (async (): Promise<void> => {
+    // 1) 先落 meta(meta.yaml 立即可见,失败也能拿到 sessionId)
+    const meta = await store.createSession(reqId, { topic: 'spike', kind: 'chat' })
+
+    // 2) provider.createSession —— 失败 → query_failed typed,不污染 liveSessions
+    let session: AISession
+    try {
+      session = await provider.createSession(reqId, {
+        localSid: meta.sid,
+        topic: meta.topic,
+        kind: meta.kind,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      fastify.log.error({ err: error, runId, sessionId: meta.sid }, '[spike] createSession failed')
+      hub.publish(reqId, {
+        type: 'query_failed',
+        runId,
+        reqId,
+        sessionId: meta.sid,
+        ts: Date.now(),
+        category: 'B',
+        code: 'session_create_failed',
+        message,
+        retryable: false,
+      })
+      return reply.code(202).send({
+        status: 'accepted',
+        runId,
+        reqId,
+        sessionId: meta.sid,
+        promptPreview: prompt.slice(0, 80),
+      })
+    }
+
+    // 3) live + recorder
+    liveSessions.set(session.id, session)
+    const recorder = attachRecorder(session, { store, mirror })
+
+    // 4) 异步 pump AIEvent → typed SseEvent → hub
+    const pump = (async () => {
       try {
-        const session = await provider.createSession(reqId, {
-          topic: 'spike',
-          kind: 'chat',
-        })
-
-        // 把 AIEvent 通过 hub 推到订阅者(每条都包一层 SseEvent 形态)
-        void (async (): Promise<void> => {
-          try {
-            for await (const ev of session.events()) {
-              // 我们用一个统一的 'analysis_chunk' 形态包装(与现有 web 端契约一致)?
-              // 不:spike 阶段 web 端还没接通,先把 AIEvent 原样吐出去,后续 P5 再细化
-              const sseEvent: SseEvent = wrapAiEventAsSse(runId, reqId, ev)
-              hub.publish(reqId, sseEvent)
-            }
-          } catch (err) {
-            fastify.log.error({ err, runId }, '[spike] event pump threw')
-          }
-        })()
-
-        await session.send(prompt)
-        await session.close()
+        for await (const event of session.events()) {
+          hub.publish(reqId, mapAiEventToSse(runId, reqId, session.id, event))
+        }
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        fastify.log.error({ err, runId }, '[spike] run failed')
+        fastify.log.error({ err, runId, sessionId: session.id }, '[spike] event pump threw')
+      }
+    })()
+
+    // 5) 异步 run + cleanup
+    void (async () => {
+      try {
+        await session.send(prompt)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        fastify.log.error({ err: error, runId, sessionId: session.id }, '[spike] run failed')
         hub.publish(reqId, {
-          type: 'placeholder',
-          message: `[spike] run failed: ${message}`,
+          type: 'query_failed',
+          runId,
+          reqId,
+          sessionId: session.id,
+          ts: Date.now(),
+          category: 'B',
+          code: 'run_failed',
+          message,
+          retryable: false,
         })
+      } finally {
+        try {
+          await session.close()
+        } catch {
+          /* noop */
+        }
+        await Promise.allSettled([pump, recorder.done])
+        liveSessions.delete(session.id)
       }
     })()
 
@@ -147,20 +259,8 @@ export const spikeRoutes: FastifyPluginAsync<SpikeRoutesOptions> = async (fastif
       status: 'accepted',
       runId,
       reqId,
+      sessionId: session.id,
       promptPreview: prompt.slice(0, 80),
     })
   })
-}
-
-/**
- * 把 AIEvent 包成 SseEvent。
- * 注意:shared SseEvent 联合目前只覆盖 hello/heartbeat/placeholder/analysis_chunk;
- * P0 阶段我们用 placeholder 把 AIEvent 当 message 字段塞,让 web 端调试时能拿到完整形态。
- * P5 再扩 SseEvent 联合(type: 'ai_event')。
- */
-function wrapAiEventAsSse(runId: string, reqId: string, ev: AIEvent): SseEvent {
-  return {
-    type: 'placeholder',
-    message: JSON.stringify({ runId, reqId, ev }),
-  }
 }

@@ -1,27 +1,20 @@
 /**
- * Spike routes tests —— ADR-0010 P0 验收
- *
- * 覆盖:
- *  - POST /api/spike/run —— 400 on missing/empty prompt; 202 on good body
- *  - GET /api/spike/events —— SSE Content-Type + hello event
- *  - run() 会通过 hub 把 session.events() 推到订阅者
- *  - run() 失败 → placeholder 推送
- *
- * SSE 测试用真实 http.request + 端口,避开 fastify.inject() 对 SSE 长连的兼容问题。
+ * Spike routes tests —— ADR-0010 P0 + P4 (typed SSE / 持久化 / 取消)
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import http from 'node:http'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spikeRoutes, SPIKE_CHANNEL } from '../routes/spike.js'
 import { createSseHub, type SseHub } from '../sse/SseHub.js'
+import { SessionStore } from '../session/SessionStore.js'
+import { MessagesMirror } from '../session/MessagesMirror.js'
 import { TokenManager } from '../auth/TokenManager.js'
 import { authPlugin } from '../auth/authPlugin.js'
-import type { AIProvider } from '../providers/AIProvider.js'
-import type { AISession } from '../providers/AIProvider.js'
+import type { AIProvider, AISession } from '../providers/AIProvider.js'
 import type { AIEvent } from '../providers/AIEvent.js'
 import type { SseEvent } from '@ai-devspace/shared'
 import type { CcSwitchClient } from '../providers/CcSwitchClient.js'
@@ -29,219 +22,177 @@ import type { CcSwitchClient } from '../providers/CcSwitchClient.js'
 function fakeCcSwitch(): CcSwitchClient {
   return {
     getCurrent: () => ({
-      id: 'p-1',
-      name: 'MiniMax',
-      is_current: true,
-      baseUrl: 'http://x',
-      apiKey: 'k',
-      models: {
-        main: 'MiniMax-M3',
-        haiku: null,
-        sonnet: 'MiniMax-M3[1M]',
-        opus: null,
-        fable: null,
-        reasoning: null,
-      },
+      id: 'p-1', name: 'MiniMax', is_current: true, baseUrl: 'http://x', apiKey: 'k',
+      models: { main: 'MiniMax-M3', haiku: null, sonnet: 'MiniMax-M3[1M]', opus: null, fable: null, reasoning: null },
     }),
-    getAll: () => [],
-    getById: () => undefined,
-    getModel: () => undefined,
-    close: () => {},
+    getAll: () => [], getById: () => undefined, getModel: () => undefined, close: () => {},
   }
 }
 
-/** 简单 subject:支持 push + async iterator + close */
-function makeSubject<T>(): {
-  push(v: T): void
-  close(): void
-  toAsyncIterable(): AsyncIterable<T>
-} {
-  const queue: T[] = []
-  const resolvers: Array<(v: IteratorResult<T>) => void> = []
+/**
+ * Tee 流:每个 events() 调用得到独立队列 —— recorder + route pump 各自消费一份。
+ */
+function makeSubject<T>() {
+  type Sub = { queue: T[]; pending: Array<(v: IteratorResult<T>) => void>; closed: boolean }
+  const subs: Sub[] = []
   let closed = false
   return {
     push(v: T) {
       if (closed) return
-      const r = resolvers.shift()
-      if (r) r({ value: v, done: false })
-      else queue.push(v)
+      for (const s of subs) {
+        if (s.closed) continue
+        const r = s.pending.shift()
+        if (r) r({ value: v, done: false })
+        else s.queue.push(v)
+      }
     },
     close() {
       closed = true
-      while (resolvers.length) resolvers.shift()!({ value: undefined, done: true })
+      for (const s of subs) {
+        if (s.closed) continue
+        s.closed = true
+        while (s.pending.length) s.pending.shift()!({ value: undefined, done: true })
+      }
     },
     toAsyncIterable() {
-      return {
-        [Symbol.asyncIterator]: () => ({
-          next: () =>
-            new Promise<IteratorResult<T>>((resolve) => {
-              if (closed) return resolve({ value: undefined, done: true })
-              const head = queue.shift()
-              if (head !== undefined) resolve({ value: head, done: false })
-              else resolvers.push(resolve)
-            }),
-          return: async () => ({ value: undefined, done: true }),
+      const sub: Sub = { queue: [], pending: [], closed: false }
+      if (closed) sub.closed = true
+      subs.push(sub)
+      return { [Symbol.asyncIterator]: () => ({
+        next: () => new Promise<IteratorResult<T>>((resolve) => {
+          const head = sub.queue.shift()
+          if (head !== undefined) resolve({ value: head, done: false })
+          else if (sub.closed) resolve({ value: undefined, done: true })
+          else sub.pending.push(resolve)
         }),
-      }
+        return: async () => {
+          sub.closed = true
+          return { value: undefined, done: true }
+        },
+      }) }
     },
   }
 }
 
-/** 创建一个 fake provider:返回一个 events() 会被同步推事件的 session
- *
- * 关键时序:必须在 createSession 同步返回前把 events push 进 subject,
- * 这样 route 的事件 pump 一旦开始 for-await,就能从队列里读到;
- * 不依赖 setTimeout(避免被 route.close() 抢先 close 掉 subject)。 */
-function fakeProvider(eventsToEmit: AIEvent[]): AIProvider {
+function fakeProvider(
+  eventsToEmit: AIEvent[],
+  opts: { cancelSpy?: ReturnType<typeof vi.fn>; sessionId?: string } = {},
+): AIProvider {
   return {
     name: 'fake',
-    async createSession(reqId, opts): Promise<AISession> {
+    async createSession(reqId, o): Promise<AISession> {
       const subj = makeSubject<AIEvent>()
-      // 同步 push:route 的事件 pump 一旦开始 iterate,就能读到
-      for (const e of eventsToEmit) subj.push(e)
-      return {
-        id: 'fake-sid',
-        reqId,
-        kind: opts.kind,
-        topic: opts.topic,
-        state: 'idle',
-        sdkSessionId: 'fake-sdk',
-        model: undefined,
+      let sendResolve!: () => void
+      const sendPromise = new Promise<void>((r) => { sendResolve = r })
+      // session.id 必须等于 meta.sid —— AISession.id 语义是 localSid
+      const sid = opts.sessionId ?? o.localSid ?? 'fake-sid'
+      const session: AISession = {
+        id: sid, reqId, kind: o.kind, topic: o.topic, state: 'idle',
+        sdkSessionId: 'fake-sdk', model: undefined,
         events: () => subj.toAsyncIterable(),
-        async send() {
-          /* noop */
-        },
-        async cancel() {
-          /* noop */
-        },
-        async close() {
+        async send() { await sendPromise },
+        async cancel(reason) { opts.cancelSpy?.(reason); subj.close(); sendResolve() },
+        async close() { subj.close(); sendResolve() },
+      }
+      setImmediate(() => {
+        for (const e of eventsToEmit) subj.push(e)
+        subj.close()
+        sendResolve()
+      })
+      return session
+    },
+    async shutdown() {},
+  }
+}
+
+function fakeProviderLong(opts: { cancelSpy?: ReturnType<typeof vi.fn> } = {}): AIProvider {
+  return {
+    name: 'fake-long',
+    async createSession(reqId, o): Promise<AISession> {
+      const subj = makeSubject<AIEvent>()
+      // 让 send 等到外部 close —— 这样 liveSessions 期间 cancel 可以命中
+      let resolveSend!: () => void
+      const sendPromise = new Promise<void>((r) => { resolveSend = r })
+      return {
+        id: 'long-sid', reqId, kind: o.kind, topic: o.topic, state: 'idle',
+        sdkSessionId: 'long-sdk', model: undefined,
+        events: () => subj.toAsyncIterable(),
+        async send() { await sendPromise },
+        async cancel(reason) {
+          opts.cancelSpy?.(reason)
+          resolveSend()
           subj.close()
         },
+        async close() { resolveSend(); subj.close() },
       }
     },
     async shutdown() {},
   }
 }
 
-interface CapturedResponse {
-  statusCode: number
-  headers: Record<string, string | string[] | undefined>
-  body: string
-}
-
-function openSse(port: number, readMs = 250): Promise<CapturedResponse> {
+interface Cap { statusCode: number; headers: Record<string, string | string[] | undefined>; body: string }
+function openSse(port: number, readMs = 250): Promise<Cap> {
   return new Promise((resolve, reject) => {
-    const req = http.request(
-      {
-        method: 'GET',
-        hostname: '127.0.0.1',
-        port,
-        path: '/api/spike/events',
-      },
-      (res) => {
-        const chunks: Buffer[] = []
-        const timer = setTimeout(() => {
-          req.destroy()
-          resolve({
-            statusCode: res.statusCode ?? 0,
-            headers: res.headers as Record<string, string | string[] | undefined>,
-            body: Buffer.concat(chunks).toString('utf8'),
-          })
-        }, readMs)
-        res.on('data', (c: Buffer) => chunks.push(c))
-        res.on('end', () => {
-          clearTimeout(timer)
-          resolve({
-            statusCode: res.statusCode ?? 0,
-            headers: res.headers as Record<string, string | string[] | undefined>,
-            body: Buffer.concat(chunks).toString('utf8'),
-          })
-        })
-        res.on('error', () => {
-          clearTimeout(timer)
-          resolve({
-            statusCode: res.statusCode ?? 0,
-            headers: res.headers as Record<string, string | string[] | undefined>,
-            body: Buffer.concat(chunks).toString('utf8'),
-          })
-        })
-      },
-    )
-    req.on('error', reject)
-    req.end()
+    const req = http.request({ method: 'GET', hostname: '127.0.0.1', port, path: '/api/spike/events' }, (res) => {
+      const chunks: Buffer[] = []
+      const t = setTimeout(() => { req.destroy(); resolve({ statusCode: res.statusCode ?? 0, headers: res.headers as any, body: Buffer.concat(chunks).toString('utf8') }) }, readMs)
+      res.on('data', (c: Buffer) => chunks.push(c))
+      res.on('end', () => { clearTimeout(t); resolve({ statusCode: res.statusCode ?? 0, headers: res.headers as any, body: Buffer.concat(chunks).toString('utf8') }) })
+      res.on('error', () => { clearTimeout(t); resolve({ statusCode: res.statusCode ?? 0, headers: res.headers as any, body: Buffer.concat(chunks).toString('utf8') }) })
+    })
+    req.on('error', reject); req.end()
   })
 }
 
 describe('spike routes', () => {
-  let fastify: FastifyInstance
-  let hub: SseHub
-  let port: number
-
+  let fastify: FastifyInstance, hub: SseHub, port: number, root: string
   beforeEach(async () => {
+    root = mkdtempSync(join(tmpdir(), 'aidevsp-spike-'))
     hub = createSseHub({ heartbeatMs: 60_000 })
+    const store = new SessionStore({ root, now: () => '2026-07-13T00:00:00.000Z' })
+    const mirror = new MessagesMirror({ root })
     fastify = Fastify({ logger: false })
-    await fastify.register(spikeRoutes, {
-      hub,
-      provider: fakeProvider([
-        { type: 'text', text: 'hi', delta: false },
-        { type: 'done', reason: 'end_turn', sessionId: 'fake-sdk' },
-      ]),
-      ccSwitch: fakeCcSwitch(),
-    })
+    await fastify.register(spikeRoutes, { hub, provider: fakeProvider([
+      { type: 'text', text: 'hi', delta: false },
+      { type: 'done', reason: 'end_turn', sessionId: 'fake-sdk' },
+    ]), ccSwitch: fakeCcSwitch(), store, mirror })
     await fastify.ready()
     const url = await fastify.listen({ port: 0, host: '127.0.0.1' })
     port = new URL(url).port
   })
-
   afterEach(async () => {
-    await fastify.close()
-    await hub.close()
+    await fastify.close(); await hub.close()
+    if (existsSync(root)) rmSync(root, { recursive: true, force: true })
   })
 
-  it('POST /api/spike/run rejects empty prompt with 400', async () => {
-    const res = await fastify.inject({
-      method: 'POST',
-      url: '/api/spike/run',
-      payload: { prompt: '' },
-    })
+  it('rejects empty prompt with 400', async () => {
+    const res = await fastify.inject({ method: 'POST', url: '/api/spike/run', payload: { prompt: '' } })
     expect(res.statusCode).toBe(400)
-    const body = res.json()
-    expect(body.error).toBe('bad_request')
+    expect(res.json().error).toBe('bad_request')
   })
 
-  it('POST /api/spike/run rejects missing prompt with 400', async () => {
-    const res = await fastify.inject({
-      method: 'POST',
-      url: '/api/spike/run',
-      payload: {},
-    })
+  it('rejects missing prompt with 400', async () => {
+    const res = await fastify.inject({ method: 'POST', url: '/api/spike/run', payload: {} })
     expect(res.statusCode).toBe(400)
   })
 
-  it('POST /api/spike/run accepts good body with 202', async () => {
-    const res = await fastify.inject({
-      method: 'POST',
-      url: '/api/spike/run',
-      payload: { prompt: 'hello' },
-    })
+  it('accepts good body with 202 + sessionId + meta.yaml', async () => {
+    const res = await fastify.inject({ method: 'POST', url: '/api/spike/run', payload: { prompt: 'hello' } })
     expect(res.statusCode).toBe(202)
     const body = res.json()
     expect(body.status).toBe('accepted')
     expect(typeof body.runId).toBe('string')
     expect(body.reqId).toBe(SPIKE_CHANNEL)
+    expect(typeof body.sessionId).toBe('string')
+    expect(existsSync(join(root, 'requirements', SPIKE_CHANNEL, 'sessions', body.sessionId, 'meta.yaml'))).toBe(true)
   })
 
-  it('POST /api/spike/run uses provided reqId', async () => {
-    const res = await fastify.inject({
-      method: 'POST',
-      url: '/api/spike/run',
-      payload: { prompt: 'hi', reqId: 'custom-req' },
-    })
-    const body = res.json()
-    expect(body.reqId).toBe('custom-req')
+  it('uses provided reqId', async () => {
+    const res = await fastify.inject({ method: 'POST', url: '/api/spike/run', payload: { prompt: 'hi', reqId: 'custom-req' } })
+    expect(res.json().reqId).toBe('custom-req')
   })
 
-  it('GET /api/spike/events sends Content-Type text/event-stream and hello', async () => {
+  it('GET /events sends Content-Type text/event-stream and hello', async () => {
     const res = await openSse(port, 200)
     expect(res.statusCode).toBe(200)
     expect(res.headers['content-type']).toMatch(/^text\/event-stream/)
@@ -253,142 +204,190 @@ describe('spike routes', () => {
     expect(helloEvent.reqId).toBe(SPIKE_CHANNEL)
   })
 
-  it('GET /api/spike/events emits X-Accel-Buffering: no header', async () => {
+  it('GET /events emits X-Accel-Buffering: no header', async () => {
     const res = await openSse(port, 100)
     expect(res.headers['x-accel-buffering']).toBe('no')
   })
 
-  it('POST run pushes session.events() through hub to subscribers', async () => {
+  it('POST run pushes session.events() through hub as typed ai_event', async () => {
     const received: SseEvent[] = []
     hub.subscribe(SPIKE_CHANNEL, (e) => received.push(e))
-    const res = await fastify.inject({
-      method: 'POST',
-      url: '/api/spike/run',
-      payload: { prompt: 'hello' },
-    })
+    const res = await fastify.inject({ method: 'POST', url: '/api/spike/run', payload: { prompt: 'hello' } })
     expect(res.statusCode).toBe(202)
-    // 等异步 pump 推完(close 在 send 后会触发)
     await new Promise((r) => setTimeout(r, 50))
-    expect(received.length).toBeGreaterThanOrEqual(2)
-    const messages = received
-      .filter((e) => e.type === 'placeholder')
-      .map((e) => JSON.parse((e as { message: string }).message).ev)
-    expect(messages).toContainEqual({ type: 'text', text: 'hi', delta: false })
-    expect(messages).toContainEqual({
-      type: 'done',
-      reason: 'end_turn',
-      sessionId: 'fake-sdk',
-    })
+    expect(received).toContainEqual(expect.objectContaining({
+      type: 'ai_event', reqId: SPIKE_CHANNEL,
+      event: { type: 'text', text: 'hi', delta: false },
+    }))
   })
 
-  it('POST run failure publishes placeholder via hub', async () => {
-    const received: SseEvent[] = []
-    const throwingProvider: AIProvider = {
-      name: 'fake-throw',
-      async createSession(): Promise<AISession> {
-        throw new Error('boom')
-      },
-      async shutdown() {},
-    }
+  it('POST run with retrying/error/done emits typed retrying + query_failed', async () => {
+    const root2 = mkdtempSync(join(tmpdir(), 'aidevsp-spike-retry-'))
+    const hub2 = createSseHub({ heartbeatMs: 60_000 })
+    const store2 = new SessionStore({ root: root2, now: () => '2026-07-13T00:00:00.000Z' })
+    const mirror2 = new MessagesMirror({ root: root2 })
     const app = Fastify({ logger: false })
     await app.register(spikeRoutes, {
-      hub,
-      provider: throwingProvider,
-      ccSwitch: fakeCcSwitch(),
+      hub: hub2, ccSwitch: fakeCcSwitch(), store: store2, mirror: mirror2,
+      provider: fakeProvider([
+        { type: 'retrying', category: 'A', retry: 1, maxRetries: 3, delayMs: 1000, message: 'retrying' },
+        { type: 'error', code: 'auth', message: 'bad key', recoverable: false, category: 'B' },
+        { type: 'done', reason: 'error', sessionId: 'sdk-1' },
+      ]),
     })
     await app.ready()
+    const received: SseEvent[] = []
+    hub2.subscribe(SPIKE_CHANNEL, (e) => received.push(e))
+    const res = await app.inject({ method: 'POST', url: '/api/spike/run', payload: { prompt: 'hello' } })
+    expect(res.statusCode).toBe(202)
+    await new Promise((r) => setTimeout(r, 80))
+    const r = received.find((e) => e.type === 'retrying')
+    expect(r).toBeDefined()
+    expect(r).toMatchObject({ type: 'retrying', category: 'A', retry: 1, maxRetries: 3, delayMs: 1000, message: 'retrying' })
+    expect((r as any).runId).toBeTruthy()
+    expect((r as any).reqId).toBe(SPIKE_CHANNEL)
+    expect((r as any).sessionId).toBeTruthy()
+    expect(typeof (r as any).ts).toBe('number')
+    const f = received.find((e) => e.type === 'query_failed')
+    expect(f).toBeDefined()
+    expect(f).toMatchObject({ type: 'query_failed', category: 'B', code: 'auth', message: 'bad key', retryable: false })
+    await app.close(); await hub2.close(); rmSync(root2, { recursive: true, force: true })
+  })
+
+  it('done{cancelled} emits query_cancelled typed event', async () => {
+    const root2 = mkdtempSync(join(tmpdir(), 'aidevsp-spike-cancel-event-'))
+    const hub2 = createSseHub({ heartbeatMs: 60_000 })
+    const store2 = new SessionStore({ root: root2, now: () => '2026-07-13T00:00:00.000Z' })
+    const mirror2 = new MessagesMirror({ root: root2 })
+    const app = Fastify({ logger: false })
+    await app.register(spikeRoutes, {
+      hub: hub2, ccSwitch: fakeCcSwitch(), store: store2, mirror: mirror2,
+      provider: fakeProvider([
+        { type: 'text', text: 'partial', delta: false },
+        { type: 'done', reason: 'cancelled', sessionId: 'sdk-c' },
+      ]),
+    })
+    await app.ready()
+    const received: SseEvent[] = []
+    hub2.subscribe(SPIKE_CHANNEL, (e) => received.push(e))
+    await app.inject({ method: 'POST', url: '/api/spike/run', payload: { prompt: 'hi' } })
+    await new Promise((r) => setTimeout(r, 80))
+    const c = received.find((e) => e.type === 'query_cancelled')
+    expect(c).toBeDefined()
+    expect(c).toMatchObject({ type: 'query_cancelled', reqId: SPIKE_CHANNEL })
+    expect((c as any).sessionId).toBeTruthy()
+    expect(typeof (c as any).runId).toBe('string')
+    expect(typeof (c as any).ts).toBe('number')
+    await app.close(); await hub2.close(); rmSync(root2, { recursive: true, force: true })
+  })
+
+  it('provider.createSession failure → query_failed typed; 202 + sessionId; liveSessions 不污染', async () => {
+    const root3 = mkdtempSync(join(tmpdir(), 'aidevsp-spike-createfail-'))
+    const hub3 = createSseHub({ heartbeatMs: 60_000 })
+    const store3 = new SessionStore({ root: root3, now: () => '2026-07-13T00:00:00.000Z' })
+    const mirror3 = new MessagesMirror({ root: root3 })
+    const throwingProvider: AIProvider = {
+      name: 'fake-throw', async createSession(): Promise<AISession> { throw new Error('boom') }, async shutdown() {},
+    }
+    const app = Fastify({ logger: false })
+    await app.register(spikeRoutes, { hub: hub3, provider: throwingProvider, ccSwitch: fakeCcSwitch(), store: store3, mirror: mirror3 })
+    await app.ready()
+    const received: SseEvent[] = []
+    hub3.subscribe(SPIKE_CHANNEL, (e) => received.push(e))
+    const res = await app.inject({ method: 'POST', url: '/api/spike/run', payload: { prompt: 'x' } })
+    expect(res.statusCode).toBe(202)
+    const body = res.json()
+    expect(body.status).toBe('accepted')
+    expect(typeof body.sessionId).toBe('string')
+    expect(existsSync(join(root3, 'requirements', SPIKE_CHANNEL, 'sessions', body.sessionId, 'meta.yaml'))).toBe(true)
+    await new Promise((r) => setTimeout(r, 80))
+    const f = received.find((e) => e.type === 'query_failed')
+    expect(f).toBeDefined()
+    expect(f).toMatchObject({ type: 'query_failed', category: 'B', code: 'session_create_failed', retryable: false })
+    expect((f as any).message).toMatch(/boom/)
+    expect((f as any).sessionId).toBe(body.sessionId)
+    const cancel = await app.inject({ method: 'POST', url: `/api/spike/session/${body.sessionId}/cancel` })
+    expect(cancel.statusCode).toBe(404)
+    await app.close(); await hub3.close(); rmSync(root3, { recursive: true, force: true })
+  })
+
+  it('POST cancel 命中 live session → 202 + cancel(user)', async () => {
+    const root2 = mkdtempSync(join(tmpdir(), 'aidevsp-spike-cancel-'))
+    const hub2 = createSseHub({ heartbeatMs: 60_000 })
+    const store2 = new SessionStore({ root: root2, now: () => '2026-07-13T00:00:00.000Z' })
+    const mirror2 = new MessagesMirror({ root: root2 })
+    const cancelSpy = vi.fn()
+    const app = Fastify({ logger: false })
+    await app.register(spikeRoutes, { hub: hub2, provider: fakeProviderLong({ cancelSpy }), ccSwitch: fakeCcSwitch(), store: store2, mirror: mirror2 })
+    await app.ready()
+    const run = await app.inject({ method: 'POST', url: '/api/spike/run', payload: { prompt: 'long' } })
+    const { sessionId } = run.json()
+    expect(typeof sessionId).toBe('string')
+    const cancel = await app.inject({ method: 'POST', url: `/api/spike/session/${sessionId}/cancel` })
+    expect(cancel.statusCode).toBe(202)
+    expect(cancel.json()).toEqual({ status: 'cancelling', sessionId })
+    expect(cancelSpy).toHaveBeenCalledWith('user')
+    await app.close(); await hub2.close(); rmSync(root2, { recursive: true, force: true })
+  })
+
+  it('POST cancel for unknown sessionId → 404', async () => {
+    const res = await fastify.inject({ method: 'POST', url: '/api/spike/session/does-not-exist/cancel' })
+    expect(res.statusCode).toBe(404)
+    expect(res.json().error).toBe('session_not_running')
+  })
+
+  it('POST run 真实落 messages.jsonl + ai_event typed SSE', async () => {
+    const received: SseEvent[] = []
     hub.subscribe(SPIKE_CHANNEL, (e) => received.push(e))
-    await app.inject({ method: 'POST', url: '/api/spike/run', payload: { prompt: 'x' } })
-    await new Promise((r) => setTimeout(r, 50))
-    expect(received.some((e) => e.type === 'placeholder' && e.message.includes('boom'))).toBe(true)
-    await app.close()
+    const res = await fastify.inject({ method: 'POST', url: '/api/spike/run', payload: { prompt: 'hello' } })
+    expect(res.statusCode).toBe(202)
+    const { sessionId } = res.json()
+    await new Promise((r) => setTimeout(r, 80))
+    const mirror = new MessagesMirror({ root })
+    const messages = await mirror.readMessages(sessionId)
+    const at = messages.find((m) => m.role === 'assistant' && m.type === 'text')
+    expect(at).toBeDefined()
+    expect(at?.content).toBe('hi')
+    expect(received.some((e) => e.type === 'ai_event')).toBe(true)
   })
 })
 
 describe('spike routes + authPlugin interaction', () => {
-  let app: FastifyInstance
-  let authedHub: SseHub
-  let root: string
-  let port: number
-
+  let app: FastifyInstance, authedHub: SseHub, root: string, port: number
   beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), 'aidevsp-spike-auth-'))
-    const tm = new TokenManager(root)
-    await tm.ensure()
+    const tm = new TokenManager(root); await tm.ensure()
+    const store = new SessionStore({ root, now: () => '2026-07-13T00:00:00.000Z' })
+    const mirror = new MessagesMirror({ root })
     authedHub = createSseHub({ heartbeatMs: 60_000 })
     app = Fastify({ logger: false })
-    // 注册 authPlugin(模拟 server.ts 的真实场景) + spikeRoutes
     await app.register(authPlugin, { tokenManager: tm, allowedOrigins: ['http://localhost:3333'] })
-    await app.register(spikeRoutes, {
-      hub: authedHub,
-      provider: fakeProvider([]),
-      ccSwitch: fakeCcSwitch(),
-    })
+    await app.register(spikeRoutes, { hub: authedHub, provider: fakeProvider([]), ccSwitch: fakeCcSwitch(), store, mirror })
     await app.ready()
     const url = await app.listen({ port: 0, host: '127.0.0.1' })
     port = new URL(url).port
   })
-
   afterEach(async () => {
-    await app.close()
-    await authedHub.close()
-    rmSync(root, { recursive: true, force: true })
+    await app.close(); await authedHub.close(); rmSync(root, { recursive: true, force: true })
   })
 
-  it('GET /api/spike/events is public (no token → 200, not 401)', async () => {
-    const res = await openSseOnPort(port, 100)
+  it('GET /events is public (no token → 200)', async () => {
+    const res = await new Promise<Cap>((resolve, reject) => {
+      const req = http.request({ method: 'GET', hostname: '127.0.0.1', port, path: '/api/spike/events' }, (r) => {
+        const t = setTimeout(() => { req.destroy(); resolve({ statusCode: r.statusCode ?? 0, headers: r.headers as any, body: '' }) }, 100)
+        r.on('data', () => {}); r.on('error', () => { clearTimeout(t); resolve({ statusCode: r.statusCode ?? 0, headers: r.headers as any, body: '' }) })
+        r.on('end', () => { clearTimeout(t); resolve({ statusCode: r.statusCode ?? 0, headers: r.headers as any, body: '' }) })
+      })
+      req.on('error', reject); req.end()
+    })
     expect(res.statusCode).toBe(200)
     expect(res.headers['content-type']).toMatch(/^text\/event-stream/)
   })
 
-  it('POST /api/spike/run is public (no token → 202/400, not 401)', async () => {
-    // 缺 prompt → 400(不是 401)
-    const res400 = await app.inject({ method: 'POST', url: '/api/spike/run', payload: {} })
-    expect(res400.statusCode).toBe(400)
-    // 有 prompt → 202
-    const res202 = await app.inject({ method: 'POST', url: '/api/spike/run', payload: { prompt: 'hi' } })
-    expect(res202.statusCode).toBe(202)
+  it('POST /run is public (no token → 202/400)', async () => {
+    const r400 = await app.inject({ method: 'POST', url: '/api/spike/run', payload: {} })
+    expect(r400.statusCode).toBe(400)
+    const r202 = await app.inject({ method: 'POST', url: '/api/spike/run', payload: { prompt: 'hi' } })
+    expect(r202.statusCode).toBe(202)
   })
 })
-
-function openSseOnPort(port: number, readMs: number): Promise<{
-  statusCode: number
-  headers: Record<string, string | string[] | undefined>
-}> {
-  return new Promise((resolve, reject) => {
-    const req = http.request(
-      {
-        method: 'GET',
-        hostname: '127.0.0.1',
-        port,
-        path: '/api/spike/events',
-      },
-      (res) => {
-        const timer = setTimeout(() => {
-          req.destroy()
-          resolve({
-            statusCode: res.statusCode ?? 0,
-            headers: res.headers as Record<string, string | string[] | undefined>,
-          })
-        }, readMs)
-        res.on('data', () => {})
-        res.on('error', () => {
-          clearTimeout(timer)
-          resolve({
-            statusCode: res.statusCode ?? 0,
-            headers: res.headers as Record<string, string | string[] | undefined>,
-          })
-        })
-        res.on('end', () => {
-          clearTimeout(timer)
-          resolve({
-            statusCode: res.statusCode ?? 0,
-            headers: res.headers as Record<string, string | string[] | undefined>,
-          })
-        })
-      },
-    )
-    req.on('error', reject)
-    req.end()
-  })
-}

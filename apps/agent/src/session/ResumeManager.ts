@@ -59,6 +59,7 @@ export class ResumeManager {
     if (!meta) throw new Error(`ResumeManager.tryResume: session ${localSid} not found`)
 
     const baseOpts: CreateSessionOptions = {
+      localSid: meta.sid,
       topic: meta.topic,
       kind: meta.kind,
       ...(meta.model !== undefined ? { model: meta.model } : {}),
