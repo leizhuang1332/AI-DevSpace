@@ -1,0 +1,30 @@
+apps/agent/src/providers/ClaudeCodeProvider.ts
+  s_5ecfdb591ee8af::t_115d3509e810d8 11-16,21,34-37,45-54,66-85,90-97,111-125,129-140,161-162,164-166,170,173,180-182,185-187
+  s_5ecfdb591ee8af::t_316587d28ae990 167-169,171-172,174-179,183-184,188-197,206,219-227,262,264,266,269,296,298-304,306-310,312-325,335-336,350,357,360-364,374-376,383
+apps/agent/src/providers/AIEvent.ts
+  s_5ecfdb591ee8af::t_115d3509e810d8 10-11
+  s_5ecfdb591ee8af::t_f32e1b21567314 23-31
+apps/agent/src/__tests__/ClaudeCodeProvider.test.ts
+  s_5ecfdb591ee8af::t_115d3509e810d8 123-183,187-189,198-201,204-206,208-211,213-215,225,227-228,233-235,240-242,244-247,249-251,257,259,272,275-276,278-281,305
+  s_5ecfdb591ee8af::t_fa244697fa3bca 184-186,190-197,202-203,207,212,216-224,226,229-232,236-239,243,248,252-256,258,260-271,273-274,277,282-304
+apps/agent/src/providers/AIProvider.ts
+  s_5ecfdb591ee8af::t_86e04b31f00318 40-41
+apps/agent/src/session/AISession.ts
+  s_5ecfdb591ee8af::t_37e0d6d4bc3a2d 81-90,623-633
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "d1cadf519c9e48873601b6e7a7e340ba9a941afd",
+  "prompts": {},
+  "sessions": {
+    "s_5ecfdb591ee8af": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "217fbfe9-6c93-48f5-afca-a64a3dc1ee05",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
