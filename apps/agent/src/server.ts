@@ -16,7 +16,8 @@ import { analysisRoutes } from './routes/analysis.js'
 import { spikeRoutes } from './routes/spike.js'
 import { createSseHub, type SseHub } from './sse/SseHub.js'
 import { sseRoutes } from './sse/requirementEventsRoute.js'
-import { createCcSwitchClient, type CcSwitchClient } from './providers/CcSwitchClient.js'
+import { createCcSwitchClient, createNullCcSwitchClient } from './providers/CcSwitchClient.js'
+import type { CcSwitchClient } from './providers/CcSwitchClient.js'
 import { createClaudeCodeProvider } from './providers/ClaudeCodeProvider.js'
 
 const ALLOWED_ORIGINS: string[] = ['http://localhost:3333', 'http://127.0.0.1:3333']
@@ -122,13 +123,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     })
   } catch (err) {
     fastify.log.error({ err }, 'cc-switch client init failed; spike routes will warn')
-    ccSwitch = {
-      getCurrent: () => undefined,
-      getAll: () => [],
-      getById: () => undefined,
-      getModel: () => undefined,
-      close: () => {},
-    } as CcSwitchClient
+    ccSwitch = createNullCcSwitchClient()
   }
   const provider = createClaudeCodeProvider({ ccSwitch, debug: false })
 

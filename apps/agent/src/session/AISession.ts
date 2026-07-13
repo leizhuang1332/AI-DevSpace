@@ -101,10 +101,12 @@ export class AiSession implements IAISession {
   #consumers: Array<{ queue: ConsumerQueue; resolve: ((v: IteratorResult<AIEvent>) => void) | null }> = []
   /** 当前正在跑的 turn —— send() 时 set;finish 时清掉 */
   #inflight: Promise<void> | null = null
-  /** 内部 cancel controller */
-  #internalController: AbortController
+  /** 内部 cancel controller —— 每轮 send() 重新构造,避免 cancel-after-idle 永久污染 */
+  #internalController: AbortController | null = null
   #adapter: SdkAdapter
   #debug: boolean
+  /** 是否收到过 cancel() 调用(用于区分用户取消 vs SDK 异常) */
+  #cancelled = false
 
   constructor(deps: AiSessionDeps) {
     this.id = deps.id
@@ -115,20 +117,8 @@ export class AiSession implements IAISession {
     this.#debug = deps.debug ?? false
     this.model = deps.resolveModel?.()
 
-    // 内部 controller —— cancel() 会 abort 它;Provider 在 createSession 时可附加外部 signal
-    this.#internalController = new AbortController()
-    if (deps.signal) {
-      // 外部 abort → 转发到内部
-      if (deps.signal.aborted) {
-        this.#internalController.abort(deps.signal.reason)
-      } else {
-        deps.signal.addEventListener(
-          'abort',
-          () => this.#internalController.abort(deps.signal?.reason),
-          { once: true },
-        )
-      }
-    }
+    // 不在 constructor 构造 #internalController —— 每次 send() 时 new 一个,
+    // 保证 cancel() 只影响当前 turn,不影响后续 turn
 
     if (this.#debug) {
       console.log(`[AISession ${this.id}] created kind=${this.kind} topic=${this.topic}`)
@@ -248,7 +238,10 @@ export class AiSession implements IAISession {
 
   /** 内部:跑一轮 SDK query,推 AIEvent 给 consumers */
   async #runTurn(text: string): Promise<void> {
-    const signal = this.#internalController.signal
+    // 每轮 new 一个 controller —— 保证 cancel-after-idle 不污染后续 turn
+    const controller = new AbortController()
+    this.#internalController = controller
+    const signal = controller.signal
     const resume = this.#sdkSessionId // 续上下文
 
     try {
@@ -268,10 +261,23 @@ export class AiSession implements IAISession {
       this.#push({ type: 'done', reason: 'end_turn', sessionId: this.#sdkSessionId })
       this.#state = 'idle'
     } catch (err) {
+      // 区分用户取消 vs SDK 异常:
+      // - signal.aborted → 用户主动 cancel(),emit done{reason:'cancelled'}
+      // - 其他 → 真正的 SDK 抛错,emit error + done{reason:'error'}
+      if (signal.aborted) {
+        this.#push({ type: 'done', reason: 'cancelled', sessionId: this.#sdkSessionId })
+        this.#state = 'idle'
+        return
+      }
       const message = err instanceof Error ? err.message : String(err)
       this.#push({ type: 'error', code: 'sdk_throw', message, recoverable: false })
       this.#push({ type: 'done', reason: 'error', sessionId: this.#sdkSessionId })
       this.#state = 'errored'
+    } finally {
+      // 本轮 controller 退役 —— 下次 send() 时 new 一个干净的
+      if (this.#internalController === controller) {
+        this.#internalController = null
+      }
     }
   }
 
@@ -279,11 +285,12 @@ export class AiSession implements IAISession {
   async cancel(reason?: string): Promise<void> {
     if (this.#closed) return
     if (this.#state !== 'busy') {
-      // idle 时 cancel → 不做事,只 abort 内部 controller
-      this.#internalController.abort(reason ?? 'cancelled')
+      // idle 时 cancel 是 no-op —— 标记 #cancelled 但不 abort(避免污染下次 turn 的 controller)
+      this.#cancelled = true
       return
     }
-    this.#internalController.abort(reason ?? 'cancelled')
+    this.#cancelled = true
+    this.#internalController?.abort(reason ?? 'cancelled')
     // 等 in-flight turn 自然退
     if (this.#inflight) {
       try {
@@ -299,7 +306,7 @@ export class AiSession implements IAISession {
     if (this.#closed) return
     this.#closed = true
     if (this.#state === 'busy') {
-      this.#internalController.abort('closed')
+      this.#internalController?.abort('closed')
       if (this.#inflight) {
         try {
           await this.#inflight

@@ -186,3 +186,18 @@ export async function createCcSwitchClient(opts: CcSwitchClientOptions = {}): Pr
     },
   }
 }
+
+/**
+ * 创建一个「无 provider」的空 client —— server 启动时若 cc-switch.db 缺失,可降级用这个
+ * 让 spike routes 仍然能 register(只是 getCurrent() 返回 undefined,run 时会报错)
+ */
+export function createNullCcSwitchClient(): CcSwitchClient {
+  const empty: ProviderIndex[] = []
+  return {
+    getCurrent: () => undefined,
+    getAll: () => empty,
+    getById: () => undefined,
+    getModel: () => undefined,
+    close: () => {},
+  }
+}

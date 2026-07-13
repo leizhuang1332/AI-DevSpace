@@ -66,8 +66,8 @@ export const spikeRoutes: FastifyPluginAsync<SpikeRoutesOptions> = async (fastif
     fastify.log.warn('[spike] no cc-switch claude provider configured')
   }
 
-  // GET /api/spike/events —— SSE 订阅
-  fastify.get('/api/spike/events', async (req, reply) => {
+  // GET /api/spike/events —— SSE 订阅(public: spike 阶段供 curl 直接验证,P5 观测性接 web 时再加 auth)
+  fastify.get('/api/spike/events', { config: { public: true } }, async (req, reply) => {
     reply.raw.setHeader('Content-Type', 'text/event-stream')
     reply.raw.setHeader('Cache-Control', 'no-cache, no-transform')
     reply.raw.setHeader('Connection', 'keep-alive')
@@ -93,8 +93,8 @@ export const spikeRoutes: FastifyPluginAsync<SpikeRoutesOptions> = async (fastif
     reply.raw.on('close', cleanup)
   })
 
-  // POST /api/spike/run —— 启动 SDK query
-  fastify.post<{ Body: RunBody }>('/api/spike/run', async (req, reply) => {
+  // POST /api/spike/run —— 启动 SDK query(public: 同上,spike 阶段免 auth)
+  fastify.post<{ Body: RunBody }>('/api/spike/run', { config: { public: true } }, async (req, reply) => {
     const body = req.body ?? {}
     if (!isNonEmptyString(body.prompt)) {
       return reply.code(400).send(badRequest('prompt is required and must be non-empty'))

@@ -11,14 +11,16 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { AiSession, type SdkAdapter, type SdkMessageEnvelope } from '../session/AISession.js'
+import { AiSession } from '../session/AISession.js'
+import type { SdkAdapter, SdkMessageEnvelope } from '../session/AISession.js'
 import type {
   AIProvider,
   AISession as IAISession,
   CreateSessionOptions,
   ModelSelection,
 } from './AIProvider.js'
-import { CcSwitchClient, type ModelRole, type ProviderIndex } from './CcSwitchClient.js'
+import { CcSwitchClient } from './CcSwitchClient.js'
+import type { ModelRole, ProviderIndex } from './CcSwitchClient.js'
 
 /** SDK query 函数的类型 —— 用 type-only import 避免运行时依赖倒置 */
 type QueryFn = (params: {

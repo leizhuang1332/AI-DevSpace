@@ -13,8 +13,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import http from 'node:http'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { spikeRoutes, SPIKE_CHANNEL } from '../routes/spike.js'
 import { createSseHub, type SseHub } from '../sse/SseHub.js'
+import { TokenManager } from '../auth/TokenManager.js'
+import { authPlugin } from '../auth/authPlugin.js'
 import type { AIProvider } from '../providers/AIProvider.js'
 import type { AISession } from '../providers/AIProvider.js'
 import type { AIEvent } from '../providers/AIEvent.js'
@@ -299,3 +304,91 @@ describe('spike routes', () => {
     await app.close()
   })
 })
+
+describe('spike routes + authPlugin interaction', () => {
+  let app: FastifyInstance
+  let authedHub: SseHub
+  let root: string
+  let port: number
+
+  beforeEach(async () => {
+    root = mkdtempSync(join(tmpdir(), 'aidevsp-spike-auth-'))
+    const tm = new TokenManager(root)
+    await tm.ensure()
+    authedHub = createSseHub({ heartbeatMs: 60_000 })
+    app = Fastify({ logger: false })
+    // 注册 authPlugin(模拟 server.ts 的真实场景) + spikeRoutes
+    await app.register(authPlugin, { tokenManager: tm, allowedOrigins: ['http://localhost:3333'] })
+    await app.register(spikeRoutes, {
+      hub: authedHub,
+      provider: fakeProvider([]),
+      ccSwitch: fakeCcSwitch(),
+    })
+    await app.ready()
+    const url = await app.listen({ port: 0, host: '127.0.0.1' })
+    port = new URL(url).port
+  })
+
+  afterEach(async () => {
+    await app.close()
+    await authedHub.close()
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('GET /api/spike/events is public (no token → 200, not 401)', async () => {
+    const res = await openSseOnPort(port, 100)
+    expect(res.statusCode).toBe(200)
+    expect(res.headers['content-type']).toMatch(/^text\/event-stream/)
+  })
+
+  it('POST /api/spike/run is public (no token → 202/400, not 401)', async () => {
+    // 缺 prompt → 400(不是 401)
+    const res400 = await app.inject({ method: 'POST', url: '/api/spike/run', payload: {} })
+    expect(res400.statusCode).toBe(400)
+    // 有 prompt → 202
+    const res202 = await app.inject({ method: 'POST', url: '/api/spike/run', payload: { prompt: 'hi' } })
+    expect(res202.statusCode).toBe(202)
+  })
+})
+
+function openSseOnPort(port: number, readMs: number): Promise<{
+  statusCode: number
+  headers: Record<string, string | string[] | undefined>
+}> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        method: 'GET',
+        hostname: '127.0.0.1',
+        port,
+        path: '/api/spike/events',
+      },
+      (res) => {
+        const timer = setTimeout(() => {
+          req.destroy()
+          resolve({
+            statusCode: res.statusCode ?? 0,
+            headers: res.headers as Record<string, string | string[] | undefined>,
+          })
+        }, readMs)
+        res.on('data', () => {})
+        res.on('error', () => {
+          clearTimeout(timer)
+          resolve({
+            statusCode: res.statusCode ?? 0,
+            headers: res.headers as Record<string, string | string[] | undefined>,
+          })
+        })
+        res.on('end', () => {
+          clearTimeout(timer)
+          resolve({
+            statusCode: res.statusCode ?? 0,
+            headers: res.headers as Record<string, string | string[] | undefined>,
+          })
+        })
+      },
+    )
+    req.on('error', reject)
+    req.end()
+  })
+}

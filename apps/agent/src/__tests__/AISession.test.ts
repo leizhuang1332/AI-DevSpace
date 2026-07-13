@@ -235,9 +235,39 @@ describe('AiSession', () => {
     await sendP
     const events = await eventsP
     expect(sawAbort).toBe(true)
-    // error + done{error} 因为 adapter 抛了
+    // 用户主动 cancel → emit done{reason:'cancelled'},**不是** done{reason:'error'}
     expect(events.at(-1)?.type).toBe('done')
-    expect((events.at(-1) as { reason: string }).reason).toBe('error')
+    expect((events.at(-1) as { reason: string }).reason).toBe('cancelled')
+  })
+
+  it('idle cancel() is a no-op: next send() works normally', async () => {
+    let turn = 0
+    const adapter: SdkAdapter = {
+      async *runTurn() {
+        turn++
+        yield { kind: 'assistant', sessionId: 's', text: `t${turn}` }
+        yield { kind: 'result', sessionId: 's', reason: 'end_turn' }
+      },
+    }
+    const session = new AiSession({
+      id: 's-1',
+      reqId: 'r-1',
+      topic: 't',
+      kind: 'chat',
+      adapter,
+    })
+    // idle 时 cancel —— 不应该污染后续 turn
+    await session.cancel('early')
+    // 第一轮:并行启动 consumer 和 send
+    const events1P = collectEvents(session)
+    await session.send('q1')
+    const events1 = await events1P
+    expect(events1).toContainEqual({ type: 'text', text: 't1', delta: false })
+    // 第二轮:如果 idle cancel 污染了 controller,这次会直接 abort 失败
+    const events2P = collectEvents(session)
+    await session.send('q2')
+    const events2 = await events2P
+    expect(events2).toContainEqual({ type: 'text', text: 't2', delta: false })
   })
 
   it('close() stops further send and closes events()', async () => {
