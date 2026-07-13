@@ -45,13 +45,13 @@ export interface SessionLoggerOptions {
   root: string
   /** 时间戳注入 —— 便于测试;默认 new Date().toISOString() */
   now?: () => string
-  /** preview 最大字符数;默认 500 */
+  /** preview 最大字符数;默认 2000(spec §3.4) */
   maxPreviewChars?: number
   /** append 失败回调(不抛出);典型接到 GlobalLogger.sessionLogWriteFailed */
   onWriteError?: (error: unknown, input: SessionQueryLogInput) => void
 }
 
-const DEFAULT_MAX_PREVIEW_CHARS = 500
+const DEFAULT_MAX_PREVIEW_CHARS = 2000
 
 /** preview 摘要:redaction → 截断 */
 interface TextSummary {

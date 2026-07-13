@@ -142,13 +142,14 @@ describe('AiSession', () => {
   })
 
   it('maps error envelope → error event + done{reason:error}; state→errored', async () => {
+    // 死代码清理后:envelope error → recoverable 永远 false(不再透传 SDK 的 recoverable 标记)
     const session = new AiSession({
       id: 's-1',
       reqId: 'r-1',
       topic: 't',
       kind: 'chat',
       adapter: makeAdapter([
-        { kind: 'error', sessionId: 's', errorCode: 'rate_limit', message: 'slow down', recoverable: true },
+        { kind: 'error', sessionId: 's', errorCode: 'rate_limit', message: 'slow down' },
       ]),
     })
     const eventsP = collectEvents(session)
@@ -158,7 +159,7 @@ describe('AiSession', () => {
       type: 'error',
       code: 'rate_limit',
       message: 'slow down',
-      recoverable: true,
+      recoverable: false,
     })
     expect(events[1]).toEqual({ type: 'done', reason: 'error', sessionId: 's' })
     expect(session.state).toBe('errored')
@@ -370,6 +371,35 @@ describe('AiSession', () => {
     expect(retries[0]).toMatchObject({ category: 'A', retry: 1, delayMs: 1000 })
     expect(retries[1]).toMatchObject({ category: 'A', retry: 2, delayMs: 3000 })
     expect(session.state).toBe('idle')
+  })
+
+  it('C3: does not retry transient throws after partial output on a resumed session', async () => {
+    // resume 续上下文:即使 #sdkSessionId 已有值,只要 emit 过 text,就视为
+    // 「用户已看到 partial output」,再抛 transient 也必须不再 retry。
+    let calls = 0
+    const session = new AiSession({
+      id: 's-1',
+      reqId: 'r-1',
+      topic: 't',
+      kind: 'chat',
+      initialSdkSessionId: 'sdk-old',
+      retrySleep: async () => {},
+      adapter: {
+        async *runTurn() {
+          calls++
+          // 第一轮:yield 一段 partial text(模拟 SDK 在 resume 续上下文时已输出)
+          yield { kind: 'partial_assistant', sessionId: 'sdk-old', delta: 'partial...' }
+          // 然后 throw transient → AISession 拿到 {status:429}
+          // 旧实现:`!this.#sdkSessionId` 为 false → sawOutputWithoutResume 永远是 false → 会 retry
+          // 新实现:只要 emit 过 text 就 set sawOutputWithoutResume=true → canRetry 拒绝
+          throw { status: 429, message: 'slow down' }
+        },
+      },
+    })
+    const eventsP = collectEvents(session)
+    await session.send('q')
+    await eventsP
+    expect(calls).toBe(1)
   })
 
   it('does not retry auth failures and moves to errored', async () => {

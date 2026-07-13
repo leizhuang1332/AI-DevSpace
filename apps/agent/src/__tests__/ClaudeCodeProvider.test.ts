@@ -227,6 +227,93 @@ describe('createClaudeCodeProvider - Task 7 wiring', () => {
     expect(capture.calls).toBe(1)
   })
 
+  it('C1: does NOT surface api_retry with 4xx business error as retrying; classifier routes to B', async () => {
+    // api_retry envelope 携带 error_status=401 + error='authentication_failed' 时,
+    // 属于 BUSINESS_CODES(等价于 authentication_failed 字面值),不应被 Provider 透传为 retrying。
+    // Provider 应让 envelope 经 ErrorClassifier → category 'B' → queryFailed。
+    const capture: { calls: number } = { calls: 0 }
+    const queryFn = ((_params: { options?: Record<string, unknown> }) => {
+      capture.calls++
+      return (async function* () {
+        // SDK 内部 native retry 时报告的 api_retry:401/business error
+        yield {
+          type: 'system',
+          subtype: 'api_retry',
+          attempt: 1,
+          max_retries: 3,
+          retry_delay_ms: 1000,
+          error_status: 401,
+          error: 'authentication_failed',
+          session_id: 'sdk-1',
+        }
+        yield {
+          type: 'result',
+          subtype: 'success',
+          session_id: 'sdk-1',
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        }
+      })()
+    }) as Parameters<typeof createClaudeCodeProvider>[0]['queryFn']
+
+    const provider = createClaudeCodeProvider({
+      ccSwitch: makeFakeCcSwitch([currentProvider]),
+      queryFn,
+    })
+    const session = await provider.createSession('r-1', { topic: 't', kind: 'chat' })
+    const eventsP = collectUntilDone(session)
+    await session.send('hi')
+    const events = await eventsP
+
+    const retries = events.filter((e) => e.type === 'retrying')
+    expect(retries).toHaveLength(0)
+    // Provider 调用仍只 1 次:business error 不进 retry loop
+    expect(capture.calls).toBe(1)
+  })
+
+  it('C4: when api_retry fixture omits max_retries/retry_delay_ms, retrying envelope surfaces nulls (no 1/3/0 fallback)', async () => {
+    const capture: { calls: number } = { calls: 0 }
+    const queryFn = ((_params: { options?: Record<string, unknown> }) => {
+      capture.calls++
+      return (async function* () {
+        // 只给 attempt:1,其它字段 SDK 未提供
+        yield {
+          type: 'system',
+          subtype: 'api_retry',
+          attempt: 1,
+          error_status: 503,
+          error: 'server_error',
+          session_id: 'sdk-1',
+        }
+        yield {
+          type: 'result',
+          subtype: 'success',
+          session_id: 'sdk-1',
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        }
+      })()
+    }) as Parameters<typeof createClaudeCodeProvider>[0]['queryFn']
+
+    const provider = createClaudeCodeProvider({
+      ccSwitch: makeFakeCcSwitch([currentProvider]),
+      queryFn,
+    })
+    const session = await provider.createSession('r-1', { topic: 't', kind: 'chat' })
+    const eventsP = collectUntilDone(session)
+    await session.send('hi')
+    const events = await eventsP
+
+    const retries = events.filter((e) => e.type === 'retrying')
+    expect(retries).toHaveLength(1)
+    expect(retries[0]).toMatchObject({
+      type: 'retrying',
+      category: 'A',
+      retry: 1,
+      maxRetries: null,
+      delayMs: null,
+    })
+    expect(capture.calls).toBe(1)
+  })
+
   it('classifies assistant authentication_failed envelope as error category B without retrying', async () => {
     const capture: { calls: number } = { calls: 0 }
     const queryFn = ((_params: { options?: Record<string, unknown> }) => {

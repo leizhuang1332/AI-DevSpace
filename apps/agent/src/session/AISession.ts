@@ -80,13 +80,14 @@ export type SdkMessageEnvelope =
     }
   | {
       /** SDK 内部 HTTP 层 api_retry 透传:Native retry,不在 AISession retry loop 中,
-       *  仅作 AIEvent.retrying 投递(供 UI/日志观测);不触发新一轮 query。 */
+       *  仅作 AIEvent.retrying 投递(供 UI/日志观测);不触发新一轮 query。
+       *  C4:retry/maxRetries/delayMs 在 SDK 未提供时为 null(spec 透明)。 */
       kind: 'retrying'
       sessionId?: string
       category: 'A' | 'C' | 'D'
-      retry: number
-      maxRetries: number
-      delayMs: number
+      retry: number | null
+      maxRetries: number | null
+      delayMs: number | null
     }
   | {
       kind: 'error'
@@ -378,7 +379,9 @@ export class AiSession implements IAISession {
           appendSystemPrompt,
           signal,
           onText: (chunk) => { outputText += chunk },
-          markOutput: () => { if (!this.#sdkSessionId) sawOutputWithoutResume = true },
+          // C3:只要 emit 过 text 就置 true —— resume 续上下文时若已发出 partial output,
+          // 后续 transient 错误也必须拒绝 retry(避免用户看到 partial 后又突然整体重发)。
+          markOutput: () => { sawOutputWithoutResume = true },
         }),
         {
           signal,
@@ -427,11 +430,8 @@ export class AiSession implements IAISession {
         : new RetryFailure(classifyError(error, signal), attempts, retryDelaysMs)
       attempts = failure.attempts
       retryDelaysMs = failure.retryDelaysMs
-      // 从 failure.original 透传 envelope 的 recoverable 标记
-      const envelopeRecoverable =
-        failure.classification.original && typeof failure.classification.original === 'object'
-          ? (failure.classification.original as { recoverable?: boolean }).recoverable
-          : undefined
+      // 死代码移除:envelope 错误已经是 deterministic 终态,recoverable 永远是 false
+      // (RetryFailure 抛出后 AISession 不会重试),不再从 original 中读 recoverable
       if (failure.classification.category === 'cancelled' || signal.aborted) {
         status = 'cancelled'
         this.#push({ type: 'done', reason: 'cancelled', sessionId: this.#sdkSessionId })
@@ -463,8 +463,8 @@ export class AiSession implements IAISession {
           type: 'error',
           code: finalError.code,
           message: finalError.message,
-          // 若来源是 SDK envelope 且标记 recoverable,透传;否则默认 false(终态)
-          recoverable: envelopeRecoverable ?? false,
+          // envelope 错误是 deterministic 终态 —— recoverable 显式 false,不再透传 SDK 的标记
+          recoverable: false,
           category: finalError.category,
         })
         this.#push({ type: 'done', reason: 'error', sessionId: this.#sdkSessionId })
@@ -611,12 +611,14 @@ function mapSdkEnvelope(env: SdkMessageEnvelope): AIEvent[] {
       return [{ type: 'done', reason, sessionId: env.sessionId }]
     }
     case 'error':
+      // envelope error 已经是 deterministic 终态(recoverable 永远 false),
+      // 显式赋值便于读代码者理解
       return [
         {
           type: 'error',
           code: env.errorCode ?? 'sdk_error',
           message: env.message ?? 'unknown error',
-          recoverable: env.recoverable ?? false,
+          recoverable: false,
         },
         { type: 'done', reason: 'error', sessionId: env.sessionId },
       ]

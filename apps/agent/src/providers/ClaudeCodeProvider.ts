@@ -109,18 +109,56 @@ function toEnvelope(raw: unknown): SdkMessageEnvelope | null {
   switch (type) {
     case 'system': {
       // system + subtype=api_retry → 还原 native retry envelope
+      // (C1:business 错误 + 4xx → 改为 error envelope,让 AISession 的 ErrorClassifier 归 B)
       if (m['subtype'] === 'api_retry') {
         const errorStatus = m['error_status']
-        // error_status 是 number → 4xx/5xx(分类 A);缺失/其它 → 默认 D(transport 层)
-        const category: 'A' | 'B' | 'C' | 'D' =
-          typeof errorStatus === 'number' ? 'A' : 'D'
+        const errorString = typeof m['error'] === 'string' ? (m['error'] as string) : undefined
+        // C1:business 错误(认证/权限/账单/请求无效/模型未找到)—— 4xx 时不让 Provider
+        // 透传成 retrying envelope(AISession 会把它当 transient 透传到 UI),
+        // 而是转成 error envelope,让 AISession → ErrorClassifier → category 'B' →
+        // queryFailed 终态失败。
+        const BUSINESS_API_RETRY_CODES = new Set([
+          'authentication_failed',
+          'permission_denied',
+          'billing_error',
+          'invalid_request',
+          'model_not_found',
+          'error_max_turns',
+          'error_max_budget_usd',
+          'error_max_structured_output_retries',
+          'agent_abandoned',
+          'agent_gave_up',
+        ])
+        const isBusinessCode =
+          errorString !== undefined && BUSINESS_API_RETRY_CODES.has(errorString)
+        const is4xx =
+          typeof errorStatus === 'number' && errorStatus >= 400 && errorStatus < 500
+        if (isBusinessCode && is4xx) {
+          // 业务 4xx → 转 error envelope,让 classifier 归 B
+          return {
+            kind: 'error',
+            sessionId,
+            errorCode: errorString!,
+            message: errorString!,
+            status: errorStatus,
+            error: m,
+          }
+        }
+        // 否则按 error_status 走 category:
+        //   >=500 或 408/429 → A(transient)
+        //   其它 4xx / 缺失 → D(transport)
+        const category: 'A' | 'D' =
+          typeof errorStatus === 'number'
+            ? (errorStatus >= 500 || errorStatus === 408 || errorStatus === 429 ? 'A' : 'D')
+            : 'D'
+        // C4:retry/maxRetries/delayMs SDK 未提供时为 null(spec 透明),不再补 1/3/0
         return {
           kind: 'retrying',
           sessionId,
           category,
-          retry: numberOrNull(m['attempt']) ?? 1,
-          maxRetries: numberOrNull(m['max_retries']) ?? 3,
-          delayMs: numberOrNull(m['retry_delay_ms']) ?? 0,
+          retry: numberOrNull(m['attempt']),
+          maxRetries: numberOrNull(m['max_retries']),
+          delayMs: numberOrNull(m['retry_delay_ms']),
         }
       }
       return { kind: 'system', sessionId }

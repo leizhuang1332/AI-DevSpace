@@ -23,9 +23,10 @@ export type AIEvent =
   | {
       type: 'retrying'
       category: Extract<ErrorCategory, 'A' | 'C' | 'D'>
-      retry: number
-      maxRetries: number
-      delayMs: number
+      // C4:SDK 可能不提供 attempt/max_retries/retry_delay_ms → null(spec 透明)
+      retry: number | null
+      maxRetries: number | null
+      delayMs: number | null
       message: string
     }
   | { type: 'error'; code: string; message: string; recoverable: boolean; category?: Exclude<ErrorCategory, 'cancelled'> }

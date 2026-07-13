@@ -118,9 +118,10 @@ export type SseEvent =
       runId: string
       ts: number
       category: 'A' | 'C' | 'D'
-      retry: number
-      maxRetries: number
-      delayMs: number
+      // C4:SDK 未提供 attempt/max_retries/retry_delay_ms 时为 null
+      retry: number | null
+      maxRetries: number | null
+      delayMs: number | null
       message: string
     }
   /**
