@@ -1,0 +1,21 @@
+apps/agent/src/__tests__/RetryStrategy.test.ts
+  s_5ecfdb591ee8af::t_71a7d9772a561b 1-58
+apps/agent/src/error/RetryStrategy.ts
+  s_5ecfdb591ee8af::t_40e4bffb587af3 1-93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "176c759235f7482f4a223be72d1a785d8e7230d8",
+  "prompts": {},
+  "sessions": {
+    "s_5ecfdb591ee8af": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "217fbfe9-6c93-48f5-afca-a64a3dc1ee05",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
