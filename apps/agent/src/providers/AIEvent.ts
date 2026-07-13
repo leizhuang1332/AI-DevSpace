@@ -7,6 +7,8 @@
  * 扩展规则:UNION 新增 variant,不允许修改既有字段。
  */
 
+import type { ErrorCategory } from '../error/ErrorClassifier.js'
+
 /** done 事件原因 */
 export type DoneReason = 'end_turn' | 'cancelled' | 'error' | 'max_tokens'
 
@@ -18,5 +20,13 @@ export type AIEvent =
   | { type: 'tool_result'; name: string; output: unknown }
   | { type: 'file_written'; path: string; lines: number }
   | { type: 'permission_request'; tool: string; input: unknown }
-  | { type: 'error'; code: string; message: string; recoverable: boolean }
+  | {
+      type: 'retrying'
+      category: Extract<ErrorCategory, 'A' | 'C' | 'D'>
+      retry: number
+      maxRetries: number
+      delayMs: number
+      message: string
+    }
+  | { type: 'error'; code: string; message: string; recoverable: boolean; category?: Exclude<ErrorCategory, 'cancelled'> }
   | { type: 'done'; reason: DoneReason; sessionId?: string }

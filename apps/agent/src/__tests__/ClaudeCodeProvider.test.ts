@@ -121,3 +121,186 @@ describe('createClaudeCodeProvider - Q9 model selection wiring', () => {
     expect(capture.options?.['model']).toBe('current-main')
   })
 })
+
+/* -------------------------------------------------------------------------- *
+ * Task 7: SDK envelope mapping (api_retry / assistant error / result usage),
+ * localSid/resume/cwd wiring, shared FIFO limiter.
+ * -------------------------------------------------------------------------- */
+
+import type { AIEvent } from '../providers/AIEvent.js'
+
+/** 收集一个 session 的 events,直到见到 done —— 与 AISession.test 的模式一致 */
+async function collectUntilDone(session: { events(): AsyncIterable<AIEvent> }): Promise<AIEvent[]> {
+  const out: AIEvent[] = []
+  for await (const ev of session.events()) {
+    out.push(ev)
+    if (ev.type === 'done') break
+  }
+  return out
+}
+
+describe('createClaudeCodeProvider - Task 7 wiring', () => {
+  it('honors localSid, forwards resume/cwd to SDK options, and uses session.id=localSid', async () => {
+    const capture: { options?: Record<string, unknown>; calls: number } = { calls: 0 }
+    const queryFn = ((params: { options?: Record<string, unknown> }) => {
+      capture.calls++
+      capture.options = params.options
+      return (async function* () {
+        yield {
+          type: 'result',
+          subtype: 'success',
+          session_id: 'sdk-old',
+          usage: { input_tokens: 11, output_tokens: 7, cache_read_input_tokens: 3, cache_creation_input_tokens: 2 },
+        }
+      })()
+    }) as Parameters<typeof createClaudeCodeProvider>[0]['queryFn']
+
+    const provider = createClaudeCodeProvider({
+      ccSwitch: makeFakeCcSwitch([currentProvider]),
+      queryFn,
+    })
+    const session = await provider.createSession('r-1', {
+      localSid: 'local-1',
+      topic: 't',
+      kind: 'chat',
+      resume: 'sdk-old',
+      cwd: '/workspace/repo',
+    })
+    expect(session.id).toBe('local-1')
+
+    const eventsP = collectUntilDone(session)
+    await session.send('hi')
+    const events = await eventsP
+
+    expect(capture.calls).toBe(1)
+    expect(capture.options?.['resume']).toBe('sdk-old')
+    expect(capture.options?.['cwd']).toBe('/workspace/repo')
+
+    const done = events.find((e) => e.type === 'done')
+    expect(done?.type).toBe('done')
+    expect(session.sdkSessionId).toBe('sdk-old')
+  })
+
+  it('surfaces SDK native api_retry as a single AIEvent.retrying (category A, no extra query)', async () => {
+    const capture: { calls: number } = { calls: 0 }
+    const queryFn = ((_params: { options?: Record<string, unknown> }) => {
+      capture.calls++
+      return (async function* () {
+        yield {
+          type: 'system',
+          subtype: 'api_retry',
+          attempt: 1,
+          max_retries: 3,
+          retry_delay_ms: 1000,
+          error_status: 429,
+          error: 'rate_limit',
+          session_id: 'sdk-1',
+        }
+        yield {
+          type: 'result',
+          subtype: 'success',
+          session_id: 'sdk-1',
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        }
+      })()
+    }) as Parameters<typeof createClaudeCodeProvider>[0]['queryFn']
+
+    const provider = createClaudeCodeProvider({
+      ccSwitch: makeFakeCcSwitch([currentProvider]),
+      queryFn,
+    })
+    const session = await provider.createSession('r-1', { topic: 't', kind: 'chat' })
+    const eventsP = collectUntilDone(session)
+    await session.send('hi')
+    const events = await eventsP
+
+    const retries = events.filter((e) => e.type === 'retrying')
+    expect(retries).toHaveLength(1)
+    expect(retries[0]).toMatchObject({
+      type: 'retrying',
+      category: 'A',
+      retry: 1,
+      maxRetries: 3,
+      delayMs: 1000,
+    })
+    // native retry 是 SDK 内部 HTTP 重试,我们的 queryFn 只被调用一次
+    expect(capture.calls).toBe(1)
+  })
+
+  it('classifies assistant authentication_failed envelope as error category B without retrying', async () => {
+    const capture: { calls: number } = { calls: 0 }
+    const queryFn = ((_params: { options?: Record<string, unknown> }) => {
+      capture.calls++
+      return (async function* () {
+        yield {
+          type: 'assistant',
+          error: 'authentication_failed',
+          session_id: 'sdk-1',
+          message: { content: [] },
+        }
+      })()
+    }) as Parameters<typeof createClaudeCodeProvider>[0]['queryFn']
+
+    const provider = createClaudeCodeProvider({
+      ccSwitch: makeFakeCcSwitch([currentProvider]),
+      queryFn,
+    })
+    const session = await provider.createSession('r-1', { topic: 't', kind: 'chat' })
+    const eventsP = collectUntilDone(session)
+    await session.send('hi')
+    const events = await eventsP
+
+    const errors = events.filter((e) => e.type === 'error')
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toMatchObject({ type: 'error', code: 'authentication_failed', category: 'B' })
+    // B 类不可重试 → queryFn 只调用一次
+    expect(capture.calls).toBe(1)
+    expect(session.state).toBe('errored')
+  })
+
+  it('shares a 5-slot FIFO limiter across 6 concurrent sessions on the same provider', async () => {
+    type Gate = { promise: Promise<void>; release: () => void }
+    function makeGate(): Gate {
+      let release: () => void = () => {}
+      const promise = new Promise<void>((r) => { release = r })
+      return { promise, release }
+    }
+    const gates: Gate[] = []
+    const queryFn = ((_params: { options?: Record<string, unknown> }) => {
+      const gate = makeGate()
+      gates.push(gate)
+      return (async function* () {
+        await gate.promise
+        yield { type: 'result', subtype: 'success', session_id: 's-1' }
+      })()
+    }) as Parameters<typeof createClaudeCodeProvider>[0]['queryFn']
+
+    const provider = createClaudeCodeProvider({
+      ccSwitch: makeFakeCcSwitch([currentProvider]),
+      queryFn,
+    })
+
+    const sends: Array<Promise<void>> = []
+    for (let i = 0; i < 6; i++) {
+      const session = await provider.createSession(`r-${i}`, { topic: `t${i}`, kind: 'chat' })
+      sends.push(session.send('hi'))
+    }
+    // 等 microtask 队列 settle,让 5 个 in-flight + 1 个排队稳定下来
+    await new Promise((r) => setImmediate(r))
+    await new Promise((r) => setImmediate(r))
+
+    // 5 个 gate 被占据,第 6 个还没被调用
+    expect(gates).toHaveLength(5)
+
+    // 释放第 1 个 gate → breaker 把 slot 交给排队中的第 6 个 session
+    gates[0]!.release()
+    // 等到第 6 个 session 的 adapter 拿到 breaker slot,创建了它的 gate
+    while (gates.length < 6) await new Promise((r) => setImmediate(r))
+    expect(gates).toHaveLength(6)
+
+    // 释放剩余 5 个 gate,让所有 in-flight send 完成
+    for (let i = 1; i < gates.length; i++) gates[i]!.release()
+    await Promise.all(sends)
+    await provider.shutdown()
+  })
+})

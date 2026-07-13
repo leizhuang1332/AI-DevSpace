@@ -37,6 +37,8 @@ export type SessionState = 'idle' | 'busy' | 'closed' | 'errored'
 
 /** createSession 入参 —— 只放本期需要的最小字段 */
 export interface CreateSessionOptions {
+  /** 已落盘会话的稳定 local_sid;未传时 Provider 生成 UUID —— ResumeManager / spike route 传入 */
+  localSid?: string
   /** 会话 topic (用户起名 / 系统生成);P0 阶段先固定 'spike' */
   topic: string
   /** chat / task;P0 阶段先固定 'chat' */

@@ -79,6 +79,16 @@ export type SdkMessageEnvelope =
       usage?: SdkUsage
     }
   | {
+      /** SDK 内部 HTTP 层 api_retry 透传:Native retry,不在 AISession retry loop 中,
+       *  仅作 AIEvent.retrying 投递(供 UI/日志观测);不触发新一轮 query。 */
+      kind: 'retrying'
+      sessionId?: string
+      category: 'A' | 'C' | 'D'
+      retry: number
+      maxRetries: number
+      delayMs: number
+    }
+  | {
       kind: 'error'
       sessionId?: string
       errorCode?: string
@@ -609,6 +619,17 @@ function mapSdkEnvelope(env: SdkMessageEnvelope): AIEvent[] {
           recoverable: env.recoverable ?? false,
         },
         { type: 'done', reason: 'error', sessionId: env.sessionId },
+      ]
+    case 'retrying':
+      return [
+        {
+          type: 'retrying',
+          category: env.category,
+          retry: env.retry,
+          maxRetries: env.maxRetries,
+          delayMs: env.delayMs,
+          message: 'SDK native retry',
+        },
       ]
   }
 }
