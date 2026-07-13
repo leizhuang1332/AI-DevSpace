@@ -13,8 +13,11 @@ import { workspaceRoutes } from './routes/workspace.js'
 import { requirementRoutes } from './routes/requirement.js'
 import { bootstrapRoutes } from './routes/bootstrap.js'
 import { analysisRoutes } from './routes/analysis.js'
+import { spikeRoutes } from './routes/spike.js'
 import { createSseHub, type SseHub } from './sse/SseHub.js'
 import { sseRoutes } from './sse/requirementEventsRoute.js'
+import { createCcSwitchClient, type CcSwitchClient } from './providers/CcSwitchClient.js'
+import { createClaudeCodeProvider } from './providers/ClaudeCodeProvider.js'
 
 const ALLOWED_ORIGINS: string[] = ['http://localhost:3333', 'http://127.0.0.1:3333']
 
@@ -110,6 +113,25 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     throw err
   }
 
+  // 5b. CcSwitchClient (Q9) + AIProvider (Q2)
+  // —— 若 db 缺失/解析失败,降级为空 client (无 provider),不影响其他模块启动
+  let ccSwitch: CcSwitchClient
+  try {
+    ccSwitch = await createCcSwitchClient({
+      log: (msg) => fastify.log.info(msg),
+    })
+  } catch (err) {
+    fastify.log.error({ err }, 'cc-switch client init failed; spike routes will warn')
+    ccSwitch = {
+      getCurrent: () => undefined,
+      getAll: () => [],
+      getById: () => undefined,
+      getModel: () => undefined,
+      close: () => {},
+    } as CcSwitchClient
+  }
+  const provider = createClaudeCodeProvider({ ccSwitch, debug: false })
+
   // 6. Routes
   const healthService = new HealthService({
     root: workspaceRoot,
@@ -124,10 +146,13 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   await fastify.register(workspaceRoutes, { workspace })
   await fastify.register(requirementRoutes)
   await fastify.register(analysisRoutes, { hub })
+  await fastify.register(spikeRoutes, { hub, provider, ccSwitch })
   await fastify.register(bootstrapRoutes, { tokenManager, apiBase: 'http://localhost:7777' })
 
   fastify.addHook('onClose', async () => {
     await hub.close()
+    await provider.shutdown()
+    ccSwitch.close()
   })
 
   return fastify
