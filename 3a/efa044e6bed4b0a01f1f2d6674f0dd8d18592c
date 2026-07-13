@@ -1,0 +1,59 @@
+apps/agent/src/__tests__/PermissionHook.test.ts
+  s_49205f03aafb62::t_56e534b237d2b7 1-197
+apps/agent/src/__tests__/AISession.assembler.test.ts
+  s_49205f03aafb62::t_f33c8d48733488 1-9,11-13,15-140,144-150,152-155,157-158
+  s_49205f03aafb62::t_bee98f6021c10b 14
+  s_49205f03aafb62::t_7cf159c891edf3 10
+  s_49205f03aafb62::t_c0888d4191002e 141-143,151,156
+apps/agent/src/__tests__/SkillLoader.test.ts
+  s_49205f03aafb62::t_94180f634caaa5 1-221
+apps/agent/src/__tests__/HighRiskDetector.test.ts
+  s_49205f03aafb62::t_0787cde39d6df9 174-182
+  s_49205f03aafb62::t_51bcc4a22c62e1 1-173,183-205
+apps/agent/src/__tests__/SystemPromptAssembler.test.ts
+  s_49205f03aafb62::t_872fa002302ad7 1-264
+apps/agent/src/prompt/SystemPromptAssembler.ts
+  s_49205f03aafb62::t_b97a8ecbacf2f2 105-109
+  s_49205f03aafb62::t_406536078fa302 191
+  s_49205f03aafb62::t_eb2a467bfd0515 1-104,110-190,192-224,227-252,254-266,268-290
+  s_49205f03aafb62::t_42c6299849e12c 225-226
+  s_49205f03aafb62::t_c9911b76bfe8e2 253,267
+apps/agent/src/tools/HighRiskDetector.ts
+  s_49205f03aafb62::t_91a206992c8d20 55
+  s_49205f03aafb62::t_659b8f228fbb44 56
+  s_49205f03aafb62::t_69d07dc45a560b 192-194
+  s_49205f03aafb62::t_6f1307dbb173f0 208-209,211
+  s_49205f03aafb62::t_c92e7a997c4d81 1-54,57-191,195-207,210,212-238
+apps/agent/src/tools/PermissionHook.ts
+  s_49205f03aafb62::t_c077c0fabed070 27-28
+  s_49205f03aafb62::t_65adeaf60392b4 1-3,8,11-15,19-21,26,29-31,33-39,42-44,52-57,61-66,68,70-73,83-84,94-95,98-109,111-115,117,122-123,125-136,146-148,152-160,166-169,173-174,179-191,193,199-214
+  s_49205f03aafb62::t_8584beab64adda 4-7,9-10,16-18,22-25,32,40-41,45-51,58-60,67,69,74-82,85-93,96-97,110,116,118-121,124,137-145,149-151,161-165,170-172,175-178,192,194-198
+apps/agent/src/session/AISession.ts
+  s_49205f03aafb62::t_b98c4ba1981f31 22,26-34,38
+  s_49205f03aafb62::t_11b52dfe2e42d4 91-94,122-125,136-137,267-297,299
+apps/agent/src/prompt/SkillLoader.ts
+  s_49205f03aafb62::t_2d3f21410331d7 197
+  s_49205f03aafb62::t_d1fd81c7cf4342 1-78,80-196,198-221
+  s_49205f03aafb62::t_59df051ca5d8e8 79
+apps/agent/src/providers/ClaudeCodeProvider.ts
+  s_49205f03aafb62::t_b98c4ba1981f31 24-28
+  s_49205f03aafb62::t_9abcfee99ad278 43-46,115-116,153,156,170-179,192,216-218,228-229
+packages/shared/src/sse.ts
+  s_49205f03aafb62::t_55d08747b67d50 35-65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "3aefa044e6bed4b0a01f1f2d6674f0dd8d18592c",
+  "prompts": {},
+  "sessions": {
+    "s_49205f03aafb62": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "daea3e3f-a18b-4325-8684-11d6123a4a94",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
