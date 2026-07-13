@@ -1,0 +1,30 @@
+apps/agent/src/routes/spike.ts
+  s_7651a4547f2b25::t_81a0dd2068d7f9 28
+  s_7651a4547f2b25::t_a6f9d5ed38188a 161
+apps/agent/src/__tests__/AISession.test.ts
+  s_7651a4547f2b25::t_74b370a5a67150 205
+  s_7651a4547f2b25::t_18b2fa8cbb6168 13
+  s_7651a4547f2b25::t_992b7b7dab7a53 203-204
+apps/agent/src/providers/ClaudeCodeProvider.ts
+  s_7651a4547f2b25::t_a463f76cc6cd68 22
+apps/agent/src/routes/analysis.ts
+  s_7651a4547f2b25::t_48121a21d0e514 23
+apps/agent/src/session/AISession.ts
+  s_7651a4547f2b25::t_be5c4d4b15c02b 195,203,220-221,225-226,336-337
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "326b8dafd39abf821466c575e13d80c67232b720",
+  "prompts": {},
+  "sessions": {
+    "s_7651a4547f2b25": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1a884db6-b681-4210-a30d-4a7809febf5a",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
