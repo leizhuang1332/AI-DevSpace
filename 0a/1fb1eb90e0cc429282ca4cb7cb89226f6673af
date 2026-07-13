@@ -1,0 +1,23 @@
+apps/agent/src/error/CircuitBreaker.ts
+  s_5ecfdb591ee8af::t_c4bc248a29e57a 1-99
+apps/agent/src/__tests__/CircuitBreaker.test.ts
+  s_5ecfdb591ee8af::t_e6ee8568b89024 1-58
+.superpowers/sdd/task-3-report.md
+  s_5ecfdb591ee8af::t_b31dcd5113ddf2 1-146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "0a1fb1eb90e0cc429282ca4cb7cb89226f6673af",
+  "prompts": {},
+  "sessions": {
+    "s_5ecfdb591ee8af": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "217fbfe9-6c93-48f5-afca-a64a3dc1ee05",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
