@@ -112,6 +112,18 @@ describe('SessionStore.updateSession', () => {
     const store = makeStore()
     await expect(store.updateSession('missing', { sdkSessionId: 'x' })).rejects.toThrow()
   })
+
+  it('记录 last_cancel_at 并刷新 last_active_at', async () => {
+    let t = '2026-07-13T00:00:00.000Z'
+    const store = new SessionStore({ root, now: () => t })
+    const meta = await store.createSession('REQ-1', { topic: 't', kind: 'chat' })
+    t = '2026-07-13T02:00:00.000Z'
+    const updated = await store.updateSession(meta.sid, {
+      last_cancel_at: '2026-07-13T01:59:59.000Z',
+    })
+    expect(updated.last_cancel_at).toBe('2026-07-13T01:59:59.000Z')
+    expect(updated.last_active_at).toBe(t)
+  })
 })
 
 describe('SessionStore.archiveSession', () => {

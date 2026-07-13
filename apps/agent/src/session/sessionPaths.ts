@@ -36,6 +36,11 @@ export function messagesPathFor(root: string, reqId: string, localSid: string): 
   return join(sessionDirFor(root, reqId, localSid), 'messages.jsonl')
 }
 
+/** session 目录下的 log.jsonl(query 生命周期结构化日志,SessionLogger 写入) */
+export function logPathFor(root: string, reqId: string, localSid: string): string {
+  return join(sessionDirFor(root, reqId, localSid), 'log.jsonl')
+}
+
 /** findSessionDir 命中结果 */
 export interface FoundSession {
   reqId: string

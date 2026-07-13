@@ -15,6 +15,7 @@ import {
   sessionDirFor,
   metaPathFor,
   messagesPathFor,
+  logPathFor,
   findSessionDir,
 } from '../session/sessionPaths.js'
 
@@ -40,6 +41,12 @@ describe('sessionPaths pure joins', () => {
     )
     expect(messagesPathFor(root, 'REQ-1', 'sid-abc')).toBe(
       join(root, 'requirements', 'REQ-1', 'sessions', 'sid-abc', 'messages.jsonl'),
+    )
+  })
+
+  it('logPathFor 落在 session 目录下', () => {
+    expect(logPathFor(root, 'REQ-1', 'sid-abc')).toBe(
+      join(root, 'requirements', 'REQ-1', 'sessions', 'sid-abc', 'log.jsonl'),
     )
   })
 })

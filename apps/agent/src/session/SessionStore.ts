@@ -51,6 +51,8 @@ export interface SessionMeta {
   model?: ModelSelection
   /** SDK 找不到旧 session 时重建的标记 (Q8.6 / ResumeManager) */
   recovered?: boolean
+  /** 用户最近一次取消 query 的 ISO 8601 时间 */
+  last_cancel_at?: string
   /** 归档标记 */
   archived?: boolean
 }
