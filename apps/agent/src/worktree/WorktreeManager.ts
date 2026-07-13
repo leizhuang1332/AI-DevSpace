@@ -41,8 +41,8 @@ export interface WorktreeManagerDeps {
 export interface WorktreeManager {
   /** 计算一个 req × repo 的 worktree 路径(纯字符串拼接) */
   getWorktreePath(reqId: string, repoName: string): string
-  /** 计算全局仓库池的路径 */
-  getRepoPath(repoName: string): string
+  /** 计算全局仓库池的路径(<root>/repos/<repoName>/,主仓库只 clone 一次) */
+  getPoolRepoPath(repoName: string): string
   /**
    * 在主仓库里给 req 建一个 worktree:
    *   git -C <repoPath> worktree add <worktreePath> -b <branchName> <baseBranch>
@@ -64,7 +64,7 @@ export interface WorktreeManager {
 export function createWorktreeManager(deps: WorktreeManagerDeps): WorktreeManager {
   const { root, git } = deps
 
-  function getRepoPath(repoName: string): string {
+  function getPoolRepoPath(repoName: string): string {
     return posixJoin(root, 'repos', repoName)
   }
 
@@ -78,7 +78,7 @@ export function createWorktreeManager(deps: WorktreeManagerDeps): WorktreeManage
     branchName: string,
     base = 'master',
   ): Promise<void> {
-    const repoPath = getRepoPath(repoName)
+    const repoPath = getPoolRepoPath(repoName)
     const wtPath = getWorktreePath(reqId, repoName)
     const args = [
       '-C',
@@ -97,7 +97,7 @@ export function createWorktreeManager(deps: WorktreeManagerDeps): WorktreeManage
   }
 
   async function removeWorktree(reqId: string, repoName: string): Promise<void> {
-    const repoPath = getRepoPath(repoName)
+    const repoPath = getPoolRepoPath(repoName)
     const wtPath = getWorktreePath(reqId, repoName)
     const args = ['-C', repoPath, 'worktree', 'remove', wtPath]
     const result = await git(args)
@@ -107,7 +107,7 @@ export function createWorktreeManager(deps: WorktreeManagerDeps): WorktreeManage
   }
 
   async function listWorktrees(repoName: string): Promise<WorktreeInfo[]> {
-    const repoPath = getRepoPath(repoName)
+    const repoPath = getPoolRepoPath(repoName)
     const args = ['-C', repoPath, 'worktree', 'list', '--porcelain']
     const result = await git(args)
     if (result.code !== 0) {
@@ -117,7 +117,7 @@ export function createWorktreeManager(deps: WorktreeManagerDeps): WorktreeManage
   }
 
   return {
-    getRepoPath,
+    getPoolRepoPath,
     getWorktreePath,
     createWorktree,
     removeWorktree,

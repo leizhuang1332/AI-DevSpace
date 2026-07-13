@@ -60,11 +60,11 @@ describe('createWorktreeManager', () => {
     })
   })
 
-  describe('getRepoPath', () => {
+  describe('getPoolRepoPath', () => {
     it('computes the global pool path repos/<repoName>', () => {
       const { git } = makeFakeGit()
       const mgr = createWorktreeManager({ root: ROOT, git })
-      expect(mgr.getRepoPath('order-svc')).toBe('/fake/aidevspace/repos/order-svc')
+      expect(mgr.getPoolRepoPath('order-svc')).toBe('/fake/aidevspace/repos/order-svc')
     })
   })
 

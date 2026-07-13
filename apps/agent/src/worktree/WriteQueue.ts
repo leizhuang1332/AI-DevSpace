@@ -15,14 +15,18 @@
  * 不关心"成功还是失败"——这样后续 enqueue 永远能拼到上一轮末尾。
  */
 
-/** 与 AISession 透出的 tool_use.input 同构(只关心 name + input,不强校验) */
-export interface WriteToolCall {
+/**
+ * 与 AISession 透出的 tool_use.input 同构(只关心 name + input,不强校验)。
+ * 名字用 `ToolCall` 而不是 `WriteToolCall` —— 这是写 / 读共用的载荷形状,
+ * WriteQueue / ReadRunner / 外部 SDK 都传同一个 type。
+ */
+export interface ToolCall {
   name: string
   input: unknown
 }
 
-/** 工具实际执行器 —— 实际场景下接 ClaudeCodeProvider / PermissionHook 等 */
-export type WriteRunner = (reqId: string, toolCall: WriteToolCall) => Promise<unknown>
+/** 写工具执行器 —— 实际场景下接 ClaudeCodeProvider / PermissionHook 等 */
+export type WriteRunner = (reqId: string, toolCall: ToolCall) => Promise<unknown>
 
 export interface WriteQueueDeps {
   run: WriteRunner
@@ -30,7 +34,7 @@ export interface WriteQueueDeps {
 
 export interface WriteQueue {
   /** 串行执行一个写工具调用;返回的 promise 与 run() 的结果同步 */
-  exec(reqId: string, toolCall: WriteToolCall): Promise<unknown>
+  exec(reqId: string, toolCall: ToolCall): Promise<unknown>
   /** 取消某个 req 的等待队列(已在飞的不动);返回是否真的取消过 */
   cancel(reqId: string): boolean
   /** 当前在排队的 req 数量(测试用) */
@@ -41,7 +45,7 @@ export function createWriteQueue(deps: WriteQueueDeps): WriteQueue {
   // 队尾类型 = "是否完成" 的 promise,值不重要;用 unknown 接收 .catch 的返回值
   const tails = new Map<string, Promise<unknown>>()
 
-  function exec(reqId: string, toolCall: WriteToolCall): Promise<unknown> {
+  function exec(reqId: string, toolCall: ToolCall): Promise<unknown> {
     const prev = tails.get(reqId) ?? Promise.resolve()
     // next 才是真正"串行执行"的那一格;其 resolve/reject 反映本次工具结果
     const next = prev.then(() => deps.run(reqId, toolCall))

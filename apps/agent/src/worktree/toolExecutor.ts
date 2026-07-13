@@ -13,17 +13,11 @@
  * 这是 P1 阶段的最小执行器。PreToolUse hook(Q6 高危检测)留到 P2 接 SDK 原生 hook。
  */
 
-import { createWriteQueue, type WriteRunner, type WriteToolCall } from './WriteQueue.js'
+import { createWriteQueue, type WriteRunner, type ToolCall } from './WriteQueue.js'
 import { classifyTool } from './toolClassifier.js'
 
-/** 原始工具调用 —— 不透明载荷,runner 自行解析 input */
-export interface RawToolCall {
-  name: string
-  input: unknown
-}
-
 /** 读工具执行器 —— 直接调,不等队列 */
-export type ReadRunner = (reqId: string, tc: RawToolCall) => Promise<unknown>
+export type ReadRunner = (reqId: string, tc: ToolCall) => Promise<unknown>
 
 export interface ToolExecutorDeps {
   readRunner: ReadRunner
@@ -31,7 +25,7 @@ export interface ToolExecutorDeps {
 }
 
 export interface ToolExecutor {
-  exec(reqId: string, tc: RawToolCall): Promise<unknown>
+  exec(reqId: string, tc: ToolCall): Promise<unknown>
   /** 调试用 —— 当前在排队的 req 数 */
   queueSize(): number
 }
@@ -39,14 +33,9 @@ export interface ToolExecutor {
 export function createToolExecutor(deps: ToolExecutorDeps): ToolExecutor {
   const queue = createWriteQueue({ run: deps.writeRunner })
 
-  async function exec(reqId: string, tc: RawToolCall): Promise<unknown> {
+  async function exec(reqId: string, tc: ToolCall): Promise<unknown> {
     const cls = classifyTool(tc.name, tc.input)
-    if (cls === 'write') {
-      // WriteToolCall 与 RawToolCall 形状一致(name + input),但保留独立类型以便
-      // 后续给 WriteQueue 加更严格的契约。
-      const wtc: WriteToolCall = { name: tc.name, input: tc.input }
-      return queue.exec(reqId, wtc)
-    }
+    if (cls === 'write') return queue.exec(reqId, tc)
     return deps.readRunner(reqId, tc)
   }
 

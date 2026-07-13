@@ -180,4 +180,53 @@ describe('createWriteQueue', () => {
     resolveOne(1, 'ok')
     await Promise.all([pA, pB])
   })
+
+  it('cancel(reqId) lets subsequent enqueue start fresh (in-flight + already-chained continue)', async () => {
+    // cancel 语义(对齐 WriteQueue.cancel JSDoc):
+    //   - 在飞的 call 与 cancel 之前已 chain 的 pending call 继续跑(不受影响)
+    //   - cancel 之后的 enqueue 从 Promise.resolve() 开始,不再串行等待
+    //   - size() 立即清零
+    //
+    // 验证:用一个慢的 p1 + cancel + 立刻 enqueue p3,断言 p3 在 p1 之前完成
+    //     —— 如果 cancel 没生效,p3 会卡在 p1 后面,finish 顺序会反过来。
+    const order: string[] = []
+    let slowResolve!: () => void
+    const slowGate = new Promise<void>((r) => {
+      slowResolve = r
+    })
+    const runner = vi.fn<WriteRunner>(async (_reqId, tc) => {
+      const path = (tc.input as { file_path: string }).file_path
+      if (path === '/slow') await slowGate
+      order.push(path)
+    })
+    const queue = createWriteQueue({ run: runner })
+
+    // p1 慢 / p2 已在队列里 / cancel / p3 新 enqueue
+    const p1 = queue.exec('req-1', { name: 'Edit', input: { file_path: '/slow' } })
+    const p2 = queue.exec('req-1', { name: 'Edit', input: { file_path: '/pending' } })
+
+    // 等 p1 in-flight
+    await vi.waitFor(() =>
+      expect(runner.mock.calls.length).toBeGreaterThanOrEqual(1),
+    )
+
+    expect(queue.cancel('req-1')).toBe(true)
+    expect(queue.size()).toBe(0)
+
+    // cancel 之后立刻 enqueue p3 —— 关键:它应该立即被派活(不等 p1)
+    const p3 = queue.exec('req-1', { name: 'Edit', input: { file_path: '/fresh' } })
+    await vi.waitFor(() => expect(runner.mock.calls.length).toBeGreaterThanOrEqual(2))
+
+    // 此时 p3 已触发(cancel 后从 Promise.resolve() 起跳)
+    // p2 也已经触发(cancel 之前已 chain)
+    // 放行 p1
+    slowResolve()
+
+    await Promise.all([p1, p2, p3])
+
+    // 顺序断言:p3 必须在 p1 之前完成
+    const idxSlow = order.indexOf('/slow')
+    const idxFresh = order.indexOf('/fresh')
+    expect(idxFresh).toBeLessThan(idxSlow)
+  })
 })

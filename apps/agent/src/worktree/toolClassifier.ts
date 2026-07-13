@@ -26,37 +26,30 @@ const READ_TOOL_NAMES = new Set<string>(['Read', 'Grep', 'Glob'])
 /**
  * Bash 命令里出现以下任意模式 → 视为写操作。
  *
- * 保守策略:
- *   - `\brm\b` —— 删除文件;`-rf` / `-f` / `-r` 都覆盖
- *   - `\bmv\b` / `\bcp\b` —— mv 是搬移(目标侧写),cp 是复制(目标侧写)
- *   - `\bchmod\b` / `\bchown\b` —— 修改元数据(写)
- *   - `>` / `>>` —— 输出重定向
- *   - `git commit` / `git push` —— 推代码改动
- *   - `git checkout` (切换 branch / 恢复文件) / `git reset` —— 改工作区
- *   - `git merge` / `git rebase` —— 改分支拓扑
- *   - `npm install` / `pnpm install` / `yarn install` —— 改 node_modules + lockfile
- *   - `sed -i` —— 原地编辑
- *   - `touch` —— 创建文件
+ * 保守策略:命中即写,可宁误杀不可漏放(漏拦 rm / git push 等破坏性操作代价大)。
+ * 数组按"行为类别"分组,新增模式时挑对应分组追加,避免末尾堆积。
  */
 const BASH_WRITE_PATTERNS: RegExp[] = [
-  /\brm\b/,
-  /\bmv\b/,
-  /\bcp\b/,
-  /\bchmod\b/,
-  /\bchown\b/,
-  />/,
-  /git\s+commit\b/,
-  /git\s+push\b/,
-  /git\s+checkout\b/,
-  /git\s+reset\b/,
-  /git\s+merge\b/,
-  /git\s+rebase\b/,
-  /\bnpm\s+install\b/,
-  /\bpnpm\s+(?:install|add)\b/,
-  /\byarn\s+(?:install|add)\b/,
-  /\bsed\s+-i\b/,
-  /\btouch\b/,
-  /\bmkdir\b/,
+  // ── 文件 / 目录 删除 · 移动 · 复制 · 改元数据 ─────────────────
+  /\brm\b/, // 删除(rm -rf / rm -f 等)
+  /\bmv\b/, // 移动(目标侧写)
+  /\bcp\b/, // 复制(目标侧写)
+  /\bchmod\b/, // 改权限
+  /\bchown\b/, // 改属主
+
+  // ── 输出重定向(覆盖 / 追加) ────────────────────────────────────
+  />/, // 含 > 或 >> 的任何形式
+
+  // ── git 改工作区 / 分支拓扑 / 远端 ──────────────────────────────
+  /git\s+(?:commit|push|checkout|reset|merge|rebase)\b/,
+
+  // ── 包管理器(改 node_modules + lockfile) ───────────────────────
+  /\b(?:npm|pnpm|yarn)\s+(?:install|add)\b/,
+
+  // ── 文件 / 目录 创建 · 原地编辑 ────────────────────────────────
+  /\bsed\s+-i\b/, // 原地编辑
+  /\btouch\b/, // 创建空文件
+  /\bmkdir\b/, // 创建目录
 ]
 
 export type ToolClass = 'read' | 'write'

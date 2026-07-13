@@ -14,20 +14,20 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   createToolExecutor,
   type ToolExecutor,
-  type RawToolCall,
 } from '../worktree/toolExecutor.js'
+import type { ToolCall } from '../worktree/WriteQueue.js'
 
 /** 读 runner —— 记录调用,直接返回结果 */
 function makeReadRunner() {
-  const calls: RawToolCall[] = []
-  const runner = vi.fn(async (_reqId: string, tc: RawToolCall) => {
+  const calls: ToolCall[] = []
+  const runner = vi.fn(async (_reqId: string, tc: ToolCall) => {
     calls.push(tc)
     return { kind: 'read-result', name: tc.name }
   })
   return { runner, calls }
 }
 
-function toolCall(name: string, input: unknown = {}): RawToolCall {
+function toolCall(name: string, input: unknown = {}): ToolCall {
   return { name, input }
 }
 
@@ -94,7 +94,7 @@ describe('createToolExecutor', () => {
   it('serializes 3 write tool calls per req in order', async () => {
     const order: string[] = []
     const readRunner = vi.fn(async () => 'r')
-    const writeRunner = vi.fn(async (_reqId: string, tc: RawToolCall) => {
+    const writeRunner = vi.fn(async (_reqId: string, tc: ToolCall) => {
       order.push((tc.input as { file_path: string }).file_path)
       return 'w'
     })
@@ -112,7 +112,7 @@ describe('createToolExecutor', () => {
   it('different reqs do not block each other on writes', async () => {
     const order: string[] = []
     const readRunner = vi.fn(async () => 'r')
-    const writeRunner = vi.fn(async (reqId: string, tc: RawToolCall) => {
+    const writeRunner = vi.fn(async (reqId: string, tc: ToolCall) => {
       order.push(`${reqId}:${(tc.input as { file_path: string }).file_path}`)
     })
     const exec = createToolExecutor({ readRunner, writeRunner })
