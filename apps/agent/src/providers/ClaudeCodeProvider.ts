@@ -21,6 +21,11 @@ import type {
 } from './AIProvider.js'
 import { CcSwitchClient } from './CcSwitchClient.js'
 import type { ModelRole, ProviderIndex } from './CcSwitchClient.js'
+import type { PermissionHook } from '../tools/PermissionHook.js'
+import type {
+  SystemPromptAssembler,
+  AssemblerRequirement,
+} from '../prompt/SystemPromptAssembler.js'
 
 /** SDK query 函数的类型 —— 用 type-only import 避免运行时依赖倒置 */
 type QueryFn = (params: {
@@ -35,6 +40,10 @@ export interface ClaudeCodeProviderOptions {
   queryFn?: QueryFn
   /** debug log */
   debug?: boolean
+  /** Q6:5 类高危 PreToolUse hook —— 注入后 Provider 在 adapter 里 wire 到 SDK options.hooks */
+  permissionHook?: PermissionHook
+  /** Q5:system prompt 装配器 —— Provider 注入到新建的 AiSession,使其在每次 send() 自动装配 */
+  assembler?: SystemPromptAssembler
 }
 
 /**
@@ -103,6 +112,8 @@ function toEnvelope(raw: unknown): SdkMessageEnvelope | null {
 export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIProvider {
   const ccSwitch = opts.ccSwitch
   const debug = opts.debug ?? false
+  const permissionHook = opts.permissionHook
+  const assembler = opts.assembler
 
   /** Lazy import SDK —— 避免启动时拉 cli 子进程 */
   let cachedQuery: QueryFn | null = opts.queryFn ?? null
@@ -139,9 +150,10 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
    * - cwd 透传;P0 默认 process.cwd()
    * - resume 透传 sdkSessionId (Q3)
    * - abortController 由 signal 包出 (Q8.2)
+   * - appendSystemPrompt(Q5.1) + hooks(Q6.1) 由 AISession.send 阶段计算后透传
    */
   const adapter: SdkAdapter = {
-    async *runTurn({ prompt, resume, signal }): AsyncIterable<SdkMessageEnvelope> {
+    async *runTurn({ prompt, resume, appendSystemPrompt, signal }): AsyncIterable<SdkMessageEnvelope> {
       const q = await getQuery()
 
       // 构造 SDK Options —— 用 model + (optional) resume + cwd + env (baseUrl/apiKey)
@@ -155,6 +167,16 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
         if (Object.keys(env).length > 0) sdkOptions['env'] = env
       }
       if (resume) sdkOptions['resume'] = resume
+      if (appendSystemPrompt && appendSystemPrompt.length > 0) {
+        sdkOptions['appendSystemPrompt'] = appendSystemPrompt
+      }
+      // Q6:wire PreToolUse hook —— SDK 期望 { hooks: HookCallbackMatcher[] }
+      // HookCallbackMatcher = { matcher?, hooks: HookCallback[] }
+      if (permissionHook) {
+        sdkOptions['hooks'] = {
+          PreToolUse: [{ hooks: [permissionHook.callback] }],
+        }
+      }
       const controller = new AbortController()
       if (signal) {
         if (signal.aborted) controller.abort(signal.reason)
@@ -167,7 +189,7 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
 
       if (debug) {
         console.log(
-          `[ClaudeCodeProvider] runTurn model=${sdkOptions['model']} resume=${resume ?? '<none>'} cwd=${sdkOptions['cwd']}`,
+          `[ClaudeCodeProvider] runTurn model=${sdkOptions['model']} resume=${resume ?? '<none>'} cwd=${sdkOptions['cwd']} promptAppended=${appendSystemPrompt ? 'yes' : 'no'} hookWired=${permissionHook ? 'yes' : 'no'}`,
         )
       }
 
@@ -191,6 +213,9 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
         )
       }
 
+      // requirement 上下文:从 meta.yaml 读;provider 这里拿不到 fs,所以让 AISession 用 process.cwd() 兜底
+      const requirement: AssemblerRequirement | undefined = undefined
+
       const session = new AiSession({
         id: localSid,
         reqId,
@@ -200,6 +225,8 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
         resolveModel: () => createOpts.model,
         signal: createOpts.signal,
         debug,
+        assembler,
+        requirement,
       })
 
       return session

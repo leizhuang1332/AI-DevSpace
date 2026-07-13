@@ -19,13 +19,23 @@ import type {
   ModelSelection,
 } from '../providers/AIProvider.js'
 import type { AIEvent, DoneReason } from '../providers/AIEvent.js'
+import type { SystemPromptAssembler, AssemblerRequirement } from '../prompt/SystemPromptAssembler.js'
 
 /** SDK 适配器接口 —— ClaudeCodeProvider 提供;测试时可注入 mock */
 export interface SdkAdapter {
-  /** 启动一轮 query,把 SDK 消息流式推给 listener;返回时 turn 结束 */
+  /**
+   * 启动一轮 query,把 SDK 消息流式推给 listener;返回时 turn 结束。
+   *
+   * - `prompt`: 用户输入文本
+   * - `resume`: SDK session_id(Q3:续上下文)
+   * - `appendSystemPrompt`: 由 SystemPromptAssembler 计算的 per-query system prompt 增量
+   *   (Q5.1:SDK 接受 `appendSystemPrompt`,我们追加到 Claude Code 默认 system prompt 之后)
+   * - `signal`: AbortController.signal(用于 cancel)
+   */
   runTurn(input: {
     prompt: string
     resume?: string
+    appendSystemPrompt?: string
     signal?: AbortSignal
   }): AsyncIterable<SdkMessageEnvelope>
 }
@@ -78,6 +88,10 @@ export interface AiSessionDeps {
   signal?: AbortSignal
   /** debug 日志开关 */
   debug?: boolean
+  /** 系统 prompt 装配器(Q5)—— 注入后每次 send() 自动拼装 */
+  assembler?: SystemPromptAssembler
+  /** 当前 requirement 上下文(Q5 assembleDynamic 需要) */
+  requirement?: AssemblerRequirement
 }
 
 /** events() 中表示「流关闭」的 sentinel —— 与 AIEvent 类型互斥 */
@@ -105,6 +119,10 @@ export class AiSession implements IAISession {
   #internalController: AbortController | null = null
   #adapter: SdkAdapter
   #debug: boolean
+  /** Q5:per-session 系统 prompt 装配器 */
+  #assembler: SystemPromptAssembler | undefined
+  /** Q5:requirement 上下文 */
+  #requirement: AssemblerRequirement | undefined
   /** 是否收到过 cancel() 调用(用于区分用户取消 vs SDK 异常) */
   #cancelled = false
 
@@ -115,6 +133,8 @@ export class AiSession implements IAISession {
     this.topic = deps.topic
     this.#adapter = deps.adapter
     this.#debug = deps.debug ?? false
+    this.#assembler = deps.assembler
+    this.#requirement = deps.requirement
     this.model = deps.resolveModel?.()
 
     // 不在 constructor 构造 #internalController —— 每次 send() 时 new 一个,
@@ -244,8 +264,39 @@ export class AiSession implements IAISession {
     const signal = controller.signal
     const resume = this.#sdkSessionId // 续上下文
 
+    // Q5 装配:base(per-session 缓存) + dynamic(per-query)
+    let appendSystemPrompt: string | undefined
+    if (this.#assembler) {
+      try {
+        const base = await this.#assembler.assembleBase({
+          id: this.id,
+          reqId: this.reqId,
+          kind: this.kind,
+          topic: this.topic,
+        })
+        const dynamic = await this.#assembler.assembleDynamic({
+          query: text,
+          session: {
+            id: this.id,
+            reqId: this.reqId,
+            kind: this.kind,
+            topic: this.topic,
+          },
+          req:
+            this.#requirement
+            ?? { reqId: this.reqId, rootPath: process.cwd() },
+        })
+        appendSystemPrompt = `${base}\n\n${dynamic}`
+      } catch (err) {
+        // 装配失败 → 不阻断 turn,降级为不加 system prompt(SDK 默认也能跑)
+        if (this.#debug) {
+          console.warn(`[AISession ${this.id}] system prompt assembly failed:`, err)
+        }
+      }
+    }
+
     try {
-      const stream = this.#adapter.runTurn({ prompt: text, resume, signal })
+      const stream = this.#adapter.runTurn({ prompt: text, resume, signal, appendSystemPrompt })
       for await (const env of stream) {
         if (env.sessionId) this.#sdkSessionId = env.sessionId
         const events = mapSdkEnvelope(env)

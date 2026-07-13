@@ -32,5 +32,36 @@ export type SseEvent =
         text: string
       }
     }
+  /**
+   * 权限请求(ADR-0010 Q6.3 + ADR-0009 第 3 层「亮」模态)。
+   *
+   * Agent 在 SDK PreToolUse hook 命中 5 类高危时,通过 SseHub.publish(reqId, ...)
+   * 把请求推到该 reqId 的所有订阅者;Web 端收到后弹模态,等用户 approve / deny。
+   *
+   * - `requestId`: Agent 端生成的唯一 id,Web 端回复时回带;用于多请求并发场景
+   * - `toolName` + `toolInput`: 待执行工具的名字 + 输入;Web 端可展示预览
+   * - `hits`: 高危检测结果(分类 + 理由 + 命中片段)
+   * - `decision`: 留空 —— 等 Web 端回复后由后续 turn 决定(本期 P2 hook 直接返回
+   *   'deny';真正的「approve 后继续」由 S6 接入双向通道后落地)
+   */
+  | {
+      type: 'permission_request'
+      reqId: string
+      sessionId: string
+      ts: number
+      requestId: string
+      toolName: string
+      toolInput: unknown
+      hits: ReadonlyArray<{
+        category:
+          | 'delete-business-file'
+          | 'force-push'
+          | 'push-to-main'
+          | 'secret-leak'
+          | 'skip-verify'
+        reason: string
+        snippet: string
+      }>
+    }
 
 export const SSE_HEARTBEAT_MS = 30_000
