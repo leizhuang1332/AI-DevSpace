@@ -1,0 +1,36 @@
+apps/agent/src/routes/spike.ts
+  s_fde3a2baa5e2d1::t_02c9973ebb4ee8 96-97
+  s_fde3a2baa5e2d1::t_3e3050fe16e803 69-70
+apps/agent/src/__tests__/spikeRoutes.test.ts
+  s_fde3a2baa5e2d1::t_114be239e77a2d 16-18,21-22
+  s_fde3a2baa5e2d1::t_0f4657176e60a7 306-311,313-327,330-338,340-351
+  s_fde3a2baa5e2d1::t_53cad95f160e09 312,328-329,339,352-394
+apps/agent/src/providers/CcSwitchClient.ts
+  s_fde3a2baa5e2d1::t_c73a675ba1cbae 188-202
+apps/agent/src/session/AISession.ts
+  s_fde3a2baa5e2d1::t_39a5e51b90dab3 108-109
+  s_fde3a2baa5e2d1::t_61ed84c989d134 264-271,276-280
+  s_fde3a2baa5e2d1::t_8c89cf885093b4 104-105,120-121,241-244,288-289,292-293,309
+apps/agent/src/__tests__/AISession.test.ts
+  s_fde3a2baa5e2d1::t_cd698273632588 238,240-270
+apps/agent/src/providers/ClaudeCodeProvider.ts
+  s_fde3a2baa5e2d1::t_237dfa96c7ec6f 14-15,22-23
+apps/agent/src/server.ts
+  s_fde3a2baa5e2d1::t_9cbee2047a0c5a 19-20,126
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "5e545291f45367c5ee270f2622f79ca6fdc8ae70",
+  "prompts": {},
+  "sessions": {
+    "s_fde3a2baa5e2d1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6ffb5fff-b817-4f6c-8028-055e82e6ac55",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
