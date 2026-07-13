@@ -1,0 +1,58 @@
+apps/web/src/components/session-tabs.tsx
+  s_b1be142714551b::t_8058c9c12410da 239
+  s_b1be142714551b::t_75d31a8188e951 1-238,240-276
+apps/web/src/__tests__/analyzing-session-tabs.test.tsx
+  s_b1be142714551b::t_b6aae809bc0075 90-95
+  s_b1be142714551b::t_eea7d08146724e 72,75,78-79
+  s_b1be142714551b::t_a023f478ad3244 96-177
+  s_b1be142714551b::t_40e5c70ccedf39 1-35,47-71,73-74,76-77,80-89
+  s_b1be142714551b::t_16c7279135d1b1 43,45-46
+  s_b1be142714551b::t_4d28608d726b7c 178-366
+  s_b1be142714551b::t_0d395f9c545bbe 36-42
+  s_b1be142714551b::t_eea1b33b4353f8 44
+apps/web/src/lib/analyzing.server.ts
+  s_b1be142714551b::t_b5947a868c1069 33-34,40,204-213
+  s_b1be142714551b::t_1c110a527402ec 230,238-239,242-449
+apps/web/src/app/(workspace)/requirements/[id]/[zone]/page.tsx
+  s_b1be142714551b::t_abd4f6ade58767 1
+  s_b1be142714551b::t_c39b2717a3df28 89-90,92-96
+apps/web/src/components/analyzing-zone.tsx
+  s_b1be142714551b::t_be0c4aea8b30f4 48
+  s_b1be142714551b::t_6c57bd03647507 26-28,36,38-40,52,60-64,79-85,144-164,167-172,174-179,181,184-188,191,361,363,365,408,411,423-424,437,448,452
+  s_b1be142714551b::t_bd81973fcd698f 180,182-183
+  s_b1be142714551b::t_86b17cc91f4c30 7-8,18,189-190,409-410,435,470
+  s_b1be142714551b::t_69a073bfe0de87 195-198,203,205
+  s_b1be142714551b::t_baaae1edd10668 360
+  s_b1be142714551b::t_55956aa57800e3 362
+  s_b1be142714551b::t_b6812eabd404a2 364
+  s_b1be142714551b::t_b3e088f1466314 366-368,405-407
+  s_b1be142714551b::t_93f752c278e854 412-414,420-422
+  s_b1be142714551b::t_6fee9a17d3d1c7 425-427,432-434
+  s_b1be142714551b::t_52a3e75ec2af13 436
+  s_b1be142714551b::t_4ad27264eb1528 438-440,445-447
+  s_b1be142714551b::t_456c197e94650a 449-451
+  s_b1be142714551b::t_36ea2c0b44222e 453-455,467-469
+  s_b1be142714551b::t_ff84c3cd0857c5 471
+  s_b1be142714551b::t_ce9ec8a44e957a 238,250,336,347,369-404,415-419,428-431,441-444,456-466,501,508-517,519,521-522
+apps/web/src/lib/__tests__/analyzing.test.ts
+  s_b1be142714551b::t_efaadf8ad33568 17-19
+  s_b1be142714551b::t_3514fa52592df1 613-943
+apps/web/src/lib/analyzing.ts
+  s_b1be142714551b::t_8e9630712a6ac8 236-281,294-297,350-351,630-654
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "54f8024b3440d1dc1c3bab478035b3d9c8dc3347",
+  "prompts": {},
+  "sessions": {
+    "s_b1be142714551b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e6ca9677-42e4-4c96-b221-e67cf9103c1a",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
