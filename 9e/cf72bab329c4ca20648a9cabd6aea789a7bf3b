@@ -1,0 +1,19 @@
+docs/superpowers/plans/2026-07-13-p4-error-handling.md
+  s_5ecfdb591ee8af::t_e51ddc50dba274 1-2003
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "9ecf72bab329c4ca20648a9cabd6aea789a7bf3b",
+  "prompts": {},
+  "sessions": {
+    "s_5ecfdb591ee8af": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "217fbfe9-6c93-48f5-afca-a64a3dc1ee05",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
