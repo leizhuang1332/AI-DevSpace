@@ -19,8 +19,7 @@ import type {
   CreateSessionOptions,
   ModelSelection,
 } from './AIProvider.js'
-import { CcSwitchClient } from './CcSwitchClient.js'
-import type { ModelRole, ProviderIndex } from './CcSwitchClient.js'
+import type { CcSwitchClient, ModelRole, ProviderIndex } from './CcSwitchClient.js'
 import type { PermissionHook } from '../tools/PermissionHook.js'
 import type {
   SystemPromptAssembler,

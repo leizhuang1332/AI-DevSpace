@@ -20,6 +20,7 @@
 
 import type { FastifyPluginAsync } from 'fastify'
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { SseHub } from '../sse/SseHub.js'
 
@@ -366,8 +367,6 @@ function extractRequirementIdFromAgent(analysisDir: string): string {
 
 function defaultAgentRoot(): string {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { homedir } = require('node:os') as typeof import('node:os')
     return join(homedir(), '.aidevspace')
   } catch {
     return process.cwd()

@@ -10,7 +10,7 @@
  *  - close() 后再 send / events() → throw
  */
 
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { AiSession, type SdkAdapter, type SdkMessageEnvelope } from '../session/AISession.js'
 import type { AIEvent } from '../providers/AIEvent.js'
 
@@ -200,6 +200,9 @@ describe('AiSession', () => {
   it('cancel() aborts and triggers done{reason:cancelled}', async () => {
     let sawAbort = false
     const adapter: SdkAdapter = {
+      // async generator 故意不 yield —— 测试「正在跑但没消息」的 cancel 路径,
+      // 等 signal abort 触发 reject 才退出,模拟长跑 turn
+      // eslint-disable-next-line require-yield
       async *runTurn({ signal }) {
         // 监听 abort
         if (signal) {

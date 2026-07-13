@@ -123,8 +123,6 @@ export class AiSession implements IAISession {
   #assembler: SystemPromptAssembler | undefined
   /** Q5:requirement 上下文 */
   #requirement: AssemblerRequirement | undefined
-  /** 是否收到过 cancel() 调用(用于区分用户取消 vs SDK 异常) */
-  #cancelled = false
 
   constructor(deps: AiSessionDeps) {
     this.id = deps.id
@@ -192,10 +190,9 @@ export class AiSession implements IAISession {
   /** events() —— 返回一个 AsyncIterable,每次迭代拿下一个事件。
    *  多个 consumer 各自有独立 iterator,但共享 fan-out 队列。 */
   events(): AsyncIterable<AIEvent> {
-    const session = this
     return {
       [Symbol.asyncIterator]: () => {
-        if (session.#closed) {
+        if (this.#closed) {
           // closed session:返回一个空 iterable
           return {
             next: async () => ({ value: undefined, done: true as const }),
@@ -203,7 +200,7 @@ export class AiSession implements IAISession {
           }
         }
         const slot = { queue: [] as ConsumerQueue, resolve: null as ((v: IteratorResult<AIEvent>) => void) | null }
-        session.#consumers.push(slot)
+        this.#consumers.push(slot)
 
         const iterator: AsyncIterator<AIEvent> = {
           next: async (): Promise<IteratorResult<AIEvent>> => {
@@ -220,13 +217,13 @@ export class AiSession implements IAISession {
             return { value: head, done: false }
           },
           return: async (): Promise<IteratorResult<AIEvent>> => {
-            const idx = session.#consumers.indexOf(slot)
-            if (idx >= 0) session.#consumers.splice(idx, 1)
+            const idx = this.#consumers.indexOf(slot)
+            if (idx >= 0) this.#consumers.splice(idx, 1)
             return { value: undefined, done: true }
           },
           throw: async (err): Promise<IteratorResult<AIEvent>> => {
-            const idx = session.#consumers.indexOf(slot)
-            if (idx >= 0) session.#consumers.splice(idx, 1)
+            const idx = this.#consumers.indexOf(slot)
+            if (idx >= 0) this.#consumers.splice(idx, 1)
             throw err
           },
         }
@@ -336,11 +333,10 @@ export class AiSession implements IAISession {
   async cancel(reason?: string): Promise<void> {
     if (this.#closed) return
     if (this.#state !== 'busy') {
-      // idle 时 cancel 是 no-op —— 标记 #cancelled 但不 abort(避免污染下次 turn 的 controller)
-      this.#cancelled = true
+      // idle 时 cancel 是 no-op —— 不 abort(避免污染下次 turn 的 controller,
+      // 每轮 send() 会 new 一个干净的 AbortController)
       return
     }
-    this.#cancelled = true
     this.#internalController?.abort(reason ?? 'cancelled')
     // 等 in-flight turn 自然退
     if (this.#inflight) {

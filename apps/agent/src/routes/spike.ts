@@ -25,6 +25,7 @@ import { randomUUID } from 'node:crypto'
 import type { FastifyPluginAsync } from 'fastify'
 import type { SseEvent } from '@ai-devspace/shared'
 import type { SseHub } from '../sse/SseHub.js'
+import type { AIEvent } from '../providers/AIEvent.js'
 import type { AIProvider } from '../providers/AIProvider.js'
 import type { CcSwitchClient } from '../providers/CcSwitchClient.js'
 
@@ -157,7 +158,7 @@ export const spikeRoutes: FastifyPluginAsync<SpikeRoutesOptions> = async (fastif
  * P0 阶段我们用 placeholder 把 AIEvent 当 message 字段塞,让 web 端调试时能拿到完整形态。
  * P5 再扩 SseEvent 联合(type: 'ai_event')。
  */
-function wrapAiEventAsSse(runId: string, reqId: string, ev: import('../providers/AIEvent.js').AIEvent): SseEvent {
+function wrapAiEventAsSse(runId: string, reqId: string, ev: AIEvent): SseEvent {
   return {
     type: 'placeholder',
     message: JSON.stringify({ runId, reqId, ev }),
