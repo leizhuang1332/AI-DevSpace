@@ -7,6 +7,7 @@
  *  - thinking / tool_use 事件 → 各写 1 条消息(顺序保留)
  *  - done{reason:'error'|'cancelled'} 且有 partial → 标 incomplete:true
  *  - detach() 停止消费
+ *  - retrying 不写 messages;error 保留 category 诊断(Task 5)
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
@@ -178,5 +179,26 @@ describe('attachRecorder partial (Q8.6)', () => {
     const [msg] = await mirror.readMessages(sid)
     expect(msg.incomplete).toBe(true)
     expect(msg.content).toBe('超长回答被截')
+  })
+})
+
+describe('attachRecorder query lifecycle (Task 5)', () => {
+  it('retrying 不写 messages;error 保留分类诊断', async () => {
+    const { store, mirror, sid, reqId } = await setupMeta()
+    const session = fakeSession(
+      [
+        { type: 'retrying', category: 'A', retry: 1, maxRetries: 3, delayMs: 1000, message: 'retrying' },
+        { type: 'error', code: 'auth', message: 'bad key', recoverable: false, category: 'B' },
+        { type: 'done', reason: 'error' },
+      ],
+      sid,
+      reqId,
+    )
+    const rec = attachRecorder(session, { store, mirror, idGen: () => 'err-1' })
+    await rec.done
+
+    const messages = await mirror.readMessages(sid)
+    expect(messages).toHaveLength(1)
+    expect(messages[0].sdkMessageRaw).toMatchObject({ code: 'auth', category: 'B' })
   })
 })

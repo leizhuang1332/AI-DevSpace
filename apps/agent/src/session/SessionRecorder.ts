@@ -9,6 +9,9 @@
  *     创建时 sdkSessionId 空,首次 query 后回填)
  *   - done{reason:'error'|'cancelled'|'max_tokens'} 且有累积 partial →
  *     标 incomplete:true(Q8.6:被中断/截断的响应不完整)
+ *   - `retrying` 是 query 进度信号,不在镜像中落 messages.jsonl(P4 Task 5):
+ *     RetryStrategy 会按重试节奏 emit 多次,如果每条都落 messages 会污染会话
+ *     时间线;真正的失败在 `error` 事件中以 category 形式落盘供诊断
  *
  * 用法:必须在 session.send() **之前** attach,才能捕获整轮事件。
  *   const rec = attachRecorder(session, { store, mirror })
@@ -114,8 +117,16 @@ export function attachRecorder(session: AISession, deps: RecorderDeps): Recorder
           tool: ev.tool, input: ev.input,
         })
         return
+      case 'retrying':
+        // query 进度信号 —— 不在 messages.jsonl 中落消息,
+        // 仅由 SseHub 推到 web 端(走 ai_event / retrying 通道)
+        return
       case 'error':
-        await emit('error', 'system', ev.message, { code: ev.code, recoverable: ev.recoverable })
+        await emit('error', 'system', ev.message, {
+          code: ev.code,
+          recoverable: ev.recoverable,
+          ...(ev.category ? { category: ev.category } : {}),
+        })
         return
       case 'done': {
         // 双 ID 维护:回填 sdkSessionId(仅当 SDK 返了且未回填过)

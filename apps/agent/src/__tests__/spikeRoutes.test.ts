@@ -132,16 +132,22 @@ function fakeProviderLong(opts: { cancelSpy?: ReturnType<typeof vi.fn> } = {}): 
 
 interface Cap { statusCode: number; headers: Record<string, string | string[] | undefined>; body: string }
 function openSse(port: number, readMs = 250): Promise<Cap> {
+  const headers = (res: http.IncomingMessage): Record<string, string | string[] | undefined> => res.headers as Record<string, string | string[] | undefined>
   return new Promise((resolve, reject) => {
     const req = http.request({ method: 'GET', hostname: '127.0.0.1', port, path: '/api/spike/events' }, (res) => {
       const chunks: Buffer[] = []
-      const t = setTimeout(() => { req.destroy(); resolve({ statusCode: res.statusCode ?? 0, headers: res.headers as any, body: Buffer.concat(chunks).toString('utf8') }) }, readMs)
+      const t = setTimeout(() => { req.destroy(); resolve({ statusCode: res.statusCode ?? 0, headers: headers(res), body: Buffer.concat(chunks).toString('utf8') }) }, readMs)
       res.on('data', (c: Buffer) => chunks.push(c))
-      res.on('end', () => { clearTimeout(t); resolve({ statusCode: res.statusCode ?? 0, headers: res.headers as any, body: Buffer.concat(chunks).toString('utf8') }) })
-      res.on('error', () => { clearTimeout(t); resolve({ statusCode: res.statusCode ?? 0, headers: res.headers as any, body: Buffer.concat(chunks).toString('utf8') }) })
+      res.on('end', () => { clearTimeout(t); resolve({ statusCode: res.statusCode ?? 0, headers: headers(res), body: Buffer.concat(chunks).toString('utf8') }) })
+      res.on('error', () => { clearTimeout(t); resolve({ statusCode: res.statusCode ?? 0, headers: headers(res), body: Buffer.concat(chunks).toString('utf8') }) })
     })
     req.on('error', reject); req.end()
   })
+}
+
+type LifecycleFields = { runId?: unknown; reqId?: unknown; sessionId?: unknown; ts?: unknown }
+function lifecycle<T extends LifecycleFields>(event: T): Omit<T, 'runId' | 'reqId' | 'sessionId' | 'ts'> & LifecycleFields {
+  return event
 }
 
 describe('spike routes', () => {
@@ -244,10 +250,10 @@ describe('spike routes', () => {
     const r = received.find((e) => e.type === 'retrying')
     expect(r).toBeDefined()
     expect(r).toMatchObject({ type: 'retrying', category: 'A', retry: 1, maxRetries: 3, delayMs: 1000, message: 'retrying' })
-    expect((r as any).runId).toBeTruthy()
-    expect((r as any).reqId).toBe(SPIKE_CHANNEL)
-    expect((r as any).sessionId).toBeTruthy()
-    expect(typeof (r as any).ts).toBe('number')
+    expect(lifecycle(r).runId).toBeTruthy()
+    expect(lifecycle(r).reqId).toBe(SPIKE_CHANNEL)
+    expect(lifecycle(r).sessionId).toBeTruthy()
+    expect(typeof lifecycle(r).ts).toBe('number')
     const f = received.find((e) => e.type === 'query_failed')
     expect(f).toBeDefined()
     expect(f).toMatchObject({ type: 'query_failed', category: 'B', code: 'auth', message: 'bad key', retryable: false })
@@ -275,9 +281,9 @@ describe('spike routes', () => {
     const c = received.find((e) => e.type === 'query_cancelled')
     expect(c).toBeDefined()
     expect(c).toMatchObject({ type: 'query_cancelled', reqId: SPIKE_CHANNEL })
-    expect((c as any).sessionId).toBeTruthy()
-    expect(typeof (c as any).runId).toBe('string')
-    expect(typeof (c as any).ts).toBe('number')
+    expect(lifecycle(c).sessionId).toBeTruthy()
+    expect(typeof lifecycle(c).runId).toBe('string')
+    expect(typeof lifecycle(c).ts).toBe('number')
     await app.close(); await hub2.close(); rmSync(root2, { recursive: true, force: true })
   })
 
@@ -304,8 +310,8 @@ describe('spike routes', () => {
     const f = received.find((e) => e.type === 'query_failed')
     expect(f).toBeDefined()
     expect(f).toMatchObject({ type: 'query_failed', category: 'B', code: 'session_create_failed', retryable: false })
-    expect((f as any).message).toMatch(/boom/)
-    expect((f as any).sessionId).toBe(body.sessionId)
+    expect((f as { message: string }).message).toMatch(/boom/)
+    expect(lifecycle(f).sessionId).toBe(body.sessionId)
     const cancel = await app.inject({ method: 'POST', url: `/api/spike/session/${body.sessionId}/cancel` })
     expect(cancel.statusCode).toBe(404)
     await app.close(); await hub3.close(); rmSync(root3, { recursive: true, force: true })
@@ -374,9 +380,9 @@ describe('spike routes + authPlugin interaction', () => {
   it('GET /events is public (no token → 200)', async () => {
     const res = await new Promise<Cap>((resolve, reject) => {
       const req = http.request({ method: 'GET', hostname: '127.0.0.1', port, path: '/api/spike/events' }, (r) => {
-        const t = setTimeout(() => { req.destroy(); resolve({ statusCode: r.statusCode ?? 0, headers: r.headers as any, body: '' }) }, 100)
-        r.on('data', () => {}); r.on('error', () => { clearTimeout(t); resolve({ statusCode: r.statusCode ?? 0, headers: r.headers as any, body: '' }) })
-        r.on('end', () => { clearTimeout(t); resolve({ statusCode: r.statusCode ?? 0, headers: r.headers as any, body: '' }) })
+        const t = setTimeout(() => { req.destroy(); resolve({ statusCode: r.statusCode ?? 0, headers: r.headers as Record<string, string | string[] | undefined>, body: '' }) }, 100)
+        r.on('data', () => {}); r.on('error', () => { clearTimeout(t); resolve({ statusCode: r.statusCode ?? 0, headers: r.headers as Record<string, string | string[] | undefined>, body: '' }) })
+        r.on('end', () => { clearTimeout(t); resolve({ statusCode: r.statusCode ?? 0, headers: r.headers as Record<string, string | string[] | undefined>, body: '' }) })
       })
       req.on('error', reject); req.end()
     })

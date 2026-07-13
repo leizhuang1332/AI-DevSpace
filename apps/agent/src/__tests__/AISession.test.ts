@@ -381,6 +381,7 @@ describe('AiSession', () => {
       kind: 'chat',
       retrySleep: async () => {},
       adapter: {
+        // eslint-disable-next-line require-yield
         async *runTurn() {
           calls++
           throw { status: 401, message: 'invalid api key' }

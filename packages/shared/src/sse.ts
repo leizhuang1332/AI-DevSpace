@@ -2,6 +2,34 @@
  * SSE event types shared between Agent and Web.
  * Extend by UNION adding new variants — never break existing members.
  */
+
+/**
+ * AI 业务事件的可序列化 payload(Web 端 EventSource 收到的形态)。
+ *
+ * 与 apps/agent/src/providers/AIEvent.ts 的 `AIEvent` 形态基本一致,
+ * 但 `error.category` 退化为字符串字面量,避免 shared 包依赖 ErrorCategory
+ * 类型内部实现(shared 不应反向 import agent)。
+ */
+export type AiSsePayload =
+  | { type: 'thinking'; text: string }
+  | { type: 'text'; text: string; delta?: boolean }
+  | { type: 'tool_use'; name: string; input: unknown }
+  | { type: 'tool_result'; name: string; output: unknown }
+  | { type: 'file_written'; path: string; lines: number }
+  | { type: 'permission_request'; tool: string; input: unknown }
+  | {
+      type: 'error'
+      code: string
+      message: string
+      recoverable: boolean
+      category?: 'A' | 'B' | 'C' | 'D' | 'E'
+    }
+  | {
+      type: 'done'
+      reason: 'end_turn' | 'cancelled' | 'error' | 'max_tokens'
+      sessionId?: string
+    }
+
 export type SseEvent =
   | { type: 'hello'; sid: string; reqId: string; ts: number }
   | { type: 'heartbeat'; ts: number }
@@ -62,6 +90,67 @@ export type SseEvent =
         reason: string
         snippet: string
       }>
+    }
+  /**
+   * AI 业务事件(issue P4 · Task 5) — 透传 AIEvent 给 Web 端。
+   *
+   * Agent 把 AIEvent 序列化为 AiSsePayload 后包成此 variant 推出去。
+   * Web 端按 `event.type` dispatch 到 UI 流(thinking/text/tool_use/...)。
+   */
+  | {
+      type: 'ai_event'
+      reqId: string
+      sessionId: string
+      runId: string
+      ts: number
+      event: AiSsePayload
+    }
+  /**
+   * Query 重试提示(issue P4 · Task 5) — A/C/D 类可重试错误触发 retry 时广播。
+   *
+   * 与 ai_event.retrying 的区别:本 variant 是查询生命周期的「进度信号」,
+   * 由 Agent 的 RetryStrategy 主动 emit;Web 端用于展示「正在重试 N/M」提示。
+   */
+  | {
+      type: 'retrying'
+      reqId: string
+      sessionId: string
+      runId: string
+      ts: number
+      category: 'A' | 'C' | 'D'
+      retry: number
+      maxRetries: number
+      delayMs: number
+      message: string
+    }
+  /**
+   * Query 终态失败(issue P4 · Task 5) — 重试耗尽或非重试错误终止 query。
+   *
+   * 携带 A-E 分类与可重试性,Web 端据此选择重试入口或直接展示错误。
+   */
+  | {
+      type: 'query_failed'
+      reqId: string
+      sessionId: string
+      runId: string
+      ts: number
+      category: 'A' | 'B' | 'C' | 'D' | 'E'
+      code: string
+      message: string
+      retryable: boolean
+    }
+  /**
+   * Query 被用户/系统取消(issue P4 · Task 5)。
+   *
+   * `query_cancelled` 与 `done{reason:'cancelled'}` 语义等价,
+   * 但作为独立 SSE variant 便于 Web 端用 narrow switch 单独处理。
+   */
+  | {
+      type: 'query_cancelled'
+      reqId: string
+      sessionId: string
+      runId: string
+      ts: number
     }
 
 export const SSE_HEARTBEAT_MS = 30_000

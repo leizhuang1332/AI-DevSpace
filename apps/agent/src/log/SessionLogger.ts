@@ -67,7 +67,7 @@ interface TextSummary {
  */
 function summarize(text: string, maxPreviewChars: number): TextSummary {
   const redacted = text
-    .replace(/Bearer\s+[A-Za-z0-9._\-]+/gi, 'Bearer [REDACTED]')
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, 'Bearer [REDACTED]')
     // 带引号的值:secret="a b c" —— 连引号带内容一起抹
     .replace(/(api[_-]?key|token|secret)(\s*[=:]\s*)"[^"]*"/gi, '$1$2[REDACTED]')
     .replace(/(api[_-]?key|token|secret)(\s*[=:]\s*)'[^']*'/gi, '$1$2[REDACTED]')

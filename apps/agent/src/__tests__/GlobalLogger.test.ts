@@ -9,8 +9,14 @@
 import { describe, expect, it } from 'vitest'
 import { GlobalLogger, type GlobalLogSink } from '../log/GlobalLogger.js'
 
-function makeSink(): { sink: GlobalLogSink; calls: { level: string; bindings: any; message?: string }[] } {
-  const calls: { level: string; bindings: any; message?: string }[] = []
+interface CapturedCall {
+  level: 'info' | 'warn' | 'error'
+  bindings: object
+  message?: string
+}
+
+function makeSink(): { sink: GlobalLogSink; calls: CapturedCall[] } {
+  const calls: CapturedCall[] = []
   const sink: GlobalLogSink = {
     info: (bindings, message) => calls.push({ level: 'info', bindings, message }),
     warn: (bindings, message) => calls.push({ level: 'warn', bindings, message }),
