@@ -1,0 +1,19 @@
+docs/superpowers/specs/2026-07-13-p4-error-handling-design.md
+  s_5ecfdb591ee8af::t_58066d7e3d583e 1-364
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "54a01083e3a889d847beab5eb3af7c3a6e59fcb6",
+  "prompts": {},
+  "sessions": {
+    "s_5ecfdb591ee8af": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "217fbfe9-6c93-48f5-afca-a64a3dc1ee05",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
