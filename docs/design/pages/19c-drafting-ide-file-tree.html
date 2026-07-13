@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>19c · DRAFTING 二次设计 · 方案 C · IDE 文件树型 · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{
+  --brand:#5e6ad2;--brand-50:#eef0fb;--brand-100:#e0e3f7;--brand-500:#5e6ad2;--brand-600:#525bc7;--brand-700:#4147a3;
+  --success:#16a34a;--success-50:#f0fdf4;--warning:#f59e0b;--warning-50:#fffbeb;--error:#ef4444;--error-50:#fef2f2;--info:#64748b;
+  --bg:#fbfbfd;--bg-elevated:#ffffff;--bg-subtle:#f5f5f7;--border:#ebebef;--border-strong:#d8d8de;
+  --text-1:#0f172a;--text-2:#475569;--text-3:#94a3b8;
+  --space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:20px;--space-6:24px;--space-8:32px;
+  --text-xs:11px;--text-sm:12px;--text-base:13px;--text-md:14px;--text-lg:16px;--text-xl:18px;--text-2xl:20px;--text-3xl:24px;--text-4xl:32px;
+  --radius-sm:4px;--radius-md:6px;--radius-lg:8px;--radius-xl:12px;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.04);--shadow-md:0 2px 4px rgba(0,0,0,.06);--shadow-lg:0 4px 12px rgba(0,0,0,.08);
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg);color:var(--text-1);font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased}
+.topnav{position:sticky;top:0;z-index:100;background:#0f172a;color:#fff;padding:var(--space-2) var(--space-4);font-size:var(--text-sm);display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap}
+.topnav .badge{background:var(--brand);color:#fff;padding:3px 10px;border-radius:var(--radius-md);font-size:var(--text-xs);font-weight:600;white-space:nowrap}
+.topnav .form-name{color:#e2e8f0;font-weight:600;white-space:nowrap}
+.topnav a{color:#94a3b8;text-decoration:none;padding:4px 9px;border-radius:var(--radius-md);white-space:nowrap;font-size:var(--text-xs)}
+.topnav a:hover{color:#fff;background:rgba(255,255,255,.06)}
+.topnav a.cur{color:#fff;background:var(--brand)}
+.topnav .spacer{flex:1}
+.topnav .grp{display:flex;gap:2px;align-items:center;flex-wrap:wrap}
+.topnav .div{width:1px;height:15px;background:rgba(255,255,255,.14);margin:0 4px}
+.statusbar{position:sticky;top:36px;z-index:50;background:var(--bg-elevated);border-bottom:1px solid var(--border)}
+.statusbar .tabs{display:flex;align-items:center;height:40px;padding:0 var(--space-4);gap:2px}
+.statusbar .tab{display:flex;align-items:center;gap:6px;height:28px;padding:0 var(--space-3);font-size:var(--text-sm);color:var(--text-2);border-radius:var(--radius-md);cursor:pointer;white-space:nowrap}
+.statusbar .tab:hover{background:var(--bg-subtle)}
+.statusbar .tab.active{background:var(--brand-50);color:var(--brand-600);font-weight:500}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--brand);flex-shrink:0;display:inline-block}
+.statusbar .info{display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 var(--space-4);border-top:1px solid var(--border);background:var(--bg-subtle);font-size:var(--text-sm);color:var(--text-2)}
+.shell{display:grid;grid-template-columns:56px 1fr;min-height:calc(100vh - 108px)}
+.sidebar{background:var(--bg-elevated);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:var(--space-3) 0;gap:2px}
+.sidebar .logo{width:32px;height:32px;border-radius:var(--radius-md);background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;margin-bottom:var(--space-3)}
+.sidebar a{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius-md);font-size:18px;text-decoration:none;color:var(--text-2)}
+.sidebar a:hover{background:var(--bg-subtle)}
+.sidebar a.active{background:var(--brand-50)}
+.rail{background:var(--bg-subtle);border-left:1px solid var(--border);padding:var(--space-3);overflow:auto;display:flex;flex-direction:column;gap:var(--space-4)}
+.rail-section{font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:600;margin-bottom:6px}
+.rail-card{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3);font-size:var(--text-xs);border-left:3px solid var(--success);margin-bottom:var(--space-2)}
+.rail-card .ttl{font-weight:600;font-size:var(--text-sm);margin-bottom:4px;color:var(--text-1)}
+.rail-card .body{color:var(--text-2);line-height:1.5}
+.kbd{font-family:var(--mono);background:var(--bg-subtle);padding:1px 6px;border-radius:var(--radius-sm);font-size:11px;border:1px solid var(--border);color:var(--text-2)}
+.note{margin:var(--space-6);padding:var(--space-4);background:#f0f9ff;border:1px solid #bae6fd;border-radius:var(--radius-lg);font-size:var(--text-sm);color:#075985}
+.note b{color:#0c4a6e}
+.note .wire{margin-top:var(--space-3);background:#0c2233;color:#7dd3fc;border-radius:var(--radius-md);padding:var(--space-3);overflow:auto;font-family:var(--mono);font-size:11px;line-height:1.35}
+
+/* ===== 方案 C 专属：IDE 风格 ===== */
+/* 主区分三列: 文件树 (260px) + 编辑器 (1fr) + Inline Rail (140px) */
+.detail-ide{display:grid;grid-template-columns:260px 1fr 140px;background:var(--bg);min-height:calc(100vh - 108px)}
+.filetree{background:var(--bg-elevated);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.filetree-head{padding:var(--space-3);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.filetree-head .ttl{font-size:var(--text-sm);font-weight:700;color:var(--text-1);display:flex;align-items:center;gap:6px}
+.filetree-head .ttl .badge-prd{background:var(--brand);color:#fff;font-size:9px;font-weight:700;padding:2px 5px;border-radius:3px}
+.filetree-head .acts{display:flex;gap:2px}
+.filetree-head .acts button{width:24px;height:24px;border:none;background:transparent;border-radius:4px;cursor:pointer;color:var(--text-3);font-size:13px}
+.filetree-head .acts button:hover{background:var(--bg-subtle);color:var(--text-1)}
+.filetree-search{padding:var(--space-2) var(--space-3);border-bottom:1px solid var(--border)}
+.filetree-search input{width:100%;height:28px;padding:0 10px;border:1px solid var(--border-strong);border-radius:var(--radius-md);font-size:var(--text-sm);background:var(--bg);font-family:inherit}
+.filetree-search input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 2px var(--brand-50)}
+.filetree-body{flex:1;overflow:auto;padding:var(--space-2) 0}
+.fnode{display:flex;align-items:center;gap:6px;height:26px;padding:0 var(--space-3);font-size:var(--text-sm);color:var(--text-2);cursor:pointer;user-select:none}
+.fnode:hover{background:var(--bg-subtle)}
+.fnode.active{background:var(--brand-50);color:var(--brand-700);font-weight:500}
+.fnode.active::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--brand)}
+.fnode .ic{font-size:13px;width:16px;text-align:center;flex-shrink:0}
+.fnode .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fnode .badge{font-size:9px;padding:1px 4px;border-radius:3px;background:var(--brand);color:#fff;font-weight:700}
+.fnode .badge.warn{background:var(--warning);color:#fff}
+.fnode .badge.ok{background:var(--success);color:#fff}
+.fnode .more{opacity:0;width:18px;height:18px;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--text-3)}
+.fnode:hover .more{opacity:1}
+.fnode.folder .chev{font-size:9px;color:var(--text-3);width:10px}
+.fnode .grp{margin-left:auto;display:flex;align-items:center;gap:4px}
+.fnode .dirty{width:6px;height:6px;border-radius:50%;background:var(--brand);margin-right:2px}
+.add-node{display:flex;align-items:center;justify-content:center;gap:6px;margin:var(--space-2) var(--space-3);height:30px;border:1px dashed var(--border-strong);border-radius:var(--radius-md);font-size:var(--text-xs);color:var(--text-3);cursor:pointer}
+.add-node:hover{border-color:var(--brand);color:var(--brand-600);background:var(--brand-50)}
+
+/* 编辑器区 */
+.editor-area{display:flex;flex-direction:column;background:var(--bg);overflow:hidden}
+.editor-tabs{display:flex;align-items:center;background:var(--bg-elevated);border-bottom:1px solid var(--border);height:36px;padding:0 var(--space-2);gap:2px;overflow-x:auto}
+.editor-tab{display:flex;align-items:center;gap:6px;height:28px;padding:0 12px;font-size:var(--text-xs);color:var(--text-2);border-radius:var(--radius-md)  var(--radius-md) 0 0;cursor:pointer;background:var(--bg-subtle);border:1px solid var(--border);border-bottom:none;margin-top:7px;white-space:nowrap}
+.editor-tab.active{background:var(--bg);color:var(--text-1);font-weight:600}
+.editor-tab .ic{font-size:12px}
+.editor-tab .close{opacity:.6;font-size:11px;width:14px;height:14px;display:flex;align-items:center;justify-content:center;border-radius:3px;margin-left:2px}
+.editor-tab .close:hover{background:var(--border);opacity:1}
+.editor-tab .dirty{width:6px;height:6px;border-radius:50%;background:var(--brand)}
+.editor-toolbar{display:flex;align-items:center;justify-content:space-between;height:40px;padding:0 var(--space-5);border-bottom:1px solid var(--border);background:var(--bg-elevated)}
+.editor-toolbar .crumb{font-size:var(--text-sm);color:var(--text-3);display:flex;align-items:center;gap:6px}
+.editor-toolbar .crumb .cur{color:var(--text-1);font-weight:600}
+.editor-toolbar .right{display:flex;gap:var(--space-2);align-items:center;font-size:var(--text-xs);color:var(--text-3)}
+.btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 var(--space-3);border-radius:var(--radius-md);font-size:var(--text-sm);font-weight:500;cursor:pointer;border:none;background:var(--brand);color:#fff;font-family:inherit}
+.btn:hover{background:var(--brand-600)}
+.btn-lg{height:36px;padding:0 var(--space-5);font-size:var(--text-md)}
+.btn-secondary{background:var(--bg-elevated);color:var(--text-1);border:1px solid var(--border-strong)}
+.btn-secondary:hover{background:var(--bg-subtle)}
+.btn-ghost{background:transparent;color:var(--text-2)}
+.btn-ghost:hover{color:var(--text-1);background:var(--bg-subtle)}
+.editor-body{flex:1;overflow:hidden;display:flex;flex-direction:column;background:var(--bg-elevated)}
+.editor-pane{display:flex;flex:1;overflow:hidden}
+
+/* 左侧行号栏 */
+.line-nums{padding:var(--space-3) var(--space-2);background:var(--bg-elevated);color:var(--text-3);font-family:var(--mono);font-size:var(--text-sm);line-height:1.7;text-align:right;user-select:none;border-right:1px solid var(--border);min-width:48px}
+.line-nums div{height:calc(var(--text-sm) * 1.7)}
+.editor-content{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.ed-toolbar{display:flex;align-items:center;gap:var(--space-3);padding:var(--space-2) var(--space-4);background:var(--bg-subtle);border-bottom:1px solid var(--border);font-size:var(--text-sm);color:var(--text-3)}
+.ed-toolbar b{color:var(--text-2)}
+.ed-toolbar .mono{margin-left:auto;font-family:var(--mono);font-size:var(--text-xs);display:flex;gap:var(--space-3);align-items:center}
+.ed-toolbar .toggle{display:inline-flex;background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;padding:1px;height:22px}
+.ed-toolbar .toggle button{height:18px;padding:0 8px;border:none;background:transparent;font-size:11px;color:var(--text-2);cursor:pointer;border-radius:3px;font-family:inherit}
+.ed-toolbar .toggle button.active{background:var(--brand-50);color:var(--brand-600);font-weight:500}
+.ed-body-wrap{flex:1;overflow:auto;display:flex}
+.ed-body{flex:1;padding:var(--space-3) var(--space-4);border:none;font-family:var(--mono);font-size:var(--text-sm);line-height:1.7;color:var(--text-1);resize:none;background:var(--bg-elevated);outline:none;min-height:100%}
+.preview{flex:1;padding:var(--space-5);overflow:auto;background:var(--bg-elevated);border-left:1px solid var(--border)}
+.preview h1{font-size:var(--text-2xl);margin-bottom:var(--space-3);padding-bottom:var(--space-2);border-bottom:1px solid var(--border)}
+.preview h2{font-size:var(--text-lg);margin:18px 0 8px;color:var(--text-1)}
+.preview p{color:var(--text-2);margin-bottom:8px}
+.preview ul{margin-left:20px;color:var(--text-2);margin-bottom:8px}
+.preview code{font-family:var(--mono);background:var(--bg-subtle);padding:1px 6px;border-radius:3px;font-size:12px;color:var(--brand-600)}
+
+/* 底部 status bar (编辑器状态) */
+.editor-status{display:flex;align-items:center;justify-content:space-between;height:24px;padding:0 var(--space-5);background:var(--bg-subtle);border-top:1px solid var(--border);font-size:11px;color:var(--text-3)}
+.editor-status .left,.editor-status .right{display:flex;gap:var(--space-3);align-items:center}
+.editor-status .dot-ok{width:6px;height:6px;border-radius:50%;background:var(--success)}
+</style>
+</head>
+<body>
+
+<!-- Top Nav -->
+<div class="topnav">
+  <span class="badge">DRAFTING 二次设计 · 方案 ③</span>
+  <span class="form-name">· IDE 文件树型</span>
+  <span class="spacer"></span>
+  <div class="grp">
+    <a href="19a-drafting-files-equal.html">① 文件平等</a>
+    <a href="19b-drafting-prd-top-files-bottom.html">② PRD 顶置</a>
+    <a href="19c-drafting-ide-file-tree.html" class="cur">③ IDE 风格</a>
+    <span class="div"></span>
+    <a href="11a-stage-adaptive-draft.html">原 DRAFT 形态</a>
+    <a href="12-requirement-overview.html">Overview</a>
+  </div>
+</div>
+
+<!-- StatusBar -->
+<header class="statusbar">
+  <div class="tabs">
+    <div class="tab">Overview</div>
+    <div class="tab active"><span class="dot" style="background:var(--info)"></span>DRAFTING</div>
+    <div class="tab"><span class="dot" style="background:var(--text-3)"></span>ANALYZING</div>
+    <div class="tab"><span class="dot" style="background:var(--text-3)"></span>CLARIFYING</div>
+    <div class="tab"><span class="dot" style="background:var(--text-3)"></span>DESIGNING</div>
+    <div class="tab"><span class="dot" style="background:var(--text-3)"></span>EXECUTING</div>
+    <div class="tab"><span class="dot" style="background:var(--text-3)"></span>WRAP-UP</div>
+  </div>
+  <div class="info">
+    <div style="display:flex;align-items:center;gap:var(--space-3)">
+      <strong style="color:var(--text-1);font-weight:600">退款功能优化</strong>
+      <span style="color:var(--text-3)">·</span>
+      <span>DRAFTING · prd.md (主) · 1 个未保存</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:var(--space-4)">
+      <span style="color:var(--text-3)">📁 5 个文件 · 2 个仓库 · ⌘K 命令</span>
+    </div>
+  </div>
+</header>
+
+<div class="shell">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="logo">D</div>
+    <a href="#" title="概览">🏠</a>
+    <a href="#" class="active" title="需求">📌</a>
+    <a href="#" title="仓库">📦</a>
+    <a href="#" title="知识">📚</a>
+    <a href="#" title="Skill">🤖</a>
+    <span style="flex:1"></span>
+    <a href="#" title="设置">⚙️</a>
+  </nav>
+
+  <div class="detail-ide">
+    <!-- LEFT: 文件树 (IDE 风格) -->
+    <aside class="filetree">
+      <div class="filetree-head">
+        <div class="ttl">
+          📂 退款功能优化
+          <span class="badge-prd">PRD</span>
+        </div>
+        <div class="acts">
+          <button title="新建文件">＋</button>
+          <button title="上传文件">📁</button>
+          <button title="搜索">🔍</button>
+        </div>
+      </div>
+      <div class="filetree-search">
+        <input placeholder="搜索文件 (名称 / 类型)">
+      </div>
+      <div class="filetree-body">
+        <div class="fnode folder"><span class="chev">▾</span><span class="ic">📁</span><span class="name">退款功能优化</span><span class="grp"><span style="font-size:10px;color:var(--text-3)">5</span></span></div>
+        <div class="fnode active" style="padding-left:var(--space-6)"><span class="ic">📝</span><span class="name">prd.md</span><span class="grp"><span class="badge">PRD</span><span class="dirty"></span></span></div>
+        <div class="fnode" style="padding-left:var(--space-6)"><span class="ic">📐</span><span class="name">api-draft.md</span><span class="grp"><span class="badge warn">⚠</span></span></div>
+        <div class="fnode" style="padding-left:var(--space-6)"><span class="ic">📊</span><span class="name">data-model.md</span></div>
+        <div class="fnode" style="padding-left:var(--space-6)"><span class="ic">📄</span><span class="name">existing-flow.docx</span><span class="grp"><span class="badge ok">↻</span></span></div>
+        <div class="fnode" style="padding-left:var(--space-6)"><span class="ic">📑</span><span class="name">competitor-analysis.pdf</span><span class="grp"><span class="badge ok">↻</span></span></div>
+        <div class="add-node">＋ 添加文件</div>
+
+        <div style="margin:var(--space-3) 0;border-top:1px solid var(--border)"></div>
+        <div class="fnode folder" style="opacity:.7"><span class="chev">▸</span><span class="ic">📦</span><span class="name">关联仓库</span><span class="grp"><span style="font-size:10px;color:var(--text-3)">2/4</span></span></div>
+        <div class="fnode" style="padding-left:var(--space-6);opacity:.7"><span class="ic">✓</span><span class="name">refund-service</span></div>
+        <div class="fnode" style="padding-left:var(--space-6);opacity:.7"><span class="ic">✓</span><span class="name">order-service</span></div>
+        <div class="fnode" style="padding-left:var(--space-6);opacity:.7"><span class="ic">＋</span><span class="name" style="color:var(--text-3)">coupon-service</span></div>
+        <div class="fnode" style="padding-left:var(--space-6);opacity:.7"><span class="ic">＋</span><span class="name" style="color:var(--text-3)">payment-gateway</span></div>
+
+        <div style="margin:var(--space-3) 0;border-top:1px solid var(--border)"></div>
+        <div class="fnode folder" style="opacity:.7"><span class="chev">▾</span><span class="ic">🤖</span><span class="name">候命 Skill</span><span class="grp"><span style="font-size:10px;color:var(--text-3)">3</span></span></div>
+        <div class="fnode" style="padding-left:var(--space-6);opacity:.7"><span class="ic">·</span><span class="name">requirement-brainstorm</span></div>
+        <div class="fnode" style="padding-left:var(--space-6);opacity:.7"><span class="ic">·</span><span class="name">requirement-clarify</span></div>
+        <div class="fnode" style="padding-left:var(--space-6);opacity:.7"><span class="ic">·</span><span class="name">schema-design</span></div>
+      </div>
+    </aside>
+
+    <!-- CENTER: 编辑器 -->
+    <section class="editor-area">
+      <div class="editor-tabs">
+        <div class="editor-tab active"><span class="ic">📝</span><span>prd.md</span><span class="badge" style="background:var(--brand);color:#fff;font-size:9px;padding:1px 4px;border-radius:3px">PRD</span><span class="dirty"></span><span class="close">✕</span></div>
+        <div class="editor-tab"><span class="ic">📐</span><span>api-draft.md</span><span class="close">✕</span></div>
+        <div class="editor-tab"><span class="ic">📄</span><span>existing-flow.docx</span><span class="badge" style="background:var(--success);color:#fff;font-size:9px;padding:1px 4px;border-radius:3px">↻</span><span class="close">✕</span></div>
+      </div>
+      <div class="editor-toolbar">
+        <div class="crumb">
+          <span>需求</span><span>/</span><span>退款功能优化</span><span>/</span><span class="cur">prd.md</span>
+        </div>
+        <div class="right">
+          <span style="font-family:var(--mono)">prd.md · 622 chars · 4 H2 · 5 AC</span>
+          <span style="color:var(--border-strong)">|</span>
+          <span class="kbd">⌘S</span><span>保存</span>
+          <span style="color:var(--border-strong)">|</span>
+          <span class="kbd">⌘P</span><span>切换文件</span>
+        </div>
+      </div>
+
+      <div class="editor-body">
+        <div class="ed-toolbar">
+          <b>B</b><b><i>I</i></b><b>H1</b><b>&lt;/&gt;</b><span>· 列表</span>
+          <span style="color:var(--text-3)">·</span>
+          <span style="color:var(--text-2)">📂 上传 docx/pdf → 自动转 md</span>
+          <span class="mono">
+            <span>行 14 · 列 23</span>
+            <span>·</span>
+            <span>UTF-8 · LF</span>
+            <span>·</span>
+            <div class="toggle">
+              <button>✏ 编辑</button>
+              <button class="active">⊟ 分屏</button>
+              <button>👁 预览</button>
+            </div>
+          </span>
+        </div>
+        <div class="editor-pane">
+          <div class="line-nums">
+            <div>1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div><div>8</div><div>9</div><div>10</div><div>11</div><div>12</div><div>13</div><div>14</div><div>15</div><div>16</div><div>17</div><div>18</div><div>19</div><div>20</div><div>21</div><div>22</div><div>23</div>
+          </div>
+          <div class="ed-body-wrap">
+            <textarea class="ed-body"># 退款功能优化
+
+## 背景
+用户发起退款申请后，当前需人工审核，平均耗时约 2 天，投诉率高。
+
+## 目标
+- 退款流程自动化，减少人工介入
+- 提升退款到账速度与成功率
+
+## 验收标准
+- [ ] 退款成功率 ≥ 99%
+- [ ] 平均退款时长 ≤ 30s
+- [ ] 失败自动重试并通知用户
+
+## 非目标
+- 不改动原有订单状态机
+- 不涉及跨境退款流程
+</textarea>
+            <div class="preview">
+              <h1>退款功能优化</h1>
+              <h2>背景</h2>
+              <p>用户发起退款申请后，当前需人工审核，平均耗时约 2 天，投诉率高。</p>
+              <h2>目标</h2>
+              <ul>
+                <li>退款流程自动化，减少人工介入</li>
+                <li>提升退款到账速度与成功率</li>
+              </ul>
+              <h2>验收标准</h2>
+              <ul>
+                <li><code>退款成功率 ≥ 99%</code></li>
+                <li><code>平均退款时长 ≤ 30s</code></li>
+                <li>失败自动重试并通知用户</li>
+              </ul>
+              <h2>非目标</h2>
+              <ul>
+                <li>不改动原有订单状态机</li>
+                <li>不涉及跨境退款流程</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="editor-status">
+        <div class="left">
+          <span class="dot-ok"></span>
+          <span>prd.md 已自动保存 · 2 分钟前</span>
+        </div>
+        <div class="right">
+          <span>Markdown</span>
+          <span>·</span>
+          <span>4 章节</span>
+          <span>·</span>
+          <span>5 AC</span>
+          <span style="color:var(--border-strong);margin:0 4px">|</span>
+          <span style="color:var(--brand);font-weight:600">⚠ api-draft.md 未评审</span>
+          <span style="color:var(--border-strong);margin:0 4px">|</span>
+          <button class="btn-ghost" style="font-size:11px;height:18px;padding:0 8px">💾 保存</button>
+          <button class="btn" style="font-size:11px;height:20px;padding:0 10px">▶ 进入 ANALYZING</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- RIGHT: Inline Rail (紧凑) -->
+    <aside class="rail">
+      <div>
+        <div class="rail-section">候命 Skill</div>
+        <div class="rail-card">
+          <div class="ttl">🤖 brainstorm</div>
+          <div class="body">⌘K 唤起</div>
+        </div>
+        <div class="rail-card">
+          <div class="ttl">🤖 clarify</div>
+          <div class="body">⌘K 唤起</div>
+        </div>
+        <div class="rail-card">
+          <div class="ttl">🤖 schema</div>
+          <div class="body">⌘K 唤起</div>
+        </div>
+      </div>
+      <div>
+        <div class="rail-section">检查</div>
+        <div class="rail-card" style="border-left-color:var(--success)">
+          <div class="ttl">✓ PRD 完整</div>
+          <div class="body">5 段齐全</div>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<!-- 设计说明 -->
+<div class="note">
+  <b>方案 ③ IDE 文件树型 ——</b> 借鉴 VSCode 的"左侧文件树 + 右侧编辑器"模型，PRD 只是被默认选中的文件。
+  <ol style="margin:8px 0 0 20px">
+    <li><b>左 260px</b>：完整文件树（含 PRD + 辅助文件 + 仓库 + Skill 一体化导航）</li>
+    <li><b>中 1fr</b>：编辑器（顶 Tab 切换已打开文件 + 主区 Markdown 编辑 + 实时预览分屏 + 底部 status bar）</li>
+    <li><b>右 140px</b>：候命 Skill 紧凑卡片</li>
+    <li><b>仓库勾选</b>：沉到文件树底部"关联仓库"区，状态点直接显示</li>
+    <li><b>入口</b>：launch 按钮沉到编辑器底部 status bar 右侧</li>
+  </ol>
+  <b>优点</b>：与开发者日常 IDE 心智完全一致；多文件切换丝滑；编辑+预览分屏；可扩展性强（后续接 Monaco / Y.js 协作）。<br>
+  <b>代价</b>：信息密度极高，对非技术用户不友好；需要为编辑器 Tab 设计一套状态管理；首次进入时"默认打开 prd.md"的引导要做。
+  <pre class="wire">┌─ 文件树(260) ─┬─── 编辑器 (1fr) ────────────────┬─ Skill ─┐
+│ ▾ 退款功能优化   │ [📝prd.mdPRD*][api-draft][docx] │ 🤖×3  │
+│   📝 prd.md ✓ ⭐│ 工具栏 B/I/H1 · 📂上传 · ⌘S   │ ✓ 完整 │
+│   📐 api-draft⚠│ ┌─ 行号┬── 编辑 ──┬─ 预览 ──┐ │         │
+│   📊 data-model │ │ 1   │ # 退款  │ 退款功能  │ │         │
+│   📄 docx ↻     │ │ 2   │ ## 背景  │ 背景...  │ │         │
+│   📑 pdf ↻      │ │ 3   │ ...     │ 目标...  │ │         │
+│   ＋ 添加       │ │ 14  │ ▏       │          │ │         │
+│ ─────────────   │ └─────┴──────────┴──────────┘ │         │
+│ 📦 仓库 2/4    │ ●prd.md已保存·2分钟前           │         │
+│   ✓ refund-svc  │ [💾保存] [▶ 进入 ANALYZING]    │         │
+│   ✓ order-svc   │                                │         │
+│ 🤖 Skill 3      │                                │         │
+└─────────────────┴────────────────────────────────┴─────────┘</pre>
+</div>
+
+</body></html>

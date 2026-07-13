@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>19c-2d · 交互变体 D · 全屏模式 · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{--brand:#5e6ad2;--brand-50:#eef0fb;--brand-600:#525bc7;--brand-700:#4147a3;--success:#16a34a;--success-50:#f0fdf4;--warning:#f59e0b;--warning-50:#fffbeb;--error:#ef4444;--info:#64748b;--bg:#fbfbfd;--bg-elevated:#fff;--bg-subtle:#f5f5f7;--border:#ebebef;--border-strong:#d8d8de;--text-1:#0f172a;--text-2:#475569;--text-3:#94a3b8;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:20px;--space-6:24px;--space-8:32px;--text-xs:11px;--text-sm:12px;--text-base:13px;--text-md:14px;--text-lg:16px;--text-2xl:20px;--radius-sm:4px;--radius-md:6px;--radius-lg:8px;--radius-xl:12px;--shadow-sm:0 1px 2px rgba(0,0,0,.04);--shadow-md:0 2px 4px rgba(0,0,0,.06);--mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg);color:var(--text-1);font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased}
+.topnav{position:sticky;top:0;z-index:100;background:#0f172a;color:#fff;padding:var(--space-2) var(--space-4);font-size:var(--text-sm);display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap}
+.topnav .badge{background:var(--brand);color:#fff;padding:3px 10px;border-radius:var(--radius-md);font-size:var(--text-xs);font-weight:600}
+.topnav a{color:#94a3b8;text-decoration:none;padding:4px 9px;border-radius:var(--radius-md);font-size:var(--text-xs)}
+.topnav a:hover{color:#fff;background:rgba(255,255,255,.06)}
+.topnav a.cur{color:#fff;background:var(--brand)}
+.topnav .spacer{flex:1}
+.topnav .div{width:1px;height:15px;background:rgba(255,255,255,.14);margin:0 4px}
+.statusbar{position:sticky;top:36px;z-index:50;background:var(--bg-elevated);border-bottom:1px solid var(--border)}
+.statusbar .tabs{display:flex;align-items:center;height:40px;padding:0 var(--space-4);gap:2px}
+.statusbar .tab{display:flex;align-items:center;gap:6px;height:28px;padding:0 var(--space-3);font-size:var(--text-sm);color:var(--text-2);border-radius:var(--radius-md);cursor:pointer}
+.statusbar .tab.active{background:var(--brand-50);color:var(--brand-600);font-weight:500}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--info);flex-shrink:0;display:inline-block}
+.statusbar .info{display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 var(--space-4);border-top:1px solid var(--border);background:var(--bg-subtle);font-size:var(--text-sm);color:var(--text-2)}
+.shell{display:grid;grid-template-columns:56px 1fr;min-height:calc(100vh - 108px)}
+.sidebar{background:var(--bg-elevated);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:var(--space-3) 0;gap:2px}
+.sidebar .logo{width:32px;height:32px;border-radius:var(--radius-md);background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;margin-bottom:var(--space-3)}
+.sidebar a{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius-md);font-size:18px;text-decoration:none;color:var(--text-2)}
+.sidebar a.active{background:var(--brand-50)}
+.tree{background:var(--bg-elevated);border-right:1px solid var(--border);padding:var(--space-3) 0;overflow:auto}
+.tree-section{padding:0 var(--space-3);margin-bottom:var(--space-2)}
+.tree-section-label{padding:var(--space-2);font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:600;display:flex;align-items:center;justify-content:space-between}
+.tree-section-label .count{background:var(--bg-subtle);color:var(--text-2);padding:1px 6px;border-radius:var(--radius-sm);font-size:var(--text-xs)}
+.tree-section.current .tree-section-label{color:var(--brand-600)}
+.tree-section.current .tree-section-label .count{background:var(--brand-50);color:var(--brand-600)}
+.tree-node{display:flex;align-items:center;gap:var(--space-2);height:26px;padding:0 var(--space-2);border-radius:var(--radius-md);font-size:var(--text-sm);color:var(--text-2);cursor:pointer}
+.tree-node:hover{background:var(--bg-subtle)}
+.tree-node.active{background:var(--brand-50);color:var(--brand-700);font-weight:500}
+.tree-node .ic{font-size:13px;width:16px;text-align:center;color:var(--text-3)}
+.tree-node .lbl{font-family:var(--mono);font-size:10px;color:var(--text-3)}
+.tree-node .sd{width:6px;height:6px;border-radius:50%;margin-left:auto}
+.center{display:flex;flex-direction:column;background:var(--bg);overflow:hidden}
+.center-toolbar{display:flex;align-items:center;justify-content:space-between;height:44px;padding:0 var(--space-6);border-bottom:1px solid var(--border);background:var(--bg-elevated)}
+.center-toolbar .crumb{font-size:var(--text-sm);color:var(--text-3);display:flex;align-items:center;gap:8px}
+.center-toolbar .crumb .cur{color:var(--text-1);font-weight:600}
+.btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 var(--space-3);border-radius:var(--radius-md);font-size:var(--text-sm);font-weight:500;cursor:pointer;border:none;background:var(--brand);color:#fff;font-family:inherit}
+.btn:hover{background:var(--brand-600)}
+.btn-lg{height:38px;padding:0 var(--space-5);font-size:var(--text-md)}
+.btn-secondary{background:var(--bg-elevated);color:var(--text-1);border:1px solid var(--border-strong)}
+.btn-secondary:hover{background:var(--bg-subtle)}
+.btn-ghost{background:transparent;color:var(--text-2)}
+.btn-ghost:hover{background:var(--bg-subtle)}
+.workarea{flex:1;overflow:auto;padding:var(--space-5) var(--space-6) 0;display:flex;flex-direction:column}
+.rail{background:var(--bg-subtle);border-left:1px solid var(--border);padding:var(--space-3);overflow:auto;display:flex;flex-direction:column;gap:var(--space-4)}
+.rail-section{font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:600;margin-bottom:6px}
+.rail-card{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3);font-size:var(--text-xs);border-left:3px solid var(--success);margin-bottom:var(--space-2)}
+.rail-card .ttl{font-weight:600;font-size:var(--text-sm);margin-bottom:4px;color:var(--text-1)}
+.rail-card .body{color:var(--text-2);line-height:1.5}
+.kbd{font-family:var(--mono);background:var(--bg-subtle);padding:1px 6px;border-radius:var(--radius-sm);font-size:11px;border:1px solid var(--border);color:var(--text-2)}
+.note{margin:var(--space-6);padding:var(--space-4);background:#f0f9ff;border:1px solid #bae6fd;border-radius:var(--radius-lg);font-size:var(--text-sm);color:#075985}
+.note b{color:#0c4a6e}
+.note .wire{margin-top:var(--space-3);background:#0c2233;color:#7dd3fc;border-radius:var(--radius-md);padding:var(--space-3);overflow:auto;font-family:var(--mono);font-size:11px;line-height:1.35}
+
+/* ===== 方案 B + 变体 A ===== */
+.detail-b{display:grid;grid-template-columns:240px 1fr 120px;background:var(--bg);min-height:calc(100vh - 108px)}
+.split{flex:1;display:flex;flex-direction:column;min-height:0;max-width:1080px;margin:0 auto;width:100%}
+.split-row{flex:1;display:flex;flex-direction:column;min-height:0}
+.split-resizer{height:6px;background:transparent;cursor:row-resize;position:relative;margin:var(--space-2) 0}
+.split-resizer::before{content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:24px;height:2px;background:var(--border-strong);border-radius:1px}
+.split-resizer:hover::before{background:var(--brand)}
+.prd-pane{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-xl);box-shadow:var(--shadow-md);padding:var(--space-5);display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.prd-pane-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-3);flex-shrink:0}
+.prd-pane-head .ttl{font-size:var(--text-md);font-weight:700;display:flex;align-items:center;gap:8px}
+.prd-pane-head .badge-prd{background:var(--brand);color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:var(--radius-sm);letter-spacing:.04em}
+.prd-pane-head .sub{font-size:var(--text-xs);color:var(--text-3);margin-left:8px;font-weight:400}
+.prd-pane-body{flex:1;overflow:auto;display:flex;flex-direction:column;gap:var(--space-4);min-height:0}
+.field{margin-bottom:0}
+.field>label{display:block;font-size:var(--text-sm);font-weight:600;color:var(--text-2);margin-bottom:var(--space-2)}
+.inp{width:100%;height:36px;padding:0 var(--space-3);border:1px solid var(--border-strong);border-radius:var(--radius-md);font-size:var(--text-md);font-family:inherit;color:var(--text-1);background:var(--bg)}
+.inp:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-50)}
+.editor{border:1px solid var(--border-strong);border-radius:var(--radius-md);overflow:hidden;display:flex;flex-direction:column;flex:1;min-height:0}
+.ed-toolbar{display:flex;align-items:center;gap:var(--space-3);padding:var(--space-2) var(--space-3);background:var(--bg-subtle);border-bottom:1px solid var(--border);font-size:var(--text-sm);color:var(--text-3);flex-shrink:0}
+.ed-toolbar b{color:var(--text-2)}
+.ed-toolbar .mono{margin-left:auto;font-family:var(--mono);font-size:var(--text-xs)}
+.ed-body{width:100%;flex:1;min-height:120px;border:none;padding:var(--space-3);font-family:var(--mono);font-size:var(--text-sm);line-height:1.7;color:var(--text-1);resize:none;background:var(--bg-elevated)}
+.ed-body:focus{outline:none}
+.files-pane{padding-top:var(--space-2);flex-shrink:0}
+.files-pane-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-3)}
+.files-pane-head .ttl{font-size:var(--text-md);font-weight:700;display:flex;align-items:center;gap:8px}
+.files-pane-head .sub{font-size:var(--text-xs);color:var(--text-3);margin-left:8px;font-weight:400}
+.files-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:var(--space-3)}
+.fcard{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-3);cursor:pointer;transition:border-color .12s,box-shadow .12s;display:flex;flex-direction:column;gap:var(--space-2);position:relative;min-height:90px}
+.fcard:hover{border-color:var(--border-strong);box-shadow:var(--shadow-sm)}
+.fcard .ic-row{display:flex;align-items:center;gap:var(--space-2)}
+.fcard .ic{font-size:14px;width:18px;text-align:center}
+.fcard .name{font-weight:600;font-size:var(--text-sm);color:var(--text-1);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fcard .desc{font-size:var(--text-xs);color:var(--text-3);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.fcard .meta-row{display:flex;align-items:center;justify-content:space-between;font-size:var(--text-xs);color:var(--text-3);margin-top:auto;padding-top:var(--space-2);border-top:1px dashed var(--border)}
+.fcard .chip-mini{font-size:10px;padding:1px 6px;border-radius:999px;background:var(--bg-subtle);color:var(--text-2)}
+.fcard .chip-mini.warn{background:var(--warning-50);color:var(--warning)}
+.fcard .chip-mini.success{background:var(--success-50);color:var(--success)}
+.add-card{border:1px dashed var(--border-strong);background:transparent;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--text-3);font-size:var(--text-sm);cursor:pointer;min-height:90px}
+.add-card:hover{border-color:var(--brand);color:var(--brand-600);background:var(--brand-50)}
+.repo-bar{position:sticky;bottom:0;background:var(--bg-elevated);border-top:1px solid var(--border);padding:var(--space-3) var(--space-6);display:flex;align-items:center;gap:var(--space-3);font-size:var(--text-sm);z-index:10;margin:var(--space-3) calc(-1 * var(--space-6)) 0}
+.repo-bar .lbl{color:var(--text-3);font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.04em;font-weight:600}
+.repo-bar .chips{flex:1;display:flex;gap:var(--space-2);flex-wrap:wrap;align-items:center}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:5px 11px;border:1px solid var(--border-strong);border-radius:999px;font-size:var(--text-sm);color:var(--text-2);cursor:pointer;background:var(--bg)}
+.chip.on{background:var(--brand-50);border-color:var(--brand);color:var(--brand-700);font-weight:500}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+</style>
+</head>
+<body>
+
+<!-- Top Nav -->
+<div class="topnav">
+  <span class="badge">交互变体 D · 全屏模式 (PRD 隐藏 + 文件占满主区)</span>
+  <span class="spacer"></span>
+  <div class="grp">
+    <a href="19b-2c-no-tree-anchor.html">← 基础 (变体 C)</a>
+    <span class="div"></span>
+    <a href="19c-2a-prd-compress.html">A 上下分栏</a>
+    <a href="19c-2b-drawer.html">B 右侧抽屉</a>
+    <a href="19c-2c-modal.html">C 模态框</a>
+    <a href="19c-2d-fullscreen.html" class="cur">D 全屏</a>
+  </div>
+</div>
+
+<!-- StatusBar -->
+<header class="statusbar">
+  <div class="tabs">
+    <div class="tab">Overview</div>
+    <div class="tab active"><span class="dot"></span>DRAFTING</div>
+    <div class="tab" style="color:var(--text-3)"><span class="dot" style="background:var(--text-3)"></span>ANALYZING</div>
+    <div class="tab" style="color:var(--text-3)"><span class="dot" style="background:var(--text-3)"></span>CLARIFYING</div>
+    <div class="tab" style="color:var(--text-3)"><span class="dot" style="background:var(--text-3)"></span>DESIGNING</div>
+    <div class="tab" style="color:var(--text-3)"><span class="dot" style="background:var(--text-3)"></span>EXECUTING</div>
+    <div class="tab" style="color:var(--text-3)"><span class="dot" style="background:var(--text-3)"></span>WRAP-UP</div>
+  </div>
+  <div class="info">
+    <div style="display:flex;align-items:center;gap:var(--space-3)"><strong style="color:var(--text-1);font-weight:600">退款功能优化</strong><span style="color:var(--text-3)">·</span><span>DRAFTING · PRD + 4 个辅助文件</span></div>
+    <div style="color:var(--text-3)">✎ PRD 已保存 2 分钟前 · 💾 自动 30s</div>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="sidebar">
+    <div class="logo">D</div>
+    <a href="#" title="概览">🏠</a>
+    <a href="#" class="active" title="需求">📌</a>
+    <a href="#" title="仓库">📦</a>
+    <a href="#" title="知识">📚</a>
+    <a href="#" title="Skill">🤖</a>
+    <span style="flex:1"></span>
+    <a href="#" title="设置">⚙️</a>
+  </nav>
+
+  <div class="detail-b" style="grid-template-columns:1fr 140px">
+    <!-- LEFT: 【变体 C】去掉资源树，主区变两列 -->
+
+    <!-- CENTER -->
+    <section class="center">
+      <div class="center-toolbar">
+        <div class="crumb"><span>需求</span><span>/</span><span>退款功能优化</span><span>/</span><span>DRAFTING</span><span>/</span><span class="cur">📐 api-draft.md</span></div>
+        <div class="right">
+          <button class="btn-secondary" style="height:26px;font-size:var(--text-xs)">← 返回 DRAFTING</button>
+        </div>
+      </div>
+      <main class="workarea">
+        <div style="max-width:1080px;margin:0 auto;width:100%;height:100%;display:flex;flex-direction:column">
+          <!-- 【变体 D】全屏 api-draft.md 编辑器 -->
+          <div class="prd-pane" style="flex:1;border:1px solid var(--border);box-shadow:var(--shadow-md);animation:fadeIn .25s ease">
+            <div class="prd-pane-head">
+              <div class="ttl">
+                <span style="font-size:18px">📐</span>
+                <span>api-draft.md</span>
+                <span class="sub">— 退款功能优化 / 辅助文件</span>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <span style="font-size:var(--text-xs);color:var(--text-3)">已保存 · 14 分钟前</span>
+                <span style="font-size:var(--text-xs);color:var(--warning);font-weight:600">⚠ 未评审</span>
+                <button class="btn-secondary" style="height:26px;font-size:var(--text-xs)">👁 预览</button>
+                <button class="btn-secondary" style="height:26px;font-size:var(--text-xs)">⋯</button>
+              </div>
+            </div>
+            <div class="prd-pane-body">
+              <div class="field" style="flex:1;display:flex;flex-direction:column">
+                <label>Markdown · 184 chars · 5 字段</label>
+                <div class="editor">
+                  <div class="ed-toolbar"><b>B</b><b><i>I</i></b><b>H1</b><b>&lt;/&gt;</b><span>· 列表</span><span style="color:var(--text-2);margin-left:8px">📂 上传 docx/pdf → 自动转 md</span><span class="mono">行 14 · 列 23 · UTF-8</span></div>
+                  <textarea class="ed-body"># 退款 API 草案 (Draft)
+
+## POST /refunds
+
+### Request Body
+```json
+{
+  "order_id": "string",
+  "amount": 0,
+  "reason": "string",
+  "idempotency_key": "string"
+}
+```
+
+### Response 200
+```json
+{ "refund_id": "...", "status": "processing" }
+```
+
+## GET /refunds/:id
+
+查询退款状态。</textarea>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="repo-bar">
+          <span class="lbl">关联仓库</span>
+          <div class="chips">
+            <span class="chip on">✓ refund-service</span>
+            <span class="chip on">✓ order-service</span>
+            <span class="chip">＋ coupon-service</span>
+            <span class="chip">＋ payment-gateway</span>
+            <span class="chip">＋ 更多仓库…</span>
+          </div>
+          <button class="btn btn-lg">▶ 进入 ANALYZING</button>
+        </div>
+      </main>
+    </section>
+
+    <!-- RIGHT: Inline Rail -->
+    <aside class="rail">
+      <div>
+        <div class="rail-section">候命 Skill</div>
+        <div class="rail-card"><div class="ttl">🤖 brainstorm</div><div class="body">从模糊想法出发引导结构化 PRD。<br><span class="kbd">⌘K 唤起</span></div></div>
+        <div class="rail-card"><div class="ttl">🤖 clarify</div><div class="body">对已有 PRD 提问反问。</div></div>
+        <div class="rail-card"><div class="ttl">🤖 schema-design</div><div class="body">基于 PRD 草拟 schema + API。</div></div>
+      </div>
+      <div>
+        <div class="rail-section">检查</div>
+        <div class="rail-card" style="border-left-color:var(--success)"><div class="ttl">✓ PRD 完整</div><div class="body">5 段齐全，AC 可量化。</div></div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<div class="note">
+  <b>变体 D：全屏模式</b> —— 左 240px <b>完全去掉</b>，主区从三列变两列(主区 + Inline Rail)。PRD 章节大纲的导航功能由<b>PRD 编辑器顶部的锚点条</b>承担：H1/H2 横排显示，点击跳转到对应行。仓库勾选 + Skill 完全搬到主区/Inline Rail。
+  <br><br>
+  <b>优点</b>：主区横向空间最大（PRD + 辅助文件 + 仓库条都很宽敞）；学习成本最低（无资源树概念）；移动端友好。<br>
+  <b>代价</b>：仓库勾选条 + Skill 列表分散在不同位置；PRD 锚点条占用 PRD 编辑器顶部空间（PRD 越长越能体现价值）。
+  <pre class="wire">┌────── 主区 (1fr 更宽) ───────────────────┬─ Skill ─┐
+│ ╔══ PRD 顶置 ══════════════════════════╗ │         │
+│ ║ 标题 + 锚点条 H1/H2 (替代资源树)     ║ │ 候命 3 │
+│ ║ ┌─ ed-toolbar ─┐                     ║ │ 检查 1 │
+│ ║ │ B I H1 上传 · 转md │ 预览          ║ │         │
+│ ║ ├─────────────────┤                  ║ │         │
+│ ║ │ # 退款功能优化   │                  ║ │         │
+│ ║ │ ## 背景 ## AC    │                  ║ │         │
+│ ║ │ ## 非目标        │                  ║ │         │
+│ ║ └─────────────────┘                  ║ │         │
+│ ╚══════════════════════════════════════╝ │         │
+│ ‖ 拖拽分割 ‖                              │         │
+│ 📎 辅助材料 (4 个文件) + ＋新建 + 上传    │         │
+│ ┌api┐┌data┐┌docx┐┌pdf┐⊕                  │         │
+│ ── 仓库条 ── ▶ 进入 ANALYZING            │         │
+└──────────────────────────────────────────┴─────────┘</pre>
+</div>
+
+</body></html>

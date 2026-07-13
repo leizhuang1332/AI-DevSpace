@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>19a · DRAFTING 二次设计 · 方案 A · 文件平等型 · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{
+  --brand:#5e6ad2;--brand-50:#eef0fb;--brand-100:#e0e3f7;--brand-500:#5e6ad2;--brand-600:#525bc7;--brand-700:#4147a3;
+  --success:#16a34a;--success-50:#f0fdf4;--warning:#f59e0b;--warning-50:#fffbeb;--error:#ef4444;--error-50:#fef2f2;--info:#64748b;
+  --bg:#fbfbfd;--bg-elevated:#ffffff;--bg-subtle:#f5f5f7;--border:#ebebef;--border-strong:#d8d8de;
+  --text-1:#0f172a;--text-2:#475569;--text-3:#94a3b8;
+  --space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:20px;--space-6:24px;--space-8:32px;
+  --text-xs:11px;--text-sm:12px;--text-base:13px;--text-md:14px;--text-lg:16px;--text-xl:18px;--text-2xl:20px;--text-3xl:24px;--text-4xl:32px;
+  --radius-sm:4px;--radius-md:6px;--radius-lg:8px;--radius-xl:12px;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.04);--shadow-md:0 2px 4px rgba(0,0,0,.06);--shadow-lg:0 4px 12px rgba(0,0,0,.08);
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg);color:var(--text-1);font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased}
+.topnav{position:sticky;top:0;z-index:100;background:#0f172a;color:#fff;padding:var(--space-2) var(--space-4);font-size:var(--text-sm);display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap}
+.topnav .badge{background:var(--brand);color:#fff;padding:3px 10px;border-radius:var(--radius-md);font-size:var(--text-xs);font-weight:600;white-space:nowrap}
+.topnav .form-name{color:#e2e8f0;font-weight:600;white-space:nowrap}
+.topnav a{color:#94a3b8;text-decoration:none;padding:4px 9px;border-radius:var(--radius-md);white-space:nowrap;font-size:var(--text-xs)}
+.topnav a:hover{color:#fff;background:rgba(255,255,255,.06)}
+.topnav a.cur{color:#fff;background:var(--brand)}
+.topnav .spacer{flex:1}
+.topnav .grp{display:flex;gap:2px;align-items:center;flex-wrap:wrap}
+.topnav .div{width:1px;height:15px;background:rgba(255,255,255,.14);margin:0 4px}
+.statusbar{position:sticky;top:36px;z-index:50;background:var(--bg-elevated);border-bottom:1px solid var(--border)}
+.statusbar .tabs{display:flex;align-items:center;height:40px;padding:0 var(--space-4);gap:2px}
+.statusbar .tab{display:flex;align-items:center;gap:6px;height:28px;padding:0 var(--space-3);font-size:var(--text-sm);color:var(--text-2);border-radius:var(--radius-md);cursor:pointer;white-space:nowrap}
+.statusbar .tab:hover{background:var(--bg-subtle)}
+.statusbar .tab.active{background:var(--brand-50);color:var(--brand-600);font-weight:500}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--brand);flex-shrink:0;display:inline-block}
+.statusbar .info{display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 var(--space-4);border-top:1px solid var(--border);background:var(--bg-subtle);font-size:var(--text-sm);color:var(--text-2)}
+.shell{display:grid;grid-template-columns:56px 1fr;min-height:calc(100vh - 108px)}
+.sidebar{background:var(--bg-elevated);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:var(--space-3) 0;gap:2px}
+.sidebar .logo{width:32px;height:32px;border-radius:var(--radius-md);background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;margin-bottom:var(--space-3)}
+.sidebar a{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius-md);font-size:18px;text-decoration:none;color:var(--text-2)}
+.sidebar a:hover{background:var(--bg-subtle)}
+.sidebar a.active{background:var(--brand-50)}
+.detail{display:grid;grid-template-columns:240px 1fr 120px;background:var(--bg);min-height:calc(100vh - 108px)}
+.tree{background:var(--bg-elevated);border-right:1px solid var(--border);padding:var(--space-3) 0;overflow:auto}
+.tree.weak{opacity:.75}
+.tree-section{padding:0 var(--space-3);margin-bottom:var(--space-2)}
+.tree-section-label{padding:var(--space-2);font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:600;display:flex;align-items:center;justify-content:space-between}
+.tree-section-label .count{background:var(--bg-subtle);color:var(--text-2);padding:1px 6px;border-radius:var(--radius-sm);font-size:var(--text-xs)}
+.tree-section.current .tree-section-label{color:var(--brand-600)}
+.tree-section.current .tree-section-label .count{background:var(--brand-50);color:var(--brand-600)}
+.tree-node{display:flex;align-items:center;gap:var(--space-2);height:26px;padding:0 var(--space-2);border-radius:var(--radius-md);font-size:var(--text-sm);color:var(--text-2);cursor:pointer}
+.tree-node:hover{background:var(--bg-subtle)}
+.tree-node.active{background:var(--brand-50);color:var(--brand-700);font-weight:500}
+.tree-node .ic{font-size:13px;width:16px;text-align:center}
+.tree-node .sd{width:6px;height:6px;border-radius:50%;margin-left:auto}
+.center{display:flex;flex-direction:column;background:var(--bg);overflow:hidden}
+.center-toolbar{display:flex;align-items:center;justify-content:space-between;height:44px;padding:0 var(--space-6);border-bottom:1px solid var(--border);background:var(--bg-elevated)}
+.center-toolbar .crumb{font-size:var(--text-sm);color:var(--text-3);display:flex;align-items:center;gap:8px}
+.center-toolbar .crumb .cur{color:var(--text-1);font-weight:600}
+.center-toolbar .right{display:flex;gap:var(--space-2);align-items:center}
+.btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 var(--space-3);border-radius:var(--radius-md);font-size:var(--text-sm);font-weight:500;cursor:pointer;border:none;background:var(--brand);color:#fff;font-family:inherit}
+.btn:hover{background:var(--brand-600)}
+.btn-lg{height:38px;padding:0 var(--space-5);font-size:var(--text-md)}
+.btn-secondary{background:var(--bg-elevated);color:var(--text-1);border:1px solid var(--border-strong)}
+.btn-secondary:hover{background:var(--bg-subtle)}
+.btn-ghost{background:transparent;color:var(--text-2)}
+.btn-ghost:hover{color:var(--text-1);background:var(--bg-subtle)}
+.workarea{flex:1;overflow:auto;padding:var(--space-6)}
+.rail{background:var(--bg-subtle);border-left:1px solid var(--border);padding:var(--space-3);overflow:auto;display:flex;flex-direction:column;gap:var(--space-4)}
+.rail-section{font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:600;margin-bottom:6px}
+.rail-card{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3);font-size:var(--text-xs);border-left:3px solid var(--success);margin-bottom:var(--space-2)}
+.rail-card .ttl{font-weight:600;font-size:var(--text-sm);margin-bottom:4px;color:var(--text-1)}
+.rail-card .body{color:var(--text-2);line-height:1.5}
+.kbd{font-family:var(--mono);background:var(--bg-subtle);padding:1px 6px;border-radius:var(--radius-sm);font-size:11px;border:1px solid var(--border);color:var(--text-2)}
+.note{margin:var(--space-6);padding:var(--space-4);background:#f0f9ff;border:1px solid #bae6fd;border-radius:var(--radius-lg);font-size:var(--text-sm);color:#075985}
+.note b{color:#0c4a6e}
+.note .wire{margin-top:var(--space-3);background:#0c2233;color:#7dd3fc;border-radius:var(--radius-md);padding:var(--space-3);overflow:auto;font-family:var(--mono);font-size:11px;line-height:1.35}
+.swatch{display:inline-flex;align-items:center;gap:6px;font-size:var(--text-sm);color:var(--text-2)}
+.divider-v{width:1px;height:14px;background:var(--border);margin:0 4px}
+
+/* ===== 方案 A 专属：文件卡片网格 ===== */
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:var(--space-5);max-width:1180px;margin-left:auto;margin-right:auto}
+.page-head .ttl{font-size:var(--text-2xl);font-weight:700;color:var(--text-1);display:flex;align-items:center;gap:var(--space-2)}
+.page-head .sub{font-size:var(--text-sm);color:var(--text-3);margin-top:4px}
+.page-head .meta{font-size:var(--text-xs);color:var(--text-3);margin-top:6px;display:flex;gap:var(--space-3)}
+.page-head .meta b{color:var(--text-2)}
+.toolbar{display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-4);max-width:1180px;margin-left:auto;margin-right:auto}
+.toolbar .search{flex:1;position:relative}
+.toolbar .search input{width:100%;height:32px;padding:0 var(--space-3) 0 30px;border:1px solid var(--border-strong);border-radius:var(--radius-md);font-size:var(--text-sm);background:var(--bg-elevated);font-family:inherit}
+.toolbar .search input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-50)}
+.toolbar .search .ic{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--text-3);font-size:13px;pointer-events:none}
+.view-toggle{display:inline-flex;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-md);padding:2px;height:30px}
+.view-toggle button{height:24px;padding:0 10px;border:none;background:transparent;font-size:var(--text-xs);color:var(--text-2);cursor:pointer;border-radius:4px;font-family:inherit}
+.view-toggle button.active{background:var(--bg-elevated);color:var(--text-1);box-shadow:var(--shadow-sm)}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:var(--space-4);max-width:1180px;margin:0 auto}
+.fcard{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-4);cursor:pointer;transition:border-color .12s,box-shadow .12s;display:flex;flex-direction:column;gap:var(--space-3);position:relative;min-height:148px}
+.fcard:hover{border-color:var(--border-strong);box-shadow:var(--shadow-sm)}
+.fcard.primary{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-50)}
+.fcard.primary .badge-prd{background:var(--brand);color:#fff}
+.fcard .ic-row{display:flex;align-items:center;gap:var(--space-2)}
+.fcard .ic-box{width:32px;height:32px;border-radius:var(--radius-md);background:var(--bg-subtle);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
+.fcard.primary .ic-box{background:var(--brand-50)}
+.fcard .name{font-weight:600;font-size:var(--text-md);color:var(--text-1);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fcard .badge-prd{font-size:10px;font-weight:700;padding:2px 6px;border-radius:var(--radius-sm);letter-spacing:.04em}
+.fcard .desc{font-size:var(--text-xs);color:var(--text-3);line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.fcard .meta-row{display:flex;align-items:center;justify-content:space-between;font-size:var(--text-xs);color:var(--text-3);margin-top:auto}
+.fcard .meta-row .grp{display:flex;gap:var(--space-2);align-items:center}
+.fcard .meta-row .chip-mini{font-size:10px;padding:2px 6px;border-radius:999px;background:var(--bg-subtle);color:var(--text-2)}
+.fcard .meta-row .chip-mini.brand{background:var(--brand-50);color:var(--brand-600)}
+.fcard .meta-row .chip-mini.warn{background:var(--warning-50);color:var(--warning)}
+.fcard .meta-row .chip-mini.success{background:var(--success-50);color:var(--success)}
+.fcard .more{position:absolute;top:10px;right:10px;width:22px;height:22px;border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--text-3);cursor:pointer;opacity:0}
+.fcard:hover .more{opacity:1}
+.fcard .more:hover{background:var(--bg-subtle);color:var(--text-1)}
+
+.add-card{border:1px dashed var(--border-strong);background:transparent;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--space-2);color:var(--text-3);font-size:var(--text-sm);cursor:pointer;min-height:148px}
+.add-card:hover{border-color:var(--brand);color:var(--brand-600);background:var(--brand-50)}
+.add-card .plus{width:32px;height:32px;border-radius:50%;background:var(--bg-subtle);display:flex;align-items:center;justify-content:center;font-size:18px;color:var(--text-2)}
+.add-card:hover .plus{background:#fff;color:var(--brand)}
+.add-card .sub{font-size:var(--text-xs);color:var(--text-3)}
+
+.fab{position:fixed;bottom:24px;right:24px;display:flex;flex-direction:column;gap:var(--space-2);z-index:50}
+.fab .btn{box-shadow:var(--shadow-lg)}
+
+.repo-bar{position:sticky;bottom:0;background:var(--bg-elevated);border-top:1px solid var(--border);padding:var(--space-3) var(--space-6);display:flex;align-items:center;gap:var(--space-3);font-size:var(--text-sm);z-index:10;margin:var(--space-6) calc(-1 * var(--space-6)) 0}
+.repo-bar .lbl{color:var(--text-3);font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.04em;font-weight:600}
+.repo-bar .chips{flex:1;display:flex;gap:var(--space-2);flex-wrap:wrap;align-items:center}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:5px 11px;border:1px solid var(--border-strong);border-radius:999px;font-size:var(--text-sm);color:var(--text-2);cursor:pointer;background:var(--bg)}
+.chip.on{background:var(--brand-50);border-color:var(--brand);color:var(--brand-700);font-weight:500}
+.repo-bar .launch{margin-left:auto}
+
+.empty-cta{padding:var(--space-6);text-align:center;color:var(--text-3);background:var(--bg-subtle);border-radius:var(--radius-lg);font-size:var(--text-sm)}
+.empty-cta b{color:var(--text-1)}
+</style>
+</head>
+<body>
+
+<!-- Top Nav -->
+<div class="topnav">
+  <span class="badge">DRAFTING 二次设计 · 方案 ①</span>
+  <span class="form-name">· 文件平等型</span>
+  <span class="spacer"></span>
+  <div class="grp">
+    <a href="19a-drafting-files-equal.html" class="cur">① 文件平等</a>
+    <a href="19b-drafting-prd-top-files-bottom.html">② PRD 顶置</a>
+    <a href="19c-drafting-ide-file-tree.html">③ IDE 风格</a>
+    <span class="div"></span>
+    <a href="11a-stage-adaptive-draft.html">原 DRAFT 形态</a>
+    <a href="12-requirement-overview.html">Overview</a>
+  </div>
+</div>
+
+<!-- StatusBar -->
+<header class="statusbar">
+  <div class="tabs">
+    <div class="tab">Overview</div>
+    <div class="tab active"><span class="dot" style="background:var(--info)"></span>DRAFTING</div>
+    <div class="tab"><span class="dot" style="background:var(--text-3)"></span>ANALYZING</div>
+    <div class="tab"><span class="dot" style="background:var(--text-3)"></span>CLARIFYING</div>
+    <div class="tab"><span class="dot" style="background:var(--text-3)"></span>DESIGNING</div>
+    <div class="tab"><span class="dot" style="background:var(--text-3)"></span>EXECUTING</div>
+    <div class="tab"><span class="dot" style="background:var(--text-3)"></span>WRAP-UP</div>
+  </div>
+  <div class="info">
+    <div style="display:flex;align-items:center;gap:var(--space-3)">
+      <strong style="color:var(--text-1);font-weight:600">退款功能优化</strong>
+      <span style="color:var(--text-3)">·</span>
+      <span>DRAFTING · 准备原料</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:var(--space-4)">
+      <span style="color:var(--text-3)">📁 5 个文件 · 📦 2 个仓库 · 🤖 3 个 Skill 待命</span>
+    </div>
+  </div>
+</header>
+
+<div class="shell">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="logo">D</div>
+    <a href="#" title="概览">🏠</a>
+    <a href="#" class="active" title="需求">📌</a>
+    <a href="#" title="仓库">📦</a>
+    <a href="#" title="知识">📚</a>
+    <a href="#" title="Skill">🤖</a>
+    <span style="flex:1"></span>
+    <a href="#" title="设置">⚙️</a>
+  </nav>
+
+  <div class="detail">
+    <!-- LEFT: 资源树（弱化为文件分组） -->
+    <aside class="tree">
+      <div class="tree-section current">
+        <div class="tree-section-label"><span>PRD 主文档</span><span class="count">1</span></div>
+        <div class="tree-node active"><span class="ic">📝</span>prd.md<span class="sd" style="background:var(--brand)"></span></div>
+      </div>
+      <div class="tree-section">
+        <div class="tree-section-label"><span>辅助材料</span><span class="count">4</span></div>
+        <div class="tree-node"><span class="ic">📐</span>api-draft.md</div>
+        <div class="tree-node"><span class="ic">📊</span>data-model.md</div>
+        <div class="tree-node"><span class="ic">📄</span>existing-flow.docx</div>
+        <div class="tree-node"><span class="ic">📑</span>competitor-analysis.pdf</div>
+      </div>
+      <div class="tree-section">
+        <div class="tree-section-label"><span>关联仓库</span><span class="count">2</span></div>
+        <div class="tree-node"><span class="ic">📦</span>refund-service</div>
+        <div class="tree-node"><span class="ic">📦</span>order-service</div>
+        <div class="tree-node" style="color:var(--text-3)"><span class="ic">＋</span>添加仓库</div>
+      </div>
+      <div class="tree-section">
+        <div class="tree-section-label"><span>候命 Skill</span><span class="count">3</span></div>
+        <div class="tree-node"><span class="ic">🤖</span>requirement-brainstorm</div>
+        <div class="tree-node"><span class="ic">🤖</span>requirement-clarify</div>
+        <div class="tree-node"><span class="ic">🤖</span>schema-design</div>
+      </div>
+    </aside>
+
+    <!-- CENTER: 文件卡片网格 -->
+    <section class="center">
+      <div class="center-toolbar">
+        <div class="crumb"><span>需求</span><span>/</span><span>退款功能优化</span><span>/</span><span class="cur">DRAFTING</span></div>
+        <div class="right">
+          <span class="swatch">🗂 全部文件</span>
+          <div class="divider-v"></div>
+          <span class="swatch">↕ 排序:最近修改</span>
+        </div>
+      </div>
+      <main class="workarea">
+        <div class="page-head">
+          <div>
+            <div class="ttl">📦 准备原料</div>
+            <div class="sub">为「退款功能优化」准备 PRD 与辅助材料 —— 添加越完整,后续工位推进越顺</div>
+            <div class="meta">
+              <span><b>5</b> 个文件</span>
+              <span>·</span>
+              <span>PRD 主文档 <b>1</b> · 辅助 <b>4</b></span>
+              <span>·</span>
+              <span>总字数 <b>4,238</b></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <div class="search">
+            <span class="ic">🔍</span>
+            <input placeholder="搜索文件 (按名称/类型)">
+          </div>
+          <div class="view-toggle">
+            <button class="active">⊞ 网格</button>
+            <button>☰ 列表</button>
+            <button>🌳 树</button>
+          </div>
+          <button class="btn btn-secondary">📁 上传文件</button>
+          <button class="btn">＋ 新建文件</button>
+        </div>
+
+        <div class="grid">
+          <!-- PRD 主文档（特殊标记） -->
+          <div class="fcard primary">
+            <span class="more">⋯</span>
+            <div class="ic-row">
+              <span class="ic-box">📝</span>
+              <span class="name">prd.md</span>
+              <span class="badge-prd">PRD</span>
+            </div>
+            <div class="desc">退款功能优化 PRD · 包含背景/目标/AC/非目标 4 章节 · 622 字</div>
+            <div class="meta-row">
+              <div class="grp">
+                <span class="chip-mini brand">主文档</span>
+                <span class="chip-mini success">✓ 已检查</span>
+              </div>
+              <span>2 分钟前</span>
+            </div>
+          </div>
+
+          <!-- 辅助文件 1: API 草案 -->
+          <div class="fcard">
+            <span class="more">⋯</span>
+            <div class="ic-row">
+              <span class="ic-box">📐</span>
+              <span class="name">api-draft.md</span>
+            </div>
+            <div class="desc">退款 API 端点草案 · POST /refunds · 5 个字段定义</div>
+            <div class="meta-row">
+              <div class="grp">
+                <span class="chip-mini">MD</span>
+                <span class="chip-mini warn">⚠ 未评审</span>
+              </div>
+              <span>14 分钟前</span>
+            </div>
+          </div>
+
+          <!-- 辅助文件 2: 数据模型 -->
+          <div class="fcard">
+            <span class="more">⋯</span>
+            <div class="ic-row">
+              <span class="ic-box">📊</span>
+              <span class="name">data-model.md</span>
+            </div>
+            <div class="desc">退款单表结构 + 索引设计 · 来自既有 refund-service schema</div>
+            <div class="meta-row">
+              <div class="grp">
+                <span class="chip-mini">MD</span>
+              </div>
+              <span>1 小时前</span>
+            </div>
+          </div>
+
+          <!-- 辅助文件 3: Word 导入 -->
+          <div class="fcard">
+            <span class="more">⋯</span>
+            <div class="ic-row">
+              <span class="ic-box">📄</span>
+              <span class="name">existing-flow.docx</span>
+            </div>
+            <div class="desc">客服部门现有退款流程 SOP · 已转 md · 来自 Word 上传</div>
+            <div class="meta-row">
+              <div class="grp">
+                <span class="chip-mini">DOCX</span>
+                <span class="chip-mini">↻ 已转 MD</span>
+              </div>
+              <span>昨天</span>
+            </div>
+          </div>
+
+          <!-- 辅助文件 4: PDF -->
+          <div class="fcard">
+            <span class="more">⋯</span>
+            <div class="ic-row">
+              <span class="ic-box">📑</span>
+              <span class="name">competitor-analysis.pdf</span>
+            </div>
+            <div class="desc">竞品退款体验对比 · 来自 4 家友商 · 已提取文本</div>
+            <div class="meta-row">
+              <div class="grp">
+                <span class="chip-mini">PDF</span>
+                <span class="chip-mini">↻ 已转 MD</span>
+              </div>
+              <span>昨天</span>
+            </div>
+          </div>
+
+          <!-- 空卡片（新建/上传引导） -->
+          <div class="fcard add-card">
+            <div class="plus">＋</div>
+            <div>添加文件</div>
+            <div class="sub">新建 md · 上传 md/docx/pdf</div>
+          </div>
+        </div>
+
+        <!-- 仓库勾选条（底部固定） -->
+        <div class="repo-bar">
+          <span class="lbl">关联仓库</span>
+          <div class="chips">
+            <span class="chip on">✓ refund-service</span>
+            <span class="chip on">✓ order-service</span>
+            <span class="chip">＋ coupon-service</span>
+            <span class="chip">＋ payment-gateway</span>
+            <span class="chip">＋ 更多仓库…</span>
+          </div>
+          <button class="btn btn-lg launch">▶ 进入 ANALYZING</button>
+        </div>
+      </main>
+    </section>
+
+    <!-- RIGHT: Inline Rail 候命 Skill -->
+    <aside class="rail">
+      <div>
+        <div class="rail-section">候命 Skill</div>
+        <div class="rail-card">
+          <div class="ttl">🤖 requirement-brainstorm</div>
+          <div class="body">从模糊想法出发，引导你产出结构化 PRD。<br><span class="kbd">⌘K 唤起</span></div>
+        </div>
+        <div class="rail-card">
+          <div class="ttl">🤖 requirement-clarify</div>
+          <div class="body">对已有文档提问 / 反问，补足模糊点。</div>
+        </div>
+        <div class="rail-card">
+          <div class="ttl">🤖 schema-design</div>
+          <div class="body">基于 PRD 草拟数据库 schema 与 API 草案。</div>
+        </div>
+      </div>
+      <div>
+        <div class="rail-section">检查</div>
+        <div class="rail-card" style="border-left-color:var(--success)">
+          <div class="ttl">✓ PRD 主文档完整</div>
+          <div class="body">标题/背景/目标/AC/非目标 5 段齐全。</div>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<!-- 设计说明 -->
+<div class="note">
+  <b>方案 ① 文件平等型 ——</b> DRAFTING 主区是<strong>文件卡片网格</strong>，PRD 与所有辅助文件<b>平级</b>展示，没有「主表单区」的概念。PRD 唯一特殊身份是 <span class="kbd">badge: PRD</span> + <span class="kbd">border: brand</span>。
+  <br><br>
+  <b>核心交互</b>：
+  <ul style="margin:8px 0 0 20px">
+    <li>点击卡片 → 打开文件查看/编辑（可走模态或侧滑）</li>
+    <li>右上 <span class="kbd">⋯</span> → 重命名 / 删除 / 导出 / 查看历史</li>
+    <li>虚线卡片 → 唤起「新建/上传」菜单（md / docx / pdf）</li>
+    <li>仓库勾选条固定在底部，避免遮挡文件</li>
+    <li>资源树退化为「文件分组 + 仓库 + Skill」导航，不再显示 PRD 大纲</li>
+  </ul>
+  <b>优点</b>：所有文件同等重要，避免 PRD 抢焦；新用户上手无门槛。<br>
+  <b>代价</b>：PRD 编辑入口要点击 1 次卡片才能进入；表单驱动感变弱。
+  <pre class="wire">┌──── 资源树 ─────┬────── 主区:文件网格 ──────────┬─ 候命 Skill ─┐
+│ PRD: prd.md ⭐ │  ┌─ prd.md [PRD]─┐ ┌─api.md─┐ │ 🤖 brainstorm │
+│ 辅助: api.md    │  │ 退款功能优化  │ │ API端点 │ │ 🤖 clarify    │
+│         data.md │  │ PRD · 622 字  │ │ 5 字段  │ │ 🤖 schema     │
+│         docx    │  └──────────────┘ └────────┘ │               │
+│         pdf     │  ┌─data─┐ ┌─docx┐ ┌─pdf┐ ⊕ │ ✓ PRD 完整    │
+│ 仓库: refund ✓  │  │ data │ │ SOP │ │ 竞品│ + │               │
+│       order ✓   │  └──────┘ └──────┘ └────┘   │               │
+│ Skill: 3        │  ── 仓库勾选条 (底部固定) ── ▶ 进入分析     │
+└─────────────────┴──────────────────────────────────┴──────────────┘</pre>
+</div>
+
+</body></html>
