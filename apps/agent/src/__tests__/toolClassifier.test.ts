@@ -91,12 +91,12 @@ describe('classifyTool', () => {
       expect(classifyTool('Bash', { command: 'cat src.txt > out.txt' })).toBe('write')
     })
 
-    it('empty command defaults to read (no write signal)', () => {
-      expect(classifyTool('Bash', { command: '' })).toBe('read')
+    it('empty command defaults to write (conservative: missing info = treat as write)', () => {
+      expect(classifyTool('Bash', { command: '' })).toBe('write')
     })
 
-    it('Bash without command field defaults to read', () => {
-      expect(classifyTool('Bash', {})).toBe('read')
+    it('Bash without command field defaults to write (conservative)', () => {
+      expect(classifyTool('Bash', {})).toBe('write')
     })
 
     it('rm is detected even when surrounded by other tokens', () => {

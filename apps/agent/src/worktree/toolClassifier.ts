@@ -72,7 +72,8 @@ export function classifyTool(name: string, input: unknown): ToolClass {
 
   if (name === 'Bash') {
     const cmd = extractBashCommand(input)
-    if (cmd === null) return 'read'
+    // 拿不到 command 字符串时保守按写(宁可误杀不可漏放)
+    if (cmd === null) return 'write'
     return isBashWriteCommand(cmd) ? 'write' : 'read'
   }
 
@@ -84,7 +85,7 @@ export function classifyTool(name: string, input: unknown): ToolClass {
 function extractBashCommand(input: unknown): string | null {
   if (input === null || input === undefined || typeof input !== 'object') return null
   const cmd = (input as { command?: unknown }).command
-  return typeof cmd === 'string' ? cmd : null
+  return typeof cmd === 'string' && cmd.length > 0 ? cmd : null
 }
 
 /** 命令字符串是否匹配任何写模式 */

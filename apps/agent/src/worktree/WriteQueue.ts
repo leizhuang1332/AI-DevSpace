@@ -15,8 +15,6 @@
  * 不关心"成功还是失败"——这样后续 enqueue 永远能拼到上一轮末尾。
  */
 
-import type { AIEvent } from '../providers/AIEvent.js'
-
 /** 与 AISession 透出的 tool_use.input 同构(只关心 name + input,不强校验) */
 export interface WriteToolCall {
   name: string
@@ -40,14 +38,17 @@ export interface WriteQueue {
 }
 
 export function createWriteQueue(deps: WriteQueueDeps): WriteQueue {
-  const tails = new Map<string, Promise<void>>()
+  // 队尾类型 = "是否完成" 的 promise,值不重要;用 unknown 接收 .catch 的返回值
+  const tails = new Map<string, Promise<unknown>>()
 
   function exec(reqId: string, toolCall: WriteToolCall): Promise<unknown> {
     const prev = tails.get(reqId) ?? Promise.resolve()
     // next 才是真正"串行执行"的那一格;其 resolve/reject 反映本次工具结果
     const next = prev.then(() => deps.run(reqId, toolCall))
-    // 队尾用 .catch(()=>{}) 隔离子任务失败,这样后续 enqueue 不会被卡死
-    tails.set(reqId, next.then(() => undefined, () => undefined))
+    // 队尾用 .catch(()=>{}) 隔离子任务失败,这样后续 enqueue 不会被卡死。
+    // 对齐 ADR-0010 Q4 伪代码:队尾只关心"是否完成",不关心"成功还是失败"。
+    // 显式标注 catch handler 返回 void,让 tails 仍保持 Promise<void> 契约。
+    tails.set(reqId, next.catch((): void => undefined))
     return next
   }
 
@@ -60,12 +61,4 @@ export function createWriteQueue(deps: WriteQueueDeps): WriteQueue {
   }
 
   return { exec, cancel, size }
-}
-
-/** 类型守卫:从 AIEvent 列表里挑出 tool_use,且 name 命中"写类工具名" */
-export function isWriteToolUse(
-  ev: AIEvent,
-  writeNames: ReadonlySet<string>,
-): ev is Extract<AIEvent, { type: 'tool_use' }> {
-  return ev.type === 'tool_use' && writeNames.has(ev.name)
 }
