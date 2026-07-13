@@ -1,0 +1,49 @@
+apps/agent/src/worktree/pathUtil.ts
+  s_687860947eba26::t_d2ff7ca4f5cbca 1-23
+apps/agent/src/__tests__/WriteQueue.test.ts
+  s_687860947eba26::t_fea2102718e445 1-9,11-13,15-16,18-19,21-25,27-30
+  s_687860947eba26::t_b4f64e87a6900a 115,119
+  s_687860947eba26::t_4ba5e5b7f62841 120-145,148-183
+  s_687860947eba26::t_282153734145d1 146-147
+  s_687860947eba26::t_df7b1c13bec184 14,17,20,26,31
+  s_687860947eba26::t_76087ea7b8bbd2 73-95
+  s_687860947eba26::t_95187d7f338938 96-114,116-118
+  s_687860947eba26::t_1764362cfe09a4 10
+  s_687860947eba26::t_bc8f6411dd7b97 32-72
+apps/agent/src/worktree/toolExecutor.ts
+  s_687860947eba26::t_8d66d97b09bd23 1-58
+apps/agent/src/__tests__/WorktreeManager.test.ts
+  s_687860947eba26::t_57301e7f3a3112 1-185
+apps/agent/src/worktree/WriteQueue.ts
+  s_687860947eba26::t_c1d8b1d1d53ae6 1-71
+apps/agent/src/__tests__/toolExecutor.test.ts
+  s_687860947eba26::t_6e6343c24f9a4c 1-141,144-165
+  s_687860947eba26::t_bff42d1dd726da 142-143
+apps/agent/src/worktree/WorktreeManager.ts
+  s_687860947eba26::t_8d2788ce4f160c 68,72
+  s_687860947eba26::t_880fe7682ab891 1-13,15-67,69-71,73-128,130-147,150-189
+  s_687860947eba26::t_f749743fe6ca29 14
+  s_687860947eba26::t_0ce60ebef4db5e 129,148-149
+apps/agent/src/__tests__/pathUtil.test.ts
+  s_687860947eba26::t_3c7b5c1e2eb5cc 1-28
+apps/agent/src/worktree/toolClassifier.ts
+  s_687860947eba26::t_93bc2629525718 1-97
+apps/agent/src/__tests__/toolClassifier.test.ts
+  s_687860947eba26::t_a31f1aeff8161d 1-106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "2ffa5bd15090436f7e96c13398e2f4fce919c086",
+  "prompts": {},
+  "sessions": {
+    "s_687860947eba26": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cc572745-27a6-440b-85f6-15a36a77c665",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
