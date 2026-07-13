@@ -1,0 +1,33 @@
+.superpowers/sdd/review-fixes-report.md
+  s_5ecfdb591ee8af::t_89632929fc7873 1-166
+apps/agent/src/__tests__/AISession.test.ts
+  s_5ecfdb591ee8af::t_0d49f5c2258fb8 145,152,162,376-404
+apps/agent/src/__tests__/ClaudeCodeProvider.test.ts
+  s_5ecfdb591ee8af::t_8afd962b3517bd 230-316
+apps/agent/src/log/SessionLogger.ts
+  s_5ecfdb591ee8af::t_6ac3f9c0103b55 48,54
+apps/agent/src/providers/AIEvent.ts
+  s_5ecfdb591ee8af::t_bf017411992986 26-29
+apps/agent/src/providers/ClaudeCodeProvider.ts
+  s_5ecfdb591ee8af::t_614471b8bb5750 112,115-154,159-161
+apps/agent/src/session/AISession.ts
+  s_5ecfdb591ee8af::t_3074245dafc311 83-84,88-90,382-384,433-434,466-467,614-615,621
+packages/shared/src/sse.ts
+  s_5ecfdb591ee8af::t_f157565bd080c0 121-124
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "02d8dc3a1bdd9867137350e8d5d6c4bd2bf43a95",
+  "prompts": {},
+  "sessions": {
+    "s_5ecfdb591ee8af": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "217fbfe9-6c93-48f5-afca-a64a3dc1ee05",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
