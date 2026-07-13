@@ -1,0 +1,25 @@
+.scratch/feature/sdk-integration/issues/02-p1-write-queue.md
+  s_687860947eba26::t_5d3acab8c0a005 2
+apps/agent/src/__tests__/toolClassifier.test.ts
+  s_687860947eba26::t_153d32dd737dca 94-95,98-99
+apps/agent/src/worktree/WriteQueue.ts
+  s_687860947eba26::t_297b1b78af9576 41-42,48-51
+apps/agent/src/worktree/toolClassifier.ts
+  s_687860947eba26::t_a7244f90d8cf5e 75-76,88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "d54e580184bb26b86e2f132e89f2891319c0340d",
+  "prompts": {},
+  "sessions": {
+    "s_687860947eba26": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cc572745-27a6-440b-85f6-15a36a77c665",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
