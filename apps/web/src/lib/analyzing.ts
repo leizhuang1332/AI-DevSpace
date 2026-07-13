@@ -295,6 +295,14 @@ export interface AnalyzingData {
   sessions: AnalysisSession[]
   /** 当前 active 会话 id(issue 19c VS3 新增,主区按此过滤) */
   activeSessionId: string
+  /** 是否可生成技术概要(issue 19e VS5 · ADR-0013 D8 · 始终 true,verdict 不限制) */
+  canGenerateBrief: boolean
+  /** 技术概要 markdown 全文(双产物都不存在 → null) */
+  techBriefPreview: string | null
+  /** modules.yaml 解析后的结构(双产物都不存在 → null) */
+  modulesPreview: import('./tech-brief').TechBriefModulesFile | null
+  /** 最近生成时间 ISO 8601(由 mtime 派生;无产物 → null) */
+  briefGeneratedAt: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -349,6 +357,10 @@ export function emptyAnalyzing(requirementId: string): AnalyzingData {
     empty: true,
     sessions: [],
     activeSessionId: '',
+    canGenerateBrief: true,
+    techBriefPreview: null,
+    modulesPreview: null,
+    briefGeneratedAt: null,
   }
 }
 
@@ -627,6 +639,11 @@ export const REFUND_ANALYZING: Omit<AnalyzingData, 'requirementId'> = {
     pendingAdjudicationCount: 10,
     verdict: 'fail',
   }),
+  // issue 19e VS5 — tech brief preview 占位(实际数据由 server 端按需加载)
+  canGenerateBrief: true,
+  techBriefPreview: null,
+  modulesPreview: null,
+  briefGeneratedAt: null,
   // issue 19c VS3 — 多会话样例(架构 / 数据 / 接口 3 个 Tab,主区显示"数据"会话)
   sessions: [
     {

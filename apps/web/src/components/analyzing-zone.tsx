@@ -21,6 +21,7 @@ import { SessionTabs } from './session-tabs'
 import { ThinkingStream, type ThinkingPhase } from './thinking-stream'
 import { ProductList } from './product-list'
 import { InterjectInput } from './interject-input'
+import { TechBriefPanel } from './tech-brief-panel'
 
 /**
  * ANALYZING 工位组件(ADR-0011 §6 ANALYZING 布局 · issue 19)
@@ -523,14 +524,24 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
           onAcceptRisk={() => setVerdictOverride('pending')}
         />
       </div>
-      {/* issue 19c VS3 — 多会话 Tab(横向浏览器风格,主区按 activeSessionId 切换) */}
-      <div className="mt-3">
-        <SessionTabs
-          sessions={sessions}
-          activeId={activeSessionId}
-          onSwitch={handleSwitchSession}
-          onCreate={handleCreateSession}
-          onClose={handleCloseSession}
+      {/* issue 19c VS3 — 多会话 Tab(横向浏览器风格,主区按 activeSessionId 切换)
+          + issue 19e VS5 — 技术概要面板(右对齐,与 Tabs 同行) */}
+      <div className="mt-3 px-6 flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <SessionTabs
+            sessions={sessions}
+            activeId={activeSessionId}
+            onSwitch={handleSwitchSession}
+            onCreate={handleCreateSession}
+            onClose={handleCloseSession}
+          />
+        </div>
+        <TechBriefPanel
+          requirementId={data.requirementId}
+          sessionId={activeSessionId}
+          preview={data.techBriefPreview}
+          modulesPreview={data.modulesPreview}
+          generatedAt={data.briefGeneratedAt}
         />
       </div>
       <div

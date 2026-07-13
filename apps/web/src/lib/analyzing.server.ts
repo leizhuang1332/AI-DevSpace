@@ -27,7 +27,7 @@
  *   不会触发 webpack 模块解析,不会泄露 client 数据
  */
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type {
   AnalysisSession,
@@ -43,6 +43,8 @@ import {
   emptyAnalyzing,
   resolveAdmissionDimensions,
 } from './analyzing'
+import { loadTechBrief, loadModules } from './tech-brief.server'
+import type { TechBriefModulesFile } from './tech-brief'
 
 // ---------------------------------------------------------------------------
 // analysis/sessions/<session-id>/chunks.jsonl 数据源(issue 19b · 验收 #12)
@@ -228,6 +230,7 @@ function emptyAnalyzingWithOptions(
     ? countPendingAdjudications(options.analysisDir)
     : 0
   const sessionsBundle = loadSessionsBundle(options?.analysisSessionsDir, options?.lastSessionId)
+  const techBrief = options?.analysisDir ? loadTechBriefFromAnalysisDir(options.analysisDir) : null
   return {
     ...emptyAnalyzing(requirementId),
     admission: buildAdmissionData({
@@ -237,6 +240,40 @@ function emptyAnalyzingWithOptions(
     }),
     sessions: sessionsBundle.sessions,
     activeSessionId: sessionsBundle.activeSessionId,
+    ...techBrief,
+  }
+}
+
+/**
+ * 从 analysisDir 加载技术概要产物(issue 19e VS5)。
+ * - 双产物都存在 → 返回 { brief, modules, generatedAt }
+ * - 缺一 → 返回 null(让顶层字段保持默认 null)
+ */
+function loadTechBriefFromAnalysisDir(analysisDir: string): {
+  techBriefPreview: string
+  modulesPreview: TechBriefModulesFile
+  briefGeneratedAt: string
+} | null {
+  const brief = loadTechBrief(analysisDir)
+  if (brief === null) return null
+  const modules = loadModules(analysisDir)
+  // 派生 generatedAt:取两个文件 mtime 的较新者
+  let mtimeMs = 0
+  for (const name of ['technical-brief.md', 'modules.yaml']) {
+    const p = join(analysisDir, name)
+    if (existsSync(p)) {
+      try {
+        const st = statSync(p)
+        if (st.mtimeMs > mtimeMs) mtimeMs = st.mtimeMs
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  return {
+    techBriefPreview: brief,
+    modulesPreview: modules,
+    briefGeneratedAt: mtimeMs > 0 ? new Date(mtimeMs).toISOString() : new Date().toISOString(),
   }
 }
 

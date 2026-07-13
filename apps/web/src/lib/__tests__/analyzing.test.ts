@@ -544,6 +544,56 @@ describe('loadSessionChunks', () => {
 })
 
 // ============================================================================
+// getAnalyzingData — tech brief 段集成(issue 19e VS5 验收)
+// ============================================================================
+
+describe('getAnalyzingData · tech brief 段(issue 19e VS5)', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'analyzing-brief-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('canGenerateBrief: 始终 true(任何 verdict 状态都允许生成)', async () => {
+    const data = await getAnalyzingData('UNKNOWN-BRIEF-1', { analysisDir: tmpDir })
+    expect(data.canGenerateBrief).toBe(true)
+  })
+
+  it('双产物不存在 → techBriefPreview 为 null,modulesPreview 为 null', async () => {
+    const data = await getAnalyzingData('UNKNOWN-BRIEF-2', { analysisDir: tmpDir })
+    expect(data.techBriefPreview).toBeNull()
+    expect(data.modulesPreview).toBeNull()
+    expect(data.briefGeneratedAt).toBeNull()
+  })
+
+  it('双产物存在 → techBriefPreview 与 modulesPreview 字段填充', async () => {
+    const dir = join(tmpDir, 'UNKNOWN-BRIEF-3')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'technical-brief.md'), '# 技术概要\n\n## 1. 业务背景\n')
+    writeFileSync(
+      join(dir, 'modules.yaml'),
+      'modules:\n  - id: m-1\n    name: 网关\n    description: 幂等\n    deps: []\n    complexity: low\n',
+    )
+    const data = await getAnalyzingData('UNKNOWN-BRIEF-3', { analysisDir: dir })
+    expect(data.techBriefPreview).toBe('# 技术概要\n\n## 1. 业务背景\n')
+    expect(data.modulesPreview).not.toBeNull()
+    expect(data.modulesPreview!.modules).toHaveLength(1)
+    expect(data.modulesPreview!.modules[0].id).toBe('m-1')
+    expect(data.briefGeneratedAt).not.toBeNull()
+  })
+
+  it('req-001 mock → canGenerateBrief: true(verdict=fail 也允许生成)', async () => {
+    const data = await getAnalyzingData('req-001')
+    expect(data.canGenerateBrief).toBe(true)
+    expect(data.admission.verdict).toBe('fail')
+  })
+})
+
+// ============================================================================
 // getAnalyzingData — admission 段集成(issue 19a 验收)
 // ============================================================================
 
