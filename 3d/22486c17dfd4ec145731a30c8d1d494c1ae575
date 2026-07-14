@@ -1,0 +1,85 @@
+apps/web/src/components/executing-zone.tsx
+  s_908002fdf2b416::t_851ec280f0e875 1-2
+apps/agent/src/session/SessionStateRegistry.ts
+  s_64537139f01735::t_9d8174b20f5b35 15
+  s_64537139f01735::t_7add185e3f5213 120-121
+  s_64537139f01735::t_f6be9dffcba255 52
+  s_64537139f01735::t_c1ca1e0134adcf 1-14,16-51,53-65,67-119,122-124,134-136,138-146
+  s_64537139f01735::t_decbfed695e5d6 125-133,137
+  s_64537139f01735::t_23116e2143ac8b 66
+apps/agent/src/routes/sessionStateRoute.ts
+  s_64537139f01735::t_916980660273c8 1-63
+apps/agent/src/__tests__/classifyActivity.test.ts
+  s_64537139f01735::t_bc45f36aca5845 1-120
+apps/agent/src/sse/sessionEventsRoute.ts
+  s_64537139f01735::t_45fbec426e1b77 1-83
+apps/agent/src/sse/sessionBroadcaster.ts
+  s_64537139f01735::t_f8576fbf959597 60
+  s_64537139f01735::t_df2ea1175928a2 22
+  s_64537139f01735::t_a481bcc31ec6a1 1-21,23-59,61,65-141
+  s_64537139f01735::t_e5747cf0ef4371 62-64
+apps/agent/src/__tests__/sessionStateRoute.test.ts
+  s_64537139f01735::t_724fb08325423c 1-149
+apps/agent/src/sse/mapAiEventToSse.ts
+  s_64537139f01735::t_60296952021e5a 1-66
+apps/agent/src/__tests__/sessionEventsRoute.test.ts
+  s_64537139f01735::t_ffc5e787633a92 1-202
+apps/agent/src/server.ts
+  s_64537139f01735::t_830bd3c66bbaee 22
+  s_64537139f01735::t_9df4d70565b5ba 19-21
+  s_64537139f01735::t_12c3d977a08bfc 152-160,180-181,188-191,193-194,223
+apps/agent/src/__tests__/SessionStateRegistry.test.ts
+  s_64537139f01735::t_01ff8443701b60 1-97,99-100,103-105,107-124
+  s_64537139f01735::t_d9f5c2101c70ca 98,101-102,106
+apps/agent/src/__tests__/sessionBroadcaster.test.ts
+  s_64537139f01735::t_921ff4afabdb0b 101
+  s_64537139f01735::t_37993a319847b6 24,54,67
+  s_64537139f01735::t_d8720c3ec9f6e1 1-23,25-35,51-53,55-66,68,75-94,98-100,102-134,136-155,157-173,175-199
+  s_64537139f01735::t_f52169ce769a7b 42
+  s_64537139f01735::t_81405c4884e0fa 95-96
+  s_64537139f01735::t_ad1674c9c0a3b1 36-41,43-50,69-74
+  s_64537139f01735::t_df690a6a0c1826 97
+  s_64537139f01735::t_ad150a27c63471 135,156,174
+apps/agent/src/sse/SseHub.ts
+  s_64537139f01735::t_dcf2f9d8b7b88f 7-18
+  s_64537139f01735::t_cd4310467afb3f 19,21-24,26
+  s_64537139f01735::t_b963cd2d6543fe 86,88,91,96,99,104,106,117-123,133-134,137
+apps/agent/src/sse/classifyActivity.ts
+  s_64537139f01735::t_24347efa8dc060 1-45
+apps/agent/src/__tests__/SseHub.test.ts
+  s_64537139f01735::t_dc76b86545412d 73-144
+apps/agent/src/__tests__/spikeRoutes.test.ts
+  s_64537139f01735::t_bc0a4ed75dcbd1 15,161-162,167,241,275,304,332,374,377
+apps/agent/src/providers/ClaudeCodeProvider.ts
+  s_64537139f01735::t_965e9c2810e29b 83-84,94-101,288,436-438
+apps/agent/src/routes/spike.ts
+  s_64537139f01735::t_8b6c685f964844 29-34,49-50,67-69,73,181,184-192,218-220
+apps/agent/src/session/AISession.ts
+  s_64537139f01735::t_23d68f5d214cc5 143-150,200-201,223,244-273,369,487,499,532,663
+packages/shared/src/sse.ts
+  s_64537139f01735::t_c8726f75664cef 99-103,111,176-204
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "3d22486c17dfd4ec145731a30c8d1d494c1ae575",
+  "prompts": {},
+  "sessions": {
+    "s_64537139f01735": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b1868531-dbd9-4a9d-b73f-517d84df7a8b",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    },
+    "s_908002fdf2b416": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a6436498-e4d1-47ab-b7f6-0a015c45785f",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
