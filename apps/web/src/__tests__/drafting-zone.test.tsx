@@ -1,12 +1,55 @@
-import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest'
+import { describe, it, expect, afterEach, vi, beforeEach, beforeAll } from 'vitest'
 import { render, screen, cleanup, within, act, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { DraftingZone } from '@/components/drafting-zone'
 import {
   emptyDrafting,
   getDraftingData,
+  DEFAULT_PRD_RATIO,
+  AUX_PANE_MIN_HEIGHT_PX,
+  SPLIT_RESIZER_HEIGHT_PX,
 } from '@/lib/drafting'
 import { generatePrdSkeleton } from '@ai-devspace/shared'
+
+// ============================================================================
+// jsdom polyfills
+// ============================================================================
+// jsdom 不带 PointerEvent 与 ResizeObserver;DraftingZone 用后者测容器高度,
+// DraggableDivider 用前者接收拖拽。本测试文件提供最小 polyfill,仅在测试环境
+// 生效。
+
+beforeAll(() => {
+  if (typeof PointerEvent === 'undefined') {
+    class PointerEventPolyfill extends MouseEvent {
+      public pointerId: number
+      public pointerType: string
+      constructor(type: string, params: PointerEventInit = {}) {
+        super(type, params)
+        this.pointerId = params.pointerId ?? 1
+        this.pointerType = params.pointerType ?? 'mouse'
+      }
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(globalThis as any).PointerEvent = PointerEventPolyfill
+  }
+
+  if (typeof ResizeObserver === 'undefined') {
+    class ResizeObserverPolyfill {
+      private cb: ResizeObserverCallback
+      constructor(cb: ResizeObserverCallback) {
+        this.cb = cb
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      observe(_target: any) {
+        // 不主动回调;测试如需触发,通过 stub getBoundingClientRect 实现
+      }
+      unobserve() {}
+      disconnect() {}
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(globalThis as any).ResizeObserver = ResizeObserverPolyfill
+  }
+})
 
 // ============================================================================
 // Router mock — DraftingPrdPane 用 useRouter().push 跳到 ANALYZING 工位
@@ -541,5 +584,412 @@ describe('DraftingZone · PRD 锚点条 (issue 03)', () => {
 
     // selectionStart 被推到目标行(line 6)的字符偏移
     expect(ta.selectionStart).toBeGreaterThan(0)
+  })
+})
+
+// ============================================================================
+// issue 04 · 辅助文件卡片 + 拖拽分割(端到端集成)
+// ============================================================================
+//
+// 关键设计点:
+// - DraftingZone 在 mount 时用 ResizeObserver 实测 split-row 容器高度,
+//   用该高度计算 clampSplitRatio 后的 effectiveRatio(控制 PRD/aux 的 flexGrow)
+// - jsdom 不带 ResizeObserver,我们注入一个 no-op polyfill + window resize
+//   手动触发 measure → setContainerHeight
+// - 当容器高度 = 0(unmeasured 状态),effectiveRatio = prdRatio = 0.6(默认值)
+// - 测试"拖拽"用键盘 ArrowDown / ArrowUp 更稳定;真实 mouse drag 在
+//   单元测试中需要精确控制 clientY,jsdom 模拟起来不如键盘直接
+//
+// 验收清单(对照 issue 04 acceptance criteria):
+// #1 辅助文件面板在 PRD 下方
+// #2 每条 AuxFile 渲染为卡片,带 icon / filename / usage tag
+// #3 拖拽条存在 + hover row-resize cursor
+// #4 拖拽改变 ratio(用键盘 ArrowDown 验证)
+// #5 默认 60/40(data-prd-ratio)
+// #6 最小行 floor(用极小容器高度模拟)
+// #7 空态 → dashed 占位
+// #8 视觉匹配 19-final-drafting.html(类名 / testid 路径一致即可,不渲染真实浏览器)
+// #9 tests cover(本 describe 覆盖 #1 #2 #3 #4 #6 #7)
+
+describe('DraftingZone · 辅助文件卡片 + 拖拽分割 (issue 04)', () => {
+  // 工具:模拟 split-row 容器高度 = h,触发 DraftingZone 的 measure() 重读
+  function stubSplitRowHeight(heightPx: number) {
+    // jsdom 下 ResizeObserver polyfill 不会主动回调,所以改用 dispatchEvent
+    // window 'resize' 来触发 DraftingZone 的 measure 副作用。
+    const original = Element.prototype.getBoundingClientRect
+    Element.prototype.getBoundingClientRect = function () {
+      // 仅对 split-row 元素返回指定高度;其它元素用默认 0
+      if (
+        this instanceof HTMLElement &&
+        this.getAttribute('data-testid') === 'drafting-split-row'
+      ) {
+        return {
+          width: 800,
+          height: heightPx,
+          top: 0,
+          left: 0,
+          right: 800,
+          bottom: heightPx,
+          x: 0,
+          y: 0,
+          toJSON() {
+            return {}
+          },
+        } as DOMRect
+      }
+      return original.call(this)
+    }
+    return () => {
+      Element.prototype.getBoundingClientRect = original
+    }
+  }
+
+  afterEach(() => {
+    // 清理:把 getBoundingClientRect 还原(在 stubSplitRowHeight 测试中 restore)
+  })
+
+  // -------------------------------------------------------------------------
+  // 验收 #1 辅助文件面板在 PRD 下方
+  // -------------------------------------------------------------------------
+  it('PRD 卡片与 aux-files-pane 同时渲染(PRD 在上,aux 在下)', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+
+    // PRD 卡片还在(issue 02 / 03 不回归)
+    expect(screen.getByTestId('drafting-prd-pane')).toBeInTheDocument()
+    // issue 04 新增:辅助文件面板
+    expect(screen.getByTestId('aux-files-pane')).toBeInTheDocument()
+
+    // 顺序:PRD wrapper 在 aux wrapper 之前(DOM 顺序 = 视觉顺序)
+    const prdWrapper = screen.getByTestId('drafting-prd-wrapper')
+    const auxWrapper = screen.getByTestId('drafting-aux-wrapper')
+    expect(
+      (prdWrapper.compareDocumentPosition(auxWrapper) &
+        Node.DOCUMENT_POSITION_FOLLOWING) !==
+        0,
+    ).toBe(true)
+  })
+
+  it('split-row 容器 + 拖拽条存在', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+
+    expect(screen.getByTestId('drafting-split-row')).toBeInTheDocument()
+    expect(screen.getByTestId('split-resizer')).toBeInTheDocument()
+  })
+
+  // -------------------------------------------------------------------------
+  // 验收 #2 卡片渲染
+  // -------------------------------------------------------------------------
+  it('auxFiles 列表 → 渲染对应数量的 aux-card', async () => {
+    const data = await getDraftingData('req-001')
+    // req-001 mock 有 4 个 aux files
+    expect(data.auxFiles).toHaveLength(4)
+    render(<DraftingZone data={data} />)
+
+    const cards = screen.getAllByTestId('aux-card')
+    expect(cards).toHaveLength(4)
+    const ids = cards.map((c) => c.getAttribute('data-aux-id'))
+    expect(ids).toEqual([
+      'aux-api-draft',
+      'aux-data-model',
+      'aux-existing-flow',
+      'aux-competitor',
+    ])
+  })
+
+  it('每张卡片显示 filename + usage tag 文本', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+
+    const allCards = screen.getAllByTestId('aux-card')
+    const apiCardEl = allCards.find(
+      (c) => c.getAttribute('data-aux-id') === 'aux-api-draft',
+    ) as HTMLElement
+    expect(within(apiCardEl).getByTestId('aux-card-filename').textContent).toBe(
+      'api-draft.md',
+    )
+    expect(within(apiCardEl).getByTestId('aux-card-usage-tag').textContent).toBe(
+      'API 草案',
+    )
+
+    const dataCardEl = allCards.find(
+      (c) => c.getAttribute('data-aux-id') === 'aux-data-model',
+    ) as HTMLElement
+    expect(
+      within(dataCardEl).getByTestId('aux-card-usage-tag').textContent,
+    ).toBe('数据字典')
+
+    const sopCardEl = allCards.find(
+      (c) => c.getAttribute('data-aux-id') === 'aux-existing-flow',
+    ) as HTMLElement
+    expect(within(sopCardEl).getByTestId('aux-card-usage-tag').textContent).toBe(
+      'SOP',
+    )
+
+    const researchCardEl = allCards.find(
+      (c) => c.getAttribute('data-aux-id') === 'aux-competitor',
+    ) as HTMLElement
+    expect(
+      within(researchCardEl).getByTestId('aux-card-usage-tag').textContent,
+    ).toBe('调研')
+  })
+
+  it('docx / pdf 源 + converted=true → 显示 "↻ 已转 MD"', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+    const cards = screen.getAllByTestId('aux-card')
+    const sopCard = cards.find(
+      (c) => c.getAttribute('data-aux-id') === 'aux-existing-flow',
+    ) as HTMLElement
+    expect(within(sopCard).getByTestId('aux-card-converted')).toHaveTextContent(
+      /已转 MD/,
+    )
+
+    // md 源 + converted=false → 不显示
+    const apiCard = cards.find(
+      (c) => c.getAttribute('data-aux-id') === 'aux-api-draft',
+    ) as HTMLElement
+    expect(within(apiCard).queryByTestId('aux-card-converted')).toBeNull()
+  })
+
+  it('点击卡片 → 触发 onOpen 占位 console.info', async () => {
+    const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {})
+    try {
+      const data = await getDraftingData('req-001')
+      render(<DraftingZone data={data} />)
+      const user = userEvent.setup()
+      const cards = screen.getAllByTestId('aux-card')
+      await user.click(cards[0])
+      expect(consoleSpy).toHaveBeenCalledWith(
+        '[drafting-aux] open',
+        expect.objectContaining({ auxId: 'aux-api-draft' }),
+      )
+    } finally {
+      consoleSpy.mockRestore()
+    }
+  })
+
+  // -------------------------------------------------------------------------
+  // 验收 #3 拖拽条存在 + row-resize cursor
+  // -------------------------------------------------------------------------
+  it('拖拽条带 cursor-row-resize', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+    const resizer = screen.getByTestId('split-resizer')
+    expect(resizer.className).toContain('cursor-row-resize')
+  })
+
+  it('拖拽条 role=separator', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+    expect(screen.getByTestId('split-resizer').getAttribute('role')).toBe(
+      'separator',
+    )
+  })
+
+  // -------------------------------------------------------------------------
+  // 验收 #4 拖拽改变 ratio + 立即反映
+  // 验收 #5 默认 60/40
+  // -------------------------------------------------------------------------
+  it('默认 prdRatio = 0.6(验收 #5)', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+    const zone = screen.getByTestId('drafting-zone')
+    expect(zone.getAttribute('data-prd-ratio')).toBe(String(DEFAULT_PRD_RATIO))
+    expect(DEFAULT_PRD_RATIO).toBeCloseTo(0.6, 5)
+  })
+
+  it('键盘 ArrowDown(1% × N)→ data-prd-ratio 同步增长', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+    const resizer = screen.getByTestId('split-resizer')
+
+    resizer.focus()
+    await user.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}')
+
+    const zone = screen.getByTestId('drafting-zone')
+    expect(Number(zone.getAttribute('data-prd-ratio'))).toBeCloseTo(0.63, 5)
+  })
+
+  it('键盘 ArrowUp → ratio 减小', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+    const resizer = screen.getByTestId('split-resizer')
+
+    resizer.focus()
+    await user.keyboard('{ArrowUp}')
+
+    const zone = screen.getByTestId('drafting-zone')
+    expect(Number(zone.getAttribute('data-prd-ratio'))).toBeCloseTo(0.59, 5)
+  })
+
+  it('键盘 PageDown(5%)→ ratio 增大 0.05', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+    const resizer = screen.getByTestId('split-resizer')
+
+    resizer.focus()
+    await user.keyboard('{PageDown}')
+
+    const zone = screen.getByTestId('drafting-zone')
+    expect(Number(zone.getAttribute('data-prd-ratio'))).toBeCloseTo(0.65, 5)
+  })
+
+  it('键盘 Home → ratio 跳到 min', async () => {
+    const restore = stubSplitRowHeight(1200)
+    try {
+      const data = await getDraftingData('req-001')
+      render(<DraftingZone data={data} />)
+      // 触发 window resize 让 DraftingZone 重测高度
+      act(() => {
+        window.dispatchEvent(new Event('resize'))
+      })
+
+      const user = userEvent.setup()
+      const resizer = screen.getByTestId('split-resizer')
+      resizer.focus()
+      await user.keyboard('{Home}')
+
+      const zone = screen.getByTestId('drafting-zone')
+      const minRatio = SPLIT_RESIZER_HEIGHT_PX / (1200 - SPLIT_RESIZER_HEIGHT_PX)
+      expect(Number(zone.getAttribute('data-prd-ratio'))).toBeCloseTo(
+        minRatio,
+        3,
+      )
+    } finally {
+      restore()
+    }
+  })
+
+  it('键盘 End → ratio 跳到 max', async () => {
+    const restore = stubSplitRowHeight(1200)
+    try {
+      const data = await getDraftingData('req-001')
+      render(<DraftingZone data={data} />)
+      act(() => {
+        window.dispatchEvent(new Event('resize'))
+      })
+
+      const user = userEvent.setup()
+      const resizer = screen.getByTestId('split-resizer')
+      resizer.focus()
+      await user.keyboard('{End}')
+
+      const zone = screen.getByTestId('drafting-zone')
+      const maxRatio =
+        1 - AUX_PANE_MIN_HEIGHT_PX / (1200 - SPLIT_RESIZER_HEIGHT_PX)
+      expect(Number(zone.getAttribute('data-prd-ratio'))).toBeCloseTo(
+        maxRatio,
+        3,
+      )
+    } finally {
+      restore()
+    }
+  })
+
+  // -------------------------------------------------------------------------
+  // 验收 #6 最小行 floor —— 即使 prdRatio 极大,aux 仍 ≥ 行卡片高
+  // -------------------------------------------------------------------------
+  it('容器较小 → effectiveRatio 被 clamp,aux flexGrow 不为负', async () => {
+    // 容器 800px:usable = 794px;maxPrdRatio = 1 - 140/794 ≈ 0.824
+    const restore = stubSplitRowHeight(800)
+    try {
+      const data = await getDraftingData('req-001')
+      render(<DraftingZone data={data} />)
+      act(() => {
+        window.dispatchEvent(new Event('resize'))
+      })
+
+      // 键盘 End 把 prdRatio 推到最大
+      const user = userEvent.setup()
+      const resizer = screen.getByTestId('split-resizer')
+      resizer.focus()
+      await user.keyboard('{End}')
+
+      const zone = screen.getByTestId('drafting-zone')
+      const effectivePrd = Number(zone.getAttribute('data-effective-prd-ratio'))
+      const effectiveAux = 1 - effectivePrd
+
+      // aux flexGrow 必须 > 0(至少保留 floor)
+      expect(effectiveAux).toBeGreaterThan(0)
+      // aux 实际高度 = 800 * effectiveAux ≥ AUX_PANE_MIN_HEIGHT_PX
+      expect(800 * effectiveAux).toBeGreaterThanOrEqual(
+        AUX_PANE_MIN_HEIGHT_PX - 0.01,
+      )
+    } finally {
+      restore()
+    }
+  })
+
+  it('容器 200px 极小 → aux 仍 ≥ AUX_PANE_MIN_HEIGHT_PX', async () => {
+    const restore = stubSplitRowHeight(200)
+    try {
+      const data = await getDraftingData('req-001')
+      render(<DraftingZone data={data} />)
+      act(() => {
+        window.dispatchEvent(new Event('resize'))
+      })
+
+      const user = userEvent.setup()
+      const resizer = screen.getByTestId('split-resizer')
+      resizer.focus()
+      // 反复 End 推到 max
+      await user.keyboard('{End}')
+
+      const zone = screen.getByTestId('drafting-zone')
+      const effectivePrd = Number(zone.getAttribute('data-effective-prd-ratio'))
+      const auxHeight = 200 * (1 - effectivePrd)
+      // clampSplitRatio 保证 aux ≥ AUX_PANE_MIN_HEIGHT_PX
+      expect(auxHeight).toBeGreaterThanOrEqual(AUX_PANE_MIN_HEIGHT_PX - 0.01)
+    } finally {
+      restore()
+    }
+  })
+
+  // -------------------------------------------------------------------------
+  // 验收 #7 空态 → dashed 占位卡
+  // -------------------------------------------------------------------------
+  it('emptyDrafting() → auxFiles=[] → 渲染 EmptyAuxPlaceholder', () => {
+    render(<DraftingZone data={emptyDrafting('NEW')} />)
+    expect(screen.getByTestId('aux-empty-placeholder')).toBeInTheDocument()
+    expect(screen.queryAllByTestId('aux-card')).toHaveLength(0)
+    // pane 也标记 data-empty="true"
+    expect(
+      screen.getByTestId('aux-files-pane').getAttribute('data-empty'),
+    ).toBe('true')
+  })
+
+  it('空态点击占位卡 → 触发 console.info(占位 onCreate)', async () => {
+    const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {})
+    try {
+      render(<DraftingZone data={emptyDrafting('NEW')} />)
+      const user = userEvent.setup()
+      await user.click(screen.getByTestId('aux-empty-placeholder'))
+      expect(consoleSpy).toHaveBeenCalledWith('[drafting-aux] create')
+    } finally {
+      consoleSpy.mockRestore()
+    }
+  })
+
+  // -------------------------------------------------------------------------
+  // 回归:issue 02/03 的 PRD / 锚点条测试在 issue 04 改造后仍通过
+  // -------------------------------------------------------------------------
+  it('issue 02 验收仍通过:PRD 卡片 + 锚点条 + ANALYZING 跳转', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+
+    // PRD 卡片 + 锚点条 + 启动按钮
+    expect(screen.getByTestId('drafting-prd-card')).toBeInTheDocument()
+    expect(screen.getByTestId('prd-anchor-bar')).toBeInTheDocument()
+    const btn = screen.getByTestId('drafting-action-launch')
+    expect(btn.getAttribute('disabled')).toBeNull()
+
+    await user.click(btn)
+    expect(routerPush).toHaveBeenCalledWith('/requirements/req-001/analyzing/')
   })
 })

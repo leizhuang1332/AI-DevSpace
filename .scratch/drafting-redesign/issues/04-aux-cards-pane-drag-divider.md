@@ -1,5 +1,5 @@
 ---
-Status: ready-for-agent
+Status: ready-for-human
 Type: ticket
 Parent: ../../ai-devspace-mvp/issues/23-zone-drafting-redesign.md
 Related-ADRs: [ADR-0006, ADR-0011, ADR-0012]
