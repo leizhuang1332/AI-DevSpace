@@ -1,0 +1,51 @@
+apps/web/src/components/drafting-prd-pane.tsx
+  s_a4149d32ab8cbd::t_ec911a36287ca3 10
+apps/web/src/lib/__tests__/format.test.ts
+  s_a4149d32ab8cbd::t_6f2f444297e679 1,4-5,9-16,35-39
+  s_a4149d32ab8cbd::t_616773c2d89074 2-3,6-8,17-34,40-41
+apps/web/src/components/aux-file-card.tsx
+  s_a4149d32ab8cbd::t_3ec40dd2b6825f 4,20,23-24,55
+apps/web/src/components/aux-drawer.tsx
+  s_a4149d32ab8cbd::t_560d62d8399471 143-146,151-152,154,157-161,163-164
+  s_a4149d32ab8cbd::t_552ceea98c7764 4-142,147-150,153,155-156,162,165-298
+  s_a4149d32ab8cbd::t_09db4e43fc0f8c 1-3
+  s_a4149d32ab8cbd::t_464633a090c884 299-301
+  s_a4149d32ab8cbd::t_9e423b5acf578a 302-411
+apps/web/src/__tests__/drafting-zone.test.tsx
+  s_a4149d32ab8cbd::t_32489d05466bc6 996-1133
+  s_a4149d32ab8cbd::t_ebcb14d1e14f41 756-771
+  s_a4149d32ab8cbd::t_fdd6eda7110e36 1134
+apps/web/src/lib/aux-meta.ts
+  s_a4149d32ab8cbd::t_ed2e471f930248 1-58
+apps/web/src/components/__tests__/aux-drawer.test.tsx
+  s_a4149d32ab8cbd::t_968115bfb1fcf1 609-636,638-647,649-713
+  s_a4149d32ab8cbd::t_92eae1206b371a 44,59,74,116,140,158,177,205,222,240,257,274,298,312,328,452
+  s_a4149d32ab8cbd::t_6f9f3158755512 637,648
+  s_a4149d32ab8cbd::t_294f3a5d728bda 95,343,367,384,408,423,436,471,489,520,540,557,579,596
+  s_a4149d32ab8cbd::t_71a68bc79391d9 1-43,45-58,60-73,75-94,96-115,117-139,141-157,159-176,178-204,206-221,223-239,241-256,258-273,275-297,299-311,313-327,329-342,344-366,368-383,385-407,409-422,424-435,437-451,453-470,472-488,490-519,521-539,541-556,558-578,580-595,597-608
+apps/web/src/lib/format.ts
+  s_a4149d32ab8cbd::t_e4b9271fcd12c3 1-31
+apps/web/src/components/drafting-zone.tsx
+  s_a4149d32ab8cbd::t_504fcbd2101411 14
+  s_a4149d32ab8cbd::t_255476ec661a2f 48-54
+  s_a4149d32ab8cbd::t_4f1947de777a81 168,171-178
+  s_a4149d32ab8cbd::t_3eed021f3e5c37 270
+  s_a4149d32ab8cbd::t_3c5960fb8bb0d8 63-78
+  s_a4149d32ab8cbd::t_230f0a8980fb9e 262-269,271-274
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "540dc4d1c4af55a5f2ad65a7eb1ca60ffdfc7fa5",
+  "prompts": {},
+  "sessions": {
+    "s_a4149d32ab8cbd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "61d35e38-12cf-499a-a2b6-0549911acbdb",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
