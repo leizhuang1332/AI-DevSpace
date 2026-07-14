@@ -1,0 +1,21 @@
+apps/agent/src/__tests__/sessionsRetryRoute.test.ts
+  s_8aee14c7153c26::t_2438d43f59f7d1 68-126
+.scratch/feature/sdk-integration/issues/05-p4-errors.md
+  s_8aee14c7153c26::t_d7cd3bc216d7dd 2,7,15,21,26-27,30-31,36-38,40-42,44,48,50-78,88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "e936f2c9058762fb7e9a78d7cff4763b31247f14",
+  "prompts": {},
+  "sessions": {
+    "s_8aee14c7153c26": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "63701278-6e68-4767-97f2-ccc0f48ba3cb",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
