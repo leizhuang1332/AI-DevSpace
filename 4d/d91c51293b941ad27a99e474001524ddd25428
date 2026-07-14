@@ -1,0 +1,21 @@
+apps/agent/src/__tests__/RetryStrategy.test.ts
+  s_8aee14c7153c26::t_3edbdc11a11515 59-102
+apps/agent/src/error/RetryStrategy.ts
+  s_8aee14c7153c26::t_609c7691a63da7 21-22,68-69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "4dd91c51293b941ad27a99e474001524ddd25428",
+  "prompts": {},
+  "sessions": {
+    "s_8aee14c7153c26": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "63701278-6e68-4767-97f2-ccc0f48ba3cb",
+        "model": "unknown"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
