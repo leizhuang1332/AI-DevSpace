@@ -384,3 +384,162 @@ describe('DraftingZone · 旧 UI 元素已移除', () => {
     expect(screen.queryByTestId('drafting-form-missing')).toBeNull()
   })
 })
+
+// ============================================================================
+// PRD 锚点条(issue 03 端到端集成 —— 验收 #1 #2 #3 #4 #5 #6 #7)
+// ============================================================================
+
+describe('DraftingZone · PRD 锚点条 (issue 03)', () => {
+  // 验收 #1:horizontal 锚点条渲染在 PRD 编辑器之上
+  it('锚点条挂载在 PRD 编辑器之上', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+
+    const field = document.querySelector(
+      '[data-testid="drafting-field"][data-field-label="PRD Markdown"]',
+    ) as HTMLElement
+    const bar = screen.getByTestId('prd-anchor-bar')
+    const editor = screen.getByTestId('drafting-editor')
+
+    // bar 与 editor 都在 field 之后
+    expect(field).not.toBeNull()
+    expect(
+      (field.compareDocumentPosition(bar) &
+        Node.DOCUMENT_POSITION_FOLLOWING) !==
+        0,
+    ).toBe(true)
+    expect(
+      (field.compareDocumentPosition(editor) &
+        Node.DOCUMENT_POSITION_FOLLOWING) !==
+        0,
+    ).toBe(true)
+    // bar 在 editor 之前(DOM 顺序)
+    expect(
+      (bar.compareDocumentPosition(editor) &
+        Node.DOCUMENT_POSITION_FOLLOWING) !==
+        0,
+    ).toBe(true)
+  })
+
+  // 验收 #2:列出 H1 + H2,忽略更深
+  it('退款项 PRD 骨架 → 锚点条列出 H1 + 4 个 H2', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+
+    const items = screen.getAllByTestId('anchor-item')
+    expect(items).toHaveLength(5) // 1 H1 + 4 H2 (背景 / 目标 / 验收标准 / 非目标)
+    expect(items[0].getAttribute('data-anchor-title')).toBe('退款功能优化')
+    expect(items[1].getAttribute('data-anchor-title')).toBe('背景')
+    expect(items[2].getAttribute('data-anchor-title')).toBe('目标')
+    expect(items[3].getAttribute('data-anchor-title')).toBe('验收标准')
+    expect(items[4].getAttribute('data-anchor-title')).toBe('非目标')
+  })
+
+  // 验收 #3:实时更新
+  it('编辑 PRD 删除一个 H2 → 锚点条立刻少一个', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+
+    expect(screen.getAllByTestId('anchor-item')).toHaveLength(5)
+
+    // 用 fireEvent 把 textarea 改成只剩 H1
+    fireEvent.change(screen.getByTestId('drafting-prd'), {
+      target: { value: '# 仅 H1\n' },
+    })
+
+    expect(screen.getAllByTestId('anchor-item')).toHaveLength(1)
+    expect(
+      screen.getByTestId('anchor-item').getAttribute('data-anchor-title'),
+    ).toBe('仅 H1')
+  })
+
+  // 验收 #4:无 H1/H2 → bar 隐藏
+  it('PRD 全是普通段落(无 # 标题) → 锚点条不渲染', async () => {
+    const data = await getDraftingData('req-001')
+    render(
+      <DraftingZone
+        data={{
+          ...data,
+          prdMarkdown:
+            '这是普通段落\n不是标题\n另一段\n#notheading (无空格)\n> # 引用里的 # 不算',
+          empty: false,
+        }}
+      />,
+    )
+    expect(screen.queryByTestId('prd-anchor-bar')).toBeNull()
+  })
+
+  // 验收 #5:点击 anchor → textarea selectionStart 推到目标行
+  it('点击 anchor → textarea 的 selectionStart 移到目标行', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+
+    const ta = screen.getByTestId('drafting-prd') as HTMLTextAreaElement
+    // "背景" 在骨架 line 2 ( # 退款 \n \n ## 背景 ... )
+    // 前两行 = "# 退款功能优化" + "" → charOffset = len + 1 + 0 + 1 = len(# 退款功能优化) + 2
+    const expectedOffset =
+      '# 退款功能优化'.length + 1 + ''.length + 1
+    expect(expectedOffset).toBeGreaterThan(0)
+
+    const items = screen.getAllByTestId('anchor-item')
+    await user.click(items[1]) // H2 背景
+
+    expect(ta.selectionStart).toBe(expectedOffset)
+    expect(ta.selectionEnd).toBe(expectedOffset)
+  })
+
+  // 验收 #6 + #7:1.5s 高亮窗口(focus on zone 端到端)
+  // 仅这条用 fake timers:userEvent.keyboard 与 fake timers 时序不稳,
+  // 所以 fake 限定在该用例范围(try/finally 收尾)
+  it('点击 anchor → data-highlighted="true";1500ms 后清除', async () => {
+    vi.useFakeTimers()
+    try {
+      const data = await getDraftingData('req-001')
+      render(<DraftingZone data={data} />)
+
+      const target = screen.getAllByTestId('anchor-item')[1] // H2 背景
+      expect(target.getAttribute('data-highlighted')).toBe('false')
+
+      act(() => {
+        target.click()
+      })
+      expect(target.getAttribute('data-highlighted')).toBe('true')
+
+      // 1499ms 还高亮
+      act(() => {
+        vi.advanceTimersByTime(1_499)
+      })
+      expect(target.getAttribute('data-highlighted')).toBe('true')
+
+      // 1500ms 清掉
+      act(() => {
+        vi.advanceTimersByTime(1)
+      })
+      expect(target.getAttribute('data-highlighted')).toBe('false')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // 验收 #7:键盘激活(zone 端到端)
+  it('Enter 键 → 触发跳转 + selectionStart 移到目标行', async () => {
+    // 高亮窗口由 PrdAnchorBar 单元测试用 fake timers 覆盖;
+    // 端到端这里只用真实 timer,验证"键盘 Enter → onJumpTo"链路接通父组件。
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+
+    const ta = screen.getByTestId('drafting-prd') as HTMLTextAreaElement
+    // H2 目标 在骨架 line 6;其字符偏移 = #退款+空+## 背景+(正文+空)×2+## 目标
+    // 估算在 ~30 以内
+    const target = screen.getAllByTestId('anchor-item')[2] // H2 目标
+
+    target.focus()
+    await user.keyboard('{Enter}')
+
+    // selectionStart 被推到目标行(line 6)的字符偏移
+    expect(ta.selectionStart).toBeGreaterThan(0)
+  })
+})

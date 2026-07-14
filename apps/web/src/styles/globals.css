@@ -4,7 +4,26 @@
 
 @import './tokens.css';
 
+/* ============================================================
+   DRAFTING 工位 PRD 锚点条高亮动画 (issue 03)
+   视觉对照 [docs/design/pages/19-final-drafting.html] .anchor-hl
+   keyframe 全局保留,class 移到 @layer components 内以保持层叠一致
+   ============================================================ */
+@keyframes prd-anchor-hl {
+  0% {
+    background-color: hsl(var(--brand-50));
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
 @layer components {
+  /* PRD 锚点条高亮动画 (issue 03) — 与 keyframes prd-anchor-hl 配对 */
+  .anchor-hl {
+    animation: prd-anchor-hl 1500ms ease forwards;
+  }
+
   /* Light-surface kbd (used in CommandPalette on bg-elevated) */
   .kbd {
     font-family: 'JetBrains Mono', ui-monospace, monospace;

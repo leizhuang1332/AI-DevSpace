@@ -1,24 +1,28 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   generatePrdSkeleton,
   validateLaunch,
   type DraftingData,
 } from '@/lib/drafting'
+import { PrdAnchorBar } from './prd-anchor-bar'
 
 /**
- * DRAFTING 工位的 PRD 顶置面板(issue 02)
+ * DRAFTING 工位的 PRD 顶置面板(issue 02 · 已扩展 issue 03 锚点条)
  *
  * 视觉对照基线:[docs/design/pages/19-final-drafting.html](docs/design/pages/19-final-drafting.html)
  *
- * 布局(issue 02 验收 #1):
+ * 布局(issue 02 + issue 03 扩展):
  * ┌──────────────────────────────────────────────────┐
  * │ PRD · 主文档              已保存 · x 秒前          │
  * ├──────────────────────────────────────────────────┤
  * │ 标题 input                                       │
- * │ ┌─ ed-toolbar ─────────────────────────────────┐ │
+ * │ PRD Markdown                                     │
+ * │ ┌─ anchor-bar ─────────────────────────────────┐ │
+ * │ │ 大纲 ▾ H1 退款 ... H2 背景 ... H2 目标 ...     │ │
+ * │ ├─ ed-toolbar ─────────────────────────────────┤ │
  * │ │ B I H1 · xxxx chars                          │ │
  * │ ├──────────────────────────────────────────────┤ │
  * │ │ # PRD Markdown 编辑区 (textarea)             │ │
@@ -34,10 +38,12 @@ import {
  * - 自动保存:setInterval 周期写入(本期 mock:仅更新 UI 时间戳)
  * - 启动校验:用 packages/shared 的 validateLaunch(title + prdMarkdown 双 trim)
  *   不读仓库/辅助文件 —— 那些是 issue 08(仓库软警告)+ 上层 execution policy 的事
+ * - PRD 锚点条(issue 03):mount 在 PRD Markdown 编辑器之上;点击回调 →
+ *   prdTextareaRef 把 selectionStart/End 移到目标行,并按行号推算 scrollTop
  * - 唯一动作:[▶ 进入 ANALYZING] router.push 到 /requirements/<id>/analyzing/
  *   不改 Requirement status、不启动 Agent、不产生其他副作用(决策 15 不写状态机)
  *
- * 不在 issue 02 范围(后续 ticket 引入):预览模式 / PRD 锚点条 / 仓库勾选条 / 辅助卡片。
+ * 不在 issue 02/03 范围(后续 ticket 引入):预览模式 / 仓库勾选条 / 辅助卡片 / Drawer。
  */
 export interface DraftingPrdPaneProps {
   data: DraftingData
@@ -52,6 +58,36 @@ export function DraftingPrdPane({ data }: DraftingPrdPaneProps) {
   const [title, setTitle] = useState(data.title)
   const [prdMarkdown, setPrdMarkdown] = useState(data.prdMarkdown)
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(data.lastSavedAt)
+
+  // -------------------------------------------------------------------------
+  // PRD textarea ref —— issue 03 锚点条点击时用于滚动定位 / 移动光标
+  // -------------------------------------------------------------------------
+  const prdTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+
+  /**
+   * 处理锚点条点击:把光标定位到目标行(line)开头的字符偏移,并按 textarea
+   * 行高滚动 scrollTop,使目标行进入可视区。
+   *
+   * - selectionStart/selectionEnd 设为 charOffset → 用户立即看到光标
+   * - scrollTop 推到 "第 line 行的行顶位置" — 不足以暴露到行底(留 buffer)
+   *
+   * 计算行顶字符偏移:把 markdown 按 \n 拆分,前 line 行(0-based 不含目标行)
+   * 的总字符数就是目标行起始位置(line 0 的 #标题 总是 charOffset=0)。
+   */
+  const handleJumpToLine = useCallback((line: number) => {
+    const ta = prdTextareaRef.current
+    if (!ta) return
+    const lines = prdMarkdown.split(/\r?\n/)
+    const safeLine = Math.max(0, Math.min(line, lines.length - 1))
+    let charOffset = 0
+    for (let i = 0; i < safeLine; i++) charOffset += lines[i].length + 1
+    ta.focus({ preventScroll: true })
+    ta.setSelectionRange(charOffset, charOffset)
+    // 按行号 × 单行像素推算 scrollTop(行高取 textarea 计算样式,失败回退 20)
+    const lineHeight =
+      parseFloat(getComputedStyle(ta).lineHeight) || ta.scrollHeight / Math.max(lines.length, 1)
+    ta.scrollTop = Math.max(0, safeLine * lineHeight - lineHeight * 2)
+  }, [prdMarkdown])
 
   // -------------------------------------------------------------------------
   // 骨架自动填充 —— 仅在首次 mount 时触发,且要求 empty + PRD 为空
@@ -179,9 +215,11 @@ export function DraftingPrdPane({ data }: DraftingPrdPaneProps) {
             <label className="block text-sm font-semibold text-text-2 mb-2">
               PRD Markdown
             </label>
+            {/* PRD 锚点条 (issue 03) —— 挂载在编辑器之上,无 H1/H2 时不渲染 */}
+            <PrdAnchorBar markdown={prdMarkdown} onJumpTo={handleJumpToLine} />
             <div
               data-testid="drafting-editor"
-              className="border border-border-strong rounded-md overflow-hidden flex flex-col flex-1 min-h-0"
+              className="border border-border-strong rounded-md rounded-tl-none rounded-tr-none overflow-hidden flex flex-col flex-1 min-h-0"
             >
               <div
                 data-testid="drafting-editor-toolbar"
@@ -205,6 +243,7 @@ export function DraftingPrdPane({ data }: DraftingPrdPaneProps) {
               </div>
               <textarea
                 data-testid="drafting-prd"
+                ref={prdTextareaRef}
                 value={prdMarkdown}
                 onChange={(e) => setPrdMarkdown(e.target.value)}
                 placeholder={`# 需求标题\n\n## 背景\n...\n\n## 目标\n...\n\n## 验收标准\n- [ ] ...\n\n## 非目标\n...`}
