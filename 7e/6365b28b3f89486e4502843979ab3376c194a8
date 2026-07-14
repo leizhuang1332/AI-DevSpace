@@ -1,0 +1,64 @@
+apps/web/src/components/__tests__/aux-files-pane.test.tsx
+  s_5171e11f91b7ad::t_e845a263cb0930 1-166
+apps/web/src/components/aux-file-card.tsx
+  s_5171e11f91b7ad::t_d4de5af7d7a7ff 1-197
+apps/web/src/components/__tests__/draggable-divider.test.tsx
+  s_5171e11f91b7ad::t_6cd6710e11593c 366,375,385-390
+  s_5171e11f91b7ad::t_af487d66adfac2 2
+  s_5171e11f91b7ad::t_c455efaa5464a7 3-5,29-271,311-365,367-374,376-384,391-393
+  s_5171e11f91b7ad::t_df3aa6c1b39559 272-310
+  s_5171e11f91b7ad::t_2e86237aa7c4b8 1,6-28
+apps/web/src/lib/drafting.ts
+  s_5171e11f91b7ad::t_29cdde7ca430c4 269-306
+  s_5171e11f91b7ad::t_feeda2b9ae9874 2-3,5-7,11,23-24,30,32
+  s_5171e11f91b7ad::t_4ed15aa83c98c4 137-147,149-150,161,163-168,170-175,177-195
+  s_5171e11f91b7ad::t_f39e3e827dcffc 62,68-69,81-89,103
+  s_5171e11f91b7ad::t_ae662e1d67c18f 148,151-160,162,169,176
+  s_5171e11f91b7ad::t_57fa3bffade120 213,222
+  s_5171e11f91b7ad::t_5a60ce1a955ca1 196-197
+apps/web/src/components/drafting-zone.tsx
+  s_5171e11f91b7ad::t_ce19e921a5fa31 62,112-113,119-120,124-128,130-132,135-137,213-215
+  s_5171e11f91b7ad::t_56ba8c195fe938 1-10,12-13,16,20,24-31,33,38-47,49,51-61,63-102,114-118,129,133-134,138-175,181-182,186-187,190,193-212,216-233
+  s_5171e11f91b7ad::t_f5456968514b6b 103-111,121-123
+apps/web/src/components/draggable-divider.tsx
+  s_5171e11f91b7ad::t_b8a4e7cac160be 1-17,21-23,25-26,32,35-38,45,47,50,57-68,72-84,88-97,103-109,111-120,122-128,130-131,133,135-143,145,147-180,182,184-205
+  s_5171e11f91b7ad::t_4216c56f57bf16 39-44,46,48-49,51,70
+  s_5171e11f91b7ad::t_25de7af246a456 18-20,24,27-31,33-34,52-56,69,71,85-87,98,110,121,129,132,134,144,146,181,183
+  s_5171e11f91b7ad::t_44285f5840e82f 99-102
+apps/web/src/components/aux-files-pane.tsx
+  s_5171e11f91b7ad::t_b49ac6340efc7e 1-103
+apps/web/src/lib/__tests__/drafting.test.ts
+  s_5171e11f91b7ad::t_73e2dde9cdc1a9 38-39
+  s_5171e11f91b7ad::t_b02b8f7c4a3000 3-6
+  s_5171e11f91b7ad::t_197a7c40499f99 60-66
+  s_5171e11f91b7ad::t_0b0e007bc9d41b 150-151
+  s_5171e11f91b7ad::t_71438a74b6ed1b 133-149,152-215
+apps/web/src/__tests__/drafting-zone.test.tsx
+  s_5171e11f91b7ad::t_ffa5f65165647c 1,8-10,14-52
+  s_5171e11f91b7ad::t_ff5170778238b6 588-994
+  s_5171e11f91b7ad::t_e1abb9fa0b70b7 53
+.scratch/drafting-redesign/issues/04-aux-cards-pane-drag-divider.md
+  s_5171e11f91b7ad::t_e7d7359f020cc7 2
+apps/web/src/components/empty-aux-placeholder.tsx
+  s_5171e11f91b7ad::t_65fd82d3c2f5e2 1-65
+apps/web/src/components/__tests__/empty-aux-placeholder.test.tsx
+  s_5171e11f91b7ad::t_f0ac7ccb58db01 1-62
+apps/web/src/components/__tests__/aux-file-card.test.tsx
+  s_5171e11f91b7ad::t_a88d67c700910d 1-184
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "7e6365b28b3f89486e4502843979ab3376c194a8",
+  "prompts": {},
+  "sessions": {
+    "s_5171e11f91b7ad": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c7d2d99a-7ad8-4980-80e0-2f72d9477099",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
