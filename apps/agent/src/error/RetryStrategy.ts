@@ -18,6 +18,8 @@ export interface ExecuteWithRetryOptions {
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
   onRetry?: (event: RetryEvent) => void | Promise<void>
   canRetry?: (error: unknown, classification: ClassifiedError) => boolean
+  /** Override first retry delay (ms). Default 1000. Set 0 for retry-of-retry. */
+  initialDelayMs?: number
 }
 
 export class RetryFailure extends Error {
@@ -63,7 +65,8 @@ export async function executeWithRetry<T>(
         && (options.canRetry?.(error, classification) ?? true)
       if (!allowed) throw new RetryFailure(classification, attempts, retryDelaysMs)
 
-      const delayMs = schedule[retry - 1]
+      const initialDelay = options.initialDelayMs ?? 1000
+      const delayMs = retry === 1 ? initialDelay : schedule[retry - 1]
       await options.onRetry?.({
         classification,
         retry,

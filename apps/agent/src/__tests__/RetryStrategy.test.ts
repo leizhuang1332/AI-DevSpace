@@ -56,3 +56,47 @@ describe('executeWithRetry', () => {
     expect(onRetry).not.toHaveBeenCalled()
   })
 })
+
+describe('executeWithRetry · initialDelayMs', () => {
+  it('uses initialDelayMs=0 to skip first retry delay', async () => {
+    const delays: number[] = []
+    const sleep = vi.fn(async (ms: number) => {
+      delays.push(ms)
+    })
+    let attempts = 0
+    await expect(
+      executeWithRetry(
+        async () => {
+          attempts++
+          if (attempts < 2) throw { status: 429, type: 'rate_limit_error', message: 'slow down' }
+          throw new Error('still bad')
+        },
+        {
+          sleep: sleep as never,
+          initialDelayMs: 0,
+          canRetry: () => true,
+        },
+      ),
+    ).rejects.toBeInstanceOf(RetryFailure)
+    expect(delays[0]).toBe(0)
+  })
+
+  it('defaults initialDelayMs to 1000 (existing behavior unchanged)', async () => {
+    const delays: number[] = []
+    const sleep = vi.fn(async (ms: number) => {
+      delays.push(ms)
+    })
+    let attempts = 0
+    await expect(
+      executeWithRetry(
+        async () => {
+          attempts++
+          if (attempts < 2) throw { status: 429, type: 'rate_limit_error', message: 'slow down' }
+          throw new Error('still bad')
+        },
+        { sleep: sleep as never, canRetry: () => true },
+      ),
+    ).rejects.toBeInstanceOf(RetryFailure)
+    expect(delays[0]).toBe(1000)
+  })
+})
