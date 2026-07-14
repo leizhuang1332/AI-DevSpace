@@ -11,7 +11,6 @@ import { getAnalyzingData } from '@/lib/analyzing.server'
 import { AnalyzingZone } from '@/components/analyzing-zone'
 import {
   getDraftingData,
-  extractPrdOutline,
 } from '@/lib/drafting'
 import { DraftingZone } from '@/components/drafting-zone'
 import { DraftingSkillRail } from '@/components/drafting-skill-rail'
@@ -32,13 +31,17 @@ import { ZoneShell } from '@/lib/zone-shell'
  * - generateStaticParams 预生成 6 个合法路由
  * - 未知 route_segment 由 [zone]/layout.tsx 拦截 notFound()
  * - 每个 zone page 自行包裹 ZoneShell,这样 page-fetched 数据(例如 DRAFTING 的
- *   PRD Markdown / 候命 Skill 列表)可以注入到 ResourceTree / InlineRail
+ *   候命 Skill 列表)可以注入到 InlineRail
  * - EXECUTING 工位(issue 17 样板)渲染 `<ExecutingZone />` 三列 Mission Control
- * - DRAFTING 工位(issue 18)渲染 `<DraftingZone />` Form 居中布局
+ * - DRAFTING 工位(issue 18 / issue 01 重新设计)渲染 `<DraftingZone />` Form 居中
+ *   布局,主区仅 1 列 + 右侧 Inline 栏(Skill 候命)
  * - ANALYZING 工位(issue 19)渲染 `<AnalyzingZone />` Thinking 大屏 + 打字机流
  * - CLARIFYING 工位(issue 20)渲染 `<ClarifyingZone />` Q&A 主区
  * - DESIGNING 工位(issue 21)渲染 `<DesigningZone />` Compare 主区
  * - WRAP-UP 工位(issue 22)渲染 `<WrapupZone />` Archive 形态
+ *
+ * issue 01 后:DRAFTING 不再注入 `prdSections` —— ZoneShell / ResourceTree 已
+ * 移除 PRD-outline 分支,DRAFTING 改为单主区 + 右侧 Inline 栏布局。
  */
 export function generateStaticParams() {
   return ZONE_META.map((z) => ({ zone: z.route_segment }))
@@ -62,14 +65,14 @@ export default async function ZonePage({
     )
   }
 
-  // DRAFTING 工位(issue 18):Form 居中布局 + 标题/PRD/AC/关联仓库
+  // DRAFTING 工位(issue 18 / issue 01 重新设计):Form 居中布局 + 标题/PRD/AC/关联仓库
+  // 主区 1 列 + 右侧 Inline 栏(Skill 候命) —— 不再渲染左 240px 资源树
   if (zone.id === 'drafting') {
     const data = await getDraftingData(params.id)
     return (
       <ZoneShell
         id={params.id}
         zone={zone}
-        prdSections={extractPrdOutline(data.prdMarkdown)}
         // 用 client 包装器替代默认 InlineRail —— 因为 Skill 点击需要函数回调
         // (server component 不能直接传函数 prop)
         inlineRailSlot={

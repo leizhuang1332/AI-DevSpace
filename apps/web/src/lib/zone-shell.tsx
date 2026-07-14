@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { ResourceTree } from '@/components/resource-tree'
 import { InlineRail } from '@/components/inline-rail'
-import type { DraftingSkill, PrdSection } from '@/lib/drafting'
+import type { DraftingSkill } from '@/lib/drafting'
 import type { WrapupTreeSummary } from '@/lib/wrapup'
 import type { ZoneMeta } from './zones'
 
@@ -32,17 +32,15 @@ export function zoneShellGridClass(zone: ZoneMeta): string {
  * 关于 client 函数 prop:本组件是 Server Component,不能直接接收函数 prop。
  * 凡是 zone 需要函数回调(issue 18 Skill 点击),调用方(page.tsx)需通过
  * inlineRailSlot 注入 client wrapper 组件。
+ *
+ * issue 01 后:DRAFTING 工位不再渲染资源树(has_resource_tree=false),故本接口
+ * 不再有 `prdSections` / `DraftingPrdTreeView` 相关 prop;DRAFTING 的 PRD 大纲
+ * 改由主区顶部锚点栏(issue 03)+ Inline 栏(候命 Skill)承载。
  */
 export interface ZoneShellProps {
   id: string
   zone: ZoneMeta
   children: ReactNode
-  /**
-   * DRAFTING 工位专用:PRD 章节大纲。
-   * 传入时,资源树切换到 PRD 大纲视图(issue 18)。
-   * 其它工位不传,资源树维持默认静态结构。
-   */
-  prdSections?: PrdSection[]
   /**
    * DRAFTING 工位专用:候命 Skill 列表(issue 18)。
    * 传入时,Inline 栏切换到 Skill 列表视图。
@@ -52,7 +50,7 @@ export interface ZoneShellProps {
   /**
    * WRAP-UP 工位专用:产物 / PR / 决策摘要(issue 22)。
    * 传入时,资源树切换到 WRAP-UP 摘要视图(产物清单 + PR/Commit + 决策回顾)。
-   * 其它工位不传,资源树维持默认静态结构或 DRAFTING 的 PRD 大纲视图。
+   * 其它工位不传,资源树维持默认静态结构。
    */
   wrapupSummary?: WrapupTreeSummary
   /**
@@ -70,7 +68,6 @@ export function ZoneShell({
   id,
   zone,
   children,
-  prdSections,
   draftingSkills,
   wrapupSummary,
   inlineRailSlot,
@@ -86,7 +83,6 @@ export function ZoneShell({
       {zone.has_resource_tree && (
         <ResourceTree
           requirementId={id}
-          prdSections={prdSections}
           wrapupSummary={wrapupSummary}
         />
       )}

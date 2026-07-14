@@ -45,10 +45,11 @@ describe('ZONE_META', () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 
-  it('6 工位的 resource_tree / inline_rail 组合符合 ADR-0012 §4 默认值表', () => {
+  it('6 工位的 resource_tree / inline_rail 组合符合 ADR-0012 §4 默认值表(issue 01 后)', () => {
     const tree = Object.fromEntries(ZONE_META.map((z) => [z.id, z.has_resource_tree]))
     const rail = Object.fromEntries(ZONE_META.map((z) => [z.id, z.has_inline_rail]))
-    expect(tree.drafting).toBe(true)
+    // issue 01 后 DRAFTING 不再渲染资源树(has_resource_tree=false)
+    expect(tree.drafting).toBe(false)
     expect(tree.analyzing).toBe(false)
     expect(tree.clarifying).toBe(false)
     expect(tree.designing).toBe(false)

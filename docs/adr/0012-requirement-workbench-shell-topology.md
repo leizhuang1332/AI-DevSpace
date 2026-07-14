@@ -228,12 +228,17 @@ zone:
 
 | 工位 | resource_tree | inline_rail | status_color | status_pulse | thinking_bar |
 |---|---|---|---|---|---|
-| DRAFTING | ✅ true | ✅ true | gray | false | required |
+| DRAFTING | ❌ false | ✅ true | gray | false | required |
 | ANALYZING | ❌ false | ❌ false | blue | true | required |
 | CLARIFYING | ❌ false | ❌ false | purple+warn | false | required |
 | DESIGNING | ⚠️ false | ❌ false | yellow | false | required |
 | EXECUTING | ✅ true | ✅ true | green | false | required |
 | WRAP-UP | ✅ true | ❌ false | gray | false | minimal |
+
+> **DRAFTING 更新(issue 01 · drafting 重新设计)** —— `has_resource_tree`
+> 从 `true` 改为 `false`,与 ADR-0011 §5 R2 表同步。本表为单一事实源:
+> `apps/agent/src/zones/drafting.yaml` 与 `apps/web/src/lib/zones.ts` 的
+> ZONE_META 都按此表落盘,后续工位集合变更需先改本表再同步两侧。
 
 **default_arming 双源叠加**(基于第 8 决策子决定 8a):
 - 工位默认 on-arming 列表 + Skill 自身 `triggers:` 触发列表

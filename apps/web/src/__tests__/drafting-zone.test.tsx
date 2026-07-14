@@ -95,7 +95,7 @@ describe('DraftingZone · 满数据渲染', () => {
     expect(launchBtn.getAttribute('disabled')).toBeNull() // 满数据 → 可提交
   })
 
-  it('主区编辑器可见(PRD 大纲由资源树承载,见 resource-tree 测试)', async () => {
+  it('主区编辑器可见(issue 01 后:PRD 大纲改由 issue 03 顶部锚点栏承载,本测试仅校验主区编辑器与字符计数)', async () => {
     const data = await getDraftingData('req-001')
     render(<DraftingZone data={data} />)
 

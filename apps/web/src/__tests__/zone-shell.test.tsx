@@ -9,7 +9,8 @@ const drafting: ZoneMeta = {
   display_name: '起草',
   icon: '✏️',
   route_segment: 'drafting',
-  has_resource_tree: true,
+  // issue 01 后:DRAFTING 不再渲染资源树(主区全宽 + 右侧 Inline 栏)
+  has_resource_tree: false,
   has_inline_rail: true,
   status_color: 'gray',
   status_pulse: false,
@@ -24,6 +25,8 @@ const wrapup: ZoneMeta = {
   display_name: '归档',
   icon: '📦',
   route_segment: 'wrap-up',
+  // 显式声明:WRAP-UP 仍有资源树(沿用 issue 01 之前的设定)
+  has_resource_tree: true,
   has_inline_rail: false,
 }
 
@@ -45,21 +48,24 @@ const executing: ZoneMeta = {
   display_name: '执行中',
   icon: '⚡',
   route_segment: 'executing',
+  // 显式声明:EXECUTING 仍有资源树(issue 01 不影响 EXECUTING)
+  has_resource_tree: true,
+  has_inline_rail: true,
 }
 
 afterEach(() => cleanup())
 
 describe('zoneShellGridClass', () => {
   it('资源树 + Inline 栏 → 3 列', () => {
-    expect(zoneShellGridClass(drafting)).toBe('grid-cols-[240px_1fr_120px]')
+    // 仍有一个组合属 3 列(EXECUTING)
+    expect(zoneShellGridClass(executing)).toBe('grid-cols-[240px_1fr_120px]')
   })
   it('仅资源树 → 2 列(左 + 主)', () => {
     expect(zoneShellGridClass(wrapup)).toBe('grid-cols-[240px_1fr]')
   })
   it('仅 Inline 栏 → 2 列(主 + 右)', () => {
-    expect(zoneShellGridClass({ ...drafting, has_resource_tree: false })).toBe(
-      'grid-cols-[1fr_120px]',
-    )
+    // DRAFTING(issue 01 后):仅 Inline 栏,主区全宽 + 右 120px
+    expect(zoneShellGridClass(drafting)).toBe('grid-cols-[1fr_120px]')
   })
   it('均无 → 1 列(主区全宽)', () => {
     expect(zoneShellGridClass(clarifying)).toBe('grid-cols-1')
@@ -67,7 +73,7 @@ describe('zoneShellGridClass', () => {
 })
 
 describe('ZoneShell', () => {
-  it('DRAFTING(资源树 + Inline 栏):data 属性正确,3 列布局', () => {
+  it('DRAFTING(issue 01 后:仅 Inline 栏):data 属性正确,2 列布局', () => {
     const { getByTestId } = render(
       <ZoneShell id="REF-001" zone={drafting}>
         <span data-testid="main">main</span>
@@ -75,9 +81,9 @@ describe('ZoneShell', () => {
     )
     const shell = getByTestId('zone-shell')
     expect(shell.getAttribute('data-zone-id')).toBe('drafting')
-    expect(shell.getAttribute('data-has-resource-tree')).toBe('true')
+    expect(shell.getAttribute('data-has-resource-tree')).toBe('false')
     expect(shell.getAttribute('data-has-inline-rail')).toBe('true')
-    expect(shell.className).toContain('grid-cols-[240px_1fr_120px]')
+    expect(shell.className).toContain('grid-cols-[1fr_120px]')
     expect(getByTestId('main')).toBeInTheDocument()
   })
 
@@ -129,16 +135,14 @@ describe('ZoneShell', () => {
   })
 
   it('资源树 / Inline 栏的实际可见性与 zone config 一致', () => {
-    // DRAFTING:ResourceTree + InlineRail 都渲染
+    // DRAFTING(issue 01 后):仅 Inline 栏渲染,grid-cols-[1fr_120px]
     const { unmount, container: c1 } = render(
       <ZoneShell id="REF-001" zone={drafting}>
         main
       </ZoneShell>,
     )
-    expect(c1.querySelectorAll('[class*="col-"], .grid-cols-\\[240px_1fr_120px\\]').length).toBeGreaterThanOrEqual(0)
-    // 简化:只要 shell class 含正确的 grid-cols-* 即可
     expect((c1.querySelector('[data-testid="zone-shell"]') as HTMLElement).className).toContain(
-      'grid-cols-[240px_1fr_120px]',
+      'grid-cols-[1fr_120px]',
     )
     unmount()
 

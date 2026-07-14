@@ -101,12 +101,17 @@
 
 | 工位 | 主任务 | 主要动作 | 资源树(R2) | Inline 栏(C) |
 |---|---|---|---|---|
-| DRAFTING | 写需求 PRD | 主动**创作** | ✅ PRD 章节 + AC + 仓库 | ✅ 保留 |
+| DRAFTING | 写需求 PRD | 主动**创作** | ❌ 主区全宽(issue 01 起改为 Inline 栏 only) | ✅ 保留(候命 Skill + 仓库底部栏) |
 | ANALYZING | 旁观 AI 解析 | 被动**观察** | ❌ 主区全宽 | ❌ 无 |
 | CLARIFYING | 回答 AI 提问 | 主动**回答** | ❌ 主区全宽 | ❌ 无 |
 | DESIGNING | 评审候选方案 | 主动**决策** | ⚠️ 默认无 | ❌ 无 |
 | EXECUTING | 监督 AI 实施 | 被动**监督** | ✅ 任务 DAG + Diff + 产物 | ✅ 保留 |
 | WRAP-UP | 归档复盘 | 主动**总结** | ✅ 产物 + PR + 决策 | ❌ 无 |
+
+> **R2 更新(issue 01 · drafting 重新设计)** —— DRAFTING 工位从"3 工位有资源树"
+> 中退出。原 PRD 章节大纲 / 仓库 / 任务 / 产物 改由主区顶部锚点栏(issue 03)+ 主区
+> 卡片 + 右侧 Inline 栏(候命 Skill / 仓库底部栏)承载。本表与 ADR-0012 字段默认值表
+> 同步刷新:`DRAFTING has_resource_tree: false` / `has_inline_rail: true`。
 
 ### 6. 工位布局(原 6 形态,内容不变,概念改名)
 

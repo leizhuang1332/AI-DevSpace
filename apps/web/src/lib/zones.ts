@@ -60,7 +60,9 @@ export const ZONE_META: readonly ZoneMeta[] = [
     display_name: '起草',
     icon: '✏️',
     route_segment: 'drafting',
-    has_resource_tree: true,
+    // 工位重新设计后(issue 01):DRAFTING 改为单主区 + 右侧 Inline 栏(Skill 候命)
+    // 不再有左 240px 资源树 —— PRD 大纲 / 仓库 / 任务 / 产物改为 Inline 栏 + 主区卡片
+    has_resource_tree: false,
     has_inline_rail: true,
     status_color: 'gray',
     status_pulse: false,
