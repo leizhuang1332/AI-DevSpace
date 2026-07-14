@@ -1,0 +1,24 @@
+apps/web/src/lib/useExecutingSse.ts
+  s_8aee14c7153c26::t_c54e3ad3a2fe04 1-53,55,59,63-205
+  s_8aee14c7153c26::t_7204c1e596ecfa 54,56-58,60-62
+apps/web/src/lib/__tests__/useExecutingSse.test.ts
+  s_8aee14c7153c26::t_c7670daa07d0e0 95,99,107,110-117,122,129,131
+  s_8aee14c7153c26::t_bdab1d22b29cdc 106,118-119,130,132-135,137
+  s_8aee14c7153c26::t_67d0aa83767f67 1-94,96-98,100-105,108-109,120-121,123-128,136
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "6a52a3c3de74b72c8b209125ea66f7500298e424",
+  "prompts": {},
+  "sessions": {
+    "s_8aee14c7153c26": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "63701278-6e68-4767-97f2-ccc0f48ba3cb",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
