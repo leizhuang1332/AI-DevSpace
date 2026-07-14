@@ -1,0 +1,47 @@
+apps/web/src/components/__tests__/prd-anchor-bar.test.tsx
+  s_eb54bb9995e552::t_70fe4e6de7b8b6 1-15,17-19,29-75,77,79-124,126-127,129-154,157-168,170-173,175-180,182-193,196-208,210-211,213-214,217-223,225-228,230-236,238-241,243-249,251-254,256-258,260-262,264-272,274-277,279-280,282,286-288,290-293,295-297,299-307,309,316-319,321-333,335-337,339-340,342-347,349-351,353,356-385
+  s_eb54bb9995e552::t_d9cac9e76ce767 156
+  s_eb54bb9995e552::t_6b1b5e309787b4 263,281,284,289,294
+  s_eb54bb9995e552::t_e6958472dbcf36 16,20-28
+  s_eb54bb9995e552::t_6f44d5aa3d410a 155,169,174,181
+  s_eb54bb9995e552::t_fbbded19b0f4e2 354-355
+  s_eb54bb9995e552::t_b19cad2a294ed0 312-315
+  s_eb54bb9995e552::t_2ce920a650732d 76,78
+  s_eb54bb9995e552::t_826f7e5ccf6110 194-195,209,212,215-216,224,229,237,242,250,255,259,273,278,283,285,298,308,310-311,320,334,338,341,348,352
+  s_eb54bb9995e552::t_b25e53239c8cff 125,128
+apps/web/src/components/drafting-prd-pane.tsx
+  s_eb54bb9995e552::t_b293dea25a048c 62-91
+  s_eb54bb9995e552::t_4407f81504ffe6 218-219,222
+  s_eb54bb9995e552::t_c7a1125f76409b 246
+  s_eb54bb9995e552::t_1afedceffb34cb 3,10,13,17,22-25,41-42,46
+apps/web/src/components/prd-anchor-bar.tsx
+  s_eb54bb9995e552::t_d9e2cac236816c 1-176
+apps/web/src/__tests__/drafting-zone.test.tsx
+  s_eb54bb9995e552::t_4d07a599e3baa3 398-400,404-410,412-416,418-421
+  s_eb54bb9995e552::t_2dc2d23642bd17 494-495,497-523
+  s_eb54bb9995e552::t_d586e68ed5ac6a 386-397,401-403,411,417,422-457,459-463,466-493,496,524-525,533,538,541,544
+  s_eb54bb9995e552::t_3388b5187ec523 464
+  s_eb54bb9995e552::t_ad42a277f5e7e3 526,528-529,532,535-536,540,542
+  s_eb54bb9995e552::t_e9e3d55ee8ccf6 527,530-531,534,537,539,543
+  s_eb54bb9995e552::t_193b944c9b0bc2 458
+  s_eb54bb9995e552::t_255a3142f12f6a 465
+apps/web/src/styles/globals.css
+  s_eb54bb9995e552::t_5ca3a1ed375762 7-9,11-20
+  s_eb54bb9995e552::t_7e09e302143add 10,22-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "104800178bba0f5ccef4484043c16c4efbc19bcb",
+  "prompts": {},
+  "sessions": {
+    "s_eb54bb9995e552": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0c0fbf8c-215e-4948-af08-fa2e3444b9d4",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
