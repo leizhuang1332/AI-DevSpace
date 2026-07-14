@@ -1,0 +1,25 @@
+apps/web/src/components/__tests__/toast-host.test.tsx
+  s_8aee14c7153c26::t_bdd9ca5474e559 1-29
+apps/web/src/components/__tests__/toast.test.tsx
+  s_8aee14c7153c26::t_260b5983f2acee 1-39
+apps/web/src/components/toast.tsx
+  s_8aee14c7153c26::t_84a099a75b290c 1-45
+apps/web/src/components/toast-host.tsx
+  s_8aee14c7153c26::t_8cb74ffc162b91 1-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "4e432c28b09d834d202caf8b0e68b81a5916ac38",
+  "prompts": {},
+  "sessions": {
+    "s_8aee14c7153c26": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "63701278-6e68-4767-97f2-ccc0f48ba3cb",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
