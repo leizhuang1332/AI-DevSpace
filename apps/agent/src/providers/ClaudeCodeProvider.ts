@@ -35,6 +35,7 @@ import type { ProviderSemaphore } from '../error/ProviderSemaphore.js'
 import { ProviderSemaphore as DefaultProviderSemaphore } from '../error/ProviderSemaphore.js'
 import type { SessionLogger } from '../log/SessionLogger.js'
 import type { GlobalLogger } from '../log/GlobalLogger.js'
+import type { SessionStore } from '../session/SessionStore.js'
 
 /** SDK query 函数的类型 —— 用 type-only import 避免运行时依赖倒置 */
 type QueryFn = (params: {
@@ -73,6 +74,8 @@ export interface ClaudeCodeProviderOptions {
   onSessionCancelled?: OnSessionCancelled
   /** Task 4:全局结构化日志 */
   globalLogger?: GlobalLogger
+  /** P4 · Task 3:SessionStore —— 用于 send 成功后回写 meta.yaml.last_input */
+  sessionStore?: SessionStore
 }
 
 /** 工具:从 record 中提 number;缺失 / 非 number → null */
@@ -258,6 +261,7 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
   const sessionLogger = opts.sessionLogger
   const onSessionCancelled = opts.onSessionCancelled
   const globalLogger = opts.globalLogger
+  const sessionStore = opts.sessionStore
 
   // Task 7:Provider 共享的 FIFO limiter(顶层只创建一次);null 表示不限流
   const providerSemaphore: ProviderSemaphore | null = opts.providerSemaphore === null
@@ -399,6 +403,7 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
         retrySleep,
         sessionLogger,
         globalLogger,
+        sessionStore,
         onCancelled: onSessionCancelled,
         debug,
         assembler,

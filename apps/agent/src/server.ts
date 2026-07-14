@@ -149,6 +149,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     debug: false,
     providerSemaphore,
     sessionLogger,
+    sessionStore,
     globalLogger,
     onSessionCancelled: async ({ localSid }) => {
       await sessionStore.updateSession(localSid, {

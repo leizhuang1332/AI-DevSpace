@@ -13,8 +13,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import { AiSession, type SdkAdapter, type SdkMessageEnvelope } from '../session/AISession.js'
 import type { AIEvent } from '../providers/AIEvent.js'
-import { CircuitBreaker } from '../error/CircuitBreaker.js'
+import { ProviderSemaphore } from '../error/ProviderSemaphore.js'
 import type { SessionLogger } from '../log/SessionLogger.js'
+import type { SessionStore, SessionMeta } from '../session/SessionStore.js'
 
 /** Deferred helper —— for limiting / abort testing */
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -442,16 +443,16 @@ describe('AiSession', () => {
   })
 
   it('aborts a queued turn and invokes onCancelled without retrying', async () => {
-    const breaker = new CircuitBreaker({ limit: 1 })
+    const semaphore = new ProviderSemaphore({ limit: 1 })
     const blocker = deferred()
-    const first = breaker.run(async () => { await blocker.promise })
+    const first = semaphore.run(async () => { await blocker.promise })
     const onCancelled = vi.fn(async () => {})
     const session = new AiSession({
       id: 's-1',
       reqId: 'r-1',
       topic: 't',
       kind: 'chat',
-      circuitBreaker: breaker,
+      providerSemaphore: semaphore,
       onCancelled,
       adapter: makeAdapter([{ kind: 'result', reason: 'end_turn' }]),
     })
@@ -498,5 +499,89 @@ describe('AiSession', () => {
       status: 'succeeded',
       durationMs: 50,
     }))
+  })
+})
+
+describe('AISession · last_input persistence', () => {
+  it('writes inputText to meta.yaml via sessionStore after successful send', async () => {
+    const updateSession = vi.fn(async (sid: string, patch: Partial<SessionMeta>) =>
+      ({
+        sid,
+        reqId: 'r-1',
+        provider: 'claude-code',
+        sdkSessionId: '',
+        created_at: '',
+        last_active_at: '',
+        topic: 't',
+        kind: 'chat',
+        ...patch,
+      }) satisfies SessionMeta,
+    )
+    const sessionStore = { updateSession } as unknown as SessionStore
+    const session = new AiSession({
+      id: 's-1',
+      reqId: 'r-1',
+      topic: 't',
+      kind: 'chat',
+      sessionStore,
+      adapter: makeAdapter([
+        { kind: 'assistant', text: 'ok', sessionId: 'sdk-1' },
+        { kind: 'result', sessionId: 'sdk-1', reason: 'end_turn' },
+      ]),
+    })
+    await session.send('hello world')
+    expect(updateSession).toHaveBeenCalledWith('s-1', expect.objectContaining({ last_input: 'hello world' }))
+  })
+})
+
+describe('AISession · isRetry', () => {
+  it('passes initialDelayMs=0 to retrySleep when isRetry=true and first attempt fails', async () => {
+    const sleeps: number[] = []
+    const retrySleep = vi.fn(async (ms: number) => { sleeps.push(ms) })
+    let calls = 0
+    const session = new AiSession({
+      id: 's-1',
+      reqId: 'r-1',
+      topic: 't',
+      kind: 'chat',
+      retrySleep,
+      adapter: {
+        // eslint-disable-next-line require-yield
+        async *runTurn() {
+          calls++
+          if (calls < 2) throw { status: 429, type: 'rate_limit_error', message: 'slow down' }
+          yield { kind: 'result', sessionId: 'sdk-1', reason: 'end_turn' }
+        },
+      },
+    })
+    const eventsP = collectEvents(session)
+    await session.send('q', { isRetry: true })
+    await eventsP
+    expect(sleeps[0]).toBe(0)
+  })
+
+  it('passes initialDelayMs=1000 by default when isRetry omitted', async () => {
+    const sleeps: number[] = []
+    const retrySleep = vi.fn(async (ms: number) => { sleeps.push(ms) })
+    let calls = 0
+    const session = new AiSession({
+      id: 's-1',
+      reqId: 'r-1',
+      topic: 't',
+      kind: 'chat',
+      retrySleep,
+      adapter: {
+        // eslint-disable-next-line require-yield
+        async *runTurn() {
+          calls++
+          if (calls < 2) throw { status: 429, type: 'rate_limit_error', message: 'slow down' }
+          yield { kind: 'result', sessionId: 'sdk-1', reason: 'end_turn' }
+        },
+      },
+    })
+    const eventsP = collectEvents(session)
+    await session.send('q')
+    await eventsP
+    expect(sleeps[0]).toBe(1000)
   })
 })

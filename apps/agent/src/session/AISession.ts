@@ -25,6 +25,7 @@ import { classifyError } from '../error/ErrorClassifier.js'
 import type { SessionQueryLogInput, SessionLogger } from '../log/SessionLogger.js'
 import type { GlobalLogger } from '../log/GlobalLogger.js'
 import type { SystemPromptAssembler, AssemblerRequirement } from '../prompt/SystemPromptAssembler.js'
+import type { SessionStore } from './SessionStore.js'
 
 export interface SdkUsage {
   input: number | null
@@ -135,6 +136,8 @@ export interface AiSessionDeps {
   nowMs?: () => number
   /** 全局结构化日志 —— retryExhausted / queryFailed 调用 */
   globalLogger?: GlobalLogger
+  /** SessionStore —— 用于 send 成功后回写 meta.yaml.last_input(P4 · Task 3) */
+  sessionStore?: SessionStore
 }
 
 /** events() 中表示「流关闭」的 sentinel —— 与 AIEvent 类型互斥 */
@@ -180,6 +183,8 @@ export class AiSession implements IAISession {
   #nowMs: () => number
   /** 全局结构化日志 */
   #globalLogger: GlobalLogger | undefined
+  /** SessionStore —— 回写 meta.yaml(P4 · Task 3) */
+  #sessionStore: SessionStore | undefined
 
   constructor(deps: AiSessionDeps) {
     this.id = deps.id
@@ -197,6 +202,7 @@ export class AiSession implements IAISession {
     this.#onCancelled = deps.onCancelled
     this.#nowMs = deps.nowMs ?? (() => Date.now())
     this.#globalLogger = deps.globalLogger
+    this.#sessionStore = deps.sessionStore
     // 初始 SDK session id —— 用于断点续传
     this.#sdkSessionId = deps.initialSdkSessionId
     this.model = deps.resolveModel?.()
@@ -299,7 +305,7 @@ export class AiSession implements IAISession {
   }
 
   /** 发送一段用户输入,启动一轮 query */
-  async send(text: string, _attachments?: ReadonlyArray<unknown>): Promise<void> {
+  async send(text: string, opts?: { isRetry?: boolean } | ReadonlyArray<unknown>): Promise<void> {
     this.#assertOpen()
     if (this.#inflight) {
       throw new Error(`AISession ${this.id} is busy; cannot send while a turn is in flight`)
@@ -308,9 +314,13 @@ export class AiSession implements IAISession {
       throw new Error('send() requires a non-empty text')
     }
 
+    const isRetry = !Array.isArray(opts) && typeof opts === 'object' && 'isRetry' in opts
+      ? Boolean((opts as { isRetry?: boolean }).isRetry)
+      : false
+
     this.#state = 'busy'
 
-    const turn = this.#runTurn(text)
+    const turn = this.#runTurn({ text, isRetry })
     this.#inflight = turn
     try {
       await turn
@@ -320,7 +330,8 @@ export class AiSession implements IAISession {
   }
 
   /** 内部:跑一轮 SDK query,推 AIEvent 给 consumers */
-  async #runTurn(text: string): Promise<void> {
+  async #runTurn(input: { text: string; isRetry?: boolean }): Promise<void> {
+    const text = input.text
     // 每轮 new 一个 controller —— 保证 cancel-after-idle 不污染后续 turn
     const controller = new AbortController()
     this.#internalController = controller
@@ -386,6 +397,7 @@ export class AiSession implements IAISession {
         {
           signal,
           sleep: this.#retrySleep,
+          initialDelayMs: input.isRetry ? 0 : 1000,
           canRetry: (error) => {
             if (sawOutputWithoutResume) return false
             // SDK 主动报 error envelope 是 deterministic,不参与 retry
@@ -490,6 +502,15 @@ export class AiSession implements IAISession {
         tokens: usage,
         error: finalError,
       })
+      // P4 · Task 3:成功 send 后回写 meta.yaml.last_input,供 retry UI 取用
+      // 失败路径不回写 —— 避免用户看到 stale inputText
+      if (status === 'succeeded' && this.#sessionStore) {
+        await this.#sessionStore.updateSession(this.id, { last_input: text }).catch((err) => {
+          if (this.#debug) {
+            console.warn(`[AISession ${this.id}] last_input persistence failed:`, err)
+          }
+        })
+      }
     }
   }
 

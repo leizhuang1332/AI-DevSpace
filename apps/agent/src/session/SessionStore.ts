@@ -53,6 +53,8 @@ export interface SessionMeta {
   recovered?: boolean
   /** 用户最近一次取消 query 的 ISO 8601 时间 */
   last_cancel_at?: string
+  /** 最近一次 query 的原始 inputText(P4 · Task 3 用于 UI retry 时回放) */
+  last_input?: string
   /** 归档标记 */
   archived?: boolean
 }
