@@ -153,5 +153,19 @@ export type SseEvent =
       runId: string
       ts: number
     }
+  /**
+   * Query 成功终态(issue P4 · Task 5)— query 正常结束时广播。
+   *
+   * Web 端 reducer 据此把 status 从 running/retrying 重置为 idle。
+   */
+  | {
+      type: 'query_succeeded'
+      reqId: string
+      sessionId: string
+      runId: string
+      ts: number
+      durationMs: number
+      attempts: number
+    }
 
 export const SSE_HEARTBEAT_MS = 30_000

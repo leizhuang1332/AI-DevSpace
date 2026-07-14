@@ -138,6 +138,8 @@ export interface AiSessionDeps {
   globalLogger?: GlobalLogger
   /** SessionStore —— 用于 send 成功后回写 meta.yaml.last_input(P4 · Task 3) */
   sessionStore?: SessionStore
+  /** 生命周期事件回调 —— query 成功/失败时调(P4 · Task 5);server 用此把事件 publish 到 SSE */
+  onLifecycle?: (event: { type: 'query_succeeded'; runId: string; durationMs: number; attempts: number; ts: number }) => void
 }
 
 /** events() 中表示「流关闭」的 sentinel —— 与 AIEvent 类型互斥 */
@@ -185,6 +187,10 @@ export class AiSession implements IAISession {
   #globalLogger: GlobalLogger | undefined
   /** SessionStore —— 回写 meta.yaml(P4 · Task 3) */
   #sessionStore: SessionStore | undefined
+  /** Lifecycle 事件回调 —— P4 · Task 5 */
+  #onLifecycle: ((event: { type: 'query_succeeded'; runId: string; durationMs: number; attempts: number; ts: number }) => void) | undefined
+  /** runId 计数器 —— 每次 send 增加;query_succeeded 携带 */
+  #runCounter = 0
 
   constructor(deps: AiSessionDeps) {
     this.id = deps.id
@@ -203,6 +209,7 @@ export class AiSession implements IAISession {
     this.#nowMs = deps.nowMs ?? (() => Date.now())
     this.#globalLogger = deps.globalLogger
     this.#sessionStore = deps.sessionStore
+    this.#onLifecycle = deps.onLifecycle
     // 初始 SDK session id —— 用于断点续传
     this.#sdkSessionId = deps.initialSdkSessionId
     this.model = deps.resolveModel?.()
@@ -332,6 +339,7 @@ export class AiSession implements IAISession {
   /** 内部:跑一轮 SDK query,推 AIEvent 给 consumers */
   async #runTurn(input: { text: string; isRetry?: boolean }): Promise<void> {
     const text = input.text
+    const runId = `run-${++this.#runCounter}`
     // 每轮 new 一个 controller —— 保证 cancel-after-idle 不污染后续 turn
     const controller = new AbortController()
     this.#internalController = controller
@@ -510,6 +518,22 @@ export class AiSession implements IAISession {
             console.warn(`[AISession ${this.id}] last_input persistence failed:`, err)
           }
         })
+      }
+      // P4 · Task 5:query 成功终态 —— 上层通过 onLifecycle publish 到 SSE
+      if (status === 'succeeded' && this.#onLifecycle) {
+        try {
+          this.#onLifecycle({
+            type: 'query_succeeded',
+            runId,
+            durationMs: this.#nowMs() - startedAt,
+            attempts,
+            ts: this.#nowMs(),
+          })
+        } catch (err) {
+          if (this.#debug) {
+            console.warn(`[AISession ${this.id}] onLifecycle.publish failed:`, err)
+          }
+        }
       }
     }
   }

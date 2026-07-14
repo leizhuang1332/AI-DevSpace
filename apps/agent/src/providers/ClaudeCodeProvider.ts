@@ -78,6 +78,8 @@ export interface ClaudeCodeProviderOptions {
   sessionStore?: SessionStore
   /** P4 · Task 4:createSession 完成后回调 —— server 用于把 session 注册到 retry registry */
   onSessionCreated?: (session: RetryableSession) => void
+  /** P4 · Task 5:query 生命周期事件回调 —— server 借此 publish query_succeeded 到 SSE */
+  onLifecycle?: (event: { type: 'query_succeeded'; runId: string; durationMs: number; attempts: number; ts: number; reqId: string; sessionId: string }) => void
 }
 
 /** P4 · Task 4:retry registry 需要的最小 AISession 形态 */
@@ -272,6 +274,7 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
   const globalLogger = opts.globalLogger
   const sessionStore = opts.sessionStore
   const onSessionCreated = opts.onSessionCreated
+  const onLifecycle = opts.onLifecycle
 
   // Task 7:Provider 共享的 FIFO limiter(顶层只创建一次);null 表示不限流
   const providerSemaphore: ProviderSemaphore | null = opts.providerSemaphore === null
@@ -415,6 +418,10 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
         globalLogger,
         sessionStore,
         onCancelled: onSessionCancelled,
+        // P4 · Task 5:把 reqId/sessionId 注入到 lifecycle payload,便于 server hub.publish
+        onLifecycle: onLifecycle
+          ? (ev) => onLifecycle({ ...ev, reqId, sessionId: session.id })
+          : undefined,
         debug,
         assembler,
         requirement,

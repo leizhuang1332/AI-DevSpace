@@ -162,6 +162,18 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     onSessionCreated: (entry) => {
       retrySessions.set(entry.id, entry)
     },
+    // P4 · Task 5:把 query_succeeded 通过 SseHub 发布,Web 端收到后把 status 重置 idle
+    onLifecycle: (ev) => {
+      hub.publish(ev.reqId, {
+        type: 'query_succeeded',
+        reqId: ev.reqId,
+        sessionId: ev.sessionId,
+        runId: ev.runId,
+        ts: ev.ts,
+        durationMs: ev.durationMs,
+        attempts: ev.attempts,
+      })
+    },
     onSessionCancelled: async ({ localSid }) => {
       await sessionStore.updateSession(localSid, {
         last_cancel_at: new Date().toISOString(),
