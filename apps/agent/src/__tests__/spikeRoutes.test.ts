@@ -12,6 +12,7 @@ import { spikeRoutes, SPIKE_CHANNEL } from '../routes/spike.js'
 import { createSseHub, type SseHub } from '../sse/SseHub.js'
 import { SessionStore } from '../session/SessionStore.js'
 import { MessagesMirror } from '../session/MessagesMirror.js'
+import { SessionStateRegistry } from '../session/SessionStateRegistry.js'
 import { TokenManager } from '../auth/TokenManager.js'
 import { authPlugin } from '../auth/authPlugin.js'
 import type { AIProvider, AISession } from '../providers/AIProvider.js'
@@ -157,11 +158,13 @@ describe('spike routes', () => {
     hub = createSseHub({ heartbeatMs: 60_000 })
     const store = new SessionStore({ root, now: () => '2026-07-13T00:00:00.000Z' })
     const mirror = new MessagesMirror({ root })
+    // P5 · Q10.4:StatusBar 4 指示器状态注册表(spike route 强依赖)
+    const registry = new SessionStateRegistry()
     fastify = Fastify({ logger: false })
     await fastify.register(spikeRoutes, { hub, provider: fakeProvider([
       { type: 'text', text: 'hi', delta: false },
       { type: 'done', reason: 'end_turn', sessionId: 'fake-sdk' },
-    ]), ccSwitch: fakeCcSwitch(), store, mirror })
+    ]), ccSwitch: fakeCcSwitch(), store, mirror, registry })
     await fastify.ready()
     const url = await fastify.listen({ port: 0, host: '127.0.0.1' })
     port = new URL(url).port
@@ -235,6 +238,7 @@ describe('spike routes', () => {
     const app = Fastify({ logger: false })
     await app.register(spikeRoutes, {
       hub: hub2, ccSwitch: fakeCcSwitch(), store: store2, mirror: mirror2,
+      registry: new SessionStateRegistry(),
       provider: fakeProvider([
         { type: 'retrying', category: 'A', retry: 1, maxRetries: 3, delayMs: 1000, message: 'retrying' },
         { type: 'error', code: 'auth', message: 'bad key', recoverable: false, category: 'B' },
@@ -268,6 +272,7 @@ describe('spike routes', () => {
     const app = Fastify({ logger: false })
     await app.register(spikeRoutes, {
       hub: hub2, ccSwitch: fakeCcSwitch(), store: store2, mirror: mirror2,
+      registry: new SessionStateRegistry(),
       provider: fakeProvider([
         { type: 'text', text: 'partial', delta: false },
         { type: 'done', reason: 'cancelled', sessionId: 'sdk-c' },
@@ -296,7 +301,7 @@ describe('spike routes', () => {
       name: 'fake-throw', async createSession(): Promise<AISession> { throw new Error('boom') }, async shutdown() {},
     }
     const app = Fastify({ logger: false })
-    await app.register(spikeRoutes, { hub: hub3, provider: throwingProvider, ccSwitch: fakeCcSwitch(), store: store3, mirror: mirror3 })
+    await app.register(spikeRoutes, { hub: hub3, provider: throwingProvider, ccSwitch: fakeCcSwitch(), store: store3, mirror: mirror3, registry: new SessionStateRegistry() })
     await app.ready()
     const received: SseEvent[] = []
     hub3.subscribe(SPIKE_CHANNEL, (e) => received.push(e))
@@ -324,7 +329,7 @@ describe('spike routes', () => {
     const mirror2 = new MessagesMirror({ root: root2 })
     const cancelSpy = vi.fn()
     const app = Fastify({ logger: false })
-    await app.register(spikeRoutes, { hub: hub2, provider: fakeProviderLong({ cancelSpy }), ccSwitch: fakeCcSwitch(), store: store2, mirror: mirror2 })
+    await app.register(spikeRoutes, { hub: hub2, provider: fakeProviderLong({ cancelSpy }), ccSwitch: fakeCcSwitch(), store: store2, mirror: mirror2, registry: new SessionStateRegistry() })
     await app.ready()
     const run = await app.inject({ method: 'POST', url: '/api/spike/run', payload: { prompt: 'long' } })
     const { sessionId } = run.json()
@@ -366,9 +371,10 @@ describe('spike routes + authPlugin interaction', () => {
     const store = new SessionStore({ root, now: () => '2026-07-13T00:00:00.000Z' })
     const mirror = new MessagesMirror({ root })
     authedHub = createSseHub({ heartbeatMs: 60_000 })
+    const authedRegistry = new SessionStateRegistry()
     app = Fastify({ logger: false })
     await app.register(authPlugin, { tokenManager: tm, allowedOrigins: ['http://localhost:3333'] })
-    await app.register(spikeRoutes, { hub: authedHub, provider: fakeProvider([]), ccSwitch: fakeCcSwitch(), store, mirror })
+    await app.register(spikeRoutes, { hub: authedHub, provider: fakeProvider([]), ccSwitch: fakeCcSwitch(), store, mirror, registry: authedRegistry })
     await app.ready()
     const url = await app.listen({ port: 0, host: '127.0.0.1' })
     port = new URL(url).port

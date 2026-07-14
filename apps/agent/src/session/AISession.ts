@@ -140,6 +140,14 @@ export interface AiSessionDeps {
   sessionStore?: SessionStore
   /** 生命周期事件回调 —— query 成功/失败时调(P4 · Task 5);server 用此把事件 publish 到 SSE */
   onLifecycle?: (event: { type: 'query_succeeded'; runId: string; durationMs: number; attempts: number; ts: number }) => void
+  /**
+   * 状态变化回调 —— ADR-0010 Q10.4 + 决策 49 StatusBar 色码
+   *
+   * AISession 在每次 state 转换(idle→busy→idle/closed/errored)时同步调用;
+   * server 用此把状态 push 到 SSE,Web 端据此更新 StatusBar 4 指示器。
+   * 失败/异常必须 swallow(observer 错不能影响主 turn)。
+   */
+  onStateChange?: (event: { localSid: string; reqId: string; state: SessionState; ts: number }) => void
 }
 
 /** events() 中表示「流关闭」的 sentinel —— 与 AIEvent 类型互斥 */
@@ -189,6 +197,8 @@ export class AiSession implements IAISession {
   #sessionStore: SessionStore | undefined
   /** Lifecycle 事件回调 —— P4 · Task 5 */
   #onLifecycle: ((event: { type: 'query_succeeded'; runId: string; durationMs: number; attempts: number; ts: number }) => void) | undefined
+  /** 状态变化回调 —— P5 · Q10.4 */
+  #onStateChange: ((event: { localSid: string; reqId: string; state: SessionState; ts: number }) => void) | undefined
   /** runId 计数器 —— 每次 send 增加;query_succeeded 携带 */
   #runCounter = 0
 
@@ -210,6 +220,7 @@ export class AiSession implements IAISession {
     this.#globalLogger = deps.globalLogger
     this.#sessionStore = deps.sessionStore
     this.#onLifecycle = deps.onLifecycle
+    this.#onStateChange = deps.onStateChange
     // 初始 SDK session id —— 用于断点续传
     this.#sdkSessionId = deps.initialSdkSessionId
     this.model = deps.resolveModel?.()
@@ -228,6 +239,36 @@ export class AiSession implements IAISession {
 
   get sdkSessionId(): string | undefined {
     return this.#sdkSessionId
+  }
+
+  /**
+   * 设置 state 并同步触发 onStateChange(若新状态 ≠ 旧状态)。
+   *
+   * 内部统一调用入口 —— 所有 state 赋值必须走这里,避免外部观察者(决策 49
+   * StatusBar 色码)漏掉一次转换。
+   *
+   * observer 抛错必须 swallow(主 turn 不能被状态广播副作用打断)。
+   */
+  #setState(next: SessionState): void {
+    if (next === this.#state) return
+    const prev = this.#state
+    this.#state = next
+    if (this.#onStateChange) {
+      try {
+        this.#onStateChange({
+          localSid: this.id,
+          reqId: this.reqId,
+          state: next,
+          ts: this.#nowMs(),
+        })
+      } catch (err) {
+        if (this.#debug) {
+          console.warn(`[AISession ${this.id}] onStateChange observer threw:`, err)
+        }
+      }
+    }
+    // prev 暂时未使用 —— 留给后续需要在 diff 上做更精细状态机的实现
+    void prev
   }
 
   #assertOpen(): void {
@@ -325,7 +366,7 @@ export class AiSession implements IAISession {
       ? Boolean((opts as { isRetry?: boolean }).isRetry)
       : false
 
-    this.#state = 'busy'
+    this.#setState('busy')
 
     const turn = this.#runTurn({ text, isRetry })
     this.#inflight = turn
@@ -443,7 +484,7 @@ export class AiSession implements IAISession {
     try {
       if (this.#providerSemaphore) await this.#providerSemaphore.run(execute, signal)
       else await execute()
-      this.#state = 'idle'
+      this.#setState('idle')
     } catch (error) {
       const failure = error instanceof RetryFailure
         ? error
@@ -455,7 +496,7 @@ export class AiSession implements IAISession {
       if (failure.classification.category === 'cancelled' || signal.aborted) {
         status = 'cancelled'
         this.#push({ type: 'done', reason: 'cancelled', sessionId: this.#sdkSessionId })
-        this.#state = 'idle'
+        this.#setState('idle')
         await this.#onCancelled?.({
           localSid: this.id,
           reqId: this.reqId,
@@ -488,7 +529,7 @@ export class AiSession implements IAISession {
           category: finalError.category,
         })
         this.#push({ type: 'done', reason: 'error', sessionId: this.#sdkSessionId })
-        this.#state = failure.classification.category === 'E' ? 'idle' : 'errored'
+        this.#setState(failure.classification.category === 'E' ? 'idle' : 'errored')
       }
     } finally {
       // 清理外部 signal listener
@@ -619,7 +660,7 @@ export class AiSession implements IAISession {
         }
       }
     }
-    this.#state = 'closed'
+    this.#setState('closed')
     this.#closeAllConsumers()
   }
 }

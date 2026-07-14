@@ -80,6 +80,8 @@ export interface ClaudeCodeProviderOptions {
   onSessionCreated?: (session: RetryableSession) => void
   /** P4 · Task 5:query 生命周期事件回调 —— server 借此 publish query_succeeded 到 SSE */
   onLifecycle?: (event: { type: 'query_succeeded'; runId: string; durationMs: number; attempts: number; ts: number; reqId: string; sessionId: string }) => void
+  /** P5 · Q10.4:session state 变化 observer —— 透传到每个新建的 AISession */
+  onSessionStateChange?: SessionStateObserver
 }
 
 /** P4 · Task 4:retry registry 需要的最小 AISession 形态 */
@@ -88,6 +90,14 @@ export interface RetryableSession {
   readonly reqId: string
   send(text: string, opts?: { isRetry?: boolean } | ReadonlyArray<unknown>): Promise<void>
 }
+
+/** P5 · Q10.4:state-change observer 形态 —— server 注入,Provider 透传到 AISession */
+export type SessionStateObserver = (event: {
+  localSid: string
+  reqId: string
+  state: 'idle' | 'busy' | 'closed' | 'errored'
+  ts: number
+}) => void
 
 /** 工具:从 record 中提 number;缺失 / 非 number → null */
 function numberOrNull(v: unknown): number | null {
@@ -275,6 +285,7 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
   const sessionStore = opts.sessionStore
   const onSessionCreated = opts.onSessionCreated
   const onLifecycle = opts.onLifecycle
+  const onSessionStateChange = opts.onSessionStateChange
 
   // Task 7:Provider 共享的 FIFO limiter(顶层只创建一次);null 表示不限流
   const providerSemaphore: ProviderSemaphore | null = opts.providerSemaphore === null
@@ -422,6 +433,9 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
         onLifecycle: onLifecycle
           ? (ev) => onLifecycle({ ...ev, reqId, sessionId: session.id })
           : undefined,
+        // P5 · Q10.4:把 sessionState observer 透传到每个新 AISession,
+        // observer 内已携带 reqId/localSid,不需要在这里再注入
+        onStateChange: onSessionStateChange,
         debug,
         assembler,
         requirement,

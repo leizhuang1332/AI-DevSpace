@@ -96,6 +96,11 @@ export type SseEvent =
    *
    * Agent 把 AIEvent 序列化为 AiSsePayload 后包成此 variant 推出去。
    * Web 端按 `event.type` dispatch 到 UI 流(thinking/text/tool_use/...)。
+   *
+   * `streamKind` 由 Agent 计算后附带(ADR-0010 Q10.3 + 决策 43b/49):
+   *  - `'chat'` → 直接显示在 chat 主气泡(text/thinking)
+   *  - `'activity'` → 折叠在 assistant 气泡下,12px 灰字 1 行 + hover 展开 3 行
+   *  - `'lifecycle'` → 驱动 StatusBar 状态色码 + 计数器(error/done/retrying)
    */
   | {
       type: 'ai_event'
@@ -103,6 +108,7 @@ export type SseEvent =
       sessionId: string
       runId: string
       ts: number
+      streamKind: 'chat' | 'activity' | 'lifecycle'
       event: AiSsePayload
     }
   /**
@@ -166,6 +172,35 @@ export type SseEvent =
       ts: number
       durationMs: number
       attempts: number
+    }
+  /**
+   * Session 状态变化(ADR-0010 Q10.4 + 决策 49 StatusBar 色码)。
+   *
+   * Agent 在 AISession 每次 state 转换(idle↔busy→idle/closed/errored)时
+   * 推此 variant 到 per-session 通道。Web 端 reducer 据此更新 StatusBar
+   * 主指示器的色码;推送是「静默」的 —— 决策 49 不弹 Toast,不弹窗,
+   * 仅 StatusBar 单点指示器变更。
+   */
+  | {
+      type: 'session_state'
+      reqId: string
+      sessionId: string
+      ts: number
+      state: 'idle' | 'busy' | 'closed' | 'errored'
+    }
+  /**
+   * 工具写文件计数(决策 49 「最近写入 N」指示器)。
+   *
+   * Agent 观测到 AISession.events() 流里的 tool_use / file_written 类型
+   * 时,递增该 session 的窗口计数并广播此 variant。Web 端 StatusBar 显示
+   * 「最近写入 N」数字(默认 60s 衰减窗口,定义见 SessionStateRegistry)。
+   */
+  | {
+      type: 'session_writes'
+      reqId: string
+      sessionId: string
+      ts: number
+      recentWrites: number
     }
 
 export const SSE_HEARTBEAT_MS = 30_000

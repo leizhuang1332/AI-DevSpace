@@ -4,11 +4,26 @@ import { SSE_HEARTBEAT_MS } from '@ai-devspace/shared'
 export type SseListener = (event: SseEvent) => void
 export type Unsubscribe = () => void
 
+/**
+ * SseHub —— 通用多通道 SSE fan-out(ADR-0010 Q10.2)
+ *
+ * "通道"是一个任意字符串 key —— 历史用法以 `reqId` 为 key(P0/P4);
+ * P5 起引入"每 session 一条独立通道",callers 直接以 `localSid` 为 key
+ * 订阅/发布即可,hub 内部不区分语义。
+ *
+ * 行为契约:
+ *  - `publish(key, event)` 只投递到订阅了同一个 `key` 的 listener;无订阅者 → no-op
+ *  - `closeChannel(key)` 移除该 key 所有订阅者(用于 session 关闭时的资源回收)
+ *  - `close()` 全局销毁,所有 listener 被清空,定时器停掉
+ *  - listener 抛错必须不影响其他 listener(隔离 swallow)
+ */
 export interface SseHub {
-  subscribe(reqId: string, listener: SseListener): Unsubscribe
-  publish(reqId: string, event: SseEvent): void
+  subscribe(key: string, listener: SseListener): Unsubscribe
+  publish(key: string, event: SseEvent): void
+  /** 移除某个 key 的所有订阅者(per-session 关闭时调用)。 */
+  closeChannel(key: string): void
   close(): Promise<void>
-  stats(): { subscribers: number }
+  stats(): { subscribers: number; channels: number }
 }
 
 export interface SseScheduler {
@@ -68,27 +83,27 @@ export function createSseHub(opts: CreateSseHubOptions = {}): SseHub {
     }
   }
 
-  function subscribe(reqId: string, listener: SseListener): Unsubscribe {
+  function subscribe(key: string, listener: SseListener): Unsubscribe {
     if (closed) return () => {}
-    let set = channels.get(reqId)
+    let set = channels.get(key)
     if (!set) {
       set = new Set()
-      channels.set(reqId, set)
+      channels.set(key, set)
     }
     set.add(listener)
     ensureHeartbeatRunning()
     return () => {
-      const s = channels.get(reqId)
+      const s = channels.get(key)
       if (!s) return
       s.delete(listener)
-      if (s.size === 0) channels.delete(reqId)
+      if (s.size === 0) channels.delete(key)
       maybeStopHeartbeat()
     }
   }
 
-  function publish(reqId: string, event: SseEvent): void {
+  function publish(key: string, event: SseEvent): void {
     if (closed) return
-    const set = channels.get(reqId)
+    const set = channels.get(key)
     if (!set) return
     for (const listener of set) {
       try {
@@ -97,6 +112,13 @@ export function createSseHub(opts: CreateSseHubOptions = {}): SseHub {
         /* swallow */
       }
     }
+  }
+
+  function closeChannel(key: string): void {
+    const set = channels.get(key)
+    if (!set) return
+    channels.delete(key)
+    maybeStopHeartbeat()
   }
 
   async function close(): Promise<void> {
@@ -108,9 +130,9 @@ export function createSseHub(opts: CreateSseHubOptions = {}): SseHub {
     channels.clear()
   }
 
-  function stats(): { subscribers: number } {
-    return { subscribers: totalSubscribers() }
+  function stats(): { subscribers: number; channels: number } {
+    return { subscribers: totalSubscribers(), channels: channels.size }
   }
 
-  return { subscribe, publish, close, stats }
+  return { subscribe, publish, closeChannel, close, stats }
 }

@@ -26,6 +26,12 @@ import type { CcSwitchClient } from '../providers/CcSwitchClient.js'
 import type { SessionStore } from '../session/SessionStore.js'
 import type { MessagesMirror } from '../session/MessagesMirror.js'
 import { attachRecorder } from '../session/SessionRecorder.js'
+import { attachSessionBroadcaster } from '../sse/sessionBroadcaster.js'
+import { mapAiEventToSse } from '../sse/mapAiEventToSse.js'
+import type { SessionStateRegistry } from '../session/SessionStateRegistry.js'
+
+// 重新导出保持向后兼容(原 spike.ts 内有此函数,spikeRoutes.test.ts 也直接 import)
+export { mapAiEventToSse }
 
 /** P0 阶段固定通道 id;P5 会改成 per-session N 通道 */
 export const SPIKE_CHANNEL = 'spike'
@@ -40,6 +46,8 @@ export interface SpikeRoutesOptions {
   store: SessionStore
   /** Q7.4 messages.jsonl 镜像 —— SessionRecorder attach 后异步写 */
   mirror: MessagesMirror
+  /** Q10.4 StatusBar 4 指示器状态注册表 —— broadcaster 用它记录 recent_writes */
+  registry: SessionStateRegistry
 }
 
 interface RunBody {
@@ -56,56 +64,13 @@ function isNonEmptyString(v: unknown): v is string {
 }
 
 /**
- * 把 AIEvent typed 映射成 SseEvent。
- *
- * 规则(brief Step 6):
- *  - retrying → retrying variant(独立)
- *  - error & category !== 'E' → query_failed(retryable 由 recoverable 决定)
- *  - done{reason:'cancelled'} → query_cancelled(独立)
- *  - 其余(包含 error category=E) → ai_event envelope(由 typed AIEvent 自然承载)
+ * 把 AIEvent typed 映射成 SseEvent —— 拆到 sse/mapAiEventToSse.ts(打破与
+ * sessionBroadcaster 的循环依赖);这里仅 re-export,保持 spikeRoutes.test.ts
+ * 里的 import 路径不破。
  */
-export function mapAiEventToSse(
-  runId: string,
-  reqId: string,
-  sessionId: string,
-  event: AIEvent,
-  ts: number = Date.now(),
-): SseEvent {
-  if (event.type === 'retrying') {
-    return {
-      type: 'retrying',
-      runId,
-      reqId,
-      sessionId,
-      ts,
-      category: event.category,
-      retry: event.retry,
-      maxRetries: event.maxRetries,
-      delayMs: event.delayMs,
-      message: event.message,
-    }
-  }
-  if (event.type === 'error' && event.category !== 'E') {
-    return {
-      type: 'query_failed',
-      runId,
-      reqId,
-      sessionId,
-      ts,
-      category: event.category ?? 'B',
-      code: event.code,
-      message: event.message,
-      retryable: event.recoverable,
-    }
-  }
-  if (event.type === 'done' && event.reason === 'cancelled') {
-    return { type: 'query_cancelled', runId, reqId, sessionId, ts }
-  }
-  return { type: 'ai_event', runId, reqId, sessionId, ts, event }
-}
 
 export const spikeRoutes: FastifyPluginAsync<SpikeRoutesOptions> = async (fastify, opts) => {
-  const { hub, provider, ccSwitch, store, mirror } = opts
+  const { hub, provider, ccSwitch, store, mirror, registry } = opts
 
   // 启动日志 —— issue 验收第 1 条
   const current = ccSwitch.getCurrent()
@@ -213,18 +178,18 @@ export const spikeRoutes: FastifyPluginAsync<SpikeRoutesOptions> = async (fastif
 
     // 3) live + recorder
     liveSessions.set(session.id, session)
+    registry.register(session)
     const recorder = attachRecorder(session, { store, mirror })
 
-    // 4) 异步 pump AIEvent → typed SseEvent → hub
-    const pump = (async () => {
-      try {
-        for await (const event of session.events()) {
-          hub.publish(reqId, mapAiEventToSse(runId, reqId, session.id, event))
-        }
-      } catch (err) {
-        fastify.log.error({ err, runId, sessionId: session.id }, '[spike] event pump threw')
-      }
-    })()
+    // 4) P5 · Q10.2:per-session broadcaster —— 推到两通道(reqId + sessionId),
+    //    并在 session.close() 时清掉该 session 通道的所有订阅者
+    const broadcaster = attachSessionBroadcaster(session, reqId, {
+      hub,
+      registry,
+      runId,
+      onError: (err) =>
+        fastify.log.error({ err, runId, sessionId: session.id }, '[spike] event pump threw'),
+    })
 
     // 5) 异步 run + cleanup
     void (async () => {
@@ -250,7 +215,9 @@ export const spikeRoutes: FastifyPluginAsync<SpikeRoutesOptions> = async (fastif
         } catch {
           /* noop */
         }
-        await Promise.allSettled([pump, recorder.done])
+        await broadcaster.close()
+        await recorder.done
+        registry.unregister(session.id)
         liveSessions.delete(session.id)
       }
     })()

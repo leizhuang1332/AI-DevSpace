@@ -16,6 +16,10 @@ import { analysisRoutes } from './routes/analysis.js'
 import { spikeRoutes } from './routes/spike.js'
 import { createSseHub, type SseHub } from './sse/SseHub.js'
 import { sseRoutes } from './sse/requirementEventsRoute.js'
+import { sessionSseRoutes } from './sse/sessionEventsRoute.js'
+import { sessionStateRoutes } from './routes/sessionStateRoute.js'
+import { makeStateChangePublisher } from './sse/sessionBroadcaster.js'
+import { SessionStateRegistry } from './session/SessionStateRegistry.js'
 import { createCcSwitchClient, createNullCcSwitchClient } from './providers/CcSwitchClient.js'
 import type { CcSwitchClient } from './providers/CcSwitchClient.js'
 import { createClaudeCodeProvider } from './providers/ClaudeCodeProvider.js'
@@ -145,6 +149,15 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     }),
   })
   const providerSemaphore = new ProviderSemaphore({ limit: 5 })
+  // P5 · Q10.4:StatusBar 4 指示器状态注册表 —— server 启动时构造,spike route 共享
+  const sessionStateRegistry = new SessionStateRegistry({
+    providerSemaphore,
+    recentWritesWindowMs: 60_000,
+  })
+  // P5 · Q10.2:per-session SSE 路由(通道 key = localSid);需要 sessionStore 校验存在
+  await fastify.register(sessionSseRoutes, { hub, sessionStore })
+  // P5 · Q10.4:session 状态 REST 路由(StatusBar refresh + 全局 4 指示器)
+  await fastify.register(sessionStateRoutes, { registry: sessionStateRegistry, store: sessionStore })
 
   // P4 · Task 4:active session registry (localSid → AISession).
   // provider 通过 onSessionCreated 回调 push;retry route 通过本 Map 找到目标 session
@@ -164,16 +177,21 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     },
     // P4 · Task 5:把 query_succeeded 通过 SseHub 发布,Web 端收到后把 status 重置 idle
     onLifecycle: (ev) => {
-      hub.publish(ev.reqId, {
-        type: 'query_succeeded',
+      const event = {
+        type: 'query_succeeded' as const,
         reqId: ev.reqId,
         sessionId: ev.sessionId,
         runId: ev.runId,
         ts: ev.ts,
         durationMs: ev.durationMs,
         attempts: ev.attempts,
-      })
+      }
+      hub.publish(ev.reqId, event)
+      // P5 · Q10.2:也推到 per-session 通道(Web 端开单 session tab 时订阅)
+      hub.publish(ev.sessionId, event)
     },
+    // P5 · Q10.4:state 变化 → publish 到 req + session 双通道
+    onSessionStateChange: makeStateChangePublisher(hub),
     onSessionCancelled: async ({ localSid }) => {
       await sessionStore.updateSession(localSid, {
         last_cancel_at: new Date().toISOString(),
@@ -202,7 +220,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   await fastify.register(workspaceRoutes, { workspace })
   await fastify.register(requirementRoutes)
   await fastify.register(analysisRoutes, { hub })
-  await fastify.register(spikeRoutes, { hub, provider, ccSwitch, store: sessionStore, mirror: messagesMirror })
+  await fastify.register(spikeRoutes, { hub, provider, ccSwitch, store: sessionStore, mirror: messagesMirror, registry: sessionStateRegistry })
   await fastify.register(bootstrapRoutes, { tokenManager, apiBase: 'http://localhost:7777' })
   // P4 · Task 4:retry route —— UI 点重试时调;GET/sessions/:sid 是 GET,POST /retry 是 action
   await fastify.register(sessionsRetryRoutes, { sessionStore, runTurn })
