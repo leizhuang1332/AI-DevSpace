@@ -76,6 +76,15 @@ export interface ClaudeCodeProviderOptions {
   globalLogger?: GlobalLogger
   /** P4 · Task 3:SessionStore —— 用于 send 成功后回写 meta.yaml.last_input */
   sessionStore?: SessionStore
+  /** P4 · Task 4:createSession 完成后回调 —— server 用于把 session 注册到 retry registry */
+  onSessionCreated?: (session: RetryableSession) => void
+}
+
+/** P4 · Task 4:retry registry 需要的最小 AISession 形态 */
+export interface RetryableSession {
+  readonly id: string
+  readonly reqId: string
+  send(text: string, opts?: { isRetry?: boolean } | ReadonlyArray<unknown>): Promise<void>
 }
 
 /** 工具:从 record 中提 number;缺失 / 非 number → null */
@@ -262,6 +271,7 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
   const onSessionCancelled = opts.onSessionCancelled
   const globalLogger = opts.globalLogger
   const sessionStore = opts.sessionStore
+  const onSessionCreated = opts.onSessionCreated
 
   // Task 7:Provider 共享的 FIFO limiter(顶层只创建一次);null 表示不限流
   const providerSemaphore: ProviderSemaphore | null = opts.providerSemaphore === null
@@ -409,6 +419,15 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
         assembler,
         requirement,
       })
+
+      // P4 · Task 4:通知 server 把 session 注册到 retry registry
+      if (onSessionCreated) {
+        onSessionCreated({
+          id: session.id,
+          reqId: session.reqId,
+          send: (text, opts) => session.send(text, opts),
+        })
+      }
 
       return session
     },

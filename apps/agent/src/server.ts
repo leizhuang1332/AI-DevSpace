@@ -19,11 +19,13 @@ import { sseRoutes } from './sse/requirementEventsRoute.js'
 import { createCcSwitchClient, createNullCcSwitchClient } from './providers/CcSwitchClient.js'
 import type { CcSwitchClient } from './providers/CcSwitchClient.js'
 import { createClaudeCodeProvider } from './providers/ClaudeCodeProvider.js'
+import type { RetryableSession } from './providers/ClaudeCodeProvider.js'
 import { SessionStore } from './session/SessionStore.js'
 import { MessagesMirror } from './session/MessagesMirror.js'
 import { ProviderSemaphore } from './error/ProviderSemaphore.js'
 import { SessionLogger } from './log/SessionLogger.js'
 import { GlobalLogger } from './log/GlobalLogger.js'
+import { sessionsRetryRoutes, type RunTurn } from './routes/sessionsRetryRoute.js'
 
 const ALLOWED_ORIGINS: string[] = ['http://localhost:3333', 'http://127.0.0.1:3333']
 
@@ -144,6 +146,12 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   })
   const providerSemaphore = new ProviderSemaphore({ limit: 5 })
 
+  // P4 · Task 4:active session registry (localSid → AISession).
+  // provider 通过 onSessionCreated 回调 push;retry route 通过本 Map 找到目标 session
+  // 调 send({ isRetry: true })。Map 允许重复 id 覆盖(spike 测试需要 reset 模式),
+  // 真实生产 key 由 provider 用 UUID 保证唯一。
+  const retrySessions = new Map<string, RetryableSession>()
+
   const provider = createClaudeCodeProvider({
     ccSwitch,
     debug: false,
@@ -151,12 +159,22 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     sessionLogger,
     sessionStore,
     globalLogger,
+    onSessionCreated: (entry) => {
+      retrySessions.set(entry.id, entry)
+    },
     onSessionCancelled: async ({ localSid }) => {
       await sessionStore.updateSession(localSid, {
         last_cancel_at: new Date().toISOString(),
       })
     },
   })
+
+  const runTurn: RunTurn = async (input) => {
+    const resolved = retrySessions.get(input.localSid)
+    if (!resolved) throw new Error(`No active session for localSid=${input.localSid}`)
+    await resolved.send(input.inputText, { isRetry: input.isRetry })
+    return { runId: `retry-${Date.now()}` }
+  }
 
   // 6. Routes
   const healthService = new HealthService({
@@ -174,6 +192,8 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   await fastify.register(analysisRoutes, { hub })
   await fastify.register(spikeRoutes, { hub, provider, ccSwitch, store: sessionStore, mirror: messagesMirror })
   await fastify.register(bootstrapRoutes, { tokenManager, apiBase: 'http://localhost:7777' })
+  // P4 · Task 4:retry route —— UI 点重试时调;GET/sessions/:sid 是 GET,POST /retry 是 action
+  await fastify.register(sessionsRetryRoutes, { sessionStore, runTurn })
 
   // 7. 启动 / 配置变更日志
   globalLogger.agentStarted({ root: workspaceRoot, version: opts.agentVersion ?? '0.0.0' })
