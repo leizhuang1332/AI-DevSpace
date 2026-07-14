@@ -1,0 +1,28 @@
+apps/agent/src/__tests__/AISession.test.ts
+  s_8aee14c7153c26::t_3c15173ec692a1 16,18
+  s_8aee14c7153c26::t_56111341a69876 446,448,455,503-586
+apps/agent/src/providers/ClaudeCodeProvider.ts
+  s_8aee14c7153c26::t_ccba2b9cad9d46 38,77-78,264,406
+apps/agent/src/server.ts
+  s_8aee14c7153c26::t_d00180b63c6d4e 152
+apps/agent/src/session/AISession.ts
+  s_8aee14c7153c26::t_f0a9cee35fe3d1 28,139-140,186-187,205,308,317-320,323,333-334,400,505-513
+apps/agent/src/session/SessionStore.ts
+  s_8aee14c7153c26::t_e21950e4280186 56-57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "a0ce9e2702ff436942cbf98f91c9bb205483e83d",
+  "prompts": {},
+  "sessions": {
+    "s_8aee14c7153c26": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "63701278-6e68-4767-97f2-ccc0f48ba3cb",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
