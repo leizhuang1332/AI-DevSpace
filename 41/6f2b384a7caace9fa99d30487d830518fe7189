@@ -1,0 +1,32 @@
+apps/agent/src/__tests__/ProviderSemaphore.test.ts
+  s_a2a637ad44d5a7::t_ad37ec00eb4f35 37
+  s_a2a637ad44d5a7::t_8526a321a7944c 1-3,10-36,38-45
+  s_a2a637ad44d5a7::t_1da39019f7dbf9 52,54-55
+  s_a2a637ad44d5a7::t_d1ec809618a444 46,50-51,56-61,67-68
+  s_a2a637ad44d5a7::t_4fd82fc77256cf 47-49,53,62-66
+  s_a2a637ad44d5a7::t_2d116a45b7a554 4-9
+apps/agent/src/error/ProviderSemaphore.ts
+  s_a2a637ad44d5a7::t_1f4633550b324a 1-97
+apps/agent/src/providers/ClaudeCodeProvider.ts
+  s_a2a637ad44d5a7::t_f3fc2ec31fd3d9 15,34-35,67,263,265,398,414
+apps/agent/src/server.ts
+  s_a2a637ad44d5a7::t_40dc77c458c57c 24,145,150
+apps/agent/src/session/AISession.ts
+  s_a2a637ad44d5a7::t_f3f4ae4ce9c649 22,126-127,172,194,424
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "416f2b384a7caace9fa99d30487d830518fe7189",
+  "prompts": {},
+  "sessions": {
+    "s_a2a637ad44d5a7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6333dd15-1461-436c-9d27-b958c9dce262",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
