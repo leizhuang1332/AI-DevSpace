@@ -1,0 +1,41 @@
+apps/web/src/components/executing-zone.tsx
+  s_8aee14c7153c26::t_0f7bf65ae7a90e 2,97-98
+  s_8aee14c7153c26::t_08a74970c19174 119,124-131,199,210,221,223
+  s_8aee14c7153c26::t_09a1a75379898f 19-21
+  s_8aee14c7153c26::t_f0788397e057cc 99-101,109-110,117
+  s_8aee14c7153c26::t_b71e54d579a8bf 61-96
+  s_8aee14c7153c26::t_efff8cf06d9f1d 196-198
+  s_8aee14c7153c26::t_6fbb44f3ce4da4 200-202,207-209
+  s_8aee14c7153c26::t_69020e364bd7eb 211-213,218-220
+  s_8aee14c7153c26::t_d41334f2af2f19 222
+  s_8aee14c7153c26::t_87e47204fec811 224
+  s_8aee14c7153c26::t_4c53587848e614 156,170,186-195,203-206,214-217,229-237,248-257,598-604,623,626-640
+apps/web/src/__tests__/executing-zone.test.tsx
+  s_8aee14c7153c26::t_c7b3b7a72e9eac 63-65,399
+  s_8aee14c7153c26::t_84d34817e50522 10,14-56,391,397
+  s_8aee14c7153c26::t_fe17c11f76aca0 1-3
+  s_8aee14c7153c26::t_061cc1a537b210 57-62
+  s_8aee14c7153c26::t_ec91abe6e57f38 388-390
+  s_8aee14c7153c26::t_83a4a4e18d693f 392-396
+  s_8aee14c7153c26::t_d9a18eed85580c 398
+  s_8aee14c7153c26::t_dc74152331312d 400-402
+  s_8aee14c7153c26::t_72fa49e84a5df5 371-387,403-606
+apps/web/src/lib/executing.ts
+  s_8aee14c7153c26::t_ac5aecf5f36b81 151-154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "1a1f40f3d03decbdd24c87714ca441b14ab80877",
+  "prompts": {},
+  "sessions": {
+    "s_8aee14c7153c26": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "63701278-6e68-4767-97f2-ccc0f48ba3cb",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
