@@ -1,0 +1,25 @@
+apps/agent/src/providers/ClaudeCodeProvider.ts
+  s_8aee14c7153c26::t_c626be2368bdf9 81-82,277,421-424
+apps/agent/src/server.ts
+  s_8aee14c7153c26::t_4261aca9da116d 165-176
+apps/agent/src/session/AISession.ts
+  s_8aee14c7153c26::t_cdb7b7f2fce955 141-142,190-193,212,342,522-537
+packages/shared/src/sse.ts
+  s_8aee14c7153c26::t_e4cd44619785a0 156-169
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "45fa92130d2d58da0d6e0b633918ba3cf551e250",
+  "prompts": {},
+  "sessions": {
+    "s_8aee14c7153c26": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "63701278-6e68-4767-97f2-ccc0f48ba3cb",
+        "model": "unknown"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
