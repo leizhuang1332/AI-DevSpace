@@ -753,21 +753,22 @@ describe('DraftingZone · 辅助文件卡片 + 拖拽分割 (issue 04)', () => {
     expect(within(apiCard).queryByTestId('aux-card-converted')).toBeNull()
   })
 
-  it('点击卡片 → 触发 onOpen 占位 console.info', async () => {
-    const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {})
-    try {
-      const data = await getDraftingData('req-001')
-      render(<DraftingZone data={data} />)
-      const user = userEvent.setup()
-      const cards = screen.getAllByTestId('aux-card')
-      await user.click(cards[0])
-      expect(consoleSpy).toHaveBeenCalledWith(
-        '[drafting-aux] open',
-        expect.objectContaining({ auxId: 'aux-api-draft' }),
-      )
-    } finally {
-      consoleSpy.mockRestore()
-    }
+  it('点击卡片 → 打开 aux-drawer(issue 05 接线)', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+
+    // 抽屉初始不存在(openAuxId=null)
+    expect(screen.queryByTestId('aux-drawer')).toBeNull()
+
+    const cards = screen.getAllByTestId('aux-card')
+    await user.click(cards[0]) // aux-api-draft
+
+    // 抽屉已渲染,且显示对应文件
+    expect(screen.getByTestId('aux-drawer')).toBeInTheDocument()
+    expect(
+      screen.getByTestId('aux-drawer-filename').textContent,
+    ).toBe('api-draft.md')
   })
 
   // -------------------------------------------------------------------------
@@ -991,5 +992,143 @@ describe('DraftingZone · 辅助文件卡片 + 拖拽分割 (issue 04)', () => {
 
     await user.click(btn)
     expect(routerPush).toHaveBeenCalledWith('/requirements/req-001/analyzing/')
+  })
+})
+
+// ============================================================================
+// issue 05 · 辅助文件抽屉(端到端集成)
+//
+// 验收清单(对照 issue 05 acceptance criteria):
+// #1  点击卡片打开抽屉
+// #2  60% 宽度 + min/max width(由 AuxDrawer 单测覆盖;这里走存在性)
+// #3  半透明 backdrop,点击关闭(由 AuxDrawer 单测覆盖;这里走存在性)
+// #4  Escape 关闭(由 AuxDrawer 单测覆盖)
+// #5  dialog 语义 + 可见关闭按钮(由 AuxDrawer 单测覆盖)
+// #6  抽屉宿主 Markdown 编辑器,编辑更新该文件状态
+// #7  与 PRD 共 30s 自动保存(由 AuxDrawer 单测覆盖)
+// #8  关闭再开同一文件 → 内容恢复
+// #9  唯一抽屉:打开第二个文件时切换
+// #10 视觉匹配 19-final-drafting.html(类名 / testid 一致即可)
+// #11 tests cover — 本 describe 覆盖 #1 #6 #8 #9
+// ============================================================================
+
+describe('DraftingZone · 辅助文件抽屉 (issue 05)', () => {
+  it('验收 #1:点击卡片 → 抽屉打开显示该文件', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+
+    // 打开前不存在
+    expect(screen.queryByTestId('aux-drawer')).toBeNull()
+
+    // 点击第 1 张(api-draft.md)
+    const cards = screen.getAllByTestId('aux-card')
+    await user.click(cards[0])
+
+    // 抽屉展示对应文件名
+    expect(screen.getByTestId('aux-drawer')).toBeInTheDocument()
+    expect(
+      screen.getByTestId('aux-drawer-filename').textContent,
+    ).toBe('api-draft.md')
+  })
+
+  it('验收 #6:抽屉内的编辑 → 该文件持久化(关闭再开仍存在)', async () => {
+    const data = await getDraftingData('req-001')
+    const { rerender } = render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+
+    // 打开抽屉
+    await user.click(screen.getAllByTestId('aux-card')[0])
+    const ta = screen.getByTestId('aux-drawer-editor') as HTMLTextAreaElement
+    const original = ta.value
+    fireEvent.change(ta, { target: { value: original + '\n> 修改痕迹' } })
+    expect(ta.value).toContain('> 修改痕迹')
+
+    // 关闭抽屉
+    await user.click(screen.getByTestId('aux-drawer-close'))
+    expect(screen.queryByTestId('aux-drawer')).toBeNull()
+
+    // 重新打开同一文件 → 内容仍在
+    await user.click(screen.getAllByTestId('aux-card')[0])
+    const reopened = screen.getByTestId('aux-drawer-editor') as HTMLTextAreaElement
+    expect(reopened.value).toContain('> 修改痕迹')
+    expect(reopened.value).not.toBe(original)
+  })
+
+  it('验收 #9:唯一抽屉 — 打开第二个文件 → 自动切换', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+
+    // 先开 aux-1
+    const cards = screen.getAllByTestId('aux-card')
+    await user.click(cards[0]) // aux-api-draft
+    expect(
+      screen.getByTestId('aux-drawer-filename').textContent,
+    ).toBe('api-draft.md')
+
+    // 直接点另一张卡片(不点 close)→ 应只显示一个抽屉 + 内容切换
+    await user.click(cards[1]) // aux-data-model
+    expect(screen.queryByTestId('aux-drawer')).toBeInTheDocument()
+    expect(
+      screen.getByTestId('aux-drawer-filename').textContent,
+    ).toBe('data-model.md')
+    // 仍只有一个抽屉(物理上 DOM 中也只有一个 backdrop)
+    expect(screen.queryAllByTestId('aux-drawer-backdrop')).toHaveLength(1)
+  })
+
+  it('验收 #8:打开 → 编辑 → 关闭 → 切到另一个文件 → 切回 → 该文件内容恢复', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+
+    // 1) 打开第一张并编辑
+    const cards = screen.getAllByTestId('aux-card')
+    await user.click(cards[0])
+    const ta1 = screen.getByTestId('aux-drawer-editor') as HTMLTextAreaElement
+    fireEvent.change(ta1, { target: { value: 'X-' + data.auxFiles[0].body } })
+
+    // 2) 不点 close,直接点另一张
+    await user.click(cards[1])
+    const ta2 = screen.getByTestId('aux-drawer-editor') as HTMLTextAreaElement
+    expect(ta2.value).toBe(data.auxFiles[1].body) // 第二张是没编辑过的原值
+    // 编辑第二张
+    fireEvent.change(ta2, { target: { value: 'Y-' + data.auxFiles[1].body } })
+
+    // 3) 关掉抽屉
+    await user.click(screen.getByTestId('aux-drawer-close'))
+    expect(screen.queryByTestId('aux-drawer')).toBeNull()
+
+    // 4) 重新打开第一张 → 内容恢复为 X-...
+    await user.click(cards[0])
+    expect(
+      (screen.getByTestId('aux-drawer-editor') as HTMLTextAreaElement).value,
+    ).toBe('X-' + data.auxFiles[0].body)
+
+    // 5) 切到第二张 → 内容恢复为 Y-...
+    await user.click(cards[1])
+    expect(
+      (screen.getByTestId('aux-drawer-editor') as HTMLTextAreaElement).value,
+    ).toBe('Y-' + data.auxFiles[1].body)
+  })
+
+  it('不在 issue 04 验收测试失败的回归', async () => {
+    // 关闭抽屉不抛错
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+    await user.click(screen.getAllByTestId('aux-card')[0])
+    await user.click(screen.getByTestId('aux-drawer-close'))
+    // 卸载组件
+    cleanup()
+    expect(data.auxFiles).toHaveLength(4)
+  })
+
+  it('空数据(empty=true)下点击占位卡不打开抽屉(issue 06 不在本期范围)', async () => {
+    render(<DraftingZone data={emptyDrafting('NEW')} />)
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('aux-empty-placeholder'))
+    // 不应打开抽屉 — 占位是 onCreate,不在 issue 05 路径
+    expect(screen.queryByTestId('aux-drawer')).toBeNull()
   })
 })

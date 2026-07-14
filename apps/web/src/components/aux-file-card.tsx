@@ -1,6 +1,7 @@
 'use client'
 
 import type { AuxFile, UsageTag } from '@ai-devspace/shared'
+import { AUX_USAGE_META } from '@/lib/aux-meta'
 
 /**
  * 单个辅助文件卡片(issue 04 验收 #2)
@@ -16,66 +17,17 @@ import type { AuxFile, UsageTag } from '@ai-devspace/shared'
  * └───────────────────────────────────────┘
  *
  * 行为:
- * - 点击整张卡片 → 调用 `onOpen(aux.id)`(issue 05 抽屉留接口,本期仅占位)
+ * - 点击整张卡片 → 调用 `onOpen(aux.id)`(issue 05 抽屉接收)
  * - 鼠标 hover 提边框 + 上移 1px(设计稿 .fcard:hover)
  *
- * 颜色映射(对应 `.fcard .tag` 行内色块):
- * - api:indigo(主色 #5e6ad2)
- * - data:amber
- * - research:pink
- * - sop:blue
- * - ui:green
- * - other:gray
+ * UsageTag 的 icon / label / 颜色由 `lib/aux-meta.ts` 集中定义,
+ * 与 `aux-drawer.tsx` 共享,避免一处新增 tag 而忘记同步另一处。
  */
 
 export interface AuxFileCardProps {
   aux: AuxFile
   /** 点击卡片回调;不传则禁用 hover/click 视觉反馈 */
   onOpen?: (id: string) => void
-}
-
-// ---------------------------------------------------------------------------
-// Usage tag → (icon, label, 颜色) 查表
-// ---------------------------------------------------------------------------
-
-interface UsageTagMeta {
-  icon: string
-  label: string
-  /** Tailwind utility 用于 tag chip 背景(注意:必须在 tailwind safelist 中存在) */
-  chipClass: string
-}
-
-const USAGE_TAG_META: Record<UsageTag, UsageTagMeta> = {
-  api: {
-    icon: '📐',
-    label: 'API 草案',
-    chipClass: 'bg-[#eef2ff] text-[#4338ca]',
-  },
-  data: {
-    icon: '📊',
-    label: '数据字典',
-    chipClass: 'bg-[#fef3c7] text-[#a16207]',
-  },
-  research: {
-    icon: '📑',
-    label: '调研',
-    chipClass: 'bg-[#fce7f3] text-[#9d174d]',
-  },
-  sop: {
-    icon: '📄',
-    label: 'SOP',
-    chipClass: 'bg-[#dbeafe] text-[#1e40af]',
-  },
-  ui: {
-    icon: '🎨',
-    label: 'UI 草图',
-    chipClass: 'bg-[#dcfce7] text-[#15803d]',
-  },
-  other: {
-    icon: '📎',
-    label: '其他',
-    chipClass: 'bg-bg-subtle text-text-2',
-  },
 }
 
 // ---------------------------------------------------------------------------
@@ -100,7 +52,7 @@ function pickPreviewLine(body: string): string {
 // ---------------------------------------------------------------------------
 
 export function AuxFileCard({ aux, onOpen }: AuxFileCardProps) {
-  const meta = USAGE_TAG_META[aux.usage_tag]
+  const meta = AUX_USAGE_META[aux.usage_tag]
   const preview = pickPreviewLine(aux.body)
 
   const handleClick = () => {

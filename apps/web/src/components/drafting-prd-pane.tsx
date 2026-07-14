@@ -7,6 +7,7 @@ import {
   validateLaunch,
   type DraftingData,
 } from '@/lib/drafting'
+import { formatRelativeTime } from '@/lib/format'
 import { PrdAnchorBar } from './prd-anchor-bar'
 
 /**
@@ -284,22 +285,4 @@ export function DraftingPrdPane({ data }: DraftingPrdPaneProps) {
       </div>
     </section>
   )
-}
-
-// ============================================================================
-// 工具
-// ============================================================================
-
-/**
- * 简单的"x 秒前 / x 分钟前"格式化。
- * mock 用,实际项目可替换为 dayjs / date-fns。
- */
-function formatRelativeTime(iso: string): string {
-  const then = new Date(iso).getTime()
-  const diff = Date.now() - then
-  if (diff < 0) return '刚刚'
-  if (diff < 5_000) return '刚刚'
-  if (diff < 60_000) return `${Math.round(diff / 1000)} 秒前`
-  if (diff < 3_600_000) return `${Math.round(diff / 60_000)} 分钟前`
-  return new Date(iso).toLocaleTimeString()
 }

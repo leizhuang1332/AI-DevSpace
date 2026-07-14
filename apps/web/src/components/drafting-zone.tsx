@@ -11,6 +11,7 @@ import {
 import { DraftingPrdPane } from './drafting-prd-pane'
 import { AuxFilesPane } from './aux-files-pane'
 import { DraggableDivider } from './draggable-divider'
+import { AuxDrawer } from './aux-drawer'
 
 /**
  * DRAFTING 工位组件(issue 02 + issue 04)
@@ -42,9 +43,15 @@ import { DraggableDivider } from './draggable-divider'
  * - 容器高度由 ref 实测;窗口 resize 时重测,以保证 clamp 永远反映当前布局
  *
  * 不在本组件范围(后续 ticket 引入):
- * - 辅助文件点击 → 抽屉(issue 05):占位 no-op,后续 `onOpen` 接到抽屉
  * - 新建/上传 → mock 转换(issue 06):占位 no-op
  * - 仓库底部条 + 软警告(issue 08)
+ *
+ * issue 05 已实现:
+ * - 辅助文件点击 → 打开右侧 60% 抽屉(AuxDrawer)
+ * - 抽屉宽度 60%(min 520 / max 880)+ 半透明 backdrop + Escape / ✕ / 点击遮罩关闭
+ * - 抽屉内的编辑内容由父组件(DraftingZone)的 `auxBodies` 跨生命周期持久
+ *   —— 关闭再开同一文件,内容不丢
+ * - 单一抽屉:openAuxId 是 string | null;同时只能打开一个
  */
 
 export function DraftingZone({ data }: { data: DraftingData }) {
@@ -52,6 +59,22 @@ export function DraftingZone({ data }: { data: DraftingData }) {
   // 上下分割比例(issue 04)
   // -------------------------------------------------------------------------
   const [prdRatio, setPrdRatio] = useState<number>(DEFAULT_PRD_RATIO)
+
+  // -------------------------------------------------------------------------
+  // 辅助文件抽屉状态(issue 05)
+  // - `openAuxId`:当前打开的 aux file id;null = 抽屉关闭
+  //   单一抽屉语义:string | null 即可天然保证"同时只一个"
+  //   切换文件由父组件直接 setOpenAuxId(新 id);AuxDrawer 接住后自动重置内容
+  // - `auxBodies`:per-file 跨抽屉生命周期的编辑内容
+  //   (打开 → 编辑 → 关闭 → 再打开,内容恢复)
+  // -------------------------------------------------------------------------
+  const [openAuxId, setOpenAuxId] = useState<string | null>(null)
+  const [auxBodies, setAuxBodies] = useState<Record<string, string>>({})
+
+  /** 受控回调 —— AuxDrawer 通知 body 变化 */
+  const handleAuxBodyChange = useCallback((id: string, newBody: string) => {
+    setAuxBodies((prev) => ({ ...prev, [id]: newBody }))
+  }, [])
 
   /** 主区(split-row)DOM 引用,用于实测高度 + clamp 计算 */
   const splitContainerRef = useRef<HTMLDivElement | null>(null)
@@ -142,14 +165,17 @@ export function DraftingZone({ data }: { data: DraftingData }) {
   }, [])
 
   // -------------------------------------------------------------------------
-  // 辅助文件 / 新建点击 → issue 05/06 占位 no-op(后续接入抽屉 / mock 转换)
+  // 辅助文件 / 新建点击(issue 05/06)
   // -------------------------------------------------------------------------
   const handleAuxOpen = useCallback((auxId: string) => {
-    // issue 05:打开抽屉显示该 aux file;本期先 console.info 占位
-    if (typeof window !== 'undefined') {
-      // eslint-disable-next-line no-console
-      console.info('[drafting-aux] open', { auxId })
-    }
+    // issue 05:打开抽屉显示该 aux file
+    // - 单一抽屉语义:如果点击另一张卡片,直接切换(无需手动 close)
+    // - editedBodies 已经持久所有之前的编辑,切换不会丢
+    setOpenAuxId(auxId)
+  }, [])
+
+  const handleAuxClose = useCallback(() => {
+    setOpenAuxId(null)
   }, [])
 
   const handleAuxCreate = useCallback(() => {
@@ -233,6 +259,19 @@ export function DraftingZone({ data }: { data: DraftingData }) {
           </div>
         </div>
       </div>
+
+      {/* 辅助文件抽屉(issue 05) —— 用 portal 思路直接渲染在主元素末尾,
+          固定定位 + 高 z-index 覆盖全屏。父组件(DraftingZone)持有:
+          - 当前打开文件 id(openAuxId)
+          - 跨生命周期编辑内容(auxBodies) */}
+      <AuxDrawer
+        openAuxId={openAuxId}
+        auxFiles={data.auxFiles}
+        auxBodies={auxBodies}
+        onClose={handleAuxClose}
+        onBodyChange={handleAuxBodyChange}
+        autosaveIntervalMs={data.autosaveIntervalMs}
+      />
     </main>
   )
 }
