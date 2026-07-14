@@ -1,14 +1,15 @@
 import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest'
-import { render, screen, cleanup, within, act } from '@testing-library/react'
+import { render, screen, cleanup, within, act, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { DraftingZone } from '@/components/drafting-zone'
 import {
   emptyDrafting,
   getDraftingData,
 } from '@/lib/drafting'
+import { generatePrdSkeleton } from '@ai-devspace/shared'
 
 // ============================================================================
-// Router mock — DraftingForm 用 useRouter().push 跳到 ANALYZING 工位
+// Router mock — DraftingPrdPane 用 useRouter().push 跳到 ANALYZING 工位
 // ============================================================================
 
 const routerPush = vi.fn()
@@ -28,11 +29,11 @@ beforeEach(() => {
 })
 
 // ============================================================================
-// 满数据渲染(对应原型 11a)
+// 满数据渲染(对应原型 19-final-drafting 的 PRD 顶置区域)
 // ============================================================================
 
 describe('DraftingZone · 满数据渲染', () => {
-  it('根节点 + toolbar + Form 容器存在', async () => {
+  it('根节点 + toolbar + PRD 卡片存在', async () => {
     const data = await getDraftingData('req-001')
     render(<DraftingZone data={data} />)
 
@@ -40,72 +41,49 @@ describe('DraftingZone · 满数据渲染', () => {
     expect(root.getAttribute('data-empty')).toBe('false')
     expect(root.getAttribute('data-requirement-id')).toBe('req-001')
 
-    // toolbar
+    // toolbar(壳层)
     expect(screen.getByTestId('drafting-toolbar')).toBeInTheDocument()
     expect(screen.getByTestId('drafting-toolbar-crumb')).toBeInTheDocument()
-    expect(screen.getByTestId('drafting-toolbar-status').textContent).toContain('草稿')
 
-    // 主区 Form
+    // 主区 PRD 卡片(issue 02)
     expect(screen.getByTestId('drafting-main')).toBeInTheDocument()
-    expect(screen.getByTestId('drafting-form')).toBeInTheDocument()
+    expect(screen.getByTestId('drafting-prd-pane')).toBeInTheDocument()
+    expect(screen.getByTestId('drafting-prd-card')).toBeInTheDocument()
   })
 
-  it('Form 标题 / PRD 编辑器 / AC 列表 / 仓库 chips 渲染', async () => {
+  it('PRD 卡片头显示 "PRD" badge + "主文档" 标题 + 自动保存指示(无则隐藏)', async () => {
     const data = await getDraftingData('req-001')
     render(<DraftingZone data={data} />)
 
-    // 标题 input
+    const head = screen.getByTestId('drafting-prd-head')
+    expect(within(head).getByTestId('drafting-prd-badge')).toBeInTheDocument()
+    expect(head.textContent).toContain('主文档')
+
+    // lastSavedAt=null 时不渲染时间戳(本期样例未保存过)
+    expect(screen.queryByTestId('drafting-autosaved')).toBeNull()
+  })
+
+  it('标题 input 渲染并带初始值', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+
     const title = screen.getByTestId('drafting-title') as HTMLInputElement
     expect(title).toBeInTheDocument()
     expect(title.value).toContain('退款')
+  })
 
-    // PRD 编辑器
+  it('PRD 编辑器渲染(含 toolbar + textarea + 字符计数)', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+
     expect(screen.getByTestId('drafting-editor')).toBeInTheDocument()
     expect(screen.getByTestId('drafting-editor-toolbar')).toBeInTheDocument()
     const prd = screen.getByTestId('drafting-prd') as HTMLTextAreaElement
     expect(prd).toBeInTheDocument()
     expect(prd.value.length).toBeGreaterThan(0)
-
-    // AC 列表
-    const acList = screen.getByTestId('drafting-ac')
-    const acItems = within(acList).getAllByTestId('drafting-ac-item')
-    expect(acItems.length).toBe(3)
-    acItems.forEach((item) => {
-      const input = within(item).getByTestId('drafting-ac-input') as HTMLInputElement
-      expect(input.value.length).toBeGreaterThan(0)
-    })
-
-    // 仓库 chips(通过 data-repo 属性筛)
-    const repoGroup = screen.getByTestId('drafting-repos')
-    const chips = within(repoGroup).getAllByTestId(/^drafting-repo-chip-/)
-    expect(chips.length).toBeGreaterThan(0)
-  })
-
-  it('底部动作按钮:保存草稿 + 创建并启动 AI 分析', async () => {
-    const data = await getDraftingData('req-001')
-    render(<DraftingZone data={data} />)
-
-    const saveBtn = screen.getByTestId('drafting-action-save')
-    const launchBtn = screen.getByTestId('drafting-action-launch')
-    expect(saveBtn).toBeInTheDocument()
-    expect(saveBtn.textContent).toContain('保存草稿')
-    expect(launchBtn).toBeInTheDocument()
-    expect(launchBtn.textContent).toContain('创建并启动 AI 分析')
-    expect(launchBtn.getAttribute('data-variant')).toBe('primary')
-    expect(launchBtn.getAttribute('disabled')).toBeNull() // 满数据 → 可提交
-  })
-
-  it('主区编辑器可见(issue 01 后:PRD 大纲改由 issue 03 顶部锚点栏承载,本测试仅校验主区编辑器与字符计数)', async () => {
-    const data = await getDraftingData('req-001')
-    render(<DraftingZone data={data} />)
-
-    // PRD 编辑器与 textarea 可见
-    expect(screen.getByTestId('drafting-editor')).toBeInTheDocument()
-    const prd = screen.getByTestId('drafting-prd') as HTMLTextAreaElement
-    expect(prd).toBeInTheDocument()
-    expect(prd.value.length).toBeGreaterThan(0)
-    // PRD 字符计数可见
-    expect(screen.getByTestId('drafting-markdown-chars')).toBeInTheDocument()
+    // 字符计数
+    const chars = screen.getByTestId('drafting-markdown-chars')
+    expect(chars.getAttribute('data-chars')).toBe(String(prd.value.length))
   })
 
   it('面包屑:DRAFTING 工位的当前态标记', async () => {
@@ -122,154 +100,240 @@ describe('DraftingZone · 满数据渲染', () => {
 })
 
 // ============================================================================
-// 表单交互:AC 增删 + 仓库多选
+// 骨架自动填充(issue 02 验收 #2)
 // ============================================================================
 
-describe('DraftingZone · 表单交互', () => {
-  it('添加 AC 按钮 → 列表追加一条', async () => {
-    const data = await getDraftingData('req-001')
-    render(<DraftingZone data={data} />)
-    const user = userEvent.setup()
-
-    const before = screen.getAllByTestId('drafting-ac-item').length
-    await user.click(screen.getByTestId('drafting-ac-add'))
-    const after = screen.getAllByTestId('drafting-ac-item').length
-    expect(after).toBe(before + 1)
-  })
-
-  it('删除 AC → 列表减少一条', async () => {
-    const data = await getDraftingData('req-001')
-    render(<DraftingZone data={data} />)
-    const user = userEvent.setup()
-
-    const before = screen.getAllByTestId('drafting-ac-item').length
-    const firstItem = screen.getAllByTestId('drafting-ac-item')[0]
-    const removeBtn = within(firstItem).getByTestId('drafting-ac-remove')
-    await user.click(removeBtn)
-    const after = screen.getAllByTestId('drafting-ac-item').length
-    expect(after).toBe(before - 1)
-  })
-
-  it('AC 勾选切换', async () => {
-    const data = await getDraftingData('req-001')
-    render(<DraftingZone data={data} />)
-    const user = userEvent.setup()
-
-    const firstItem = screen.getAllByTestId('drafting-ac-item')[0]
-    expect(firstItem.getAttribute('data-checked')).toBe('false')
-    await user.click(within(firstItem).getByTestId('drafting-ac-toggle'))
-    expect(firstItem.getAttribute('data-checked')).toBe('true')
-  })
-
-  it('仓库 chip 点击 → 切换 selected', async () => {
-    const data = await getDraftingData('req-001')
-    render(<DraftingZone data={data} />)
-    const user = userEvent.setup()
-
-    // 选一个未选的 chip("coupon-service")
-    const coupon = screen.getByTestId('drafting-repo-chip-coupon-service')
-    expect(coupon.getAttribute('data-selected')).toBe('false')
-    await user.click(coupon)
-    expect(coupon.getAttribute('data-selected')).toBe('true')
-
-    // 取消一个已选的
-    const refund = screen.getByTestId('drafting-repo-chip-refund-service')
-    expect(refund.getAttribute('data-selected')).toBe('true')
-    await user.click(refund)
-    expect(refund.getAttribute('data-selected')).toBe('false')
-  })
-
-  it('标题为空时,launch 按钮 disabled;填写标题后恢复', async () => {
-    // 用空数据起手
+describe('DraftingZone · 骨架自动填充', () => {
+  it('empty=true + PRD 为空 → mount 后 PRD textarea 显示骨架内容', () => {
+    // emptyDrafting 默认 title='' prdMarkdown='' empty=true → 触发骨架
     render(<DraftingZone data={emptyDrafting('NEW')} />)
-    const user = userEvent.setup()
 
-    const launchBtn = screen.getByTestId('drafting-action-launch')
-    expect(launchBtn.getAttribute('disabled')).not.toBeNull()
+    const prd = screen.getByTestId('drafting-prd') as HTMLTextAreaElement
+    // generatePrdSkeleton('') 的 fallback H1
+    expect(prd.value).toBe(generatePrdSkeleton(''))
+    // 骨架的 4 个 H2
+    expect(prd.value).toContain('## 背景')
+    expect(prd.value).toContain('## 目标')
+    expect(prd.value).toContain('## 验收标准')
+    expect(prd.value).toContain('## 非目标')
+  })
 
-    // 填标题 → 仍缺 PRD / AC → 仍 disabled
-    const title = screen.getByTestId('drafting-title')
-    await user.type(title, '新需求')
-    expect(launchBtn.getAttribute('disabled')).not.toBeNull()
+  it('empty=true 且 title 非空 → 骨架 H1 与 title 一致', () => {
+    render(
+      <DraftingZone
+        data={{ ...emptyDrafting('NEW'), title: '退款功能优化' }}
+      />,
+    )
 
-    // 缺字段提示文案
-    const missing = screen.getByTestId('drafting-form-missing')
-    expect(missing.getAttribute('data-missing')).toContain('prd')
+    const prd = screen.getByTestId('drafting-prd') as HTMLTextAreaElement
+    expect(prd.value).toBe(generatePrdSkeleton('退款功能优化'))
+    expect(prd.value.startsWith('# 退款功能优化')).toBe(true)
+  })
+
+  it('empty=false(已存 PRD)→ 骨架不覆盖,保留原始内容', async () => {
+    const data = await getDraftingData('req-001')
+    // req-001 prdMarkdown 已是 generatePrdSkeleton('退款功能优化') 的结果
+    const original = data.prdMarkdown
+    render(<DraftingZone data={data} />)
+
+    const prd = screen.getByTestId('drafting-prd') as HTMLTextAreaElement
+    expect(prd.value).toBe(original)
+  })
+
+  it('empty=true 但 PRD 已有内容(异常态)→ 不触发骨架,保留内容', () => {
+    render(
+      <DraftingZone
+        data={{
+          ...emptyDrafting('NEW'),
+          prdMarkdown: '# 已有 PRD\n\n## 自定义\n- 内容',
+          empty: true,
+        }}
+      />,
+    )
+    const prd = screen.getByTestId('drafting-prd') as HTMLTextAreaElement
+    expect(prd.value).toBe('# 已有 PRD\n\n## 自定义\n- 内容')
   })
 })
 
 // ============================================================================
-// 表单交互:PRD Markdown 预览切换 + 字符计数
+// 编辑交互(issue 02 验收 #3)
 // ============================================================================
 
-describe('DraftingZone · PRD 预览切换', () => {
-  it('点击预览按钮 → textarea 隐藏,预览面板出现', async () => {
+describe('DraftingZone · 受控编辑', () => {
+  it('编辑标题 → title state 更新', async () => {
     const data = await getDraftingData('req-001')
     render(<DraftingZone data={data} />)
     const user = userEvent.setup()
 
-    const toggle = screen.getByTestId('drafting-preview-toggle')
-    expect(toggle.getAttribute('data-active')).toBe('false')
-
-    await user.click(toggle)
-    expect(toggle.getAttribute('data-active')).toBe('true')
-    expect(screen.getByTestId('drafting-preview')).toBeInTheDocument()
-    expect(screen.queryByTestId('drafting-prd')).toBeNull()
+    const title = screen.getByTestId('drafting-title') as HTMLInputElement
+    await user.clear(title)
+    await user.type(title, 'X')
+    expect(title.value).toBe('X')
   })
 
-  it('字符计数随 PRD 内容变化', async () => {
+  it('编辑 PRD → prdMarkdown state 更新(字符计数同步)', async () => {
     const data = await getDraftingData('req-001')
     render(<DraftingZone data={data} />)
     const user = userEvent.setup()
 
-    const counter = screen.getByTestId('drafting-markdown-chars')
-    const before = parseInt(counter.getAttribute('data-chars') ?? '0', 10)
-
-    const prd = screen.getByTestId('drafting-prd')
-    await user.click(prd) // focus
+    const prd = screen.getByTestId('drafting-prd') as HTMLTextAreaElement
+    const before = prd.value.length
+    await user.click(prd)
     await user.keyboard('xxx')
-
-    const after = parseInt(counter.getAttribute('data-chars') ?? '0', 10)
-    expect(after).toBeGreaterThan(before)
+    expect(prd.value.length).toBe(before + 3)
+    // 字符计数同步
+    expect(
+      screen.getByTestId('drafting-markdown-chars').getAttribute('data-chars'),
+    ).toBe(String(prd.value.length))
   })
-})
 
-// ============================================================================
-// 表单交互:保存草稿 + 启动 AI 分析
-// ============================================================================
-
-describe('DraftingZone · 底部动作', () => {
-  it('[💾 保存草稿] 触发自动保存时间戳', async () => {
+  it('title 与 PRD 各自独立(title 不写入 PRD H1)', async () => {
     const data = await getDraftingData('req-001')
     render(<DraftingZone data={data} />)
     const user = userEvent.setup()
 
-    await user.click(screen.getByTestId('drafting-action-save'))
-    const saved = screen.getByTestId('drafting-autosaved')
-    expect(saved).toBeInTheDocument()
-    expect(saved.getAttribute('data-saved-at')).toBeTruthy()
+    const title = screen.getByTestId('drafting-title') as HTMLInputElement
+    await user.clear(title)
+    await user.type(title, '新标题')
+
+    const prd = screen.getByTestId('drafting-prd') as HTMLTextAreaElement
+    // PRD H1 仍为原始 "退款功能优化",没有跟随 title 变化
+    expect(prd.value).toContain('# 退款功能优化')
+    expect(prd.value).not.toContain('# 新标题')
+  })
+})
+
+// ============================================================================
+// 自动保存(issue 02 验收 #4)
+// ============================================================================
+
+describe('DraftingZone · 自动保存', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
   })
 
-  it('[🚀 创建并启动 AI 分析] 跳转到 ANALYZING 工位路由', async () => {
+  it('表单有内容 → 30s 后出现 "已保存 · x 秒前" 时间戳', async () => {
+    const data = await getDraftingData('req-001')
+    // req-001 PRD 已有内容 → 应触发自动保存
+    render(<DraftingZone data={data} />)
+    // 起始 lastSavedAt=null → 时间戳不渲染
+    expect(screen.queryByTestId('drafting-autosaved')).toBeNull()
+    act(() => {
+      vi.advanceTimersByTime(30_000)
+    })
+    expect(screen.getByTestId('drafting-autosaved')).toBeInTheDocument()
+  })
+
+  it('clearing all content suppresses the autosave tick —— 实际交互场景', async () => {
+    // 真实场景:用户清空 PRD → PRD 为空时 autosave 不再 tick
+    // (骨架默认有内容,故需要先清空 PRD 才能验证 suppress)
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+
+    // 用 fireEvent 直接修改 React 状态(避免 userEvent + fake timers 集成问题)
+    const prd = screen.getByTestId('drafting-prd') as HTMLTextAreaElement
+    fireEvent.change(prd, { target: { value: '' } })
+    fireEvent.change(screen.getByTestId('drafting-title'), { target: { value: '' } })
+
+    act(() => {
+      vi.advanceTimersByTime(60_000)
+    })
+    expect(screen.queryByTestId('drafting-autosaved')).toBeNull()
+  })
+
+  it('卸载组件时清理定时器(不漏报内存泄漏警告)', () => {
+    const { unmount } = render(<DraftingZone data={emptyDrafting('NEW')} />)
+    expect(() => unmount()).not.toThrow()
+  })
+})
+
+// ============================================================================
+// 启动动作(issue 02 验收 #5 #6 #7 #8)
+// ============================================================================
+
+describe('DraftingZone · 启动 ANALYZING', () => {
+  it('按钮文案为 "▶ 进入 ANALYZING"', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+
+    const btn = screen.getByTestId('drafting-action-launch')
+    expect(btn).toBeInTheDocument()
+    expect(btn.textContent).toContain('▶ 进入 ANALYZING')
+    expect(btn.getAttribute('data-variant')).toBe('primary')
+  })
+
+  it('title + PRD 均有内容 → 按钮 enabled 且点击跳到 /requirements/<id>/analyzing/', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+
+    const btn = screen.getByTestId('drafting-action-launch')
+    expect(btn.getAttribute('disabled')).toBeNull()
+
+    await user.click(btn)
+    expect(routerPush).toHaveBeenCalledWith('/requirements/req-001/analyzing/')
+  })
+
+  it('title 为空 → 按钮 disabled 且点击不触发跳转', async () => {
+    // 用 empty=true + 手工写 title='' 的场景无法直接构造(骨架会覆盖 PRD)
+    // → 通过 user 清空 title 触发
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+
+    await user.clear(screen.getByTestId('drafting-title'))
+    const btn = screen.getByTestId('drafting-action-launch')
+    expect(btn.getAttribute('disabled')).not.toBeNull()
+
+    await user.click(btn)
+    expect(routerPush).not.toHaveBeenCalled()
+  })
+
+  it('PRD 全空白 → 按钮 disabled', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+
+    await user.clear(screen.getByTestId('drafting-prd'))
+    const btn = screen.getByTestId('drafting-action-launch')
+    expect(btn.getAttribute('disabled')).not.toBeNull()
+  })
+
+  it('点击启动按钮不触发任何副作用(mockside routerPush 仅一次)', async () => {
     const data = await getDraftingData('req-001')
     render(<DraftingZone data={data} />)
     const user = userEvent.setup()
 
     await user.click(screen.getByTestId('drafting-action-launch'))
-    expect(routerPush).toHaveBeenCalledWith('/requirements/req-001/analyzing/')
+    // 仅 1 次 push,无其他 API 调用 / 状态变更
+    expect(routerPush).toHaveBeenCalledTimes(1)
   })
 
-  it('空草稿点击 launch 时不跳转(disabled)', async () => {
+  it('disabled 时点击 → 不跳转(disabled 按钮被 userEvent silent no-op)', async () => {
     render(<DraftingZone data={emptyDrafting('NEW')} />)
     const user = userEvent.setup()
 
-    // 1) 按钮必须 disabled(防止误触发)
     const btn = screen.getByTestId('drafting-action-launch')
     expect(btn.getAttribute('disabled')).not.toBeNull()
-
-    // 2) userEvent 对 disabled 按钮会 silently no-op,模拟点击不应触发跳转
     await user.click(btn)
     expect(routerPush).not.toHaveBeenCalled()
+  })
+
+  it('不依赖仓库或辅助文件 —— 满数据 + 空仓库/辅助也能 launch', async () => {
+    // 构造一个不带 repos/auxFiles 的数据(issue 02 数据层已无这些字段)
+    const data = {
+      ...emptyDrafting('req-002'),
+      title: '退款',
+      prdMarkdown: generatePrdSkeleton('退款'),
+      empty: false,
+    }
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+
+    const btn = screen.getByTestId('drafting-action-launch')
+    expect(btn.getAttribute('disabled')).toBeNull()
+    await user.click(btn)
+    expect(routerPush).toHaveBeenCalledWith('/requirements/req-002/analyzing/')
   })
 })
 
@@ -278,56 +342,45 @@ describe('DraftingZone · 底部动作', () => {
 // ============================================================================
 
 describe('DraftingZone · 空数据', () => {
-  it('empty=true 时仍渲染 Form 容器,字段全部为空', () => {
+  it('empty=true → launch 按钮 disabled + PRD 字段被骨架填充', () => {
     render(<DraftingZone data={emptyDrafting('NEW')} />)
 
-    expect(screen.getByTestId('drafting-zone').getAttribute('data-empty')).toBe('true')
-    expect((screen.getByTestId('drafting-title') as HTMLInputElement).value).toBe('')
-    expect((screen.getByTestId('drafting-prd') as HTMLTextAreaElement).value).toBe('')
-    // AC 列表为空(显示"尚无 AC"提示)
-    expect(screen.queryAllByTestId('drafting-ac-item')).toHaveLength(0)
-    // launch 按钮 disabled
-    expect(screen.getByTestId('drafting-action-launch').getAttribute('disabled')).not.toBeNull()
+    expect(screen.getByTestId('drafting-zone').getAttribute('data-empty')).toBe(
+      'true',
+    )
+    expect((screen.getByTestId('drafting-title') as HTMLInputElement).value).toBe(
+      '',
+    )
+    // PRD 已被骨架填充,验证骨架存在即可
+    expect(
+      (screen.getByTestId('drafting-prd') as HTMLTextAreaElement).value,
+    ).toContain('## 背景')
+    // launch 按钮 disabled(title 为空 → canLaunch=false)
+    expect(
+      screen.getByTestId('drafting-action-launch').getAttribute('disabled'),
+    ).not.toBeNull()
   })
 })
 
 // ============================================================================
-// 自动保存定时器 — 30 秒周期(本期 mock:仅 UI 更新)
+// 旧 UI 元素已彻底移除(issue 02 验收 #9)
 // ============================================================================
 
-describe('DraftingZone · 自动保存', () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-  })
-
-  it('表单非空时,30s 后触发自动保存', () => {
-    const data = {
-      ...emptyDrafting('NEW'),
-      title: 't',
-      prdMarkdown: 'p',
-      // 给一条 AC 以让 canSave 触发
-      acceptanceCriteria: [{ id: 'a', text: 'ac', checked: false }],
-    }
+describe('DraftingZone · 旧 UI 元素已移除', () => {
+  it('不再渲染 AC checklist / 添加按钮 / 仓库 chips / 保存草稿按钮', async () => {
+    const data = await getDraftingData('req-001')
     render(<DraftingZone data={data} />)
 
-    expect(screen.queryByTestId('drafting-autosaved')).toBeNull()
-    // 用 act() 包住,确保 React 18 在 fake timers 下也 flush state update
-    act(() => {
-      vi.advanceTimersByTime(30_000)
-    })
-    expect(screen.getByTestId('drafting-autosaved')).toBeInTheDocument()
-  })
-
-  it('表单全空时,30s 后不触发自动保存', () => {
-    render(<DraftingZone data={emptyDrafting('NEW')} />)
-    act(() => {
-      vi.advanceTimersByTime(30_000)
-    })
-    expect(screen.queryByTestId('drafting-autosaved')).toBeNull()
-  })
-
-  it('卸载组件时清理定时器(不漏报内存泄漏警告)', () => {
-    const { unmount } = render(<DraftingZone data={emptyDrafting('NEW')} />)
-    expect(() => unmount()).not.toThrow()
+    // AC checklist
+    expect(screen.queryByTestId('drafting-ac')).toBeNull()
+    expect(screen.queryByTestId('drafting-ac-add')).toBeNull()
+    expect(screen.queryByTestId('drafting-ac-item')).toBeNull()
+    // 仓库多选
+    expect(screen.queryByTestId('drafting-repos')).toBeNull()
+    // 旧保存草稿 action
+    expect(screen.queryByTestId('drafting-action-save')).toBeNull()
+    // 旧"创建并启动 AI 分析"
+    expect(screen.queryByTestId('drafting-action-cancel')).toBeNull()
+    expect(screen.queryByTestId('drafting-form-missing')).toBeNull()
   })
 })

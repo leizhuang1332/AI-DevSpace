@@ -1,31 +1,31 @@
-import { DraftingForm } from './drafting-form'
+import { DraftingPrdPane } from './drafting-prd-pane'
 import type { DraftingData } from '@/lib/drafting'
 
 /**
- * DRAFTING 工位组件(ADR-0011 §6 DRAFTING 布局 · issue 18)
+ * DRAFTING 工位组件(ADR-0011 §6 DRAFTING 布局 · issue 02)
  *
- * 视觉对照基线:[11a-stage-adaptive-draft.html](../../../../docs/design/pages/11a-stage-adaptive-draft.html)
+ * 视觉对照基线:[docs/design/pages/19-final-drafting.html](docs/design/pages/19-final-drafting.html)
+ * 的"PRD 顶置"区域;其他区域(锚点条 / 辅助材料卡片 / 仓库底部条)由后续
+ * issue 03 / 04 / 08 引入,本期不渲染。
  *
- * 布局(由 ZoneShell 提供资源树 + Inline 栏,这里只渲染主区 Form):
+ * 布局(由 ZoneShell 提供右栏 Inline 栏,这里只渲染主区 PRD 卡片):
  * ┌────────────────────────────────────────────────┐
  * │ Toolbar(面包屑 + 自动保存状态)                  │
  * ├────────────────────────────────────────────────┤
- * │ Form 居中(760px)                                │
- * │  - 标题                                          │
- * │  - PRD Markdown                                  │
- * │  - AC 结构化 checklist                           │
- * │  - 关联仓库多选                                  │
- * │  - 底部动作 [💾 保存草稿] [🚀 创建并启动 AI]   │
+ * │ 主区:PRD 卡片(单列)                              │
+ * │  - 标题 input                                     │
+ * │  - PRD Markdown 编辑器                            │
+ * │  - 底部单一动作 [▶ 进入 ANALYZING]              │
  * └────────────────────────────────────────────────┘
  *
- * 数据全部由 props 注入;交互逻辑委托给 DraftingForm('use client')。
- * 资源树 / Inline 栏的 DRAFTING 视图由 ZoneShell 通过 zone.has_resource_tree
- * / zone.has_inline_rail 决定是否渲染(资源树:PRD 大纲;Inline 栏:候命 Skill)。
+ * 数据全部由 props 注入;交互逻辑委托给 DraftingPrdPane('use client')。
+ * Inline 栏(候命 Skill)由 ZoneShell 通过 inlineRailSlot 注入 DraftingSkillRail。
  *
- * 设计要点(与 EXECUTING 样板的差异):
- * - 顶部 toolbar 没有 stage strip —— DRAFTING 没有"任务进度",只有状态文本
- * - Form 居中布局:max-w-[760px] mx-auto(对齐原型 .form 样式)
- * - 主区无 overflow 滚动条(表单自管理滚动;与 EXECUTING 整页滚动不同)
+ * 设计要点(与 issue 18 形态的差异):
+ * - 删除:AC 结构化 checklist / 关联仓库多选 / [💾 保存草稿] 按钮 / 旧"创建并启动
+ *   AI 分析"按钮 → 全部被新 PRD 卡片 + 自动保存 + [▶ 进入 ANALYZING] 取代
+ * - 顶部 toolbar 保留(面包屑导航一致性);状态文本保留但已无内容指示价值
+ * - 主区 1 列 + 右侧 Inline 栏(继承 issue 01:不再渲染左 240px 资源树)
  */
 export function DraftingZone({ data }: { data: DraftingData }) {
   return (
@@ -40,8 +40,8 @@ export function DraftingZone({ data }: { data: DraftingData }) {
         data-testid="drafting-main"
         className="flex-1 overflow-auto p-6 bg-bg"
       >
-        <div className="max-w-[760px] mx-auto">
-          <DraftingForm data={data} />
+        <div className="max-w-[1080px] mx-auto h-full flex flex-col">
+          <DraftingPrdPane data={data} />
         </div>
       </div>
     </main>
@@ -66,7 +66,9 @@ function DraftingToolbar({ toolbar }: { toolbar: DraftingData['toolbar'] }) {
         {toolbar.crumb.map((c, i) => (
           <span
             key={`${c.label}-${i}`}
-            data-testid={c.current ? 'drafting-crumb-current' : 'drafting-crumb-item'}
+            data-testid={
+              c.current ? 'drafting-crumb-current' : 'drafting-crumb-item'
+            }
             data-current={c.current ? 'true' : 'false'}
             className={
               c.current
@@ -86,9 +88,6 @@ function DraftingToolbar({ toolbar }: { toolbar: DraftingData['toolbar'] }) {
           className="text-xs text-text-3"
         >
           {toolbar.statusText}
-        </span>
-        <span className="font-mono text-xs text-text-3">
-          形态:📝 Form
         </span>
       </div>
     </div>
