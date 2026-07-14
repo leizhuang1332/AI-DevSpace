@@ -1,13 +1,67 @@
-import { describe, it, expect, afterEach } from 'vitest'
-import { render, screen, cleanup, within } from '@testing-library/react'
+import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest'
+import { render, screen, cleanup, within, act } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { ExecutingZone } from '@/components/executing-zone'
 import {
   emptyExecuting,
   getExecutingData,
   type ExecutingData,
 } from '@/lib/executing'
+import type { ExecutingAiStatus } from '@/lib/useExecutingSse'
 
 afterEach(() => cleanup())
+
+// ---------------------------------------------------------------------------
+// P4 · Task 8/9/10/11 共享 helper
+// ---------------------------------------------------------------------------
+
+function baseExecutingData(): ExecutingData {
+  return {
+    ...emptyExecuting('REQ-1'),
+    empty: false,
+    dag: {
+      block: { title: '任务 DAG', meta: '0/0', tasks: [] },
+      tasks: [],
+    },
+    diff: { files: [], cumulativeText: 'Diff 流' },
+    aiEvents: [],
+    stage: {
+      badge: '⑤ 编码',
+      title: 'IMPLEMENTING',
+      metaLeft: '',
+      metaCenter: '',
+      metaRight: '',
+    },
+    toolbar: { crumb: [{ label: 'A', current: true }], actions: [] },
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Mock EventSource —— Task 11 顶层接线需要
+// ---------------------------------------------------------------------------
+class MockEventSource {
+  static instances: MockEventSource[] = []
+  url: string
+  onmessage: ((e: { data: string }) => void) | null = null
+  onerror: (() => void) | null = null
+  constructor(url: string) {
+    this.url = url
+    MockEventSource.instances.push(this)
+  }
+  close(): void {}
+  emit(data: unknown): void {
+    this.onmessage?.({ data: JSON.stringify(data) })
+  }
+}
+
+// 用 spy stub globalThis.EventSource;为避免污染其他 test,在 afterEach 还原
+const originalEventSource = (globalThis as Record<string, unknown>)['EventSource']
+function installEventSourceMock(): void {
+  ;(globalThis as Record<string, unknown>)['EventSource'] = MockEventSource
+}
+function restoreEventSourceMock(): void {
+  ;(globalThis as Record<string, unknown>)['EventSource'] = originalEventSource
+}
 
 // ============================================================================
 // 满数据渲染 — 三列 Mission Control 布局
@@ -313,5 +367,241 @@ describe('ExecutingZone · 错误态(边界)', () => {
     render(<ExecutingZone data={data} />)
     expect(screen.getByText('暂无 AI 事件')).toBeInTheDocument()
     expect(screen.getByTestId('executing-ai-time-range').textContent).toBe('—')
+  })
+})
+
+// ============================================================================
+// P4 · Task 8:StageStrip status 徽章
+// ============================================================================
+
+/**
+ * 通过直接 emit MockEventSource 事件让 reducer 把 status 从 idle 推到目标状态,
+ * 这样 real useExecutingSse(无 mock) + StatusBadge 真实渲染路径都被覆盖。
+ */
+function renderWithStatus(opts: {
+  sessionId?: string | null
+  reqId?: string
+  emit?: (es: MockEventSource) => void
+}) {
+  installEventSourceMock()
+  const data: ExecutingData = {
+    ...baseExecutingData(),
+    sessionId: opts.sessionId ?? null,
+    reqId: opts.reqId ?? 'REQ-1',
+  }
+  const view = render(<ExecutingZone data={data} />)
+  const es = MockEventSource.instances[MockEventSource.instances.length - 1]
+  if (es && opts.emit !== undefined) {
+    const emit = opts.emit
+    act(() => emit(es))
+  }
+  return { view, es, container: view.container }
+}
+
+describe('ExecutingZone · StageStrip status badge', () => {
+  beforeEach(() => {
+    MockEventSource.instances = []
+    installEventSourceMock()
+  })
+  afterEach(() => {
+    MockEventSource.instances = []
+    restoreEventSourceMock()
+    cleanup()
+  })
+
+  it.each<[(es: MockEventSource) => void, ExecutingAiStatus['kind']]>([
+    [
+      (es) => {
+        es.emit({
+          type: 'retrying', reqId: 'r', sessionId: 's', runId: 'run-1', ts: 0,
+          category: 'A', retry: 1, maxRetries: 3, delayMs: 1000, message: '',
+        })
+      },
+      'retrying',
+    ],
+    [
+      (es) => {
+        es.emit({
+          type: 'retrying', reqId: 'r', sessionId: 's', runId: 'run-1', ts: 0,
+          category: 'A', retry: 1, maxRetries: 3, delayMs: 1000, message: '',
+        })
+        es.emit({
+          type: 'query_failed', reqId: 'r', sessionId: 's', runId: 'run-1', ts: 0,
+          category: 'B', code: '401', message: 'auth failed', retryable: false,
+        })
+      },
+      'failed',
+    ],
+    [
+      (es) => {
+        es.emit({
+          type: 'query_cancelled', reqId: 'r', sessionId: 's', runId: 'run-1', ts: 0,
+        })
+      },
+      'cancelled',
+    ],
+  ])('renders badge for status=%s', (emitFn, kind) => {
+    const { container } = renderWithStatus({
+      sessionId: 's',
+      reqId: 'r',
+      emit: emitFn,
+    })
+    const badge = container.querySelector('[data-testid="executing-stage-status"]')
+    expect(badge).not.toBeNull()
+    expect(badge?.getAttribute('data-status')).toBe(kind)
+  })
+
+  it('renders no badge when status=idle', () => {
+    // sessionId 为 null 不连 EventSource,status 保 idle
+    installEventSourceMock()
+    const data: ExecutingData = { ...baseExecutingData(), sessionId: null }
+    const { container } = render(<ExecutingZone data={data} />)
+    expect(container.querySelector('[data-testid="executing-stage-status"]')).toBeNull()
+    restoreEventSourceMock()
+  })
+})
+
+// ============================================================================
+// P4 · Task 9:Toolbar 重试按钮
+// ============================================================================
+
+describe('ExecutingZone · Toolbar retry button', () => {
+  beforeEach(() => {
+    MockEventSource.instances = []
+    installEventSourceMock()
+  })
+  afterEach(() => {
+    MockEventSource.instances = []
+    restoreEventSourceMock()
+    cleanup()
+  })
+
+  it('shows retry button only when status=failed', () => {
+    // running → 无 retry
+    const dataRunning: ExecutingData = { ...baseExecutingData(), sessionId: 's', reqId: 'r' }
+    render(<ExecutingZone data={dataRunning} />)
+    expect(screen.queryByTestId('executing-toolbar-retry')).toBeNull()
+    cleanup()
+
+    // failed → 有 retry
+    const dataFailed: ExecutingData = { ...baseExecutingData(), sessionId: 's2', reqId: 'r2' }
+    render(<ExecutingZone data={dataFailed} />)
+    const es2 = MockEventSource.instances[MockEventSource.instances.length - 1]
+    act(() => {
+      es2?.emit({
+        type: 'retrying', reqId: 'r2', sessionId: 's2', runId: 'run-1', ts: 0,
+        category: 'A', retry: 1, maxRetries: 3, delayMs: 1000, message: '',
+      })
+      es2?.emit({
+        type: 'query_failed', reqId: 'r2', sessionId: 's2', runId: 'run-1', ts: 0,
+        category: 'B', code: '401', message: '', retryable: false,
+      })
+    })
+    expect(screen.getByTestId('executing-toolbar-retry')).toBeInTheDocument()
+  })
+})
+
+// ============================================================================
+// P4 · Task 10:AIEventColumn cancelled marker
+// ============================================================================
+
+describe('ExecutingZone · AIEventColumn cancelled marker', () => {
+  beforeEach(() => {
+    MockEventSource.instances = []
+    installEventSourceMock()
+  })
+  afterEach(() => {
+    MockEventSource.instances = []
+    restoreEventSourceMock()
+    cleanup()
+  })
+
+  it('renders cancelled marker when query_cancelled arrives', () => {
+    const data: ExecutingData = { ...baseExecutingData(), sessionId: 's', reqId: 'r' }
+    render(<ExecutingZone data={data} />)
+    const es = MockEventSource.instances[MockEventSource.instances.length - 1]
+    act(() => {
+      es?.emit({
+        type: 'query_cancelled', reqId: 'r', sessionId: 's', runId: 'run-1', ts: 0,
+      })
+    })
+    const marker = screen.getByTestId('executing-ai-event-cancelled-marker')
+    expect(marker.getAttribute('data-tone')).toBe('warn')
+    expect(marker.textContent).toContain('已停止')
+  })
+
+  it('does not render marker when idle', () => {
+    const data: ExecutingData = { ...baseExecutingData(), sessionId: null }
+    const { container } = render(<ExecutingZone data={data} />)
+    expect(container.querySelector('[data-testid="executing-ai-event-cancelled-marker"]')).toBeNull()
+  })
+})
+
+// ============================================================================
+// P4 · Task 11:顶层接线(useExecutingSse + Toast)
+// ============================================================================
+
+describe('ExecutingZone · top-level wiring', () => {
+  beforeEach(() => {
+    MockEventSource.instances = []
+    installEventSourceMock()
+  })
+  afterEach(() => {
+    MockEventSource.instances = []
+    restoreEventSourceMock()
+    cleanup()
+    vi.restoreAllMocks()
+  })
+
+  it('connects to EventSource when sessionId present', () => {
+    const data: ExecutingData = { ...baseExecutingData(), sessionId: 'sid-1', reqId: 'r1' }
+    render(<ExecutingZone data={data} />)
+    expect(MockEventSource.instances.length).toBeGreaterThan(0)
+    expect(MockEventSource.instances[0].url).toContain('/events?reqId=r1')
+  })
+
+  it('does not connect when sessionId=null', () => {
+    const data: ExecutingData = { ...baseExecutingData(), sessionId: null }
+    render(<ExecutingZone data={data} />)
+    expect(MockEventSource.instances.length).toBe(0)
+  })
+
+  it('pops warn toast when retrying event arrives', async () => {
+    const data: ExecutingData = { ...baseExecutingData(), sessionId: 's', reqId: 'r' }
+    render(<ExecutingZone data={data} />)
+    const es = MockEventSource.instances[MockEventSource.instances.length - 1]
+    act(() => {
+      es?.emit({
+        type: 'retrying', reqId: 'r', sessionId: 's', runId: 'run-1', ts: 0,
+        category: 'A', retry: 1, maxRetries: 3, delayMs: 1000, message: '',
+      })
+    })
+    expect(await screen.findByText(/连接异常,重试中 1\/3/)).toBeInTheDocument()
+  })
+
+  it('pops err toast when retry() rejects', async () => {
+    const user = userEvent.setup()
+    // mock fetch 让它返回 500 → retry() reject → handleRetry 弹 err toast
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () => new Response('{}', { status: 500 })) as never
+    try {
+      const data: ExecutingData = { ...baseExecutingData(), sessionId: 's', reqId: 'r' }
+      render(<ExecutingZone data={data} />)
+      const es = MockEventSource.instances[MockEventSource.instances.length - 1]
+      act(() => {
+        es?.emit({
+          type: 'retrying', reqId: 'r', sessionId: 's', runId: 'run-1', ts: 0,
+          category: 'A', retry: 1, maxRetries: 3, delayMs: 1000, message: '',
+        })
+        es?.emit({
+          type: 'query_failed', reqId: 'r', sessionId: 's', runId: 'run-1', ts: 0,
+          category: 'B', code: '401', message: '', retryable: false,
+        })
+      })
+      await user.click(screen.getByTestId('executing-toolbar-retry'))
+      expect(await screen.findByText(/重试请求失败/)).toBeInTheDocument()
+    } finally {
+      globalThis.fetch = originalFetch
+    }
   })
 })

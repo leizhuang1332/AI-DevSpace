@@ -148,6 +148,10 @@ export interface ExecutingData {
   aiEvents: AIEvent[]
   /** 空数据(无产物 / 新建需求)→ UI 渲染空态引导 */
   empty: boolean
+  /** P4 · Task 8:当前会话 localSid,供 useExecutingSse hook 订阅 SSE;不存在时退化为 idle */
+  sessionId?: string | null
+  /** P4 · Task 8:需求 id(reqId),与 sessionId 配套 */
+  reqId?: string
 }
 
 // ---------------------------------------------------------------------------

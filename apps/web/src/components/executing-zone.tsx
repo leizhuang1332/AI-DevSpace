@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { useCallback, useEffect, useState } from 'react'
 import {
   type AIEvent,
   type AIEventTone,
@@ -15,6 +16,9 @@ import {
   summarizeDagStats,
 } from '@/lib/executing'
 import { EmptyState } from './empty-state'
+import { useExecutingSse, type ExecutingAiStatus } from '@/lib/useExecutingSse'
+import { ToastHost } from './toast-host'
+import type { ToastItem } from './toast'
 
 /**
  * EXECUTING 工位组件(ADR-0011 §6 EXECUTING 布局 · issue 17 样板)
@@ -54,6 +58,47 @@ export function ExecutingZone({ data }: { data: ExecutingData }) {
     )
   }
 
+  // P4 · Task 11:hook 接线 —— 仅当 sessionId 存在才订阅 SSE;否则保 idle
+  const sessionId = data.sessionId ?? null
+  const reqId = data.reqId ?? data.requirementId
+  const { status, retry } = useExecutingSse({ reqId, sessionId, enabled: Boolean(sessionId) })
+
+  // P4 · Task 11:toast 状态 —— retrying 进入时弹 warn,fail 弹 err
+  const [toasts, setToasts] = useState<ToastItem[]>([])
+
+  useEffect(() => {
+    if (status.kind === 'retrying') {
+      setToasts((cur) => [
+        ...cur,
+        {
+          id: cryptoRandomId(),
+          message: `⚠️ 连接异常,重试中 ${status.retry}/${status.maxRetries}`,
+          tone: 'warn',
+          durationMs: 3000,
+        },
+      ])
+    }
+  }, [status])
+
+  const handleRetry = useCallback(async () => {
+    try {
+      await retry()
+    } catch (err) {
+      setToasts((cur) => [
+        ...cur,
+        {
+          id: cryptoRandomId(),
+          message: `❌ 重试请求失败:${err instanceof Error ? err.message : String(err)}`,
+          tone: 'err',
+          durationMs: 5000,
+        },
+      ])
+    }
+  }, [retry])
+
+  const canRetry = status.kind === 'failed'
+  const cancelledAt = status.kind === 'cancelled' ? status.cancelledAt : null
+
   return (
     <main
       data-testid="executing-zone"
@@ -61,18 +106,27 @@ export function ExecutingZone({ data }: { data: ExecutingData }) {
       data-empty="false"
       className="flex flex-col h-full overflow-hidden bg-bg-elevated"
     >
-      <StageStrip stage={data.stage} />
-      <Toolbar toolbar={data.toolbar} />
+      <StageStrip stage={data.stage} status={status} />
+      <Toolbar toolbar={data.toolbar} onRetry={handleRetry} canRetry={canRetry} />
       <div
         data-testid="executing-mc-main"
         className="grid grid-cols-[280px_1fr_320px] flex-1 min-h-0 border-t border-border"
       >
         <DagColumn tasks={data.dag.tasks} block={data.dag.block} />
         <DiffColumn diff={data.diff} />
-        <AIEventColumn events={data.aiEvents} />
+        <AIEventColumn events={data.aiEvents} cancelledAt={cancelledAt} />
       </div>
+      <ToastHost items={toasts} onDismiss={(id) => setToasts((cur) => cur.filter((t) => t.id !== id))} />
     </main>
   )
+}
+
+/** 简易 uuid;toast 列表 keyed 用 */
+function cryptoRandomId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID()
+  }
+  return `id-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
 
 // ============================================================================
@@ -99,7 +153,7 @@ function EmptyExecuting({ data }: { data: ExecutingData }) {
 // Stage strip(顶部状态条)
 // ============================================================================
 
-function StageStrip({ stage }: { stage: StageData }) {
+function StageStrip({ stage, status }: { stage: StageData; status: ExecutingAiStatus }) {
   return (
     <div
       data-testid="executing-stage-strip"
@@ -113,6 +167,7 @@ function StageStrip({ stage }: { stage: StageData }) {
           {stage.badge}
         </span>
         <span data-testid="executing-stage-title">{stage.title}</span>
+        <StatusBadge status={status} />
       </div>
       <div
         data-testid="executing-stage-meta"
@@ -128,11 +183,58 @@ function StageStrip({ stage }: { stage: StageData }) {
   )
 }
 
+/** P4 · Task 8:在 StageStrip 标题旁附加 query 状态徽章 */
+function StatusBadge({ status }: { status: ExecutingAiStatus }): JSX.Element | null {
+  if (status.kind === 'idle' || status.kind === 'running') return null
+  if (status.kind === 'retrying') {
+    return (
+      <span
+        data-testid="executing-stage-status"
+        data-status="retrying"
+        className="bg-[#fef3c7] text-[#92400e] text-xs font-medium px-2 py-0.5 rounded animate-pulse"
+      >
+        ⚠️ 重试中 {status.retry}/{status.maxRetries}({status.category})
+      </span>
+    )
+  }
+  if (status.kind === 'failed') {
+    return (
+      <span
+        data-testid="executing-stage-status"
+        data-status="failed"
+        className="bg-[#fee2e2] text-[#991b1b] text-xs font-medium px-2 py-0.5 rounded"
+      >
+        ❌ 失败 · {status.category} · {status.code}
+      </span>
+    )
+  }
+  if (status.kind === 'cancelled') {
+    return (
+      <span
+        data-testid="executing-stage-status"
+        data-status="cancelled"
+        className="bg-bg-subtle text-text-3 text-xs font-medium px-2 py-0.5 rounded"
+      >
+        ⏸ 已停止
+      </span>
+    )
+  }
+  return null
+}
+
 // ============================================================================
 // Toolbar(面包屑 + 动作按钮)
 // ============================================================================
 
-function Toolbar({ toolbar }: { toolbar: ToolbarData }) {
+function Toolbar({
+  toolbar,
+  onRetry,
+  canRetry,
+}: {
+  toolbar: ToolbarData
+  onRetry: () => void
+  canRetry: boolean
+}) {
   return (
     <div
       data-testid="executing-toolbar"
@@ -143,6 +245,16 @@ function Toolbar({ toolbar }: { toolbar: ToolbarData }) {
         {toolbar.actions.map((a, i) => (
           <ToolbarActionButton key={`${a.label}-${i}`} action={a} />
         ))}
+        {canRetry && (
+          <button
+            type="button"
+            data-testid="executing-toolbar-retry"
+            onClick={onRetry}
+            className="inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-sm font-medium bg-bg-elevated text-error border border-error hover:bg-[#fef2f2]"
+          >
+            🔄 重试
+          </button>
+        )}
       </div>
     </div>
   )
@@ -483,7 +595,13 @@ function DiffLineRow({ line }: { line: DiffLine }) {
 // AI 行为流列(320px)
 // ============================================================================
 
-function AIEventColumn({ events }: { events: AIEvent[] }) {
+function AIEventColumn({
+  events,
+  cancelledAt,
+}: {
+  events: AIEvent[]
+  cancelledAt: string | null
+}) {
   return (
     <aside
       data-testid="executing-ai-col"
@@ -502,10 +620,24 @@ function AIEventColumn({ events }: { events: AIEvent[] }) {
             : '—'}
         </span>
       </header>
-      {events.length === 0 ? (
+      {events.length === 0 && cancelledAt === null ? (
         <p className="text-text-3 text-sm">暂无 AI 事件</p>
       ) : (
-        events.map((e) => <AIEventCard key={e.id} event={e} />)
+        <>
+          {events.map((e) => <AIEventCard key={e.id} event={e} />)}
+          {cancelledAt !== null && (
+            <article
+              data-testid="executing-ai-event-cancelled-marker"
+              data-tone="warn"
+              className="bg-bg-subtle rounded-md p-3 text-sm border-l-[3px] border-l-warning"
+            >
+              <div className="font-mono text-xs text-text-3 mb-0.5">{cancelledAt}</div>
+              <div className="font-medium text-text-1 flex items-center gap-1.5">
+                ⏸ 已停止
+              </div>
+            </article>
+          )}
+        </>
       )}
     </aside>
   )
