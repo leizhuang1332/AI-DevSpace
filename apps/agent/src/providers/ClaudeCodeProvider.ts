@@ -12,7 +12,7 @@
  *   防止 SDK 子进程 / 上游 API 同时并发超过限额
  * - **Native api_retry 还原** —— SDK 内部 HTTP 层重试的 system 事件,以
  *   envelope(retrying) → AIEvent.retrying 单向透传;不进入 AISession 的 retry loop
- * - **shutdown 顺序** —— 先 circuitBreaker.close()(拒绝所有队列中的 waiter),
+ * - **shutdown 顺序** —— 先 providerSemaphore.close()(拒绝所有队列中的 waiter),
  *   再清 queryFn 缓存(已经走完的 query 自然退出)
  */
 
@@ -31,8 +31,8 @@ import type {
   SystemPromptAssembler,
   AssemblerRequirement,
 } from '../prompt/SystemPromptAssembler.js'
-import type { CircuitBreaker } from '../error/CircuitBreaker.js'
-import { CircuitBreaker as DefaultCircuitBreaker } from '../error/CircuitBreaker.js'
+import type { ProviderSemaphore } from '../error/ProviderSemaphore.js'
+import { ProviderSemaphore as DefaultProviderSemaphore } from '../error/ProviderSemaphore.js'
 import type { SessionLogger } from '../log/SessionLogger.js'
 import type { GlobalLogger } from '../log/GlobalLogger.js'
 
@@ -64,7 +64,7 @@ export interface ClaudeCodeProviderOptions {
   /** Q5:system prompt 装配器 —— Provider 注入到新建的 AiSession,使其在每次 send() 自动装配 */
   assembler?: SystemPromptAssembler
   /** Task 3:Provider 共享 FIFO limiter(默认 5 slots);null 表示不限制 */
-  circuitBreaker?: CircuitBreaker | null
+  providerSemaphore?: ProviderSemaphore | null
   /** Task 5:retry sleep 钩子(测试可注入) */
   retrySleep?: RetrySleep
   /** Task 4:session 级 query 日志 */
@@ -260,9 +260,9 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
   const globalLogger = opts.globalLogger
 
   // Task 7:Provider 共享的 FIFO limiter(顶层只创建一次);null 表示不限流
-  const circuitBreaker: CircuitBreaker | null = opts.circuitBreaker === null
+  const providerSemaphore: ProviderSemaphore | null = opts.providerSemaphore === null
     ? null
-    : (opts.circuitBreaker ?? new DefaultCircuitBreaker({ limit: 5 }))
+    : (opts.providerSemaphore ?? new DefaultProviderSemaphore({ limit: 5 }))
 
   /** Lazy import SDK —— 避免启动时拉 cli 子进程 */
   let cachedQuery: QueryFn | null = opts.queryFn ?? null
@@ -395,7 +395,7 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
         initialSdkSessionId: createOpts.resume,
         resolveModel: () => createOpts.model,
         signal: createOpts.signal,
-        circuitBreaker: circuitBreaker ?? undefined,
+        providerSemaphore: providerSemaphore ?? undefined,
         retrySleep,
         sessionLogger,
         globalLogger,
@@ -411,7 +411,7 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
     async shutdown(): Promise<void> {
       // Task 7:shutdown 顺序 —— 先 close limiter(拒绝所有排队中的 waiter),
       // 再清 queryFn 缓存(已经走完的 query 自然退出,正在跑的 query 不被打断)
-      circuitBreaker?.close()
+      providerSemaphore?.close()
       cachedQuery = null
     },
   }

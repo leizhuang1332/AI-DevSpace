@@ -19,7 +19,7 @@ import type {
   ModelSelection,
 } from '../providers/AIProvider.js'
 import type { AIEvent, DoneReason } from '../providers/AIEvent.js'
-import type { CircuitBreaker } from '../error/CircuitBreaker.js'
+import type { ProviderSemaphore } from '../error/ProviderSemaphore.js'
 import { executeWithRetry, RetryFailure } from '../error/RetryStrategy.js'
 import { classifyError } from '../error/ErrorClassifier.js'
 import type { SessionQueryLogInput, SessionLogger } from '../log/SessionLogger.js'
@@ -123,8 +123,8 @@ export interface AiSessionDeps {
   requirement?: AssemblerRequirement
   /** SDK 初始 session id —— 用于断点续传,首次 send() 时使用 */
   initialSdkSessionId?: string
-  /** Provider 共享的 FIFO 限流器 —— 注入后每轮 send() 走 breaker.run() */
-  circuitBreaker?: CircuitBreaker
+  /** Provider 共享的 FIFO 限流器 —— 注入后每轮 send() 走 semaphore.run() */
+  providerSemaphore?: ProviderSemaphore
   /** 重试 sleep 钩子 —— 测试可注入,默认走 abortableSleep */
   retrySleep?: (ms: number, signal?: AbortSignal) => Promise<void>
   /** Session-level query 日志 —— 每次 send() 结束后调用一次 */
@@ -169,7 +169,7 @@ export class AiSession implements IAISession {
   /** 外部 signal —— 通常是上层注入的 AbortController.signal */
   #externalSignal: AbortSignal | undefined
   /** Provider 共享的 FIFO 限流器 */
-  #circuitBreaker: CircuitBreaker | undefined
+  #providerSemaphore: ProviderSemaphore | undefined
   /** 重试 sleep 钩子 */
   #retrySleep: ((ms: number, signal?: AbortSignal) => Promise<void>) | undefined
   /** Session-level query 日志 */
@@ -191,7 +191,7 @@ export class AiSession implements IAISession {
     this.#assembler = deps.assembler
     this.#requirement = deps.requirement
     this.#externalSignal = deps.signal
-    this.#circuitBreaker = deps.circuitBreaker
+    this.#providerSemaphore = deps.providerSemaphore
     this.#retrySleep = deps.retrySleep
     this.#sessionLogger = deps.sessionLogger
     this.#onCancelled = deps.onCancelled
@@ -421,7 +421,7 @@ export class AiSession implements IAISession {
     }
 
     try {
-      if (this.#circuitBreaker) await this.#circuitBreaker.run(execute, signal)
+      if (this.#providerSemaphore) await this.#providerSemaphore.run(execute, signal)
       else await execute()
       this.#state = 'idle'
     } catch (error) {

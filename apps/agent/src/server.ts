@@ -21,7 +21,7 @@ import type { CcSwitchClient } from './providers/CcSwitchClient.js'
 import { createClaudeCodeProvider } from './providers/ClaudeCodeProvider.js'
 import { SessionStore } from './session/SessionStore.js'
 import { MessagesMirror } from './session/MessagesMirror.js'
-import { CircuitBreaker } from './error/CircuitBreaker.js'
+import { ProviderSemaphore } from './error/ProviderSemaphore.js'
 import { SessionLogger } from './log/SessionLogger.js'
 import { GlobalLogger } from './log/GlobalLogger.js'
 
@@ -142,12 +142,12 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
       sessionId: input.localSid,
     }),
   })
-  const circuitBreaker = new CircuitBreaker({ limit: 5 })
+  const providerSemaphore = new ProviderSemaphore({ limit: 5 })
 
   const provider = createClaudeCodeProvider({
     ccSwitch,
     debug: false,
-    circuitBreaker,
+    providerSemaphore,
     sessionLogger,
     globalLogger,
     onSessionCancelled: async ({ localSid }) => {

@@ -1,12 +1,10 @@
 /**
- * Provider-shared concurrency limiter.
+ * ProviderSemaphore — Provider-scoped FIFO concurrency semaphore.
  *
- * NOTE: Despite the historical name `CircuitBreaker`, this is a FIFO concurrency
- * semaphore — it caps the number of in-flight provider queries and queues
- * additional requests in arrival order. It does NOT trip on a failure rate and
- * does NOT behave like a failure-rate circuit breaker. The name is retained so
- * downstream wiring (ClaudeCodeProvider, DI graph) keeps a single injection
- * point across the provider layer.
+ * Enforces a per-Provider in-flight limit (default 5 concurrent queries).
+ * Excess callers await a release function in FIFO order. Renamed from the
+ * historical `CircuitBreaker` (which was misleading: this class does NOT
+ * trip on a failure rate).
  *
  * Behavior:
  * - `limit` concurrent operations (default 5).
@@ -22,13 +20,13 @@ interface Waiter {
   abort?: () => void
 }
 
-export interface CircuitBreakerStats {
+export interface ProviderSemaphoreStats {
   limit: number
   active: number
   queued: number
 }
 
-export class CircuitBreaker {
+export class ProviderSemaphore {
   readonly #limit: number
   #active = 0
   #closed = false
@@ -37,7 +35,7 @@ export class CircuitBreaker {
   constructor(options: { limit?: number } = {}) {
     this.#limit = options.limit ?? 5
     if (!Number.isInteger(this.#limit) || this.#limit < 1) {
-      throw new Error('CircuitBreaker limit must be a positive integer')
+      throw new Error('ProviderSemaphore limit must be a positive integer')
     }
   }
 
@@ -50,11 +48,11 @@ export class CircuitBreaker {
     }
   }
 
-  stats(): CircuitBreakerStats {
+  stats(): ProviderSemaphoreStats {
     return { limit: this.#limit, active: this.#active, queued: this.#waiters.length }
   }
 
-  close(reason: unknown = new Error('CircuitBreaker closed')): void {
+  close(reason: unknown = new Error('ProviderSemaphore closed')): void {
     this.#closed = true
     const waiters = this.#waiters.splice(0)
     for (const waiter of waiters) {
@@ -64,7 +62,7 @@ export class CircuitBreaker {
   }
 
   async #acquire(signal?: AbortSignal): Promise<() => void> {
-    if (this.#closed) throw new Error('CircuitBreaker is closed')
+    if (this.#closed) throw new Error('ProviderSemaphore is closed')
     if (signal?.aborted) throw new DOMException('aborted', 'AbortError')
     if (this.#active < this.#limit) {
       this.#active++
