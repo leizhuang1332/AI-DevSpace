@@ -1,0 +1,47 @@
+apps/web/src/components/resource-tree.tsx
+  s_7a0353e6ebb7b3::t_53cdc9f9f2debf 81-86,88,286
+packages/shared/src/__tests__/drafting.test.ts
+  s_7a0353e6ebb7b3::t_0c698e8beff74c 1-152,155-272
+  s_7a0353e6ebb7b3::t_dd3eda26d5776a 153-154
+packages/shared/src/drafting.ts
+  s_7a0353e6ebb7b3::t_2f795621134728 1-162,164-166,168,172-173,175-288
+  s_7a0353e6ebb7b3::t_fc37350391b754 163,167,169-171,174
+apps/web/src/lib/zone-shell.tsx
+  s_7a0353e6ebb7b3::t_f5891a258f17c6 4
+  s_7a0353e6ebb7b3::t_0aa43a6cdd0b14 35-38,53
+apps/web/src/__tests__/zone-shell.test.tsx
+  s_7a0353e6ebb7b3::t_54912464566750 12-13
+  s_7a0353e6ebb7b3::t_956c93a59cb863 28-29,51-53,60-61,67-68,76,84,86,138,145
+apps/agent/src/zones/drafting.yaml
+  s_7a0353e6ebb7b3::t_5de12e8a3769cc 10-12
+apps/web/src/__tests__/drafting-zone.test.tsx
+  s_7a0353e6ebb7b3::t_856f1d560932b0 98
+apps/web/src/app/(workspace)/requirements/[id]/[zone]/page.tsx
+  s_7a0353e6ebb7b3::t_cc19aa0a9be168 34,36-37,42-44,68-69
+apps/web/src/lib/__tests__/zones.test.ts
+  s_7a0353e6ebb7b3::t_deab51ef592ff4 48,51-52
+apps/web/src/lib/zones.ts
+  s_7a0353e6ebb7b3::t_514abce70fdf50 63-65
+docs/adr/0011-requirement-workbench-zone-adaptive.md
+  s_7a0353e6ebb7b3::t_37f679453cc1dd 104,111-115
+docs/adr/0012-requirement-workbench-shell-topology.md
+  s_7a0353e6ebb7b3::t_07e424fff91241 231,238-242
+packages/shared/src/index.ts
+  s_7a0353e6ebb7b3::t_30eb74d1ae907d 7-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "8fd7b6544188dae4064ac34873465d685f8d3105",
+  "prompts": {},
+  "sessions": {
+    "s_7a0353e6ebb7b3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "58ce6d4a-e0ac-49ec-958f-214bd90d7b09",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
