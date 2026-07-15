@@ -130,6 +130,9 @@ pnpm agent:stop
 后续 issue（Agent SSE / workspace 初始化 / 需求 CRUD / 仓库 worktree / AI 对话面板 / 内置 Skill 等）按
 PRD §11 实施路线推进。
 
+## 产品介绍
+[概览](images/概览.jpeg)
+
 ## 许可
 
-未指定。
+MIT License。
