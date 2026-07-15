@@ -307,6 +307,326 @@ describe('DraftingZone · 上传流程(issue 06 验收 #4 #5 #6)', () => {
 })
 
 // ============================================================================
+// PRD 预览 / 链接 → 抽屉切换(issue 07 验收 #1 #2 #7 #8)
+// ============================================================================
+
+describe('DraftingZone · PRD 预览 + 相对链接 → 抽屉(issue 07)', () => {
+  afterEach(() => cleanup())
+
+  /** 准备一个带有辅助文件的 DRAFTING 数据 */
+  function dataWithAux(): ReturnType<typeof emptyDrafting> {
+    const d = emptyDrafting('req-001')
+    d.empty = false
+    d.prdMarkdown = [
+      '# 退款功能优化',
+      '',
+      '## 验收标准',
+      '',
+      '- 成功率 ≥ 99%',
+      '- 详情见 [API 草案](./api-draft.md)',
+      '',
+    ].join('\n')
+    d.auxFiles = [
+      {
+        id: 'aux-api',
+        filename: 'api-draft.md',
+        body: '# API',
+        usage_tag: 'api',
+        source_format: 'md',
+        converted_to_md: false,
+      },
+      {
+        id: 'aux-data',
+        filename: 'data-model.md',
+        body: '# Data',
+        usage_tag: 'data',
+        source_format: 'md',
+        converted_to_md: false,
+      },
+    ]
+    return d
+  }
+
+  it('PRD 编辑器默认显示 textarea,不存在预览容器', () => {
+    render(<DraftingZone data={dataWithAux()} />)
+    expect(screen.getByTestId('drafting-prd')).toBeInTheDocument()
+    expect(screen.queryByTestId('drafting-prd-preview')).toBeNull()
+  })
+
+  it('点击 "👁 预览" → textarea 消失,预览容器出现', async () => {
+    const user = userEvent.setup()
+    render(<DraftingZone data={dataWithAux()} />)
+    await user.click(screen.getByTestId('drafting-prd-toggle-preview'))
+    expect(screen.queryByTestId('drafting-prd')).toBeNull()
+    expect(screen.getByTestId('drafting-prd-preview')).toBeInTheDocument()
+    // 预览容器内含 MarkdownPreview
+    expect(
+      screen.getByTestId('drafting-prd-preview').querySelector(
+        '[data-testid="markdown-preview"]',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('预览模式下点击合法相对链接 → 抽屉打开对应文件', async () => {
+    const user = userEvent.setup()
+    render(<DraftingZone data={dataWithAux()} />)
+    await user.click(screen.getByTestId('drafting-prd-toggle-preview'))
+
+    // 预览中应有 1 个解析成功的链接
+    const link = screen.getByTestId('md-preview-link')
+    expect(link.getAttribute('data-resolved-filename')).toBe('api-draft.md')
+
+    await user.click(link)
+    // 抽屉打开并显示目标文件
+    expect(screen.getByTestId('aux-drawer')).toBeInTheDocument()
+    expect(screen.getByTestId('aux-drawer-filename').textContent).toBe(
+      'api-draft.md',
+    )
+  })
+
+  it('预览模式下点击外部 URL 链接 → 不打开抽屉', async () => {
+    const user = userEvent.setup()
+    const d = dataWithAux()
+    d.prdMarkdown = '看 [官网](https://example.com)\n'
+    render(<DraftingZone data={d} />)
+    await user.click(screen.getByTestId('drafting-prd-toggle-preview'))
+
+    await user.click(screen.getByTestId('md-preview-link-ignored'))
+    expect(screen.queryByTestId('aux-drawer')).toBeNull()
+  })
+
+  it('预览模式下点击 .. 穿越链接 → 不打开抽屉', async () => {
+    const user = userEvent.setup()
+    const d = dataWithAux()
+    d.prdMarkdown = '[evil](../../api-draft.md)\n'
+    render(<DraftingZone data={d} />)
+    await user.click(screen.getByTestId('drafting-prd-toggle-preview'))
+
+    await user.click(screen.getByTestId('md-preview-link-ignored'))
+    expect(screen.queryByTestId('aux-drawer')).toBeNull()
+  })
+
+  it('点击 "✏ 编辑" → 预览关闭,textarea 恢复', async () => {
+    const user = userEvent.setup()
+    render(<DraftingZone data={dataWithAux()} />)
+    await user.click(screen.getByTestId('drafting-prd-toggle-preview'))
+    expect(screen.queryByTestId('drafting-prd')).toBeNull()
+    // 再次点击切回编辑
+    await user.click(screen.getByTestId('drafting-prd-toggle-preview'))
+    expect(screen.getByTestId('drafting-prd')).toBeInTheDocument()
+    expect(screen.queryByTestId('drafting-prd-preview')).toBeNull()
+  })
+})
+
+// ============================================================================
+// 抽屉切换行为(issue 07 验收 #7 #8)
+// ============================================================================
+
+describe('DraftingZone · 抽屉切换(issue 07 验收 #7 #8)', () => {
+  afterEach(() => cleanup())
+
+  function dataWithAux(): ReturnType<typeof emptyDrafting> {
+    const d = emptyDrafting('req-001')
+    d.empty = false
+    d.prdMarkdown = [
+      '# PRD',
+      '',
+      '- 见 [API](./api-draft.md)',
+      '- 见 [Data](./data-model.md)',
+      '',
+    ].join('\n')
+    d.auxFiles = [
+      {
+        id: 'aux-api',
+        filename: 'api-draft.md',
+        body: '# API body',
+        usage_tag: 'api',
+        source_format: 'md',
+        converted_to_md: false,
+      },
+      {
+        id: 'aux-data',
+        filename: 'data-model.md',
+        body: '# Data body',
+        usage_tag: 'data',
+        source_format: 'md',
+        converted_to_md: false,
+      },
+    ]
+    return d
+  }
+
+  it('抽屉已打开 → 点击预览中另一个链接 → 抽屉切换(不开第二个)', async () => {
+    const user = userEvent.setup()
+    render(<DraftingZone data={dataWithAux()} />)
+
+    // 1) 先打开第一个文件(走卡片,模拟 issue 04/05 流程)
+    const apiCard = screen
+      .getAllByTestId('aux-card')
+      .find((c) => c.getAttribute('data-aux-id') === 'aux-api')!
+    await user.click(apiCard)
+    expect(screen.getByTestId('aux-drawer')).toBeInTheDocument()
+    expect(screen.getByTestId('aux-drawer-filename').textContent).toBe(
+      'api-draft.md',
+    )
+
+    // 2) 进入预览模式 + 点击 Data 链接
+    await user.click(screen.getByTestId('drafting-prd-toggle-preview'))
+    const dataLink = screen
+      .getAllByTestId('md-preview-link')
+      .find((l) => l.getAttribute('data-resolved-filename') === 'data-model.md')!
+    await user.click(dataLink)
+
+    // 3) 同一个抽屉,内容切换到 data-model.md
+    expect(screen.getAllByTestId('aux-drawer')).toHaveLength(1)
+    expect(screen.getByTestId('aux-drawer-filename').textContent).toBe(
+      'data-model.md',
+    )
+  })
+
+  it('抽屉已打开 → 点击预览中同一文件链接 → 抽屉保持(不开第二个)', async () => {
+    const user = userEvent.setup()
+    render(<DraftingZone data={dataWithAux()} />)
+
+    await user.click(screen.getByTestId('drafting-prd-toggle-preview'))
+    const apiLink = screen
+      .getAllByTestId('md-preview-link')
+      .find((l) => l.getAttribute('data-resolved-filename') === 'api-draft.md')!
+    await user.click(apiLink)
+    expect(screen.getByTestId('aux-drawer')).toBeInTheDocument()
+
+    // 再次点击同一链接 → 仍然只有一个抽屉,filename 不变
+    await user.click(apiLink)
+    expect(screen.getAllByTestId('aux-drawer')).toHaveLength(1)
+    expect(screen.getByTestId('aux-drawer-filename').textContent).toBe(
+      'api-draft.md',
+    )
+  })
+
+  it('辅助文件预览内点击链接到另一个辅助文件 → 抽屉切换', async () => {
+    const user = userEvent.setup()
+    render(<DraftingZone data={dataWithAux()} />)
+
+    // 1) 打开 api-draft 的抽屉
+    const apiCard = screen
+      .getAllByTestId('aux-card')
+      .find((c) => c.getAttribute('data-aux-id') === 'aux-api')!
+    await user.click(apiCard)
+
+    // 2) 修改 api-draft 的 body,使其包含到 data-model 的链接
+    const ta = screen.getByTestId('aux-drawer-editor') as HTMLTextAreaElement
+    fireEvent.change(ta, {
+      target: { value: '# API\n\n详情见 [Data](./data-model.md)\n' },
+    })
+
+    // 3) 切换到预览模式
+    await user.click(screen.getByTestId('aux-drawer-toggle-preview'))
+
+    // 4) 点击链接 → 抽屉切换到 data-model.md
+    const link = screen.getByTestId('md-preview-link')
+    expect(link.getAttribute('data-resolved-filename')).toBe('data-model.md')
+    await user.click(link)
+
+    expect(screen.getAllByTestId('aux-drawer')).toHaveLength(1)
+    expect(screen.getByTestId('aux-drawer-filename').textContent).toBe(
+      'data-model.md',
+    )
+  })
+
+  it('辅助文件初始 body 含 aux 链接 → 抽屉打开后切预览即可点击切换', async () => {
+    // 验收 #8 完整覆盖:不依赖"先编辑再预览",而是从 AuxFile.body 自带的链接出发。
+    // 这里 data-model 的初始 body 已包含到 api-draft 的链接。
+    const user = userEvent.setup()
+    const d = dataWithAux()
+    d.auxFiles = d.auxFiles.map((a) =>
+      a.id === 'aux-data'
+        ? {
+            ...a,
+            body: '# Data\n\n关联 [API](./api-draft.md)\n',
+          }
+        : a,
+    )
+    render(<DraftingZone data={d} />)
+
+    // 1) 直接打开 data-model(它的初始 body 自带 aux 链接)
+    const dataCard = screen
+      .getAllByTestId('aux-card')
+      .find((c) => c.getAttribute('data-aux-id') === 'aux-data')!
+    await user.click(dataCard)
+    expect(screen.getByTestId('aux-drawer-filename').textContent).toBe(
+      'data-model.md',
+    )
+
+    // 2) 切预览(无需先编辑)
+    await user.click(screen.getByTestId('aux-drawer-toggle-preview'))
+    const link = screen.getByTestId('md-preview-link')
+    expect(link.getAttribute('data-resolved-filename')).toBe('api-draft.md')
+    await user.click(link)
+
+    // 3) 抽屉切换到 api-draft.md,且只有 1 个抽屉
+    expect(screen.getAllByTestId('aux-drawer')).toHaveLength(1)
+    expect(screen.getByTestId('aux-drawer-filename').textContent).toBe(
+      'api-draft.md',
+    )
+  })
+
+  it('辅助文件预览 → 点击链接到第三个文件 → 抽屉切换到第三个文件(连续切换)', async () => {
+    // 验收 #7 补全:之前只验证 "drawer 已开 → 点 PRD 预览链接 → 切换";
+    // 这里验证 "drawer 已开 → 点 aux 预览链接 → 切换到第三个文件"。
+    // 链路:sop-flow →(切到)→ data-model(它的 body 含 [API])→(切到)→ api-draft
+    const user = userEvent.setup()
+    const d = dataWithAux()
+    // 给 data-model 也注入 [API] 链接,实现 sop → data → api 的连续切换
+    d.auxFiles = d.auxFiles.map((a) =>
+      a.id === 'aux-data'
+        ? { ...a, body: '# Data\n\n关联 [API](./api-draft.md)\n' }
+        : a,
+    )
+    // 引入第三个文件 sop-flow,放在 auxFiles 末尾
+    d.auxFiles = [
+      ...d.auxFiles,
+      {
+        id: 'aux-sop',
+        filename: 'sop-flow.md',
+        body: '# SOP\n\n关联 [Data](./data-model.md)\n',
+        usage_tag: 'sop',
+        source_format: 'md',
+        converted_to_md: false,
+      },
+    ]
+    render(<DraftingZone data={d} />)
+
+    // 1) 先打开 sop-flow(它的 body 自带到 data-model 的链接)
+    const sopCard = screen
+      .getAllByTestId('aux-card')
+      .find((c) => c.getAttribute('data-aux-id') === 'aux-sop')!
+    await user.click(sopCard)
+    expect(screen.getByTestId('aux-drawer-filename').textContent).toBe(
+      'sop-flow.md',
+    )
+
+    // 2) 切预览 + 点击链接 → 切到 data-model
+    await user.click(screen.getByTestId('aux-drawer-toggle-preview'))
+    await user.click(screen.getByTestId('md-preview-link'))
+    expect(screen.getAllByTestId('aux-drawer')).toHaveLength(1)
+    expect(screen.getByTestId('aux-drawer-filename').textContent).toBe(
+      'data-model.md',
+    )
+
+    // 3) 此时 data-model 的 body 自带 [API] → 再点一次 → 切到 api-draft
+    // 注意:预览状态会延续(共享 hook,不随 currentFile 重置)
+    const apiLink = screen
+      .getAllByTestId('md-preview-link')
+      .find((l) => l.getAttribute('data-resolved-filename') === 'api-draft.md')!
+    await user.click(apiLink)
+    expect(screen.getAllByTestId('aux-drawer')).toHaveLength(1)
+    expect(screen.getByTestId('aux-drawer-filename').textContent).toBe(
+      'api-draft.md',
+    )
+  })
+})
+
+// ============================================================================
 // helper
 // ============================================================================
 

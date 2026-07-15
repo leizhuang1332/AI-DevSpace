@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AuxFile } from '@ai-devspace/shared'
 import { AUX_USAGE_META } from '@/lib/aux-meta'
 import { formatRelativeTime } from '@/lib/format'
+import { useMarkdownPreviewToggle } from '@/lib/use-markdown-preview-toggle'
+import { MarkdownPreview } from './markdown-preview'
 
 /**
  * 辅助文件抽屉(issue 05)
@@ -66,6 +68,12 @@ export interface AuxDrawerProps {
   onBodyChange: (auxId: string, newBody: string) => void
   /** 自动保存周期(毫秒);与 PRD 一致,默认 30s */
   autosaveIntervalMs: number
+  /**
+   * 点击预览中解析成功的辅助文件链接 → 切换抽屉到目标文件(issue 07)
+   * 单抽屉语义由父组件的 openAuxId 单一值保证 — 传同 id = no-op,
+   * 传新 id = 切换(验收 #7)。
+   */
+  onAuxLinkClick?: (target: AuxFile) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -90,6 +98,7 @@ export function AuxDrawer({
   onClose,
   onBodyChange,
   autosaveIntervalMs,
+  onAuxLinkClick,
 }: AuxDrawerProps) {
   // -------------------------------------------------------------------------
   // 受控:openAuxId → 当前文件
@@ -126,6 +135,19 @@ export function AuxDrawer({
   const [body, setBody] = useState<string>('')
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
   const currentFileIdRef = useRef<string | null>(null)
+
+  // -------------------------------------------------------------------------
+  // 预览模式(issue 07)
+  // - true  → MarkdownPreview 渲染(标题 / 段落 / 列表 / 代码块 / 链接)
+  // - false → 原始 textarea 编辑器(issue 05 行为)
+  // - 状态由 useMarkdownPreviewToggle 集中管(与 PRD 顶置共享同一 hook)
+  // - 切换文件时不重置预览开关:hook 持有自身的 useState,不绑定 currentFile,
+  //   文件切换触发的 re-render 不会重置 isPreview
+  // -------------------------------------------------------------------------
+  const previewToggle = useMarkdownPreviewToggle({
+    testId: 'aux-drawer-toggle-preview',
+  })
+  const isPreview = previewToggle.isPreview
 
   useEffect(() => {
     const nextId = currentFile?.id ?? null
@@ -370,6 +392,7 @@ export function AuxDrawer({
             {/* ===== editor ===== */}
             <div
               data-testid="aux-drawer-editor-wrap"
+              data-preview-mode={previewToggle.modeAttr}
               className="flex-1 flex flex-col min-h-0"
             >
               {/* editor toolbar — 与 PRD 编辑器一致的格式符号 */}
@@ -384,7 +407,11 @@ export function AuxDrawer({
                 <b>H1</b>
                 <b>&lt;/&gt;</b>
                 <span>· 列表</span>
-                <span className="ml-auto font-mono text-xs">
+                <span className="ml-auto font-mono text-xs flex items-center gap-3">
+                  {/* issue 07:👁 预览 / ✏ 编辑 切换按钮(共享 useMarkdownPreviewToggle) */}
+                  <button {...previewToggle.buttonProps}>
+                    {previewToggle.label}
+                  </button>
                   <span
                     data-testid="aux-drawer-editor-chars"
                     data-chars={body.length}
@@ -393,15 +420,29 @@ export function AuxDrawer({
                   </span>
                 </span>
               </div>
-              <textarea
-                data-testid="aux-drawer-editor"
-                aria-label={`编辑 ${file.filename} 内容`}
-                value={body}
-                onChange={(e) => handleBodyChange(e.target.value)}
-                spellCheck={false}
-                placeholder={`# ${file.filename}\n\n<!-- 在这里编辑该辅助文件内容 -->`}
-                className="w-full flex-1 min-h-[260px] border-none p-3 font-mono text-sm leading-relaxed text-text-1 bg-bg-elevated resize-none focus:outline-none"
-              />
+              {isPreview ? (
+                <div
+                  data-testid="aux-drawer-preview"
+                  className="flex-1 overflow-auto p-4 bg-bg-elevated"
+                >
+                  <MarkdownPreview
+                    markdown={body}
+                    currentFile={file.filename}
+                    auxFiles={auxFiles}
+                    onAuxLinkClick={onAuxLinkClick}
+                  />
+                </div>
+              ) : (
+                <textarea
+                  data-testid="aux-drawer-editor"
+                  aria-label={`编辑 ${file.filename} 内容`}
+                  value={body}
+                  onChange={(e) => handleBodyChange(e.target.value)}
+                  spellCheck={false}
+                  placeholder={`# ${file.filename}\n\n<!-- 在这里编辑该辅助文件内容 -->`}
+                  className="w-full flex-1 min-h-[260px] border-none p-3 font-mono text-sm leading-relaxed text-text-1 bg-bg-elevated resize-none focus:outline-none"
+                />
+              )}
             </div>
           </div>
         </div>

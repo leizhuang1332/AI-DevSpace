@@ -5,17 +5,20 @@ import { useRouter } from 'next/navigation'
 import {
   generatePrdSkeleton,
   validateLaunch,
+  type AuxFile,
   type DraftingData,
 } from '@/lib/drafting'
 import { formatRelativeTime } from '@/lib/format'
+import { useMarkdownPreviewToggle } from '@/lib/use-markdown-preview-toggle'
 import { PrdAnchorBar } from './prd-anchor-bar'
+import { MarkdownPreview } from './markdown-preview'
 
 /**
  * DRAFTING 工位的 PRD 顶置面板(issue 02 · 已扩展 issue 03 锚点条)
  *
  * 视觉对照基线:[docs/design/pages/19-final-drafting.html](docs/design/pages/19-final-drafting.html)
  *
- * 布局(issue 02 + issue 03 扩展):
+ * 布局(issue 02 + issue 03 扩展 + issue 07 预览):
  * ┌──────────────────────────────────────────────────┐
  * │ PRD · 主文档              已保存 · x 秒前          │
  * ├──────────────────────────────────────────────────┤
@@ -24,9 +27,9 @@ import { PrdAnchorBar } from './prd-anchor-bar'
  * │ ┌─ anchor-bar ─────────────────────────────────┐ │
  * │ │ 大纲 ▾ H1 退款 ... H2 背景 ... H2 目标 ...     │ │
  * │ ├─ ed-toolbar ─────────────────────────────────┤ │
- * │ │ B I H1 · xxxx chars                          │ │
+ * │ │ B I H1 · 👁预览 · xxxx chars                  │ │
  * │ ├──────────────────────────────────────────────┤ │
- * │ │ # PRD Markdown 编辑区 (textarea)             │ │
+ * │ │ # PRD Markdown 编辑区 (textarea / 预览)        │ │
  * │ └──────────────────────────────────────────────┘ │
  * ├──────────────────────────────────────────────────┤
  * │                            [▶ 进入 ANALYZING]    │
@@ -48,9 +51,14 @@ import { PrdAnchorBar } from './prd-anchor-bar'
  */
 export interface DraftingPrdPaneProps {
   data: DraftingData
+  /**
+   * 点击预览中解析成功的辅助文件链接 → 打开/切换抽屉
+   * (issue 07 验收 #2 #7;Drawer 单文件语义天然保证 "switch drawer")
+   */
+  onAuxLinkClick?: (target: AuxFile) => void
 }
 
-export function DraftingPrdPane({ data }: DraftingPrdPaneProps) {
+export function DraftingPrdPane({ data, onAuxLinkClick }: DraftingPrdPaneProps) {
   const router = useRouter()
 
   // -------------------------------------------------------------------------
@@ -59,6 +67,18 @@ export function DraftingPrdPane({ data }: DraftingPrdPaneProps) {
   const [title, setTitle] = useState(data.title)
   const [prdMarkdown, setPrdMarkdown] = useState(data.prdMarkdown)
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(data.lastSavedAt)
+
+  // -------------------------------------------------------------------------
+  // 预览模式开关(issue 07)
+  // - true  → MarkdownPreview 渲染(标题 / 段落 / 列表 / 代码块 / 链接)
+  // - false → 原始 textarea 编辑器(issue 02/03 行为)
+  // - 状态由 useMarkdownPreviewToggle 集中管,与 aux-drawer 共用同一 hook
+  //   避免两份相同 toggle 逻辑漂移
+  // -------------------------------------------------------------------------
+  const previewToggle = useMarkdownPreviewToggle({
+    testId: 'drafting-prd-toggle-preview',
+  })
+  const isPreview = previewToggle.isPreview
 
   // -------------------------------------------------------------------------
   // PRD textarea ref —— issue 03 锚点条点击时用于滚动定位 / 移动光标
@@ -220,6 +240,7 @@ export function DraftingPrdPane({ data }: DraftingPrdPaneProps) {
             <PrdAnchorBar markdown={prdMarkdown} onJumpTo={handleJumpToLine} />
             <div
               data-testid="drafting-editor"
+              data-preview-mode={previewToggle.modeAttr}
               className="border border-border-strong rounded-md rounded-tl-none rounded-tr-none overflow-hidden flex flex-col flex-1 min-h-0"
             >
               <div
@@ -233,7 +254,11 @@ export function DraftingPrdPane({ data }: DraftingPrdPaneProps) {
                 <b>H1</b>
                 <b>&lt;/&gt;</b>
                 <span>· 列表</span>
-                <span className="ml-auto font-mono text-xs">
+                <span className="ml-auto font-mono text-xs flex items-center gap-3">
+                  {/* issue 07:👁 预览 / ✏ 编辑 切换按钮(共享 useMarkdownPreviewToggle) */}
+                  <button {...previewToggle.buttonProps}>
+                    {previewToggle.label}
+                  </button>
                   <span
                     data-testid="drafting-markdown-chars"
                     data-chars={prdMarkdown.length}
@@ -242,14 +267,28 @@ export function DraftingPrdPane({ data }: DraftingPrdPaneProps) {
                   </span>
                 </span>
               </div>
-              <textarea
-                data-testid="drafting-prd"
-                ref={prdTextareaRef}
-                value={prdMarkdown}
-                onChange={(e) => setPrdMarkdown(e.target.value)}
-                placeholder={`# 需求标题\n\n## 背景\n...\n\n## 目标\n...\n\n## 验收标准\n- [ ] ...\n\n## 非目标\n...`}
-                className="w-full flex-1 min-h-[260px] border-none p-3 font-mono text-sm leading-relaxed text-text-1 bg-bg-elevated resize-none focus:outline-none"
-              />
+              {isPreview ? (
+                <div
+                  data-testid="drafting-prd-preview"
+                  className="flex-1 overflow-auto p-4 bg-bg-elevated"
+                >
+                  <MarkdownPreview
+                    markdown={prdMarkdown}
+                    currentFile="PRD.md"
+                    auxFiles={data.auxFiles}
+                    onAuxLinkClick={onAuxLinkClick}
+                  />
+                </div>
+              ) : (
+                <textarea
+                  data-testid="drafting-prd"
+                  ref={prdTextareaRef}
+                  value={prdMarkdown}
+                  onChange={(e) => setPrdMarkdown(e.target.value)}
+                  placeholder={`# 需求标题\n\n## 背景\n...\n\n## 目标\n...\n\n## 验收标准\n- [ ] ...\n\n## 非目标\n...`}
+                  className="w-full flex-1 min-h-[260px] border-none p-3 font-mono text-sm leading-relaxed text-text-1 bg-bg-elevated resize-none focus:outline-none"
+                />
+              )}
             </div>
           </div>
         </div>

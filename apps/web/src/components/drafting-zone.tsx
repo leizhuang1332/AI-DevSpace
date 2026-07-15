@@ -204,6 +204,21 @@ export function DraftingZone({ data }: { data: DraftingData }) {
     setOpenAuxId(null)
   }, [])
 
+  /**
+   * PRD 预览 / 抽屉预览内点击相对 Markdown 链接 → 打开/切换抽屉(issue 07)
+   *
+   * 单抽屉语义由 `openAuxId` 的单值状态天然保证:
+   * - 抽屉关闭 → 直接打开目标文件
+   * - 抽屉已开 + 不同文件 → 切换(React state setter 替换 id,Drawer useMemo 重新计算 currentFile)
+   * - 抽屉已开 + 同文件 → no-op(setState 同值不触发 re-render)
+   *
+   * 不在此处校验 target 是否存在 —— resolveAuxLink 已经在 MarkdownPreview
+   * 里过滤过;传进来的 target 必然是已知 AuxFile。
+   */
+  const handleAuxLinkClick = useCallback((target: AuxFile) => {
+    setOpenAuxId(target.id)
+  }, [])
+
   /** 头部 "＋ 新建" 按钮 / 空态占位卡 → 打开新建对话框 */
   const handleAuxCreate = useCallback(() => {
     setNewDialogError(null)
@@ -370,7 +385,10 @@ export function DraftingZone({ data }: { data: DraftingData }) {
               style={{ flexGrow: effectiveRatio, minHeight: 0 }}
               className="overflow-hidden"
             >
-              <DraftingPrdPane data={data} />
+              <DraftingPrdPane
+                data={data}
+                onAuxLinkClick={handleAuxLinkClick}
+              />
             </div>
 
             {/* 拖拽分割条 —— 固定 6px 高 */}
@@ -426,6 +444,7 @@ export function DraftingZone({ data }: { data: DraftingData }) {
         onClose={handleAuxClose}
         onBodyChange={handleAuxBodyChange}
         autosaveIntervalMs={data.autosaveIntervalMs}
+        onAuxLinkClick={handleAuxLinkClick}
       />
     </main>
   )
