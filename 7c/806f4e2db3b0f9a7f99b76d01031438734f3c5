@@ -1,0 +1,40 @@
+apps/web/src/components/__tests__/aux-files-pane.test.tsx
+  s_d0f85cc73205ab::t_703ca33277acfa 166-261
+  s_d0f85cc73205ab::t_4e2251109ffcc2 2
+apps/web/src/components/drafting-zone.tsx
+  s_d0f85cc73205ab::t_19040669831240 228,232
+  s_d0f85cc73205ab::t_5da72930568cba 5-8,20,23,37,45-50,52,62-69,71,73,75-79,91-111,197,207,209-210,213-227,229-231,233-333,396,399-400,407-417,424,478
+  s_d0f85cc73205ab::t_1a88d61993da54 70,72,74
+  s_d0f85cc73205ab::t_719f04d2e22c3c 4
+apps/web/src/components/new-aux-file-dialog.tsx
+  s_d0f85cc73205ab::t_59d9ac93c96959 1-275
+apps/web/src/components/aux-files-pane.tsx
+  s_d0f85cc73205ab::t_0fc1506a27b633 3,9,15,25-31,39,41-50,53-62,64,71-89,110,113,118-159,189
+apps/web/src/__tests__/drafting-zone.test.tsx
+  s_d0f85cc73205ab::t_363ee49e375794 967-973
+apps/web/src/components/__tests__/drafting-zone.test.tsx
+  s_d0f85cc73205ab::t_a4b88937f22cd2 96-97,100
+  s_d0f85cc73205ab::t_8ca04ecdcd6229 280-283,285,287,292,294,296-300,303-305
+  s_d0f85cc73205ab::t_870bf8cd2a0efa 291,293,295
+  s_d0f85cc73205ab::t_00c0719f150b19 1-95,98-99,101-276,307-320
+  s_d0f85cc73205ab::t_0b83a561373e79 277-279,284,286,288-290,301-302,306
+apps/web/src/components/__tests__/new-aux-file-dialog.test.tsx
+  s_d0f85cc73205ab::t_ea83c747e02f18 249-251
+  s_d0f85cc73205ab::t_a083876fd3317e 1-248,252-271
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "7c806f4e2db3b0f9a7f99b76d01031438734f3c5",
+  "prompts": {},
+  "sessions": {
+    "s_d0f85cc73205ab": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "16c91bda-6d9e-41af-916a-4e68bacfa25d",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
