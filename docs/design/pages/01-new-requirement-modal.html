@@ -314,7 +314,7 @@ body{
   <a href="#section-2">2 · 弹窗填写中</a>
   <a href="#section-3">3 · 字符实时过滤</a>
   <a href="#section-4">4 · 提交后 DRAFTING</a>
-  <a href="#section-5">5 · 资源树空态</a>
+  <a href="#section-5">5 · RepoBar N=0 空态</a>
   <a href="#section-6">6 · 首次关联仓库</a>
   <a href="#section-7">7 · 追加关联仓库</a>
 </nav>
@@ -555,48 +555,55 @@ body{
   </div>
 </section>
 
-<!-- ===== Section 5: 资源树空态 ===== -->
+<!-- ===== Section 5: 底部 RepoBar N=0 空态 ===== -->
 <section class="section" id="section-5">
   <div class="section-head">
-    <h2>5 · 资源树"仓库"节点空态</h2>
-    <span class="meta">关闭 banner 后,资源树仍是引导入口</span>
+    <h2>5 · 底部 RepoBar N=0 空态</h2>
+    <span class="meta">关闭 banner 后,RepoBar 仍是引导入口(issue 08 扩展)</span>
   </div>
   <div class="section-body">
     <div class="mock-page">
-      <div class="mock-page-flex" style="height:480px">
-        <div class="resource-tree" style="width:260px">
-          <div class="tree-section">
-            <div class="tree-section-head"><span>▼ PRD</span></div>
-            <div class="tree-item">背景</div>
-            <div class="tree-item">目标</div>
-            <div class="tree-item">验收标准</div>
-          </div>
-          <div class="tree-section">
-            <div class="tree-section-head"><span>▶ AC</span></div>
-          </div>
-          <div class="tree-section">
-            <div class="tree-section-head">
-              <span>📦 仓库 (0)</span>
-              <button class="add" title="关联仓库">+</button>
-            </div>
-            <div class="tree-empty-hint">
-              💡 首次添加仓库时会请你填写统一分支名
-            </div>
-          </div>
-        </div>
-        <div class="main-area">
+      <div class="mock-page-flex" style="height:480px;flex-direction:column">
+        <div class="main-area" style="flex:1;display:flex;flex-direction:column">
           <h1 style="margin-bottom:var(--space-2)">退款功能优化</h1>
           <div style="font-size:var(--text-sm);color:var(--text-3);font-family:'JetBrains Mono',monospace;margin-bottom:var(--space-6)">req-007-退款功能优化 · 创建于 刚刚</div>
           <div style="font-size:var(--text-base);color:var(--text-3);font-style:italic">
-            📝 PRD 内容占位…<br><br>
-            <span style="font-size:var(--text-xs)">(顶部 banner 已被关闭,资源树"仓库"节点是当前引导入口)</span>
+            📝 PRD 内容占位(主区上下分割:PRD 卡片 + 辅助文件网格)
           </div>
+        </div>
+        <!-- 底部 RepoBar(N=0 空态,扩展 issue 08) -->
+        <div data-testid="repo-bar-empty" style="
+          border-top:1px solid var(--border);background:var(--bg-elevated);
+          padding:var(--space-3) var(--space-6);
+          display:flex;align-items:center;gap:var(--space-3);
+          position:sticky;bottom:0;
+        ">
+          <span style="font-size:var(--text-xs);color:var(--text-3);font-weight:500">关联仓库</span>
+          <button data-testid="repo-bar-add" style="
+            height:28px;padding:0 var(--space-3);border-radius:var(--radius-md);
+            background:var(--brand-50);border:1px solid var(--brand-500);
+            font-size:var(--text-sm);color:var(--brand-600);cursor:pointer;
+            font-weight:500;
+          ">＋ 添加仓库…</button>
+          <span data-testid="repo-bar-empty-hint" style="
+            font-size:var(--text-xs);color:var(--text-3);margin-left:var(--space-2);
+          ">💡 首次添加仓库时会请你填写统一分支名</span>
+          <span style="
+            margin-left:auto;font-size:var(--text-xs);color:var(--warning);
+          ">⚠ 0 个仓库 · ANALYZING 可能无法完整关联代码上下文</span>
         </div>
       </div>
     </div>
 
     <div class="note">
-      <strong>设计要点:</strong>用户关闭顶部 banner 后,资源树"仓库"节点(<code>📦 仓库 (0)</code> + <code>+</code> 按钮)成为持续引导入口;节点下方浅色 hint 卡解释首次添加会发生什么(填分支名);不闪烁、不推送、零打断(决策 24/43)。
+      <strong>设计要点:</strong>DRAFTING 工位<strong>没有资源树</strong>(参见 <code>apps/web/src/components/drafting-zone.tsx</code> 实际结构);仓库关联 UI 在 <code>apps/web/src/components/repo-bar.tsx</code>(issue 08)以<strong>底部 sticky bar</strong> 形式存在。<strong>本 section 扩展 N=0 空态</strong>:
+      <ul style="margin-top:var(--space-2);padding-left:var(--space-6);font-size:var(--text-sm);color:var(--text-2)">
+        <li>原有 <code>＋ 添加仓库…</code> chip:灰底 → 改 brand-50 淡紫底 + brand-500 边(N=0 引导点击)</li>
+        <li>新增 <code>data-testid="repo-bar-empty-hint"</code>:浅色 hint 文案</li>
+        <li>用户关闭顶部 banner 后,RepoBar 仍是持续引导入口</li>
+        <li>软警告(issue 08 已有):N=0 时右侧显示 <code>⚠ 0 个仓库…</code></li>
+      </ul>
+      不闪烁、不推送、零打断(决策 24/43)。
     </div>
   </div>
 </section>
@@ -605,7 +612,7 @@ body{
 <section class="section" id="section-6">
   <div class="section-head">
     <h2>6 · 首次关联仓库弹层(填统一分支名)</h2>
-    <span class="meta">DRAFTING 资源树 [+] / banner [+] 触发</span>
+    <span class="meta">顶部 banner [+] / RepoBar [＋] chip 触发</span>
   </div>
   <div class="section-body">
     <div class="mock-page">
@@ -739,9 +746,11 @@ body{
 <!-- ===== Footer note ===== -->
 <div style="max-width:1280px;margin:0 auto;padding:var(--space-6);background:#fffbeb;border:1px solid #fde68a;border-radius:var(--radius-md);font-size:var(--text-sm);color:#78350f;line-height:1.7">
   <strong style="color:#451a03">设计说明:</strong>本设计稿是 v1.0.3 完整状态展示,7 个 section 覆盖弹窗全生命周期:<br>
-  §1-3 是弹窗自身状态(空 / 填写 / 过滤);§4 是提交后 DRAFTING 接管(骨架屏 → banner 成功 / 失败);§5-7 是 DRAFTING 工位资源树与关联仓库弹层。<br>
+  §1-3 是弹窗自身状态(空 / 填写 / 过滤);§4 是提交后 DRAFTING 接管(骨架屏 → banner 成功 / 失败);§5-7 是 DRAFTING 工位<strong>底部 RepoBar(issue 08)</strong>与关联仓库弹层。<br>
   <br>
-  <strong>v1.0 → v1.0.3 主要变化:</strong>弹窗 720px → 420px;5 字段 → 1 字段;移除 Skill 链 / PRD / 目标分支 / 关联仓库;新增 slug 实时预览;DRAFTING 顶部 banner + 资源树"仓库"节点承接;新增"统一分支名"在 DRAFTING 首次关联时填。<br>
+  <strong>v1.0 → v1.0.3 主要变化:</strong>弹窗 720px → 420px;5 字段 → 1 字段;移除 Skill 链 / PRD / 目标分支 / 关联仓库;新增 slug 实时预览;DRAFTING 顶部 banner + <strong>底部 RepoBar(issue 08 已存在,扩展 N=0 空态)</strong>承接;新增"统一分支名"在 DRAFTING 首次关联时填。<br>
+  <br>
+  <strong>关键事实(2026-07-15 修订):</strong>DRAFTING 工位<strong>没有资源树</strong>(参见 <code>apps/web/src/components/drafting-zone.tsx</code> 实际结构),仓库关联通过底部 RepoBar 实现。决策 50 表格中"DRAFTING ✅ 仓库"指 RepoBar,不是资源树节点。<br>
   <br>
   <strong>对应决策:</strong>15 / 17 / 24 / 28 / 30 / 36 / 38 / 43 / 50 / 57 / 71。<br>
   <strong>三件套:</strong><a href="../../scratch/new-requirement-modal/PRD.md" style="color:#525bc7">PRD.md</a> · <a href="../../scratch/new-requirement-modal/UI-POLISH-SPEC.md" style="color:#525bc7">UI-POLISH-SPEC.md</a> · <a href="15-new-requirement-modal.html" style="color:#525bc7;color:#525bc7;text-decoration:line-through">15-new-requirement-modal.html (deprecated)</a>

@@ -337,33 +337,49 @@ req-NNN-refund-optimization                  6 / 50
 | 错误文案 | 区分类型:"网络异常" / "鉴权失败" / "磁盘空间不足" |
 | 重试按钮 | 调相同 POST,失败不重试超过 3 次(决策 30) |
 
-### 8.3 资源树"仓库"节点空态
+### 8.3 底部 RepoBar N=0 空态
+
+> 注:DRAFTING 工位**没有资源树**(参见 `apps/web/src/components/drafting-zone.tsx` 实际结构 + issue 18 / 23 演变)。仓库关联 UI 已在 `apps/web/src/components/repo-bar.tsx`(issue 08)以**底部 sticky bar** 形式存在。本节扩展 N=0 空态。
 
 ```html
-<div class="resource-tree-section">
-  <div class="section-head">
-    <span>📦 仓库 (0)</span>
-    <button>+ 添加</button>
-  </div>
-  <div class="empty-hint px-3 py-2 bg-bg-subtle rounded-md 
-              text-xs text-text-3 mt-1">
+<!-- RepoBar N=0 空态(扩展 issue 08) -->
+<div data-testid="repo-bar-empty" class="repo-bar px-4 py-2.5 
+            border-t border-border bg-bg-elevated flex items-center gap-3">
+  <span class="text-xs text-text-3 font-medium">关联仓库</span>
+  <button data-testid="repo-bar-add"
+          class="h-7 px-3 rounded-md bg-brand-50 border border-brand-500 
+                 text-sm text-brand-600 hover:bg-brand-100">
+    ＋ 添加仓库…
+  </button>
+  <span data-testid="repo-bar-empty-hint" 
+        class="text-xs text-text-3 ml-2">
     💡 首次添加仓库时会请你填写统一分支名
-  </div>
+  </span>
+  <span class="ml-auto text-xs text-warning">⚠ 0 个仓库 · ANALYZING 可能无法完整关联代码上下文</span>
 </div>
 ```
 
 | 属性 | 值 |
 |---|---|
-| 节点标题 | "📦 仓库 (0)" |
-| 添加按钮 | "[+]",20x20,text-text-3 hover:text-text-1 |
-| 空态 hint | 浅色背景卡,💡 图标 + 解释文案,11px text-text-3 |
-| 展开后 | 显示已关联 repo 列表(若 N=0 仍显示 hint) |
+| 位置 | sticky bottom,DRAFTING 工作区底部 |
+| 高度 | ~44px |
+| 触发 | 点 `＋ 添加仓库…` chip → 弹 480px"关联仓库"弹层(§9.1) |
+| N=0 视觉 | 原 chip 灰底 → 改 brand-50 淡紫底 + brand-500 边,引导点击 |
+| 空态 hint | `💡 首次添加仓库时会请你填写统一分支名`,11px text-text-3 |
+| 软警告 | 沿用 issue 08 的 `shouldShowRepoSoftWarning()` 函数 + 软警告文案 |
+
+**改动范围**(基于 issue 08 已有 `repo-bar.tsx`):
+
+- 新增 `data-testid="repo-bar-empty"`(N=0 时整条 bar 加这个 testid)
+- 新增 `data-testid="repo-bar-empty-hint"`(N=0 时显示 hint)
+- 复用 issue 08 的 `＋ 添加仓库…` chip,但 N=0 时改 brand 色样式
+- N≥1 时 chip 仍显示(可继续追加仓库,触发 §9.2 简化弹层)
 
 ---
 
 ## 9. 首次关联仓库弹层规范
 
-**触发**:DRAFTING 资源树"仓库"节点 `[+]` 按钮 / banner `[+ 关联仓库]` 按钮 / 追加第 2/3... 个 repo 时的简化弹层。
+**触发**:DRAFTING **顶部 banner** `[+ 关联仓库]` 按钮 / **底部 RepoBar** `＋ 添加仓库…` chip(N=0 首次)/ `＋`(N≥1 追加,触发 §9.2 简化弹层)。两个入口共用同一个 480px 弹层。
 
 ### 9.1 首次关联(N≥1)—— 需填分支名
 
