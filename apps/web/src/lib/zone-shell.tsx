@@ -61,8 +61,10 @@ export interface ZoneShellProps {
   inlineRailSlot?: ReactNode
 }
 
-// ADR-0012 §3 + ADR-0007 继承:workspace shell 层 1 = StatusBar(28px) + ZoneBar(44px) = 72px
-const WORKSPACE_SHELL_OFFSET_PX = 72
+// ADR-0012 §3 + ADR-0007 继承:workspace shell 层 1 = StatusBar(tabs 行,h-10) + ZoneBar(h-11)。
+// 2026-07 删了 StatusBar 的 h-8 第二行("任务上下文条")后,sticky 顶部总高 = 40 + 44 = 84px。
+// 此常量供 calc(100vh - Npx) 减出主内容区高度;若以后 StatusBar 或 ZoneBar 改高度,记得同步。
+const WORKSPACE_SHELL_OFFSET_PX = 84
 
 export function ZoneShell({
   id,

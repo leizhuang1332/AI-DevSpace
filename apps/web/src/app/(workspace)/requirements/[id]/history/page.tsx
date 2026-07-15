@@ -98,7 +98,7 @@ export default function RequirementHistoryPage({ params }: Props) {
         <div className="mt-5 p-4 bg-[#f0f9ff] border border-[#bae6fd] rounded-md text-sm text-[#075985]">
           <strong>设计说明:</strong>时间轴 = 「会话 × 文件变更 × Commit」三流合一。紫色圆点 = Skill 阶段完成,绿色 = Commit,黄色 = 用户决策 / 问答。
           点击卡片 → 跳到对应会话的 markdown(资源树对话节点)或文件 Diff。
-          本 Tab 是「历史回溯」,而 AI 实时的状态变化看 StatusBar / Inline 提示栏。
+          本 Tab 是「历史回溯」,而 AI 实时的状态变化看 Inline 提示栏 / 会话卡(顶部 StatusBar 已精简,只保留需求切换)。
         </div>
       </main>
     </section>

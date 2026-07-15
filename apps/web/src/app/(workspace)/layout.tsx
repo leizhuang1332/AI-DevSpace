@@ -20,7 +20,7 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }) {
     <QueryProvider>
       <UIOverlayProvider>
         <div className="min-h-screen flex flex-col">
-          <StatusBar tabs={requirements} currentId="req-001" aiStatus="thinking" />
+          <StatusBar tabs={requirements} currentId="req-001" />
           <ZoneBar />
           <div className="flex-1 grid grid-cols-[56px_1fr]">
             <Sidebar />

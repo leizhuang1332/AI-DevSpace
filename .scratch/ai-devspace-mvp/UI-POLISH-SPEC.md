@@ -170,20 +170,20 @@ Related: PRD.md
 - ✅ AI 默认隐身，融入系统各面板
 - ✅ 通过 Cmd+K 命令面板主动唤起
 
-### 4.2 顶部状态条（StatusBar，常驻）
+### 4.2 顶部状态条（StatusBar，常驻 —— 2026-07 精简为单行）
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│  [Logo]  [Tab 1: 退款 ●●] [Tab 2: 会员 ○] [+]  ...  │  ← 标签栏
-│                                                          │
-│  退款功能 · 实施中    [紫●●● 思考中...]  [⚠ 3 待回答]  │  ← 状态条
+│  [Tab 1: 退款 ●●] [Tab 2: 会员 ○] [Tab 3: 客服 ○]  ...   │  ← 单行标签栏(h-10)
 └────────────────────────────────────────────────────────────┘
 ```
 
 **职责**：
-- 标签栏：多需求 Tab 切换（`Cmd+T` 新建、`Cmd+W` 关闭、`Cmd+1~9` 切换）
-- 状态条：当前需求的 AI 实时状态
+
+- 多需求 Tab 切换（`Cmd+T` 新建、`Cmd+W` 关闭、`Cmd+1~9` 切换）
+- 当前 Tab 高亮（brand 色）+ 状态色点
 - 永远在视线上方
+- ~~AI 实时状态条~~：2026-07 删除，原占据第二行的「任务上下文 + 🟢思考中 + ⌘K 提示」已下线。AI 状态改由 Inline 提示栏 / 会话卡 / Toast 承载（见 §5.3 / §10.3）
 
 ### 4.3 需求详情页（核心，三栏）
 
@@ -298,39 +298,23 @@ Related: PRD.md
 
 ## 5. 核心组件 API
 
-### 5.1 StatusBar（顶部状态条）
+### 5.1 StatusBar（顶部状态条 —— 2026-07 精简为纯 Tabs 行）
 
 ```typescript
-// packages/web/src/components/status/StatusBar.tsx
+// apps/web/src/components/statusbar.tsx
 interface StatusBarProps {
-  /** 当前激活的需求 ID（从全局 context 拿） */
-  requirementId: string
-  /** AI 状态（SSE 推送） */
-  aiStatus: AIStatusEvent | null
-  /** 需求快照（REST 拉取） */
-  snapshot: RequirementSnapshot
-  /** 错误事件（SSE 推送） */
-  errors: ErrorEvent[]
-  /** 点击状态条 → 打开命令面板 */
-  onOpenCommandPalette: () => void
-  /** 点击错误 → 跳转到详情 */
-  onErrorClick: (event: ErrorEvent) => void
-}
-
-interface AIStatusEvent {
-  event: 'ai.status'
-  requirementId: string
-  state: 'idle' | 'thinking' | 'tool_calling' | 'writing' | 'awaiting_user' | 'error'
-  detail?: {
-    toolName?: string
-    filePath?: string
-    questionCount?: number
-    errorCode?: string
-    errorMessage?: string
-  }
-  startedAt: number
+  /** 当前工作空间的需求 Tab 列表 */
+  tabs: Requirement[]
+  /** 当前激活的需求 ID（用于高亮 Tab） */
+  currentId: string | null
 }
 ```
+
+**变更记录**：
+
+- 2026-07: 删除原本承载「任务上下文 / AI 状态 / ⌘K 提示 / 错误徽章」的下方行（h-8）—— 详见 commit `2b52a66` 之后的清理。
+- 组件保留 `tabs + currentId` 两个最小 prop，不再消费 `aiStatus / snapshot / errors / onOpenCommandPalette / onErrorClick`。
+- AIStatusEvent 接口在下方继续保留（其他模块如 active-session-card、ai-status-dot 仍消费）。
 
 ### 5.2 CommandPalette（命令面板）
 
@@ -388,10 +372,11 @@ interface ToastProps {
 }
 ```
 
-**L1/L2/L3 分层**：
-- L1：状态条文字变化（持续显示，无 Toast）
+**L1/L2/L3 分层**（2026-07 调整：移除「状态条」承载层，改由 Inline 提示栏承接持久化展示）：
+
+- L1：Inline 提示栏文字 / 色点变化（持续显示，无 Toast）
 - L2：Toast 自动消失 8s
-- L3：状态条变橙/红 + 脉冲 + 浏览器 Tab 闪烁 + 不自动消失
+- L3：Inline 提示栏变橙/红 + 脉冲 + 浏览器 Tab 闪烁 + 不自动消失
 
 ### 5.4 InlineHint（内联 AI 标记）
 
@@ -1071,7 +1056,7 @@ export function createProvider(name: ProviderName): AIProvider {
 | 场景 | 形式 |
 |---|---|
 | 列表/页面初次加载 | 骨架屏（shimmer 1.5s 循环） |
-| 长操作（git/Skill） | 顶部进度条 + 状态条变化 |
+| 长操作（git/Skill） | 顶部进度条 + Inline 提示栏变化 |
 | 按钮提交 | 按钮内 spinner + "加载中..." |
 | 资源树加载 | 节点 spinner |
 
@@ -1087,7 +1072,7 @@ export function createProvider(name: ProviderName): AIProvider {
 | 列表为空/单次操作失败 | **内嵌** | "加载失败 [重试] [查看帮助]" |
 | 表单校验/短时网络错误 | **Toast**（5s） | "保存失败，请重试" |
 | 阻塞性错误（Agent 断、workspace 损坏） | **弹窗** | "Agent 已断开 [重新连接]" |
-| AI 错误/必答 | **状态条 L3** | 状态条变橙 + Tab 闪烁 + 不消失 |
+| AI 错误/必答 | **Inline 提示栏 L3** | 提示栏变橙 + Tab 闪烁 + 不消失 |
 
 ### 10.4 按钮状态
 
