@@ -1,8 +1,10 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   mockConvertToMarkdown,
+  validateLaunch,
   type AuxFile,
   type UsageTag,
 } from '@ai-devspace/shared'
@@ -13,18 +15,19 @@ import {
   clampSplitRatio,
   type DraftingData,
 } from '@/lib/drafting'
-import { DraftingPrdPane } from './drafting-prd-pane'
+import { DraftingPrdPane, type DraftingPrdPaneHandle } from './drafting-prd-pane'
 import { AuxFilesPane } from './aux-files-pane'
 import { DraggableDivider } from './draggable-divider'
 import { AuxDrawer } from './aux-drawer'
 import { NewAuxFileDialog } from './new-aux-file-dialog'
+import { RepoBar } from './repo-bar'
 
 /**
- * DRAFTING 工位组件(issue 02 + 04 + 05 + 06)
+ * DRAFTING 工位组件(issue 02 + 04 + 05 + 06 + 08)
  *
  * 视觉对照基线:[docs/design/pages/19-final-drafting.html](docs/design/pages/19-final-drafting.html)
  *
- * 布局(issue 04 形态 —— PRD 顶置 + 拖拽分割 + 辅助文件网格):
+ * 布局(issue 08 形态 —— PRD 顶置 + 拖拽分割 + 辅助文件网格 + 仓库底部条):
  * ┌────────────────────────────────────────────────┐
  * │ Toolbar(面包屑 + 自动保存状态)                  │
  * ├────────────────────────────────────────────────┤
@@ -36,6 +39,8 @@ import { NewAuxFileDialog } from './new-aux-file-dialog'
  * │  ├────────────────────────────────────────┤    │
  * │  │ 辅助文件网格 + 创建/上传 [1-ratio]   │    │
  * │  └────────────────────────────────────────┘    │
+ * │ ═══════════════ 仓库底部条(issue 08)═══════════│
+ * │ 关联仓库  ✓ …  ✓ …  ＋ …  ⚠ 仅 1 个仓库 …  ▶   │
  * └────────────────────────────────────────────────┘
  * + 右侧 Inline 栏(由 ZoneShell 注入 DraftingSkillRail)
  *
@@ -43,6 +48,11 @@ import { NewAuxFileDialog } from './new-aux-file-dialog'
  * Inline 栏(候命 Skill)由 ZoneShell 通过 inlineRailSlot 注入 DraftingSkillRail。
  *
  * 关键设计点:
+ * - **issue 08**:title / prdMarkdown 状态上提到本组件持有,作为受控 props
+ *   传给 DraftingPrdPane。父组件用 `validateLaunch` 派生 canLaunch,
+ *   传给 RepoBar;RepoBar 完全不感知 title / prdMarkdown(单一职责)。
+ * - **issue 08**:selectedRepoIds 由本组件持 state;切换由 RepoBar 触发
+ *   onToggleRepo → setSelectedRepoIds(派生软警告 + chip on/off)。
  * - 上下比例 ratio ∈ [0, 1];clamp 由 `clampSplitRatio` 集中负责
  * - **issue 06**:`auxFiles` 由 props 初始值拷贝到 local state,
  *   创建 / 上传的新文件 append 到 state;创建 / 上传后自动打开抽屉
@@ -50,14 +60,53 @@ import { NewAuxFileDialog } from './new-aux-file-dialog'
  * - id 生成:单调递增计数器 + 前缀;新文件 = `aux-new-<n>`,上传 = `aux-up-<n>`
  *
  * 不在本组件范围:
- * - 仓库底部条 + 软警告(issue 08)
+ * - 仓库创建 / 删除(后续接 agent API 时再扩展;当前 mock 阶段只支持选中)
  */
 
 export function DraftingZone({ data }: { data: DraftingData }) {
+  const router = useRouter()
+
   // -------------------------------------------------------------------------
   // 上下分割比例(issue 04)
   // -------------------------------------------------------------------------
   const [prdRatio, setPrdRatio] = useState<number>(DEFAULT_PRD_RATIO)
+
+  // -------------------------------------------------------------------------
+  // 受控 PRD 字段(issue 08 上提)—— DraftingPrdPane 改为受控组件
+  // -------------------------------------------------------------------------
+  const [title, setTitle] = useState<string>(data.title)
+  const [prdMarkdown, setPrdMarkdown] = useState<string>(data.prdMarkdown)
+
+  // -------------------------------------------------------------------------
+  // 仓库选中(issue 08)—— 由 props 初始值拷贝到 local state
+  // -------------------------------------------------------------------------
+  const [selectedRepoIds, setSelectedRepoIds] = useState<string[]>(
+    data.selectedRepoIds,
+  )
+
+  // -------------------------------------------------------------------------
+  // 命令式句柄:DraftingPrdPane 暴露 saveNow(),用于 launch 前立刻落盘
+  // -------------------------------------------------------------------------
+  const prdPaneHandleRef = useRef<DraftingPrdPaneHandle | null>(null)
+
+  // -------------------------------------------------------------------------
+  // Launch validity(issue 01 验收 #5 + issue 08 验收 #7 #8)
+  // - 仅依赖 title + prdMarkdown;不读仓库数量(issue 08 验收 #7)
+  // - 派生给 RepoBar 用于 disabled 态 + 给 hint 计算
+  // -------------------------------------------------------------------------
+  const validity = useMemo(
+    () => validateLaunch({ title, prdMarkdown }),
+    [title, prdMarkdown],
+  )
+
+  // -------------------------------------------------------------------------
+  // Launch disabled hint(issue 08)—— 父组件计算文案,传给 RepoBar
+  // 对应 issue 02 时期的 PRD 卡片脚提示文案(迁出 PRD 卡片后保留视觉反馈)
+  // -------------------------------------------------------------------------
+  const launchDisabledHint = useMemo<string | undefined>(() => {
+    if (validity.canLaunch) return undefined
+    return title.trim() ? '请填写 PRD Markdown' : '请填写标题与 PRD Markdown'
+  }, [validity.canLaunch, title])
 
   // -------------------------------------------------------------------------
   // 辅助文件列表(issue 04 + 06)
@@ -71,6 +120,9 @@ export function DraftingZone({ data }: { data: DraftingData }) {
   useEffect(() => {
     if (lastRequirementId !== data.requirementId) {
       setAuxFiles(data.auxFiles)
+      setTitle(data.title)
+      setPrdMarkdown(data.prdMarkdown)
+      setSelectedRepoIds(data.selectedRepoIds)
       setLastRequirementId(data.requirementId)
     }
     // intentionally only when requirementId changes
@@ -347,6 +399,48 @@ export function DraftingZone({ data }: { data: DraftingData }) {
   )
 
   // -------------------------------------------------------------------------
+  // 仓库 chip 切换(issue 08)—— RepoBar 触发
+  // - 真实仓库可切换;id 以 "repo-more" 开头 / 名为 "＋ 更多仓库…" 的占位
+  //   chip 视为"添加更多"动作(no-op,mock 期无后端联动),不允许进入 selectedRepoIds
+  //   (避免用户误把"占位 chip"当真实仓库勾选,触发软警告/选中数等虚假视觉)
+  // -------------------------------------------------------------------------
+  const isRealSelectableRepo = useCallback(
+    (repoId: string) => {
+      const repo = data.repos.find((r) => r.id === repoId)
+      if (!repo) return false
+      // 防御性:任何 name 以 "＋" 开头的占位条目都不可选中
+      if (repo.name.startsWith('＋')) return false
+      return true
+    },
+    [data.repos],
+  )
+
+  const handleToggleRepo = useCallback(
+    (repoId: string) => {
+      if (!isRealSelectableRepo(repoId)) return
+      setSelectedRepoIds((prev) =>
+        prev.includes(repoId)
+          ? prev.filter((id) => id !== repoId)
+          : [...prev, repoId],
+      )
+    },
+    [isRealSelectableRepo],
+  )
+
+  // -------------------------------------------------------------------------
+  // 启动 ANALYZING(issue 02 验收 #7 + issue 08 验收 #7 #8)
+  // - validity 已确保 canLaunch=true(否则 RepoBar 不会调用 onLaunch)
+  // - 启动前触发一次"立刻落盘",保证下游工位拿到最新内容(issue 02 行为)
+  // - 不改 Requirement status / 不启动 Agent / 仅 router.push
+  // -------------------------------------------------------------------------
+  const handleLaunch = useCallback(() => {
+    if (!validity.canLaunch) return
+    // 立刻保存一次(issue 02 行为;issue 08 迁到 RepoBar 时保留)
+    prdPaneHandleRef.current?.saveNow()
+    router.push(`/requirements/${data.requirementId}/analyzing/`)
+  }, [validity.canLaunch, router, data.requirementId])
+
+  // -------------------------------------------------------------------------
   // aria-valuemin / aria-valuemax 给 DraggableDivider 的 clamp 边界
   // -------------------------------------------------------------------------
   const minRatio =
@@ -363,6 +457,7 @@ export function DraftingZone({ data }: { data: DraftingData }) {
       data-empty={data.empty ? 'true' : 'false'}
       data-prd-ratio={String(prdRatio)}
       data-effective-prd-ratio={String(effectiveRatio)}
+      data-launch-valid={validity.canLaunch ? 'true' : 'false'}
       className="flex flex-col h-full overflow-hidden bg-bg"
     >
       <DraftingToolbar toolbar={data.toolbar} />
@@ -370,13 +465,13 @@ export function DraftingZone({ data }: { data: DraftingData }) {
       {/* 主区:上下分割的 flex 列(issue 04) */}
       <div
         data-testid="drafting-main"
-        className="flex-1 overflow-hidden p-6 bg-bg"
+        className="flex-1 overflow-auto p-6 bg-bg"
       >
-        <div className="max-w-[1080px] mx-auto h-full flex flex-col">
+        <div className="max-w-[1080px] mx-auto flex flex-col">
           <div
             ref={splitContainerRef}
             data-testid="drafting-split-row"
-            className="flex flex-col h-full min-h-0"
+            className="flex flex-col min-h-0"
           >
             {/* PRD 卡片 —— wrapper 控制 flexGrow,内部仍是 issue 02/03 布局 */}
             <div
@@ -387,6 +482,11 @@ export function DraftingZone({ data }: { data: DraftingData }) {
             >
               <DraftingPrdPane
                 data={data}
+                title={title}
+                prdMarkdown={prdMarkdown}
+                onTitleChange={setTitle}
+                onPrdMarkdownChange={setPrdMarkdown}
+                handle={prdPaneHandleRef}
                 onAuxLinkClick={handleAuxLinkClick}
               />
             </div>
@@ -418,6 +518,18 @@ export function DraftingZone({ data }: { data: DraftingData }) {
                 onUpload={handleAuxUpload}
               />
             </div>
+          </div>
+
+          {/* 仓库底部条(issue 08)—— sticky bottom,包含 chips + 软警告 + 启动 */}
+          <div className="mt-3 -mx-6 -mb-6">
+            <RepoBar
+              repos={data.repos}
+              selectedRepoIds={selectedRepoIds}
+              onToggleRepo={handleToggleRepo}
+              canLaunch={validity.canLaunch}
+              launchDisabledHint={launchDisabledHint}
+              onLaunch={handleLaunch}
+            />
           </div>
         </div>
       </div>

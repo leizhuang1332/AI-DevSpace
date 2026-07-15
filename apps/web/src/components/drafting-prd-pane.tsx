@@ -1,24 +1,20 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import {
-  generatePrdSkeleton,
-  validateLaunch,
-  type AuxFile,
-  type DraftingData,
-} from '@/lib/drafting'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { generatePrdSkeleton } from '@ai-devspace/shared'
+import type { AuxFile, DraftingData } from '@/lib/drafting'
 import { formatRelativeTime } from '@/lib/format'
 import { useMarkdownPreviewToggle } from '@/lib/use-markdown-preview-toggle'
 import { PrdAnchorBar } from './prd-anchor-bar'
 import { MarkdownPreview } from './markdown-preview'
 
 /**
- * DRAFTING 工位的 PRD 顶置面板(issue 02 · 已扩展 issue 03 锚点条)
+ * DRAFTING 工位的 PRD 顶置面板(issue 02 · 已扩展 issue 03 锚点条 / issue 07 预览 /
+ * issue 08 启动按钮下沉到 RepoBar)
  *
  * 视觉对照基线:[docs/design/pages/19-final-drafting.html](docs/design/pages/19-final-drafting.html)
  *
- * 布局(issue 02 + issue 03 扩展 + issue 07 预览):
+ * 布局(issue 08 形态 — PRD 卡片不再含底部动作):
  * ┌──────────────────────────────────────────────────┐
  * │ PRD · 主文档              已保存 · x 秒前          │
  * ├──────────────────────────────────────────────────┤
@@ -31,26 +27,45 @@ import { MarkdownPreview } from './markdown-preview'
  * │ ├──────────────────────────────────────────────┤ │
  * │ │ # PRD Markdown 编辑区 (textarea / 预览)        │ │
  * │ └──────────────────────────────────────────────┘ │
- * ├──────────────────────────────────────────────────┤
- * │                            [▶ 进入 ANALYZING]    │
  * └──────────────────────────────────────────────────┘
  *
- * 设计要点:
- * - 受控组件:title / prdMarkdown 各自 useState,互不耦合(允许 PRD H1 与 title 不同)
- * - 骨架自动填充:data.empty + prdMarkdown 空 → mount 时一次性 setPrdMarkdown(generatePrdSkeleton)
- *   (保留"作者从空白开始"的语义,同时让新需求一键看到骨架)
+ * 设计要点(issue 08 之后):
+ * - **受控组件**:title / prdMarkdown 由父组件(DraftingZone)持有,本组件接收
+ *   props 并通过 onChange 回调回写。父组件需要这两个值来计算 launch validity
+ *   并在 RepoBar 上渲染启动按钮。
+ * - 骨架自动填充:data.empty + prdMarkdown 为空 → mount 时一次性调用
+ *   onPrdMarkdownChange(generatePrdSkeleton(title)) 回写父 state(保留"作者从
+ *   空白开始"的语义,同时让新需求一键看到骨架)
  * - 自动保存:setInterval 周期写入(本期 mock:仅更新 UI 时间戳)
- * - 启动校验:用 packages/shared 的 validateLaunch(title + prdMarkdown 双 trim)
- *   不读仓库/辅助文件 —— 那些是 issue 08(仓库软警告)+ 上层 execution policy 的事
+ * - 启动校验:虽然 validity 由父组件用 `validateLaunch` 计算,但本组件也会保留
+ *   `data-empty` 等渲染分支需要的 state;具体 launch action 已迁到 RepoBar
  * - PRD 锚点条(issue 03):mount 在 PRD Markdown 编辑器之上;点击回调 →
  *   prdTextareaRef 把 selectionStart/End 移到目标行,并按行号推算 scrollTop
- * - 唯一动作:[▶ 进入 ANALYZING] router.push 到 /requirements/<id>/analyzing/
- *   不改 Requirement status、不启动 Agent、不产生其他副作用(决策 15 不写状态机)
  *
- * 不在 issue 02/03 范围(后续 ticket 引入):预览模式 / 仓库勾选条 / 辅助卡片 / Drawer。
+ * 不在本组件范围:
+ * - 启动按钮(issue 08)→ 已迁到 RepoBar 的 "▶ 进入 ANALYZING"
+ * - 仓库软警告(issue 08)→ RepoBar
+ * - 预览模式(issue 07)→ 本组件渲染
  */
 export interface DraftingPrdPaneProps {
   data: DraftingData
+  /** 受控:title 值(由父组件持有,本组件回写) */
+  title: string
+  /** 受控:prdMarkdown 值(由父组件持有,本组件回写) */
+  prdMarkdown: string
+  /** title 受控 onChange */
+  onTitleChange: (next: string) => void
+  /** prdMarkdown 受控 onChange */
+  onPrdMarkdownChange: (next: string) => void
+  /**
+   * 命令式句柄 —— 父组件(DraftingZone)在 launch ANALYZING 之前调用
+   * `handle.current?.saveNow()` 触发一次"立即落盘",保证下游工位拿到最新内容。
+   *
+   * 设计理由:本组件内部维护 lastSavedAt(用于 "已保存 · x 秒前" 显示),
+   * 父组件不持有该 state;通过 ref 暴露"立刻保存一次"的能力,而非
+   * 把 lastSavedAt 上提,避免无关的 state 上升。
+   */
+  handle?: React.MutableRefObject<DraftingPrdPaneHandle | null>
   /**
    * 点击预览中解析成功的辅助文件链接 → 打开/切换抽屉
    * (issue 07 验收 #2 #7;Drawer 单文件语义天然保证 "switch drawer")
@@ -58,14 +73,24 @@ export interface DraftingPrdPaneProps {
   onAuxLinkClick?: (target: AuxFile) => void
 }
 
-export function DraftingPrdPane({ data, onAuxLinkClick }: DraftingPrdPaneProps) {
-  const router = useRouter()
+/** 父组件可通过 ref 调用的命令式句柄(issue 02/08 兼容) */
+export interface DraftingPrdPaneHandle {
+  /** 立即触发一次保存(更新 lastSavedAt 时间戳) */
+  saveNow: () => void
+}
 
+export function DraftingPrdPane({
+  data,
+  title,
+  prdMarkdown,
+  onTitleChange,
+  onPrdMarkdownChange,
+  handle,
+  onAuxLinkClick,
+}: DraftingPrdPaneProps) {
   // -------------------------------------------------------------------------
-  // 受控状态
+  // 受控状态 —— 父组件持有,本组件只读取并触发 onChange
   // -------------------------------------------------------------------------
-  const [title, setTitle] = useState(data.title)
-  const [prdMarkdown, setPrdMarkdown] = useState(data.prdMarkdown)
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(data.lastSavedAt)
 
   // -------------------------------------------------------------------------
@@ -95,40 +120,37 @@ export function DraftingPrdPane({ data, onAuxLinkClick }: DraftingPrdPaneProps) 
    * 计算行顶字符偏移:把 markdown 按 \n 拆分,前 line 行(0-based 不含目标行)
    * 的总字符数就是目标行起始位置(line 0 的 #标题 总是 charOffset=0)。
    */
-  const handleJumpToLine = useCallback((line: number) => {
-    const ta = prdTextareaRef.current
-    if (!ta) return
-    const lines = prdMarkdown.split(/\r?\n/)
-    const safeLine = Math.max(0, Math.min(line, lines.length - 1))
-    let charOffset = 0
-    for (let i = 0; i < safeLine; i++) charOffset += lines[i].length + 1
-    ta.focus({ preventScroll: true })
-    ta.setSelectionRange(charOffset, charOffset)
-    // 按行号 × 单行像素推算 scrollTop(行高取 textarea 计算样式,失败回退 20)
-    const lineHeight =
-      parseFloat(getComputedStyle(ta).lineHeight) || ta.scrollHeight / Math.max(lines.length, 1)
-    ta.scrollTop = Math.max(0, safeLine * lineHeight - lineHeight * 2)
-  }, [prdMarkdown])
+  const handleJumpToLine = useCallback(
+    (line: number) => {
+      const ta = prdTextareaRef.current
+      if (!ta) return
+      const lines = prdMarkdown.split(/\r?\n/)
+      const safeLine = Math.max(0, Math.min(line, lines.length - 1))
+      let charOffset = 0
+      for (let i = 0; i < safeLine; i++) charOffset += lines[i].length + 1
+      ta.focus({ preventScroll: true })
+      ta.setSelectionRange(charOffset, charOffset)
+      // 按行号 × 单行像素推算 scrollTop(行高取 textarea 计算样式,失败回退 20)
+      const lineHeight =
+        parseFloat(getComputedStyle(ta).lineHeight) ||
+        ta.scrollHeight / Math.max(lines.length, 1)
+      ta.scrollTop = Math.max(0, safeLine * lineHeight - lineHeight * 2)
+    },
+    [prdMarkdown],
+  )
 
   // -------------------------------------------------------------------------
   // 骨架自动填充 —— 仅在首次 mount 时触发,且要求 empty + PRD 为空
   // (有保存内容的数据直接使用,绝不覆盖;空数据触发 generatePrdSkeleton)
+  // 走 onPrdMarkdownChange 回写父 state,避免本组件再额外持一份"内部副本"
   // -------------------------------------------------------------------------
   useEffect(() => {
     if (data.empty && !data.prdMarkdown && !prdMarkdown) {
-      setPrdMarkdown(generatePrdSkeleton(data.title))
+      onPrdMarkdownChange(generatePrdSkeleton(data.title || title))
     }
     // 仅在 mount 时执行一次;后续 title 变化不再次填充
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  // -------------------------------------------------------------------------
-  // 派生:启动校验 —— 使用 shared 包的 validateLaunch(纯函数,issue 01 验收)
-  // -------------------------------------------------------------------------
-  const validity = useMemo(
-    () => validateLaunch({ title, prdMarkdown }),
-    [title, prdMarkdown],
-  )
 
   // -------------------------------------------------------------------------
   // 自动保存(每 N ms;本期只更新 UI 时间戳,mock 写)
@@ -150,15 +172,28 @@ export function DraftingPrdPane({ data, onAuxLinkClick }: DraftingPrdPaneProps) 
     return () => window.clearInterval(id)
   }, [data.autosaveIntervalMs, title, prdMarkdown, saveDraft])
 
-  // -------------------------------------------------------------------------
-  // 底部动作:[▶ 进入 ANALYZING]
-  // -------------------------------------------------------------------------
-  const handleLaunch = useCallback(() => {
-    if (!validity.canLaunch) return
-    // 启动前最后写入一次,保证 ANALYZING 进入时落盘内容最新(本期 mock 仅 UI)
-    saveDraft()
-    router.push(`/requirements/${data.requirementId}/analyzing/`)
-  }, [validity.canLaunch, saveDraft, router, data.requirementId])
+  // 父组件触发的"立刻保存一次"通道 —— 通过 ref 句柄暴露。
+  // 父组件在 launch ANALYZING 之前调用 handle.current?.saveNow() 即可。
+  useEffect(() => {
+    if (!handle) return
+    const api: DraftingPrdPaneHandle = {
+      saveNow: () => {
+        // 与 interval 触发的 saveDraft 等价(更新 lastSavedAt 时间戳)
+        saveDraftRef.current()
+      },
+    }
+    handle.current = api
+    return () => {
+      // 卸载时清空,避免 stale ref 指向不存在的组件
+      if (handle.current === api) {
+        handle.current = null
+      }
+    }
+  }, [handle])
+
+  // saveDraft 的 ref —— 避免 useEffect 依赖变化导致 stale closure
+  const saveDraftRef = useRef(saveDraft)
+  saveDraftRef.current = saveDraft
 
   // -------------------------------------------------------------------------
   // 渲染
@@ -168,7 +203,6 @@ export function DraftingPrdPane({ data, onAuxLinkClick }: DraftingPrdPaneProps) 
       data-testid="drafting-prd-pane"
       data-requirement-id={data.requirementId}
       data-empty={data.empty ? 'true' : 'false'}
-      data-launch-valid={validity.canLaunch ? 'true' : 'false'}
       className="flex flex-col h-full overflow-hidden bg-bg"
     >
       {/* PRD 卡片 */}
@@ -221,7 +255,7 @@ export function DraftingPrdPane({ data, onAuxLinkClick }: DraftingPrdPaneProps) 
               type="text"
               data-testid="drafting-title"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => onTitleChange(e.target.value)}
               placeholder="一句话描述这个需求(如:退款功能优化)"
               className="w-full h-9 px-3 border border-border-strong rounded-md text-md bg-bg focus:outline-none focus:border-brand focus:ring-2 focus:ring-brand-50"
             />
@@ -284,7 +318,7 @@ export function DraftingPrdPane({ data, onAuxLinkClick }: DraftingPrdPaneProps) 
                   data-testid="drafting-prd"
                   ref={prdTextareaRef}
                   value={prdMarkdown}
-                  onChange={(e) => setPrdMarkdown(e.target.value)}
+                  onChange={(e) => onPrdMarkdownChange(e.target.value)}
                   placeholder={`# 需求标题\n\n## 背景\n...\n\n## 目标\n...\n\n## 验收标准\n- [ ] ...\n\n## 非目标\n...`}
                   className="w-full flex-1 min-h-[260px] border-none p-3 font-mono text-sm leading-relaxed text-text-1 bg-bg-elevated resize-none focus:outline-none"
                 />
@@ -293,34 +327,7 @@ export function DraftingPrdPane({ data, onAuxLinkClick }: DraftingPrdPaneProps) 
           </div>
         </div>
 
-        {/* 卡片脚:单一动作 */}
-        <footer
-          data-testid="drafting-prd-foot"
-          className="flex items-center justify-end gap-3 px-5 py-3 border-t border-border bg-bg-elevated flex-shrink-0"
-        >
-          {!validity.canLaunch && (
-            <span
-              data-testid="drafting-launch-disabled-hint"
-              className="text-xs text-text-3"
-            >
-              {title.trim() ? '请填写 PRD Markdown' : '请填写标题与 PRD Markdown'}
-            </span>
-          )}
-          <button
-            type="button"
-            data-testid="drafting-action-launch"
-            data-variant="primary"
-            disabled={!validity.canLaunch}
-            onClick={handleLaunch}
-            className={[
-              'inline-flex items-center gap-1.5 rounded-md text-sm font-medium',
-              'h-10 px-5 bg-brand text-white hover:bg-brand-600',
-              'disabled:opacity-50 disabled:cursor-not-allowed',
-            ].join(' ')}
-          >
-            ▶ 进入 ANALYZING
-          </button>
-        </footer>
+        {/* issue 08:卡片脚移除;启动按钮已迁到 RepoBar */}
       </div>
     </section>
   )

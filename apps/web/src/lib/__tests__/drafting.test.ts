@@ -14,7 +14,9 @@ import {
 } from '@ai-devspace/shared'
 
 // ============================================================================
-// DraftingData 形状(issue 02):无 acceptanceCriteria / repos / actions
+// DraftingData 形状(issue 02 + 04 + 08):
+// - 旧 acceptanceCriteria / actions 字段不再出现
+// - repos / selectedRepoIds 已就位(issue 08);空草稿两者均为 []
 // ============================================================================
 
 describe('emptyDrafting', () => {
@@ -27,16 +29,18 @@ describe('emptyDrafting', () => {
     expect(d.lastSavedAt).toBeNull()
     // 30s 自动保存周期(issue 02 验收 #4)
     expect(d.autosaveIntervalMs).toBe(30_000)
-    // 无 acceptanceCriteria / repos / actions(issue 02 移除项)
+    // 旧 acceptanceCriteria / actions 已彻底移除(issue 02)
     expect(
       (d as unknown as Record<string, unknown>).acceptanceCriteria,
     ).toBeUndefined()
-    expect((d as unknown as Record<string, unknown>).repos).toBeUndefined()
     expect((d as unknown as Record<string, unknown>).actions).toBeUndefined()
     // 候命 Skill 列表保留(Inline 栏使用)
     expect(Array.isArray(d.skills)).toBe(true)
     // issue 04:auxFiles 默认为空数组(走 EmptyAuxPlaceholder 占位)
     expect(d.auxFiles).toEqual([])
+    // issue 08:空草稿默认无仓库、无选中
+    expect(d.repos).toEqual([])
+    expect(d.selectedRepoIds).toEqual([])
   })
 })
 

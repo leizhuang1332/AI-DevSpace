@@ -1,18 +1,13 @@
 /**
  * DRAFTING 工位数据层(issue 02 — PRD 顶置 + 骨架 + 进入 ANALYZING;
- * 后续 issue 04 — 辅助文件卡片 + 拖拽分割扩展)
+ * 后续 issue 04 — 辅助文件卡片 + 拖拽分割扩展;
+ * issue 08 — 仓库底部条 + 软警告 + 启动按钮迁入底部条)
  *
- * 工位布局(issue 04 形态):
+ * 工位布局(issue 08 形态):
  * - 主区:上下两块 — PRD 顶置卡片 + 拖拽分割条 + 辅助文件卡片网格
- *   (拖拽分割条由 issue 04 引入;issue 02/03 仅渲染 PRD 卡片)
  * - 右栏(Inline 栏):候命 Skill 列表(由 ZoneShell 注入)
- * - 底部单一动作:[▶ 进入 ANALYZING](title + PRD 均有内容才可点)
- *
- * 本期(issue 04)不渲染的旧字段(后续 ticket 重新引入时再加回):
- * - acceptanceCriteria(AC 结构化 checklist)→ 03/04 期 PRD Markdown 自然承载
- * - repos(关联仓库多选 chips)→ 08 期 仓库底部软警告
- * - save action(💾 保存草稿)→ 自动保存已统一处理
- * - 旧"创建并启动 AI 分析"action → 新"▶ 进入 ANALYZING" 纯导航
+ * - **底部 sticky 条**:仓库多选 chips + 软警告 + [▶ 进入 ANALYZING]
+ *   (启动按钮已从 PRD 卡片脚迁到此处;validity 仍只取决于 title + PRD)
  *
  * 设计原则:
  * - 纯函数 + 类型化;骨架生成 / 启动校验由 `packages/shared` 统一提供
@@ -22,6 +17,8 @@
  *   —— 本层不预先填充,以保留"作者从空白开始"的语义
  * - 分割比例(issue 04)以 ratio 数值形式暴露给 UI 层;clamp 由 `clampSplitRatio`
  *   纯函数集中负责,UI 仅负责把 mouse drag / 键盘事件映射成 ratio delta
+ * - 软警告阈值(issue 08)以纯函数 `shouldShowRepoSoftWarning` 暴露;
+ *   UI 仅负责在 selectedRepoIds 变化时调一次拿到 boolean
  */
 
 import {
@@ -43,6 +40,18 @@ export interface DraftingSkill {
   description: string
   /** 触发入口文案,例如 "⌘K 唤起" / "一键启动" */
   trigger: string
+}
+
+/**
+ * 关联仓库选项(issue 08 — 仓库底部条 + 软警告)
+ *
+ * UI 用 `id` 做 React key / 受控选中的标识;`name` 是渲染在 chip 上的展示名
+ * (如 "refund-service")。本期不做仓库元数据(语言 / 默认分支 / 工作树路径等),
+ * 那些留给后续接入 agent API 时再补。
+ */
+export interface DraftingRepo {
+  id: string
+  name: string
 }
 
 /** 顶部 toolbar 面包屑条目 */
@@ -87,6 +96,19 @@ export interface DraftingData {
    * 关心展示,不再二次加工。
    */
   auxFiles: AuxFile[]
+  /**
+   * 关联仓库选项(issue 08)。所有可选仓库(chips 渲染源);与 `selectedRepoIds`
+   * 配合:已选中 = chip "on"(蓝色),未选中 = chip "off"(灰底)。
+   */
+  repos: DraftingRepo[]
+  /**
+   * 已选中的仓库 id 列表(issue 08)。
+   *
+   * - `length < 2` → 软警告 ⚠ 仅 N 个仓库 · ANALYZING 可能无法完整关联代码上下文
+   * - `length >= 2` → 软警告隐藏
+   * - **不影响** launch validity(validity 只看 title + PRD,见 `validateLaunch`)
+   */
+  selectedRepoIds: string[]
   /** 自动保存间隔(毫秒);UI 用 setInterval 触发保存 */
   autosaveIntervalMs: number
   /** 最后保存时间(ISO 字符串;空 = 从未保存);UI 显示 "已保存 x 秒前" */
@@ -196,8 +218,24 @@ export function clampSplitRatio(
 }
 
 // ---------------------------------------------------------------------------
-// 兜底数据(新建需求 / 未知 id)
+// issue 08 · 仓库软警告阈值(纯函数)
 // ---------------------------------------------------------------------------
+
+/**
+ * 软警告阈值:已选仓库数 < 2 时返回 true(issue 08 验收 #4 #5)。
+ *
+ * - 0 个仓库 → true(警告:⚠ 仅 0 个仓库 · …)
+ * - 1 个仓库 → true(警告:⚠ 仅 1 个仓库 · …)
+ * - ≥ 2 个仓库 → false(警告隐藏)
+ *
+ * 故意写成"严格小于 2",不要写成"小于等于 1":前者让边界数字读起来更直观
+ * (2 个仓库"刚好不警告");后者混用 ≤ 会增加读代码时的歧义。
+ *
+ * 纯函数:同一 selectedRepoIds → 同一 boolean;可单测;副作用为 0。
+ */
+export function shouldShowRepoSoftWarning(selectedRepoIds: readonly string[]): boolean {
+  return selectedRepoIds.length < 2
+}
 
 const EMPTY_TOOLBAR: DraftingToolbar = {
   crumb: [],
@@ -211,6 +249,8 @@ const EMPTY_TOOLBAR: DraftingToolbar = {
  *   触发 generatePrdSkeleton 骨架填充
  * - skills 暂留空数组(后续可注入,本期不渲染)
  * - **issue 04** auxFiles = [] → AuxFilesPane 走 EmptyAuxPlaceholder 占位
+ * - **issue 08** repos = [] / selectedRepoIds = [] → RepoBar 渲染空态;
+ *   软警告 `shouldShowRepoSoftWarning([]) === true`(0 个仓库触发警告)
  */
 export function emptyDrafting(requirementId: string): DraftingData {
   return {
@@ -220,6 +260,9 @@ export function emptyDrafting(requirementId: string): DraftingData {
     prdMarkdown: '',
     skills: [],
     auxFiles: [],
+    // issue 08:空草稿默认没有任何仓库选项和选中项
+    repos: [],
+    selectedRepoIds: [],
     autosaveIntervalMs: 30_000,
     lastSavedAt: null,
     empty: true,
@@ -304,6 +347,20 @@ const REFUND_DRAFTING: Omit<DraftingData, 'requirementId'> = {
       converted_to_md: true,
     },
   ],
+  // issue 08:5 个可选仓库 + 默认勾选前 2 个(refund-service / order-service),
+  // 对应设计稿 `19-final-drafting.html` 的样例(2 个仓库触发软警告文案 "⚠ 仅 2 个仓库…";
+  // 本仓库条的可视化刚好命中"软警告阈值边界",验收测试用)。
+  // 故意包含一个 "＋ 更多仓库…" 占位 chip —— 但 id 与现有 repo 不同,
+  // mock 期它是 no-op(不会触发 addRepo 之类的副作用),留给后续接 agent API 时
+  // 扩展。
+  repos: [
+    { id: 'repo-refund-service', name: 'refund-service' },
+    { id: 'repo-order-service', name: 'order-service' },
+    { id: 'repo-coupon-service', name: 'coupon-service' },
+    { id: 'repo-payment-gateway', name: 'payment-gateway' },
+    { id: 'repo-more', name: '＋ 更多仓库…' },
+  ],
+  selectedRepoIds: ['repo-refund-service', 'repo-order-service'],
   autosaveIntervalMs: 30_000,
   lastSavedAt: null,
 }

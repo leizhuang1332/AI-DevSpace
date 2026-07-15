@@ -1129,3 +1129,376 @@ describe('DraftingZone · 辅助文件抽屉 (issue 05)', () => {
     expect(screen.queryByTestId('aux-drawer')).toBeNull()
   })
 })
+
+// ============================================================================
+// issue 08 · 仓库底部条 + 软警告 + 启动按钮迁入(端到端集成)
+//
+// 验收清单(对照 issue 08 acceptance criteria):
+// #1  sticky 底部条在工作区底部
+// #2  条包含 chips + 软警告区 + ▶ 进入 ANALYZING 按钮
+// #3  条在垂直滚动时仍然可见(sticky)
+// #4  0 / 1 个仓库 → 警告 ⚠ 仅 N 个仓库 · ANALYZING 可能无法完整关联代码上下文
+// #5  ≥ 2 个仓库 → 警告隐藏
+// #6  警告纯视觉:launch 按钮 enabled 由 title + PRD 决定,与仓库数量无关
+// #7  切换 chip → 同一 render 内更新警告可见性
+// #8  视觉匹配 19-final-drafting.html(.repo-bar 类名 / testid 路径一致)
+// #9  tests cover —— 本 describe 覆盖 #1 #2 #4 #5 #6 #7
+// ============================================================================
+
+describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
+  // 验收 #1 #2 sticky 底部条 + 三段式布局(chips / 警告 / 启动按钮)
+  it('验收 #1+#2:repo-bar 渲染于工作区底部,包含 chips / 软警告区 / 启动按钮', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+
+    const bar = screen.getByTestId('drafting-repo-bar')
+    expect(bar).toBeInTheDocument()
+    // sticky bottom —— 设计稿一致
+    expect(bar.className).toContain('sticky')
+    expect(bar.className).toContain('bottom-0')
+    // 三段都在
+    expect(within(bar).getByTestId('drafting-repo-bar-label')).toBeInTheDocument()
+    expect(within(bar).getByTestId('drafting-repo-bar-chips')).toBeInTheDocument()
+    expect(within(bar).getByTestId('drafting-action-launch')).toBeInTheDocument()
+
+    // chip 渲染数量 = data.repos.length(req-001 mock = 5)
+    const chips = within(bar).getAllByTestId('drafting-repo-chip')
+    expect(chips).toHaveLength(data.repos.length)
+    // repo-bar 节点上 data 齐全
+    expect(bar.getAttribute('data-repo-count')).toBe(String(data.repos.length))
+    expect(bar.getAttribute('data-selected-count')).toBe(
+      String(data.selectedRepoIds.length),
+    )
+  })
+
+  // 验收 #4 0 个仓库 → 警告显示
+  it('验收 #4:0 个仓库 → 软警告 ⚠ 仅 0 个仓库 · … 显示', async () => {
+    const data = {
+      ...emptyDrafting('req-empty'),
+      // 0 仓库:repos=[] + selectedRepoIds=[];但 PRD 必须有内容才能 launch
+      title: '退款',
+      prdMarkdown: generatePrdSkeleton('退款'),
+      empty: false,
+    }
+    render(<DraftingZone data={data} />)
+
+    const bar = screen.getByTestId('drafting-repo-bar')
+    expect(bar.getAttribute('data-soft-warning')).toBe('true')
+    expect(bar.getAttribute('data-selected-count')).toBe('0')
+    const warn = screen.getByTestId('drafting-repo-soft-warning')
+    expect(warn.textContent).toContain('⚠ 仅 0 个仓库')
+    expect(warn.textContent).toContain('ANALYZING 可能无法完整关联代码上下文')
+    // chips 容器是 empty 占位
+    expect(screen.getByTestId('drafting-repo-bar-empty')).toBeInTheDocument()
+    expect(screen.queryAllByTestId('drafting-repo-chip')).toHaveLength(0)
+  })
+
+  // 验收 #4 1 个仓库 → 警告显示
+  it('验收 #4:1 个仓库 → 软警告 ⚠ 仅 1 个仓库 · … 显示', async () => {
+    const data = {
+      ...emptyDrafting('req-one'),
+      title: '退款',
+      prdMarkdown: generatePrdSkeleton('退款'),
+      empty: false,
+      repos: [
+        { id: 'r1', name: 'refund-service' },
+        { id: 'r2', name: 'order-service' },
+      ],
+      selectedRepoIds: ['r1'],
+    }
+    render(<DraftingZone data={data} />)
+
+    const bar = screen.getByTestId('drafting-repo-bar')
+    expect(bar.getAttribute('data-soft-warning')).toBe('true')
+    expect(bar.getAttribute('data-selected-count')).toBe('1')
+    const warn = screen.getByTestId('drafting-repo-soft-warning')
+    expect(warn.getAttribute('data-warning-count')).toBe('1')
+    expect(warn.textContent).toContain('⚠ 仅 1 个仓库')
+  })
+
+  // 验收 #5 2 个仓库 → 警告隐藏
+  it('验收 #5:2 个仓库 → 软警告隐藏', async () => {
+    const data = {
+      ...emptyDrafting('req-two'),
+      title: '退款',
+      prdMarkdown: generatePrdSkeleton('退款'),
+      empty: false,
+      repos: [
+        { id: 'r1', name: 'refund-service' },
+        { id: 'r2', name: 'order-service' },
+      ],
+      selectedRepoIds: ['r1', 'r2'],
+    }
+    render(<DraftingZone data={data} />)
+
+    const bar = screen.getByTestId('drafting-repo-bar')
+    expect(bar.getAttribute('data-soft-warning')).toBe('false')
+    expect(bar.getAttribute('data-selected-count')).toBe('2')
+    expect(screen.queryByTestId('drafting-repo-soft-warning')).toBeNull()
+  })
+
+  it('验收 #5:3+ 仓库 → 软警告仍隐藏', async () => {
+    const data = {
+      ...emptyDrafting('req-three'),
+      title: '退款',
+      prdMarkdown: generatePrdSkeleton('退款'),
+      empty: false,
+      repos: [
+        { id: 'r1', name: 'refund-service' },
+        { id: 'r2', name: 'order-service' },
+        { id: 'r3', name: 'coupon-service' },
+      ],
+      selectedRepoIds: ['r1', 'r2', 'r3'],
+    }
+    render(<DraftingZone data={data} />)
+
+    const bar = screen.getByTestId('drafting-repo-bar')
+    expect(bar.getAttribute('data-soft-warning')).toBe('false')
+  })
+
+  // 验收 #7 同一 render 内更新警告可见性
+  it('验收 #7:点击 chip 切换 → 软警告在同一 render 内更新', async () => {
+    // 起始:2 个仓库 → 警告隐藏
+    const data = {
+      ...emptyDrafting('req-toggle'),
+      title: '退款',
+      prdMarkdown: generatePrdSkeleton('退款'),
+      empty: false,
+      repos: [
+        { id: 'r1', name: 'refund-service' },
+        { id: 'r2', name: 'order-service' },
+      ],
+      selectedRepoIds: ['r1', 'r2'],
+    }
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+
+    const bar = screen.getByTestId('drafting-repo-bar')
+    expect(bar.getAttribute('data-soft-warning')).toBe('false')
+
+    // 取消勾选 r2 → 仅剩 1 个仓库 → 警告出现
+    const chips = screen.getAllByTestId('drafting-repo-chip')
+    const r2 = chips.find(
+      (c) => c.getAttribute('data-repo-id') === 'r2',
+    ) as HTMLElement
+    await user.click(r2)
+
+    expect(bar.getAttribute('data-soft-warning')).toBe('true')
+    expect(bar.getAttribute('data-selected-count')).toBe('1')
+    expect(screen.getByTestId('drafting-repo-soft-warning')).toBeInTheDocument()
+
+    // 再取消 r1 → 0 个仓库 → 警告依然显示
+    const r1 = chips.find(
+      (c) => c.getAttribute('data-repo-id') === 'r1',
+    ) as HTMLElement
+    await user.click(r1)
+    expect(bar.getAttribute('data-soft-warning')).toBe('true')
+    expect(bar.getAttribute('data-selected-count')).toBe('0')
+
+    // 再勾回 r1 → 1 个仓库 → 警告仍在
+    await user.click(r1)
+    expect(bar.getAttribute('data-soft-warning')).toBe('true')
+    expect(bar.getAttribute('data-selected-count')).toBe('1')
+
+    // 勾回 r2 → 2 个仓库 → 警告隐藏
+    await user.click(r2)
+    expect(bar.getAttribute('data-soft-warning')).toBe('false')
+    expect(bar.getAttribute('data-selected-count')).toBe('2')
+    expect(screen.queryByTestId('drafting-repo-soft-warning')).toBeNull()
+  })
+
+  it('验收 #7 同步性:chip data-selected 跟随 selectedRepoIds 切换', async () => {
+    const data = {
+      ...emptyDrafting('req-chip-sync'),
+      title: '退款',
+      prdMarkdown: generatePrdSkeleton('退款'),
+      empty: false,
+      repos: [
+        { id: 'r1', name: 'refund-service' },
+        { id: 'r2', name: 'order-service' },
+      ],
+      selectedRepoIds: ['r1'],
+    }
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+
+    const chips = screen.getAllByTestId('drafting-repo-chip')
+    const r1 = chips.find(
+      (c) => c.getAttribute('data-repo-id') === 'r1',
+    ) as HTMLElement
+    expect(r1.getAttribute('data-selected')).toBe('true')
+    const r2 = chips.find(
+      (c) => c.getAttribute('data-repo-id') === 'r2',
+    ) as HTMLElement
+    expect(r2.getAttribute('data-selected')).toBe('false')
+
+    await user.click(r2)
+    expect(r2.getAttribute('data-selected')).toBe('true')
+
+    await user.click(r1)
+    expect(r1.getAttribute('data-selected')).toBe('false')
+  })
+
+  // 验收 #6 警告纯视觉 —— launch validity 与仓库数量无关
+  it('验收 #6:0 仓库 + PRD 完整 → launch 按钮 enabled(警告存在但按钮不 disabled)', async () => {
+    const data = {
+      ...emptyDrafting('req-empty-launchable'),
+      title: '退款',
+      prdMarkdown: generatePrdSkeleton('退款'),
+      empty: false,
+      repos: [],
+      selectedRepoIds: [],
+    }
+    render(<DraftingZone data={data} />)
+
+    // 软警告显示
+    const bar = screen.getByTestId('drafting-repo-bar')
+    expect(bar.getAttribute('data-soft-warning')).toBe('true')
+    // 但 launch 按钮 enabled
+    const btn = screen.getByTestId('drafting-action-launch')
+    expect(btn.getAttribute('disabled')).toBeNull()
+    expect(bar.getAttribute('data-can-launch')).toBe('true')
+  })
+
+  it('验收 #6:1 仓库 + PRD 不全 → launch 按钮 disabled', async () => {
+    const data = {
+      ...emptyDrafting('req-one-bad'),
+      // title 为空 → canLaunch=false
+      title: '',
+      prdMarkdown: '',
+      empty: true,
+      repos: [{ id: 'r1', name: 'refund-service' }],
+      selectedRepoIds: ['r1'],
+    }
+    render(<DraftingZone data={data} />)
+
+    const bar = screen.getByTestId('drafting-repo-bar')
+    // 警告显示(1 个仓库)
+    expect(bar.getAttribute('data-soft-warning')).toBe('true')
+    // 但按钮 disabled
+    const btn = screen.getByTestId('drafting-action-launch')
+    expect(btn.getAttribute('disabled')).not.toBeNull()
+    expect(bar.getAttribute('data-can-launch')).toBe('false')
+    // 提示文案显示
+    expect(screen.getByTestId('drafting-launch-disabled-hint').textContent).toBe(
+      '请填写标题与 PRD Markdown',
+    )
+  })
+
+  // 验收 #6 #7 启动按钮从 PRD 卡片脚迁出,位置在 RepoBar 中
+  it('启动按钮在 repo-bar 内部,不在 PRD 卡片内(issue 08 验收 #7)', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+
+    const bar = screen.getByTestId('drafting-repo-bar')
+    const btn = screen.getByTestId('drafting-action-launch')
+    // launch 按钮存在于 repo-bar 子树
+    expect(bar.contains(btn)).toBe(true)
+    // PRD 卡片脚不再渲染 launch 按钮
+    const prdCard = screen.getByTestId('drafting-prd-card')
+    expect(prdCard.contains(btn)).toBe(false)
+  })
+
+  // 验收 #8 视觉匹配 —— 关键 class 与 design 一致(sticky / 上边框 / bg-elevated)
+  it('验收 #8:repo-bar 视觉匹配 19-final-drafting.html 的 .repo-bar', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+    const bar = screen.getByTestId('drafting-repo-bar')
+    expect(bar.className).toContain('sticky')
+    expect(bar.className).toContain('bottom-0')
+    expect(bar.className).toContain('border-t')
+    expect(bar.className).toContain('bg-bg-elevated')
+  })
+
+  // 验收 #3 条在工作区滚动时仍然可见 —— 通过 sticky bottom + flex 父级
+  // 实现层 sticky;这里验证关键 CSS 已应用,真实滚动行为交给浏览器
+  it('验收 #3:repo-bar 是 sticky 底部,父容器允许滚动', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+    const bar = screen.getByTestId('drafting-repo-bar')
+    expect(bar.className).toContain('sticky')
+    expect(bar.className).toContain('bottom-0')
+    // 主区允许滚动
+    expect(screen.getByTestId('drafting-main').className).toContain('overflow-auto')
+  })
+
+  // 启动按钮跳转(从 RepoBar 触发)—— issue 02 验收 #7 + issue 08 验收 #7
+  it('issue 02/08 验收:launch 按钮点击 → router.push 到 ANALYZING', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+
+    await user.click(screen.getByTestId('drafting-action-launch'))
+    expect(routerPush).toHaveBeenCalledWith('/requirements/req-001/analyzing/')
+  })
+
+  // 旧 UI 不再渲染(issue 08 验收:启动按钮不在 PRD 卡片脚)
+  it('PRD 卡片脚不再渲染 "drafting-launch-disabled-hint"(已迁到 RepoBar)', () => {
+    // 用空数据触发 canLaunch=false → disabled-hint 应在 RepoBar 内渲染
+    const data = emptyDrafting('NEW') // title='', prdMarkdown='', empty=true
+    render(<DraftingZone data={data} />)
+    const prdCard = screen.getByTestId('drafting-prd-card')
+    // hint 在 RepoBar 内,不在 PRD 卡片子树
+    const bar = screen.getByTestId('drafting-repo-bar')
+    const hint = screen.getByTestId('drafting-launch-disabled-hint')
+    expect(bar.contains(hint)).toBe(true)
+    expect(prdCard.contains(hint)).toBe(false)
+  })
+
+  // "＋ 更多仓库…" 占位 chip 不应被勾选(issue 08 code-review 修复)
+  it('"＋ 更多仓库…" 占位 chip 不可被勾选(防止误判仓库数)', async () => {
+    // 1 个真仓库 + 1 个 "＋ 更多仓库…" 占位
+    const data = {
+      ...emptyDrafting('req-more'),
+      title: '退款',
+      prdMarkdown: generatePrdSkeleton('退款'),
+      empty: false,
+      repos: [
+        { id: 'r1', name: 'refund-service' },
+        { id: 'r-more', name: '＋ 更多仓库…' },
+      ],
+      // 初始未选中真仓库
+      selectedRepoIds: [],
+    }
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+
+    // 点击占位 chip
+    const moreChip = screen
+      .getAllByTestId('drafting-repo-chip')
+      .find((c) => c.getAttribute('data-repo-id') === 'r-more') as HTMLElement
+    await user.click(moreChip)
+
+    // 占位 chip 不会被勾选(data-selected 仍为 false)
+    expect(moreChip.getAttribute('data-selected')).toBe('false')
+    // repo-bar 上的 selected-count 仍为 0
+    const bar = screen.getByTestId('drafting-repo-bar')
+    expect(bar.getAttribute('data-selected-count')).toBe('0')
+
+    // 真实仓库可正常勾选
+    const r1Chip = screen
+      .getAllByTestId('drafting-repo-chip')
+      .find((c) => c.getAttribute('data-repo-id') === 'r1') as HTMLElement
+    await user.click(r1Chip)
+    expect(r1Chip.getAttribute('data-selected')).toBe('true')
+    expect(bar.getAttribute('data-selected-count')).toBe('1')
+  })
+
+  // 启动时调用 handle.saveNow()(issue 02/08 兼容,code-review 修复)
+  it('launch 按钮点击 → 触发 DraftingPrdPane.handle.saveNow()(issue 02 行为保留)', async () => {
+    const data = await getDraftingData('req-001')
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+
+    // 启动前 lastSavedAt=null → 不渲染时间戳
+    expect(screen.queryByTestId('drafting-autosaved')).toBeNull()
+
+    // 启动
+    await user.click(screen.getByTestId('drafting-action-launch'))
+
+    // 启动后 lastSavedAt 应被更新(drafting-autosaved 时间戳渲染出来)
+    expect(screen.getByTestId('drafting-autosaved')).toBeInTheDocument()
+    // 跳转也正常触发
+    expect(routerPush).toHaveBeenCalledWith('/requirements/req-001/analyzing/')
+  })
+})
