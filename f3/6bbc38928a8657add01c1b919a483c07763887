@@ -1,0 +1,27 @@
+.scratch/new-requirement-modal/issues/04-backend-api-file-persist.md
+  s_4f998c2824ccf7::t_4d80b08abf66d7 1-43
+.scratch/new-requirement-modal/issues/03-trigger-entries-wiring.md
+  s_4f998c2824ccf7::t_b9d7aafbb2d388 1-35
+.scratch/new-requirement-modal/issues/05-e2e-verification-prd-checklist.md
+  s_4f998c2824ccf7::t_c3621b3d09e46d 1-49
+.scratch/new-requirement-modal/issues/01-drafting-attach-repo-banner-skeleton.md
+  s_4f998c2824ccf7::t_020c6c22b9059a 1-37
+.scratch/new-requirement-modal/issues/02-worktree-real-creation.md
+  s_4f998c2824ccf7::t_13c1abee20467b 1-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "f36bbc38928a8657add01c1b919a483c07763887",
+  "prompts": {},
+  "sessions": {
+    "s_4f998c2824ccf7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6ddeac87-c789-42bc-8a18-b43677911fb3",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
