@@ -139,7 +139,7 @@ PRD §11 实施路线推进。
 ![需求分析](images/需求分析.png)
 ![需求澄清](images/需求澄清.png)
 ![方案设计](images/方案设计.png)
-![任务看板](images/任务看板.png)
+![执行任务](images/执行任务.png)
 ![需求归档](images/需求归档.png)
 ![代码仓库](images/代码仓库管理.png)
 ![知识库管理](images/知识库管理.png)
