@@ -14,7 +14,6 @@ const drafting: ZoneMeta = {
   has_inline_rail: true,
   status_color: 'gray',
   status_pulse: false,
-  thinking_bar: 'required',
   description: '...',
 }
 

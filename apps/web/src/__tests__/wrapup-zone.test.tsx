@@ -273,8 +273,6 @@ describe('WrapupZone · 满数据渲染', () => {
     const wrapup = ZONE_META.find((z) => z.id === 'wrapup')
     expect(wrapup).toBeDefined()
     expect(wrapup!.status_color).toBe('gray')
-    // thinking_bar = 'minimal'(issue 16 + ADR §6 决策)
-    expect(wrapup!.thinking_bar).toBe('minimal')
   })
 })
 

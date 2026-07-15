@@ -189,8 +189,6 @@ export default async function ZonePage({
             <dd>{ZONE_STATUS_COLOR_LABEL[zone.status_color]}</dd>
             <dt className="text-text-3">status_pulse</dt>
             <dd>{zone.status_pulse ? '是' : '否'}</dd>
-            <dt className="text-text-3">thinking_bar</dt>
-            <dd>{zone.thinking_bar}</dd>
             <dt className="text-text-3">shell</dt>
             <dd>{shellDesc}</dd>
           </dl>

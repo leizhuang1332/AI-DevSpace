@@ -44,7 +44,6 @@ import { EmptyState } from './empty-state'
  * - 'use client':归档 / 重新打开是客户端交互
  * - archive.archived 同时支持 server 预置(SSR 兜底)和 useState 维护
  * - ZoneBar WRAP-UP 灰点 已由 zones.ts['wrapup'].status_color='gray' 渲染
- * - ThinkBar minimal 已由 ThinkBarSlot 根据 zone.thinking_bar='minimal' 渲染
  * - 资源树 240px 由 ZoneShell 自动渲染(WRAP-UP has_resource_tree=true)
  * - 默认 no-op 回调:server 直接渲染组件时不会抛错(空回退)
  */

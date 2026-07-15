@@ -405,7 +405,8 @@ zone:
     - requirement-critique
 
   # ──── AI 思考条(必填 · 1 字段) ────
-  thinking_bar: required         # 保持
+  # ⛔ DEPRECATED 2026-07(issue 16 wontfix):thinking_bar 字段已下线,本行仅为历史决策追溯。
+  # thinking_bar: required         # 保持
 
   # ──── 触发器(可选 · 2 字段) ────
   entry_triggers:

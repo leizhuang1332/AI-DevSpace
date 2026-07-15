@@ -38,7 +38,6 @@ const validZoneBody = (overrides: Record<string, unknown> = {}) => ({
     status_color: 'gray',
     status_pulse: false,
     default_arming: ['requirement-drafting'],
-    thinking_bar: 'required',
     entry_triggers: [],
     exit_triggers: [],
     description: '撰写需求文档',
@@ -136,16 +135,6 @@ describe('ZoneRegistry.loadAllZones', () => {
     const reg = new ZoneRegistry(zonesDir)
     const zones = await reg.loadAllZones()
     expect(zones).toHaveLength(1)
-  })
-
-  it('thinking_bar 缺失时默认 required', async () => {
-    writeZone(
-      'no-thinkbar.yaml',
-      `zone:\n  id: foo\n  name: FOO\n  display_name: foo\n  icon: "?"\n  route_segment: foo\n  has_resource_tree: false\n  has_inline_rail: false\n  main_layout: x\n  status_color: gray\n  default_arming: []\n`,
-    )
-    const reg = new ZoneRegistry(zonesDir)
-    const zones = await reg.loadAllZones()
-    expect(zones[0].thinking_bar).toBe('required')
   })
 
   it('status_pulse 缺失时默认 false', async () => {
@@ -268,7 +257,6 @@ describe('ZoneRegistry · 仓库内 6 个内置 yaml', () => {
 
     // 校验默认值兜底 + 触发器结构合法
     for (const z of zones) {
-      expect(z.thinking_bar).toMatch(/^(required|minimal|hidden)$/)
       expect(z.status_pulse === undefined || typeof z.status_pulse === 'boolean').toBe(true)
       expect(Array.isArray(z.entry_triggers)).toBe(true)
       expect(z.entry_triggers.every((t) => typeof t === 'string')).toBe(true)

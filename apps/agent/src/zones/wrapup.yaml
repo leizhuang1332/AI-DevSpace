@@ -18,9 +18,6 @@ zone:
     - retrospective-writer
     - knowledge-indexer
 
-  # ─── AI 思考条(必填 · 1 字段) ───
-  thinking_bar: minimal
-
   # ─── 触发器(可选 · 2 字段) ───
   entry_triggers: []
   exit_triggers: []

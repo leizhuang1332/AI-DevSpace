@@ -214,7 +214,10 @@ zone:
     - commit-message-draft
 
   # ──── AI 思考条(必填 · 1 字段) ────
-  thinking_bar: required         # required | minimal | hidden(A3 全局 + 工位内容)
+  # ⛔ DEPRECATED 2026-07(issue 16 wontfix):thinking_bar 字段已下线。
+  #   产品决定 ThinkBar 无实际作用、挡视线。schema / yaml / web zones.ts 同步移除。
+  #   本 ADR 行保留仅为历史决策追溯,不再生效。
+  # thinking_bar: required         # required | minimal | hidden(A3 全局 + 工位内容)
 
   # ──── 触发器(可选 · 2 字段) ────
   entry_triggers: []             # 自动进入条件,空 = 用户主动
@@ -226,14 +229,14 @@ zone:
 
 **字段默认值表**(6 工位):
 
-| 工位 | resource_tree | inline_rail | status_color | status_pulse | thinking_bar |
+| 工位 | resource_tree | inline_rail | status_color | status_pulse | thinking_bar ⚠️ deprecated |
 |---|---|---|---|---|---|
-| DRAFTING | ❌ false | ✅ true | gray | false | required |
-| ANALYZING | ❌ false | ❌ false | blue | true | required |
-| CLARIFYING | ❌ false | ❌ false | purple+warn | false | required |
-| DESIGNING | ⚠️ false | ❌ false | yellow | false | required |
-| EXECUTING | ✅ true | ✅ true | green | false | required |
-| WRAP-UP | ✅ true | ❌ false | gray | false | minimal |
+| DRAFTING | ❌ false | ✅ true | gray | false | — (已下线) |
+| ANALYZING | ❌ false | ❌ false | blue | true | — (已下线) |
+| CLARIFYING | ❌ false | ❌ false | purple+warn | false | — (已下线) |
+| DESIGNING | ⚠️ false | ❌ false | yellow | false | — (已下线) |
+| EXECUTING | ✅ true | ✅ true | green | false | — (已下线) |
+| WRAP-UP | ✅ true | ❌ false | gray | false | — (已下线) |
 
 > **DRAFTING 更新(issue 01 · drafting 重新设计)** —— `has_resource_tree`
 > 从 `true` 改为 `false`,与 ADR-0011 §5 R2 表同步。本表为单一事实源:

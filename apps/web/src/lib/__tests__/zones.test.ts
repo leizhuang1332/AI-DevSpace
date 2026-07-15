@@ -30,7 +30,6 @@ describe('ZONE_META', () => {
       expect(z.has_inline_rail).toBeTypeOf('boolean')
       expect(['gray', 'blue', 'purple', 'yellow', 'green', 'red', 'purple-warn']).toContain(z.status_color)
       expect(z.status_pulse).toBeTypeOf('boolean')
-      expect(['required', 'minimal', 'hidden']).toContain(z.thinking_bar)
       expect(typeof z.description).toBe('string')
     }
   })

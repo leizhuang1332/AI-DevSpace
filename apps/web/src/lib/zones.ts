@@ -10,7 +10,10 @@
  * - has_inline_rail:   是否渲染 InlineRail(右 120px)
  * - status_color:      ZoneBar 状态色(决策 22)
  * - status_pulse:      状态点是否脉动(ADR §6 决策 49 — 仅 ANALYZING = true)
- * - thinking_bar:      AI 思考条模式(决策 24 / A3 全局 + 工位内容)
+ *
+ * 历史字段(已下线 · 见 issue 16 wontfix):
+ * - thinking_bar: AI 思考条全局 UI 字段。2026-07 经产品决定下线(无实际作用、挡视线),
+ *   schema / yaml / web zones.ts 同步移除。
  */
 export type ZoneStatusColor =
   | 'gray'
@@ -20,8 +23,6 @@ export type ZoneStatusColor =
   | 'green'
   | 'red'
   | 'purple-warn'
-
-export type ZoneThinkingBar = 'required' | 'minimal' | 'hidden'
 
 export interface ZoneMeta {
   /** 内部 id(程序命名) */
@@ -42,8 +43,6 @@ export interface ZoneMeta {
   status_color: ZoneStatusColor
   /** 状态点是否脉动(ADR §6 决策 49) */
   status_pulse: boolean
-  /** AI 思考条模式 */
-  thinking_bar: ZoneThinkingBar
   /** 给 AI / 工具看的描述 */
   description: string
   /** 工位主区布局标识(对应 shell 不同布局组件,ADR-0013 §工位注册表) */
@@ -66,7 +65,6 @@ export const ZONE_META: readonly ZoneMeta[] = [
     has_inline_rail: true,
     status_color: 'gray',
     status_pulse: false,
-    thinking_bar: 'required',
     description: '撰写需求文档,建立初始上下文',
   },
   {
@@ -79,7 +77,6 @@ export const ZONE_META: readonly ZoneMeta[] = [
     has_inline_rail: false,
     status_color: 'blue',
     status_pulse: true,
-    thinking_bar: 'required',
     main_layout: 'admission-workbench',
     default_arming: [
       'admission-check',
@@ -99,7 +96,6 @@ export const ZONE_META: readonly ZoneMeta[] = [
     has_inline_rail: false,
     status_color: 'purple-warn',
     status_pulse: false,
-    thinking_bar: 'required',
     description: '回答 AI 的提问,提供决策信息',
   },
   {
@@ -112,7 +108,6 @@ export const ZONE_META: readonly ZoneMeta[] = [
     has_inline_rail: false,
     status_color: 'yellow',
     status_pulse: false,
-    thinking_bar: 'required',
     description: '评审 AI 候选方案,选择最终路径',
   },
   {
@@ -125,7 +120,6 @@ export const ZONE_META: readonly ZoneMeta[] = [
     has_inline_rail: true,
     status_color: 'green',
     status_pulse: false,
-    thinking_bar: 'required',
     description: '监督 AI 实施,审阅 PR 与测试',
   },
   {
@@ -138,7 +132,6 @@ export const ZONE_META: readonly ZoneMeta[] = [
     has_inline_rail: false,
     status_color: 'gray',
     status_pulse: false,
-    thinking_bar: 'minimal',
     description: '归档复盘,沉淀知识库',
   },
 ] as const
@@ -196,11 +189,13 @@ export function getZoneByRouteSegment(segment: string): ZoneMeta | null {
 }
 
 /**
- * 共享路由正则 —— 单一事实源,避免与 ZoneBar/useZone 漂移(issue 16 · 复审)。
+ * 共享路由正则 —— 单一事实源,避免与 ZoneBar 漂移。
  *
  * 仅捕获 /requirements/<id>/<zone>/ 这一层(id 不含 /,zone 不含 /)
  * - ZoneBar: 提取当前 zone 渲染 Tab
- * - useZone: 推断客户端位置 + 提供给 ThinkBarSlot
+ *
+ * 历史:issue 16 复审时与 useZone 共享,2026-07 useZone 随 ThinkBar 下线
+ * 一并删除,本注释同步简化(见 issue 16 wontfix)。
  */
 export const REQUIREMENTS_ZONE_PATH_RE =
   /^\/requirements\/([^/]+)\/([^/]+)\/?$/

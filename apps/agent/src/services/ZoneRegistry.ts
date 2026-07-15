@@ -59,9 +59,11 @@ function isStateMachineTrigger(name: string): boolean {
  * - entry_triggers / exit_triggers 包含状态机命名模式 → 抛 ZoneRegistryError
  *
  * 默认值兜底(由 zod schema 提供):
- * - thinking_bar: required
  * - status_pulse: false
  * - entry_triggers / exit_triggers: []
+ *
+ * 历史字段(已下线 · 见 issue 16 wontfix):
+ * - thinking_bar: AI 思考条全局 UI 字段。2026-07 经产品决定下线。
  */
 export class ZoneRegistry {
   private readonly zones = new Map<string, ZoneConfig>()

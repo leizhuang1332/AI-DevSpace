@@ -20,9 +20,6 @@ zone:
     - requirement-brainstorm
     - requirement-critique
 
-  # ─── AI 思考条(必填 · 1 字段) ───
-  thinking_bar: required
-
   # ─── 触发器(可选 · 2 字段) ───
   entry_triggers:
     - "DRAFTING 工位 PRD 完成时,弹出建议:进入 ANALYZING 校验"

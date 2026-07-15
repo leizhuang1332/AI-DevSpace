@@ -20,9 +20,6 @@ zone:
     - requirement-drafting
     - context-bootstrap
 
-  # ─── AI 思考条(必填 · 1 字段) ───
-  thinking_bar: required
-
   # ─── 触发器(可选 · 2 字段) ───
   entry_triggers: []
   exit_triggers: []
