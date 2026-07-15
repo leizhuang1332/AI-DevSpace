@@ -1,0 +1,58 @@
+apps/web/src/components/drafting-zone.tsx
+  s_eedb1942578def::t_eb724a0b04c4fd 207-221
+  s_eedb1942578def::t_39b2dd21d29c90 447
+  s_eedb1942578def::t_c4ae6132796ec1 388-391
+apps/web/src/components/__tests__/markdown-preview.test.tsx
+  s_eedb1942578def::t_bff686a9cc2fbb 1-381,386-390,392-393,396-501
+  s_eedb1942578def::t_d03c3cf5bd9053 382-385,391,394-395
+apps/web/src/lib/use-markdown-preview-toggle.ts
+  s_eedb1942578def::t_cfccd20bc0e666 1-89
+apps/web/src/components/markdown-preview.tsx
+  s_eedb1942578def::t_fe1b84e9162448 7-44,54-285,287-368
+  s_eedb1942578def::t_ba8e479ab43b57 286
+  s_eedb1942578def::t_aa51069cd74bef 45-53
+  s_eedb1942578def::t_14076d1588da2f 1-6
+apps/web/src/components/aux-drawer.tsx
+  s_eedb1942578def::t_1a9ab7df00c02c 71-76
+  s_eedb1942578def::t_1af09aea785038 143-145,147-150
+  s_eedb1942578def::t_3f0f3cfc69a0ac 411-413
+  s_eedb1942578def::t_f1605091562151 8
+  s_eedb1942578def::t_18931a5c064c05 101
+  s_eedb1942578def::t_6ca8c2d746efb5 139-142,146,151
+  s_eedb1942578def::t_117af69047d06b 395
+  s_eedb1942578def::t_d3eb40515bbf9c 410,414,423-445
+  s_eedb1942578def::t_16881e3b39a6d9 7
+apps/web/src/components/__tests__/drafting-zone.test.tsx
+  s_eedb1942578def::t_a696300021c02c 620-626
+  s_eedb1942578def::t_9ed55ba40de7da 309-534,627-628
+  s_eedb1942578def::t_72b32ae88ce23b 576,579-584
+  s_eedb1942578def::t_17cf2d1d264fea 535-575,577-578,585-619
+apps/web/src/components/drafting-prd-pane.tsx
+  s_eedb1942578def::t_7e36646b391685 257,261,270-277,279-291
+  s_eedb1942578def::t_f7c9995c8e61dd 75-76,78-81
+  s_eedb1942578def::t_4a8a303a0a0484 8,14
+  s_eedb1942578def::t_d5a9b014048459 12
+  s_eedb1942578def::t_7aad945212e897 258-260
+  s_eedb1942578def::t_68c3ff99baa74a 54-58
+  s_eedb1942578def::t_0fc6b8eb3710ac 243
+  s_eedb1942578def::t_c49cadca3a3e56 71-74,77,82
+  s_eedb1942578def::t_4d57f514e588aa 278
+  s_eedb1942578def::t_d128f72af6b14e 61
+  s_eedb1942578def::t_81c7a16ef77795 21,30,32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "6b18b8048c9aaaf57b268afeaea0f338ff2f72bb",
+  "prompts": {},
+  "sessions": {
+    "s_eedb1942578def": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9d297ce7-80ca-4879-a9da-b6ca8dbb570f",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
