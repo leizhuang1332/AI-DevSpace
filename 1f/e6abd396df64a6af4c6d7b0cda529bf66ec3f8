@@ -1,0 +1,27 @@
+docs/design/pages/01-new-requirement-modal.html
+  s_4f998c2824ccf7::t_58340e97982f32 1-751
+apps/web/src/components/new-requirement-modal.tsx
+  s_4f998c2824ccf7::t_a3c41df8b092df 2-22,25-44,47-55,59,62,69-76,78-79,83-92,96-99,101,108,113-117,121-124,132,139-140,142-145,149-150,152,154-156,159-160,162-175,196,203
+.scratch/new-requirement-modal/UI-POLISH-SPEC.md
+  s_4f998c2824ccf7::t_5d245867df7a3d 1-526
+.scratch/new-requirement-modal/PRD.md
+  s_4f998c2824ccf7::t_1a895f2e14a2d3 1-274
+docs/design/pages/15-new-requirement-modal.html
+  s_4f998c2824ccf7::t_a5577644e45040 2-26,30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "1fe6abd396df64a6af4c6d7b0cda529bf66ec3f8",
+  "prompts": {},
+  "sessions": {
+    "s_4f998c2824ccf7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6ddeac87-c789-42bc-8a18-b43677911fb3",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
