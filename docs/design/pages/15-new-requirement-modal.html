@@ -1,8 +1,33 @@
 <!doctype html>
+<!--
+  ⚠️ DEPRECATED · v1.0 design · superseded by 01-new-requirement-modal.html (v1.0.3)
+
+  此文件是 v1.0 时代的新建需求弹窗设计稿(720px / 5 字段 / Skill 链 chip)。
+  已于 2026-07-15 v1.0.3 重构,新版本只有 1 个 input(420px),其他字段
+  (关联仓库 / 统一分支名 / PRD / Skill 链)全部迁到 DRAFTING 工位。
+
+  **请使用新设计稿:**
+    → <a href="./01-new-requirement-modal.html">01-new-requirement-modal.html</a>
+
+  **废弃原因(决策依据):**
+    - 决策 38:Skill = 提示词封装,不是执行单元(移除 Skill 链 chip)
+    - 决策 50:DRAFTING 独立工位承接 PRD(移除 PRD 原文 textarea)
+    - 决策 4 + 50:worktree 多 repo 模型下,需求级 target branch 语义分裂
+    - 决策 15 + 28:不写状态机 + Linear 紧凑型(移除 5 字段重型表单)
+    - Q7 (grill 决策):功能内聚 → 弹窗不关联 repo(由 DRAFTING 资源树承担)
+
+  **三件套对应:**
+    - PRD:     .scratch/new-requirement-modal/PRD.md
+    - SPEC:    .scratch/new-requirement-modal/UI-POLISH-SPEC.md
+    - HTML:    ./01-new-requirement-modal.html (新)
+    - 组件:    apps/web/src/components/new-requirement-modal.tsx (已重写)
+
+  此文件保留作历史参考(决策 36 考古价值),不再维护。
+-->
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>15 · 新建需求 · AI-DevSpace</title>
+<title>[DEPRECATED v1.0] 15 · 新建需求 · AI-DevSpace</title>
 <link rel="preconnect" href="https://rsms.me/">
 <link rel="stylesheet" href="https://rsms.me/inter/inter.css">
 <style>

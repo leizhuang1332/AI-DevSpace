@@ -1,0 +1,751 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>01 · 新建需求弹窗 · AI-DevSpace v1.0.3</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  /* Brand & semantic (继承主 spec 决策 20 / 21) */
+  --brand:#5e6ad2; --brand-50:#eef0fb; --brand-500:#5e6ad2; --brand-600:#525bc7;
+  --success:#16a34a; --warning:#f59e0b; --error:#ef4444; --info:#64748b;
+
+  /* Background (主 spec §1.1) */
+  --bg:#fbfbfd; --bg-elevated:#fff; --bg-subtle:#f5f5f7;
+  --border:#ebebef; --border-strong:#d8d8de;
+  --text-1:#0f172a; --text-2:#475569; --text-3:#94a3b8;
+  --destructive:#ef4444;
+
+  /* Spacing (主 spec §1.5, 4 倍数) */
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px;
+  --space-5:20px; --space-6:24px; --space-8:32px;
+
+  /* Type scale (主 spec §1.5, 9 档) */
+  --text-xs:11px; --text-sm:12px; --text-base:13px; --text-md:14px;
+  --text-lg:16px; --text-xl:18px; --text-2xl:20px; --text-3xl:24px;
+
+  --radius-sm:4px; --radius-md:6px; --radius-lg:8px; --radius-xl:12px;
+  --shadow-xl:0 24px 64px rgba(0,0,0,0.15), 0 8px 16px rgba(0,0,0,0.08);
+  --shadow-2xl:0 32px 80px rgba(0,0,0,0.18), 0 12px 24px rgba(0,0,0,0.10);
+
+  /* Banner colors (UI-SPEC §8) */
+  --warn-bg:#fffbeb; --warn-border:#fde68a; --warn-text:#78350f; --warn-text-strong:#451a03;
+  --err-bg:#fef2f2; --err-border:#fecaca; --err-text:#991b1b;
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:'Inter',-apple-system,sans-serif;
+  background:#1a1a2e;
+  color:var(--text-1);
+  font-size:var(--text-base);
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  padding:var(--space-8);
+}
+
+/* Mono font for code/slug */
+.mono{font-family:'JetBrains Mono','SF Mono',Consolas,monospace}
+
+/* ===== Page navigation (top anchor bar) ===== */
+.page-nav{
+  max-width:1280px;margin:0 auto var(--space-8);padding:var(--space-4) var(--space-6);
+  background:#fff;border-radius:var(--radius-xl);
+  box-shadow:var(--shadow-xl);
+  display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;
+  font-size:var(--text-sm);
+}
+.page-nav .title{font-weight:600;font-size:var(--text-md);margin-right:var(--space-4)}
+.page-nav a{
+  color:var(--text-2);text-decoration:none;
+  padding:var(--space-1) var(--space-3);border-radius:var(--radius-md);
+  transition:all 0.15s;
+}
+.page-nav a:hover{background:var(--bg-subtle);color:var(--text-1)}
+
+/* ===== Section container ===== */
+.section{
+  max-width:1280px;margin:0 auto var(--space-12);
+  background:#fff;border-radius:var(--radius-xl);
+  box-shadow:var(--shadow-xl);
+  overflow:hidden;
+}
+.section-head{
+  padding:var(--space-5) var(--space-6);
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:baseline;justify-content:space-between;
+}
+.section-head h2{font-size:var(--text-xl);font-weight:600;letter-spacing:-0.01em}
+.section-head .meta{font-size:var(--text-xs);color:var(--text-3);font-family:'JetBrains Mono',monospace}
+.section-body{padding:var(--space-6)}
+
+/* ===== Mock page background (for overlays) ===== */
+.mock-page{
+  background:var(--bg);
+  border-radius:var(--radius-lg);
+  border:1px solid var(--border);
+  min-height:480px;
+  position:relative;
+  overflow:hidden;
+}
+
+/* ===== Modal shared ===== */
+.backdrop{
+  position:absolute;inset:0;
+  background:rgba(15,23,42,0.4);
+  backdrop-filter:blur(4px);
+  z-index:100;
+  display:flex;align-items:center;justify-content:center;
+}
+.modal{
+  position:relative;z-index:101;
+  background:var(--bg-elevated);
+  border-radius:var(--radius-xl);
+  box-shadow:var(--shadow-xl);
+  display:flex;flex-direction:column;
+  max-height:90vh;
+  animation:zoom-in 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes zoom-in{
+  from{opacity:0;transform:scale(0.95)}
+  to{opacity:1;transform:scale(1)}
+}
+
+.modal-head{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:var(--space-5) var(--space-6);
+  border-bottom:1px solid var(--border);
+}
+.modal-head h2{
+  font-size:var(--text-xl);font-weight:600;letter-spacing:-0.01em;
+  display:flex;align-items:center;gap:var(--space-3);
+}
+.modal-head h2::before{content:"✨";font-size:18px}
+.modal-head .close{
+  width:28px;height:28px;border-radius:var(--radius-md);
+  background:var(--bg-subtle);border:none;cursor:pointer;
+  color:var(--text-3);font-size:14px;
+  display:flex;align-items:center;justify-content:center;
+  transition:all 0.15s;
+}
+.modal-head .close:hover{background:var(--bg-elevated);color:var(--text-1)}
+
+.modal-body{padding:var(--space-6)}
+.modal-foot{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:var(--space-4) var(--space-6);
+  border-top:1px solid var(--border);
+  background:var(--bg-subtle);
+}
+.modal-foot .left{font-size:var(--text-xs);color:var(--text-3)}
+.modal-foot .right{display:flex;gap:var(--space-2)}
+
+/* ===== Field ===== */
+.field{margin-bottom:var(--space-5)}
+.field:last-child{margin-bottom:0}
+.field label{
+  display:block;font-size:var(--text-sm);font-weight:500;
+  color:var(--text-1);margin-bottom:var(--space-2);
+}
+.field label .req{color:var(--destructive)}
+.field input,.field textarea{
+  width:100%;padding:var(--space-3);
+  background:var(--bg-subtle);
+  border:1px solid var(--border-strong);
+  border-radius:var(--radius-md);
+  font-size:var(--text-md);color:var(--text-1);
+  font-family:inherit;outline:none;
+  transition:all 0.15s;
+}
+.field input:focus,.field textarea:focus{
+  border-color:var(--brand-500);
+  background:var(--bg-elevated);
+  box-shadow:0 0 0 3px rgba(94,106,210,0.15);
+}
+.field .hint{font-size:var(--text-xs);color:var(--text-3);margin-top:4px}
+.field .slug-preview{
+  font-size:var(--text-sm);font-family:'JetBrains Mono',monospace;
+  color:var(--text-3);margin-top:var(--space-1);
+  display:flex;align-items:center;gap:var(--space-1);
+}
+.field .slug-preview .placeholder{color:var(--text-3);opacity:0.6}
+.field .count-row{
+  display:flex;justify-content:space-between;align-items:center;margin-top:var(--space-1);
+}
+.field .count{font-size:var(--text-xs);color:var(--text-3);font-family:'JetBrains Mono',monospace}
+
+/* ===== Buttons ===== */
+.btn{
+  display:inline-flex;align-items:center;gap:6px;
+  height:32px;padding:0 var(--space-4);
+  border-radius:var(--radius-md);
+  font-size:var(--text-md);font-weight:500;
+  cursor:pointer;border:none;
+  transition:all 0.1s;
+}
+.btn-primary{background:var(--brand);color:#fff}
+.btn-primary:hover{background:var(--brand-600)}
+.btn-primary:disabled{opacity:0.5;cursor:not-allowed}
+.btn-secondary{background:var(--bg-elevated);color:var(--text-1);border:1px solid var(--border-strong)}
+.btn-secondary:hover{background:var(--bg-subtle)}
+.btn-ghost{background:transparent;color:var(--text-2)}
+.btn-ghost:hover{color:var(--text-1)}
+
+/* ===== Banner (DRAFTING top) ===== */
+.banner{
+  padding:var(--space-3) var(--space-6);
+  display:flex;align-items:center;justify-content:space-between;
+  border-bottom:1px solid;
+  font-size:var(--text-sm);
+}
+.banner-warn{background:var(--warn-bg);border-color:var(--warn-border);color:var(--warn-text)}
+.banner-warn strong{color:var(--warn-text-strong)}
+.banner-err{background:var(--err-bg);border-color:var(--err-border);color:var(--err-text)}
+.banner-err strong{font-weight:600}
+.banner .left{display:flex;align-items:center;gap:var(--space-2)}
+.banner .actions{display:flex;align-items:center;gap:var(--space-2)}
+.banner button.close{
+  width:28px;height:28px;border-radius:var(--radius-md);
+  background:transparent;border:none;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:background 0.15s;
+}
+.banner-warn button.close:hover{background:rgba(252,211,77,0.3)}
+.banner-err button.close:hover{background:rgba(254,202,202,0.3)}
+
+/* ===== Resource tree ===== */
+.resource-tree{
+  width:240px;border-right:1px solid var(--border);
+  padding:var(--space-3);
+  background:var(--bg-elevated);
+  font-size:var(--text-sm);
+}
+.tree-section{margin-bottom:var(--space-4)}
+.tree-section-head{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:var(--space-1) var(--space-2);
+  font-weight:500;color:var(--text-1);
+}
+.tree-section-head .add{
+  background:transparent;border:none;cursor:pointer;
+  color:var(--text-3);font-size:14px;padding:0 var(--space-1);
+  border-radius:var(--radius-sm);
+}
+.tree-section-head .add:hover{color:var(--text-1);background:var(--bg-subtle)}
+.tree-item{
+  padding:var(--space-1) var(--space-4);
+  color:var(--text-2);
+  border-radius:var(--radius-sm);
+  display:flex;align-items:center;gap:var(--space-2);
+}
+.tree-item:hover{background:var(--bg-subtle);color:var(--text-1)}
+.tree-empty-hint{
+  margin:var(--space-1) var(--space-2);
+  padding:var(--space-2) var(--space-3);
+  background:var(--bg-subtle);border-radius:var(--radius-md);
+  font-size:var(--text-xs);color:var(--text-3);
+  line-height:1.5;
+}
+
+/* ===== Skeleton (决策 30) ===== */
+.skeleton{
+  padding:var(--space-6);
+  display:flex;flex-direction:column;gap:var(--space-3);
+}
+.skeleton-line{
+  height:16px;background:linear-gradient(90deg, var(--bg-subtle) 0%, #ececf0 50%, var(--bg-subtle) 100%);
+  background-size:200% 100%;
+  border-radius:var(--radius-sm);
+  animation:shimmer 1.5s ease-in-out infinite;
+}
+@keyframes shimmer{
+  0%{background-position:200% 0}
+  100%{background-position:-200% 0}
+}
+
+/* ===== Repo picker (in attach-repo modal) ===== */
+.repo-picker{
+  background:var(--bg-subtle);border:1px solid var(--border);
+  border-radius:var(--radius-md);padding:var(--space-3);
+  max-height:200px;overflow:auto;
+}
+.repo-opt{
+  display:flex;align-items:center;gap:var(--space-3);
+  padding:var(--space-2);border-radius:var(--radius-sm);
+  cursor:pointer;font-size:var(--text-sm);
+}
+.repo-opt:hover{background:var(--bg-elevated)}
+.repo-opt.on{background:var(--bg-elevated)}
+.repo-opt .cb{
+  width:16px;height:16px;border:1.5px solid var(--border-strong);
+  border-radius:3px;display:flex;align-items:center;justify-content:center;
+  color:#fff;font-size:11px;
+}
+.repo-opt.on .cb{background:var(--brand-500);border-color:var(--brand-500)}
+.repo-opt .name{font-family:'JetBrains Mono',monospace;font-weight:500}
+.repo-opt .url{color:var(--text-3);font-size:var(--text-xs);font-family:'JetBrains Mono',monospace}
+
+/* ===== Annotation arrows (for explanation) ===== */
+.note{
+  margin-top:var(--space-6);padding:var(--space-4);
+  background:var(--brand-50);border-left:3px solid var(--brand-500);
+  border-radius:var(--radius-md);
+  font-size:var(--text-sm);color:var(--text-2);
+  line-height:1.6;
+}
+.note strong{color:var(--text-1)}
+.note code{font-family:'JetBrains Mono',monospace;font-size:var(--text-sm);background:#fff;padding:1px 6px;border-radius:3px}
+
+/* ===== Responsive grid for two-column mock pages ===== */
+.mock-page-flex{display:flex}
+.mock-page-flex .resource-tree{flex-shrink:0}
+.mock-page-flex .main-area{flex:1;padding:var(--space-6);overflow:auto}
+.mock-page-flex .main-area h1{font-size:var(--text-3xl);font-weight:600;letter-spacing:-0.02em;margin-bottom:var(--space-4)}
+</style>
+</head>
+<body>
+
+<!-- ===== Page navigation ===== -->
+<nav class="page-nav">
+  <span class="title">01 · 新建需求弹窗 v1.0.3</span>
+  <a href="#section-1">1 · 弹窗空态</a>
+  <a href="#section-2">2 · 弹窗填写中</a>
+  <a href="#section-3">3 · 字符实时过滤</a>
+  <a href="#section-4">4 · 提交后 DRAFTING</a>
+  <a href="#section-5">5 · 资源树空态</a>
+  <a href="#section-6">6 · 首次关联仓库</a>
+  <a href="#section-7">7 · 追加关联仓库</a>
+</nav>
+
+<!-- ===== Section 1: 弹窗空态 ===== -->
+<section class="section" id="section-1">
+  <div class="section-head">
+    <h2>1 · 弹窗空态(420px)</h2>
+    <span class="meta">触发后初始状态 · autoFocus 在 input</span>
+  </div>
+  <div class="section-body">
+    <div class="mock-page">
+      <div class="backdrop">
+        <div class="modal" style="width:420px">
+          <div class="modal-head">
+            <h2>新建需求</h2>
+            <button class="close" title="关闭 (ESC)">✕</button>
+          </div>
+          <div class="modal-body">
+            <div class="field">
+              <label>需求名称 <span class="req">*</span></label>
+              <input type="text" placeholder="如:退款功能优化" autofocus>
+              <div class="hint">创建后跳到 DRAFTING 工位继续</div>
+              <div class="slug-preview"><span class="placeholder">req-NNN-</span><span class="placeholder">&lt;slug&gt;</span></div>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <div class="left">⌘N 全局快捷键 · ESC 关闭</div>
+            <div class="right">
+              <button class="btn btn-ghost">取消</button>
+              <button class="btn btn-primary" disabled>✓ 创建</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">
+      <strong>设计要点:</strong>弹窗仅 420px 宽(对比 v1.0 的 720px 缩 40%);只剩 1 个 input;无步骤指示器(决策 15 不写状态机);无 PRD textarea / 仓库选择 / 分支 / Skill 链(全部迁 DRAFTING);hint + slug 预览对齐决策 24(陪伴感)。
+    </div>
+  </div>
+</section>
+
+<!-- ===== Section 2: 弹窗填写中 ===== -->
+<section class="section" id="section-2">
+  <div class="section-head">
+    <h2>2 · 弹窗填写中(slug 预览 + 字数计数)</h2>
+    <span class="meta">用户输入 title 时实时反馈</span>
+  </div>
+  <div class="section-body">
+    <div class="mock-page">
+      <div class="backdrop">
+        <div class="modal" style="width:420px">
+          <div class="modal-head">
+            <h2>新建需求</h2>
+            <button class="close" title="关闭 (ESC)">✕</button>
+          </div>
+          <div class="modal-body">
+            <div class="field">
+              <label>需求名称 <span class="req">*</span></label>
+              <input type="text" value="退款功能优化" style="border-color:var(--brand-500);background:var(--bg-elevated);box-shadow:0 0 0 3px rgba(94,106,210,0.15)">
+              <div class="hint">创建后跳到 DRAFTING 工位继续</div>
+              <div class="slug-preview">
+                <span>req-</span><span style="color:var(--text-2)">007</span><span>-</span><span style="color:var(--brand-600)">退款功能优化</span>
+              </div>
+              <div class="count-row">
+                <span></span>
+                <span class="count">6 / 50</span>
+              </div>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <div class="left">⌘N 全局快捷键 · ESC 关闭</div>
+            <div class="right">
+              <button class="btn btn-ghost">取消</button>
+              <button class="btn btn-primary">✓ 创建</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">
+      <strong>设计要点:</strong>slug 预览实时渲染(决策 24 陪伴感);数字 <code>007</code> 用灰色(占位编号,提交后填实际);slug 本体用 brand 紫(强调"这就是你的需求 ID");字数计数右下角 11px,50 字软限制;按钮 enabled。
+    </div>
+  </div>
+</section>
+
+<!-- ===== Section 3: 字符实时过滤 ===== -->
+<section class="section" id="section-3">
+  <div class="section-head">
+    <h2>3 · 字符实时过滤(决策 E3)</h2>
+    <span class="meta">用户尝试粘贴路径非法字符</span>
+  </div>
+  <div class="section-body">
+    <div class="mock-page">
+      <div class="backdrop">
+        <div class="modal" style="width:420px">
+          <div class="modal-head">
+            <h2>新建需求</h2>
+            <button class="close" title="关闭 (ESC)">✕</button>
+          </div>
+          <div class="modal-body">
+            <div class="field">
+              <label>需求名称 <span class="req">*</span></label>
+              <input type="text" value="order/refund:v2" style="border-color:var(--brand-500);background:var(--bg-elevated);box-shadow:0 0 0 3px rgba(94,106,210,0.15)">
+              <div class="hint">创建后跳到 DRAFTING 工位继续</div>
+              <div class="slug-preview">
+                <span>req-</span><span style="color:var(--text-2)">008</span><span>-</span><span style="color:var(--brand-600)">orderrefundv2</span>
+              </div>
+              <div class="count-row">
+                <span class="hint" style="margin-top:0;color:var(--warning)">⚠ 已过滤路径非法字符 <code>\ / : * ? " &lt; &gt; |</code></span>
+                <span class="count">13 / 50</span>
+              </div>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <div class="left">⌘N 全局快捷键 · ESC 关闭</div>
+            <div class="right">
+              <button class="btn btn-ghost">取消</button>
+              <button class="btn btn-primary">✓ 创建</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">
+      <strong>设计要点:</strong>用户粘贴 <code>order/refund:v2</code> → input 层实时过滤非法字符(决策 E3);显示一行黄色警告提示哪些字符被过滤;slug 预览同步更新为 <code>orderrefundv2</code>;用户能即时看到自己的需求 ID 形态(避免认知断层)。
+    </div>
+  </div>
+</section>
+
+<!-- ===== Section 4: 提交后 DRAFTING(骨架屏 + banner) ===== -->
+<section class="section" id="section-4">
+  <div class="section-head">
+    <h2>4 · 提交后跳转 DRAFTING(骨架屏 → 顶部 banner)</h2>
+    <span class="meta">决策 11 I 方案:弹窗立即关 + DRAFTING 接管</span>
+  </div>
+  <div class="section-body">
+
+    <p style="font-size:var(--text-sm);color:var(--text-2);margin-bottom:var(--space-3)"><strong>阶段 A · 骨架屏(创建中,1.5s)</strong></p>
+    <div class="mock-page">
+      <div class="mock-page-flex" style="height:480px">
+        <div class="resource-tree">
+          <div class="tree-section">
+            <div class="tree-section-head"><span>▼ PRD</span></div>
+            <div class="tree-item">背景</div>
+            <div class="tree-item">目标</div>
+          </div>
+          <div class="tree-section">
+            <div class="tree-section-head"><span>▶ AC</span></div>
+          </div>
+          <div class="tree-section">
+            <div class="tree-section-head"><span>▶ 仓库 (0)</span></div>
+          </div>
+        </div>
+        <div class="main-area">
+          <div class="skeleton">
+            <div class="skeleton-line" style="width:40%;height:24px"></div>
+            <div class="skeleton-line" style="width:80%"></div>
+            <div class="skeleton-line" style="width:60%"></div>
+            <div class="skeleton-line" style="width:75%"></div>
+            <div style="margin-top:var(--space-3);font-size:var(--text-sm);color:var(--text-3)">正在创建需求…</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p style="font-size:var(--text-sm);color:var(--text-2);margin:var(--space-6) 0 var(--space-3)"><strong>阶段 B · 成功后(banner 淡黄提示)</strong></p>
+    <div class="mock-page">
+      <div class="banner banner-warn">
+        <div class="left">
+          <span>📦</span>
+          <span>未关联任何仓库 · 添加仓库后将自动创建 worktree</span>
+        </div>
+        <div class="actions">
+          <button class="btn" style="height:28px;padding:0 12px;font-size:var(--text-sm);background:var(--bg-elevated);border:1px solid var(--warn-border);color:var(--warn-text)">+ 关联仓库</button>
+          <button class="close" style="color:var(--warn-text)">✕</button>
+        </div>
+      </div>
+      <div class="mock-page-flex" style="height:432px">
+        <div class="resource-tree">
+          <div class="tree-section">
+            <div class="tree-section-head"><span>▼ PRD</span></div>
+            <div class="tree-item">背景</div>
+            <div class="tree-item">目标</div>
+          </div>
+          <div class="tree-section">
+            <div class="tree-section-head"><span>▶ AC</span></div>
+          </div>
+          <div class="tree-section">
+            <div class="tree-section-head"><span>▶ 仓库 (0)</span></div>
+          </div>
+        </div>
+        <div class="main-area">
+          <h1 style="margin-bottom:var(--space-2)">退款功能优化</h1>
+          <div style="font-size:var(--text-sm);color:var(--text-3);font-family:'JetBrains Mono',monospace;margin-bottom:var(--space-6)">req-007-退款功能优化 · 创建于 刚刚</div>
+          <div style="font-size:var(--text-base);color:var(--text-3);font-style:italic">
+            📝 在这里写 PRD 背景、目标、AC 等内容…<br><br>
+            <span style="font-size:var(--text-xs)">(占位 — 实际 DRAFTING 工位有完整 PRD 编辑器)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p style="font-size:var(--text-sm);color:var(--text-2);margin:var(--space-6) 0 var(--space-3)"><strong>阶段 C · 失败后(banner 红色 + 重试)</strong></p>
+    <div class="mock-page">
+      <div class="banner banner-err">
+        <div class="left">
+          <span>❌</span>
+          <span><strong>创建失败</strong> · 网络异常,请检查 Agent 守护进程</span>
+        </div>
+        <div class="actions">
+          <button class="btn" style="height:28px;padding:0 12px;font-size:var(--text-sm);background:var(--bg-elevated);border:1px solid var(--err-border);color:var(--err-text)">重试</button>
+        </div>
+      </div>
+      <div class="mock-page-flex" style="height:432px">
+        <div class="resource-tree">
+          <div class="tree-section">
+            <div class="tree-section-head"><span>▶ PRD</span></div>
+          </div>
+          <div class="tree-section">
+            <div class="tree-section-head"><span>▶ AC</span></div>
+          </div>
+        </div>
+        <div class="main-area" style="display:flex;align-items:center;justify-content:center;flex-direction:column;color:var(--text-3)">
+          <div style="font-size:48px;margin-bottom:var(--space-4)">⚠️</div>
+          <div style="font-size:var(--text-md);color:var(--text-1);margin-bottom:var(--space-2)">需求创建失败</div>
+          <div style="font-size:var(--text-sm);max-width:360px;text-align:center;line-height:1.6">网络异常,请检查 Agent 守护进程是否运行。点击顶部"重试"按钮重新发起创建请求。</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">
+      <strong>设计要点:</strong>决策 11 I 方案:弹窗立即关 + 跳 DRAFTING,创建动作完全由 DRAFTING 接管;<strong>阶段 A 骨架屏</strong> shimmer 1.5s(决策 30);<strong>阶段 B 顶部淡黄 banner</strong> 持续可见不抢焦(决策 43 陪伴);<strong>阶段 C 红色 banner</strong> L3 错误态(决策 30 错误分层),含 [重试] 按钮;关联第一个 repo 后 banner 自动消失。
+    </div>
+  </div>
+</section>
+
+<!-- ===== Section 5: 资源树空态 ===== -->
+<section class="section" id="section-5">
+  <div class="section-head">
+    <h2>5 · 资源树"仓库"节点空态</h2>
+    <span class="meta">关闭 banner 后,资源树仍是引导入口</span>
+  </div>
+  <div class="section-body">
+    <div class="mock-page">
+      <div class="mock-page-flex" style="height:480px">
+        <div class="resource-tree" style="width:260px">
+          <div class="tree-section">
+            <div class="tree-section-head"><span>▼ PRD</span></div>
+            <div class="tree-item">背景</div>
+            <div class="tree-item">目标</div>
+            <div class="tree-item">验收标准</div>
+          </div>
+          <div class="tree-section">
+            <div class="tree-section-head"><span>▶ AC</span></div>
+          </div>
+          <div class="tree-section">
+            <div class="tree-section-head">
+              <span>📦 仓库 (0)</span>
+              <button class="add" title="关联仓库">+</button>
+            </div>
+            <div class="tree-empty-hint">
+              💡 首次添加仓库时会请你填写统一分支名
+            </div>
+          </div>
+        </div>
+        <div class="main-area">
+          <h1 style="margin-bottom:var(--space-2)">退款功能优化</h1>
+          <div style="font-size:var(--text-sm);color:var(--text-3);font-family:'JetBrains Mono',monospace;margin-bottom:var(--space-6)">req-007-退款功能优化 · 创建于 刚刚</div>
+          <div style="font-size:var(--text-base);color:var(--text-3);font-style:italic">
+            📝 PRD 内容占位…<br><br>
+            <span style="font-size:var(--text-xs)">(顶部 banner 已被关闭,资源树"仓库"节点是当前引导入口)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">
+      <strong>设计要点:</strong>用户关闭顶部 banner 后,资源树"仓库"节点(<code>📦 仓库 (0)</code> + <code>+</code> 按钮)成为持续引导入口;节点下方浅色 hint 卡解释首次添加会发生什么(填分支名);不闪烁、不推送、零打断(决策 24/43)。
+    </div>
+  </div>
+</section>
+
+<!-- ===== Section 6: 首次关联仓库弹层 ===== -->
+<section class="section" id="section-6">
+  <div class="section-head">
+    <h2>6 · 首次关联仓库弹层(填统一分支名)</h2>
+    <span class="meta">DRAFTING 资源树 [+] / banner [+] 触发</span>
+  </div>
+  <div class="section-body">
+    <div class="mock-page">
+      <div class="backdrop">
+        <div class="modal" style="width:480px">
+          <div class="modal-head">
+            <h2>关联仓库 · 退款功能优化</h2>
+            <button class="close">✕</button>
+          </div>
+          <div class="modal-body">
+
+            <div class="field">
+              <label>此需求将关联以下仓库(可多选)</label>
+              <div class="repo-picker">
+                <div class="repo-opt on">
+                  <div class="cb">✓</div>
+                  <div style="flex:1">
+                    <div class="name">refund-service</div>
+                    <div class="url">git@github.com:company/refund-service.git</div>
+                  </div>
+                </div>
+                <div class="repo-opt on">
+                  <div class="cb">✓</div>
+                  <div style="flex:1">
+                    <div class="name">order-service</div>
+                    <div class="url">git@github.com:company/order-service.git</div>
+                  </div>
+                </div>
+                <div class="repo-opt on">
+                  <div class="cb">✓</div>
+                  <div style="flex:1">
+                    <div class="name">pay-gateway</div>
+                    <div class="url">git@github.com:company/pay-gateway.git</div>
+                  </div>
+                </div>
+                <div class="repo-opt">
+                  <div class="cb"></div>
+                  <div style="flex:1">
+                    <div class="name">risk-service</div>
+                    <div class="url">git@github.com:company/risk-service.git</div>
+                  </div>
+                </div>
+                <div style="margin-top:var(--space-2);font-size:var(--text-sm);color:var(--brand-600);cursor:pointer;padding:var(--space-2)">+ 添加新仓库(粘贴 Git URL)</div>
+              </div>
+            </div>
+
+            <div class="field">
+              <label>统一分支名(应用于所有仓库) <span class="req">*</span></label>
+              <input type="text" value="feat/refund-optimization" autofocus style="font-family:'JetBrains Mono',monospace;border-color:var(--brand-500);background:var(--bg-elevated);box-shadow:0 0 0 3px rgba(94,106,210,0.15)">
+              <div class="hint">基于默认 base 分支(main),可在仓库设置覆盖</div>
+            </div>
+
+          </div>
+          <div class="modal-foot">
+            <div class="left">此分支将应用于 3 个仓库</div>
+            <div class="right">
+              <button class="btn btn-ghost">取消</button>
+              <button class="btn btn-primary">✓ 添加</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">
+      <strong>设计要点:</strong>480px 宽(比新建弹窗大,容纳 repo 列表);仓库选择复用 repo-picker 组件;统一分支名 <strong>autoFocus</strong>(用户最关心的输入);分支名用 mono 字体强化"这是技术字段";footer 左侧提示"将应用于 N 个仓库"作为提交前最后确认(决策 24 陪伴)。
+    </div>
+  </div>
+</section>
+
+<!-- ===== Section 7: 追加关联仓库弹层 ===== -->
+<section class="section" id="section-7">
+  <div class="section-head">
+    <h2>7 · 追加关联仓库弹层(无分支名 input)</h2>
+    <span class="meta">已有关联 → 追加 N+1 / N+2... 个仓库</span>
+  </div>
+  <div class="section-body">
+    <div class="mock-page">
+      <div class="backdrop">
+        <div class="modal" style="width:480px">
+          <div class="modal-head">
+            <h2>追加仓库 · 退款功能优化</h2>
+            <button class="close">✕</button>
+          </div>
+          <div class="modal-body">
+
+            <div style="margin-bottom:var(--space-5);padding:var(--space-3);background:var(--brand-50);border-radius:var(--radius-md);font-size:var(--text-sm);color:var(--brand-600);display:flex;align-items:center;gap:var(--space-2)">
+              <span>🔗</span>
+              <span>将使用统一分支名 <code style="font-family:'JetBrains Mono',monospace;background:#fff;padding:1px 6px;border-radius:3px">feat/refund-optimization</code>(创建时已锁定)</span>
+            </div>
+
+            <div class="field">
+              <label>追加以下仓库</label>
+              <div class="repo-picker">
+                <div class="repo-opt on">
+                  <div class="cb">✓</div>
+                  <div style="flex:1">
+                    <div class="name">risk-service</div>
+                    <div class="url">git@github.com:company/risk-service.git</div>
+                  </div>
+                </div>
+                <div class="repo-opt">
+                  <div class="cb"></div>
+                  <div style="flex:1">
+                    <div class="name">notify-service</div>
+                    <div class="url">git@github.com:company/notify-service.git</div>
+                  </div>
+                </div>
+              </div>
+              <div style="font-size:var(--text-xs);color:var(--text-3);margin-top:var(--space-1)">已关联 3 个 · 将追加 1 个 · 全部使用统一分支名</div>
+            </div>
+
+          </div>
+          <div class="modal-foot">
+            <div class="left">所有仓库统一基于 main 拉分支</div>
+            <div class="right">
+              <button class="btn btn-ghost">取消</button>
+              <button class="btn btn-primary">✓ 追加</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">
+      <strong>设计要点:</strong>追加场景 <strong>不显示</strong> 分支名 input(已锁定,无意义再填);顶部紫色 banner 显式告知"将使用统一分支名 feat/refund-optimization";用户感知明确"我不会误改分支名";字段更少,操作更快(决策 28 紧凑型)。
+    </div>
+  </div>
+</section>
+
+<!-- ===== Footer note ===== -->
+<div style="max-width:1280px;margin:0 auto;padding:var(--space-6);background:#fffbeb;border:1px solid #fde68a;border-radius:var(--radius-md);font-size:var(--text-sm);color:#78350f;line-height:1.7">
+  <strong style="color:#451a03">设计说明:</strong>本设计稿是 v1.0.3 完整状态展示,7 个 section 覆盖弹窗全生命周期:<br>
+  §1-3 是弹窗自身状态(空 / 填写 / 过滤);§4 是提交后 DRAFTING 接管(骨架屏 → banner 成功 / 失败);§5-7 是 DRAFTING 工位资源树与关联仓库弹层。<br>
+  <br>
+  <strong>v1.0 → v1.0.3 主要变化:</strong>弹窗 720px → 420px;5 字段 → 1 字段;移除 Skill 链 / PRD / 目标分支 / 关联仓库;新增 slug 实时预览;DRAFTING 顶部 banner + 资源树"仓库"节点承接;新增"统一分支名"在 DRAFTING 首次关联时填。<br>
+  <br>
+  <strong>对应决策:</strong>15 / 17 / 24 / 28 / 30 / 36 / 38 / 43 / 50 / 57 / 71。<br>
+  <strong>三件套:</strong><a href="../../scratch/new-requirement-modal/PRD.md" style="color:#525bc7">PRD.md</a> · <a href="../../scratch/new-requirement-modal/UI-POLISH-SPEC.md" style="color:#525bc7">UI-POLISH-SPEC.md</a> · <a href="15-new-requirement-modal.html" style="color:#525bc7;color:#525bc7;text-decoration:line-through">15-new-requirement-modal.html (deprecated)</a>
+</div>
+
+</body>
+</html>
