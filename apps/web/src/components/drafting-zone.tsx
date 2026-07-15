@@ -2,6 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  mockConvertToMarkdown,
+  type AuxFile,
+  type UsageTag,
+} from '@ai-devspace/shared'
+import {
   AUX_PANE_MIN_HEIGHT_PX,
   DEFAULT_PRD_RATIO,
   SPLIT_RESIZER_HEIGHT_PX,
@@ -12,9 +17,10 @@ import { DraftingPrdPane } from './drafting-prd-pane'
 import { AuxFilesPane } from './aux-files-pane'
 import { DraggableDivider } from './draggable-divider'
 import { AuxDrawer } from './aux-drawer'
+import { NewAuxFileDialog } from './new-aux-file-dialog'
 
 /**
- * DRAFTING 工位组件(issue 02 + issue 04)
+ * DRAFTING 工位组件(issue 02 + 04 + 05 + 06)
  *
  * 视觉对照基线:[docs/design/pages/19-final-drafting.html](docs/design/pages/19-final-drafting.html)
  *
@@ -28,7 +34,7 @@ import { AuxDrawer } from './aux-drawer'
  * │  ├────────────────────────────────────────┤    │
  * │  │ ‖ 拖拽分割条(6px)              ‖      │    │
  * │  ├────────────────────────────────────────┤    │
- * │  │ 辅助文件网格 + empty 占位  [1-ratio]   │    │
+ * │  │ 辅助文件网格 + 创建/上传 [1-ratio]   │    │
  * │  └────────────────────────────────────────┘    │
  * └────────────────────────────────────────────────┘
  * + 右侧 Inline 栏(由 ZoneShell 注入 DraftingSkillRail)
@@ -36,22 +42,15 @@ import { AuxDrawer } from './aux-drawer'
  * 数据全部由 props 注入;交互逻辑委托给 DraftingPrdPane('use client')。
  * Inline 栏(候命 Skill)由 ZoneShell 通过 inlineRailSlot 注入 DraftingSkillRail。
  *
- * 设计要点(issue 04 引入):
- * - 上下比例用 ratio ∈ [0, 1] 描述 PRD 占比;默认 DEFAULT_PRD_RATIO = 0.6
- * - 拖拽分割条由 `DraggableDivider` 渲染;本组件提供 clientY → ratio 的换算
- *   + `clampSplitRatio` 保证 aux 始终 ≥ AUX_PANE_MIN_HEIGHT_PX(行卡片可视)
- * - 容器高度由 ref 实测;窗口 resize 时重测,以保证 clamp 永远反映当前布局
+ * 关键设计点:
+ * - 上下比例 ratio ∈ [0, 1];clamp 由 `clampSplitRatio` 集中负责
+ * - **issue 06**:`auxFiles` 由 props 初始值拷贝到 local state,
+ *   创建 / 上传的新文件 append 到 state;创建 / 上传后自动打开抽屉
+ * - 抽屉与新建对话框同一时刻只能存在其一(互斥)
+ * - id 生成:单调递增计数器 + 前缀;新文件 = `aux-new-<n>`,上传 = `aux-up-<n>`
  *
- * 不在本组件范围(后续 ticket 引入):
- * - 新建/上传 → mock 转换(issue 06):占位 no-op
+ * 不在本组件范围:
  * - 仓库底部条 + 软警告(issue 08)
- *
- * issue 05 已实现:
- * - 辅助文件点击 → 打开右侧 60% 抽屉(AuxDrawer)
- * - 抽屉宽度 60%(min 520 / max 880)+ 半透明 backdrop + Escape / ✕ / 点击遮罩关闭
- * - 抽屉内的编辑内容由父组件(DraftingZone)的 `auxBodies` 跨生命周期持久
- *   —— 关闭再开同一文件,内容不丢
- * - 单一抽屉:openAuxId 是 string | null;同时只能打开一个
  */
 
 export function DraftingZone({ data }: { data: DraftingData }) {
@@ -61,12 +60,25 @@ export function DraftingZone({ data }: { data: DraftingData }) {
   const [prdRatio, setPrdRatio] = useState<number>(DEFAULT_PRD_RATIO)
 
   // -------------------------------------------------------------------------
+  // 辅助文件列表(issue 04 + 06)
+  // - 拷贝 props 初始值到 local state,新文件 / 上传走 setAuxFiles
+  // - mock 阶段;后续接 agent API 时由 useDraftingData hook 持有 + 同步
+  // -------------------------------------------------------------------------
+  const [auxFiles, setAuxFiles] = useState<AuxFile[]>(data.auxFiles)
+  // 防止 props 改变时 state 被意外覆盖:仅首次拷贝,后续由本地操作驱动
+  // (典型的 "lifting state up" 反模式规避)
+  const [lastRequirementId, setLastRequirementId] = useState<string>(data.requirementId)
+  useEffect(() => {
+    if (lastRequirementId !== data.requirementId) {
+      setAuxFiles(data.auxFiles)
+      setLastRequirementId(data.requirementId)
+    }
+    // intentionally only when requirementId changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.requirementId])
+
+  // -------------------------------------------------------------------------
   // 辅助文件抽屉状态(issue 05)
-  // - `openAuxId`:当前打开的 aux file id;null = 抽屉关闭
-  //   单一抽屉语义:string | null 即可天然保证"同时只一个"
-  //   切换文件由父组件直接 setOpenAuxId(新 id);AuxDrawer 接住后自动重置内容
-  // - `auxBodies`:per-file 跨抽屉生命周期的编辑内容
-  //   (打开 → 编辑 → 关闭 → 再打开,内容恢复)
   // -------------------------------------------------------------------------
   const [openAuxId, setOpenAuxId] = useState<string | null>(null)
   const [auxBodies, setAuxBodies] = useState<Record<string, string>>({})
@@ -76,7 +88,27 @@ export function DraftingZone({ data }: { data: DraftingData }) {
     setAuxBodies((prev) => ({ ...prev, [id]: newBody }))
   }, [])
 
-  /** 主区(split-row)DOM 引用,用于实测高度 + clamp 计算 */
+  // -------------------------------------------------------------------------
+  // 新建对话框状态(issue 06)
+  // - open=true → 弹出 NewAuxFileDialog
+  // - 在 open=true 期间抽屉被强制关闭(单一焦点)
+  // - errorMessage 用于文件名冲突 / 上传转换失败时的视觉提示
+  // -------------------------------------------------------------------------
+  const [showNewDialog, setShowNewDialog] = useState<boolean>(false)
+  const [newDialogError, setNewDialogError] = useState<string | null>(null)
+
+  // -------------------------------------------------------------------------
+  // id 计数器(单调递增,用于创建/上传产生的 AuxFile.id)
+  // -------------------------------------------------------------------------
+  const idCounterRef = useRef<number>(0)
+  const nextId = (prefix: string): string => {
+    idCounterRef.current += 1
+    return `${prefix}-${idCounterRef.current}`
+  }
+
+  // -------------------------------------------------------------------------
+  // PRD 编辑器 ref 回调
+  // -------------------------------------------------------------------------
   const splitContainerRef = useRef<HTMLDivElement | null>(null)
 
   /** 主区实测高度;0 表示尚未测量(SSR / 首次 render 之前) */
@@ -142,8 +174,6 @@ export function DraftingZone({ data }: { data: DraftingData }) {
     setPrdRatio((prevRatio) => {
       const start = dragStartRef.current
       if (!start) {
-        // 没有起点信息(理论上 DraggableDivider 应先调 onDragStart 再 move;
-        // 这里是 belt-and-suspenders 兜底):用当前 clientY 当起点,delta=0。
         dragStartRef.current = {
           startClientY: clientY,
           startRatio: prevRatio,
@@ -159,18 +189,14 @@ export function DraftingZone({ data }: { data: DraftingData }) {
     dragStartRef.current = null
   }, [])
 
-  // 键盘事件 → ratio 增量(由父组件 clamp)
   const handleRatioChangeBy = useCallback((delta: number) => {
     setPrdRatio((prev) => prev + delta)
   }, [])
 
   // -------------------------------------------------------------------------
-  // 辅助文件 / 新建点击(issue 05/06)
+  // 辅助文件 / 新建 / 上传(issue 05 / 06)
   // -------------------------------------------------------------------------
   const handleAuxOpen = useCallback((auxId: string) => {
-    // issue 05:打开抽屉显示该 aux file
-    // - 单一抽屉语义:如果点击另一张卡片,直接切换(无需手动 close)
-    // - editedBodies 已经持久所有之前的编辑,切换不会丢
     setOpenAuxId(auxId)
   }, [])
 
@@ -178,13 +204,132 @@ export function DraftingZone({ data }: { data: DraftingData }) {
     setOpenAuxId(null)
   }, [])
 
+  /** 头部 "＋ 新建" 按钮 / 空态占位卡 → 打开新建对话框 */
   const handleAuxCreate = useCallback(() => {
-    // issue 06:新建 / 上传 mock 转换;本期先 console.info 占位
-    if (typeof window !== 'undefined') {
-      // eslint-disable-next-line no-console
-      console.info('[drafting-aux] create')
-    }
+    setNewDialogError(null)
+    setShowNewDialog(true)
   }, [])
+
+  /**
+   * 新建对话框提交 → 在列表中追加 AuxFile + 打开抽屉
+   * - 冲突检测:同 filename 已存在 → 报错留在对话框中(不关闭),让用户改名
+   */
+  const handleAuxCreateSubmit = useCallback(
+    (value: { filename: string; usage_tag: UsageTag }) => {
+      const conflict = auxFiles.find(
+        (f) => f.filename.toLowerCase() === value.filename.toLowerCase(),
+      )
+      if (conflict) {
+        setNewDialogError(
+          `已存在同名文件 "${conflict.filename}",请换一个文件名。`,
+        )
+        return
+      }
+      // 空 Markdown(issue 06 验收 #2:creates a new AuxFile with empty Markdown)
+      const newFile: AuxFile = {
+        id: nextId('aux-new'),
+        filename: value.filename,
+        body: '',
+        usage_tag: value.usage_tag,
+        source_format: 'md',
+        converted_to_md: false,
+      }
+      setAuxFiles((prev) => [...prev, newFile])
+      setShowNewDialog(false)
+      setNewDialogError(null)
+      setOpenAuxId(newFile.id)
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [auxFiles],
+  )
+
+  /**
+   * 头部 "📁 上传" 按钮收到 File:
+   * 1) 读文件内容(.md 走 readAsText;.docx / .pdf 同样走 readAsText,内容
+   *    实际不可用,但 mock 适配器只关心 filename → 仍能派生 deterministic body)
+   * 2) 走 mockConvertToMarkdown → 拿 body / source_format / converted_to_md
+   * 3) 冲突 → 打开新建对话框并预填错误(便于用户改名)
+   * 4) 成功 → append + 打开抽屉
+   */
+  const handleAuxUpload = useCallback(
+    (file: File) => {
+      // 防御性:扩展名必须受支持
+      const lower = file.name.toLowerCase()
+      if (
+        !lower.endsWith('.md') &&
+        !lower.endsWith('.docx') &&
+        !lower.endsWith('.pdf')
+      ) {
+        setNewDialogError(
+          `不支持的格式 "${file.name}",仅支持 .md / .docx / .pdf`,
+        )
+        setShowNewDialog(true)
+        return
+      }
+
+      // 文件名需以 .md 存储(.docx / .pdf 转换后也是 markdown 文件)
+      const storedFilename = lower.endsWith('.md')
+        ? file.name
+        : `${file.name.replace(/\.(docx|pdf)$/i, '')}.md`
+
+      // 冲突检测:同 filename 已存在 → 引导用户改名
+      const existing = auxFiles.find(
+        (f) => f.filename.toLowerCase() === storedFilename.toLowerCase(),
+      )
+      if (existing) {
+        setNewDialogError(
+          `已存在同名文件 "${existing.filename}",请先改名或删除旧文件再上传。`,
+        )
+        setShowNewDialog(true)
+        return
+      }
+
+      const reader = new FileReader()
+      reader.onload = () => {
+        const content = String(reader.result ?? '')
+        let body: string
+        let source_format: 'md' | 'docx' | 'pdf'
+        let converted_to_md: boolean
+        try {
+          const out = mockConvertToMarkdown({
+            filename: file.name,
+            content,
+          })
+          body = out.body
+          source_format = out.source_format
+          converted_to_md = out.converted_to_md
+        } catch (err) {
+          // mock 本身对未知扩展名已经抛错,这里再兜底一次
+          setNewDialogError(
+            err instanceof Error ? err.message : 'mock 转换失败',
+          )
+          setShowNewDialog(true)
+          return
+        }
+
+        const newFile: AuxFile = {
+          id: nextId('aux-up'),
+          filename: storedFilename,
+          body,
+          // usage_tag:从文件名/扩展名启发式;后续可在 drawer 内让用户调整
+          usage_tag: 'other',
+          source_format,
+          converted_to_md,
+        }
+        setAuxFiles((prev) => [...prev, newFile])
+        setOpenAuxId(newFile.id)
+      }
+      reader.onerror = () => {
+        setNewDialogError(`读取文件 ${file.name} 失败,请重试`)
+        setShowNewDialog(true)
+      }
+      // mock 期都按文本读(.docx / .pdf 的二进制内容会被保留为乱码,但
+      // mockConvertToMarkdown 不解析,只取 filename 派生 deterministic body)
+      reader.readAsText(file)
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [auxFiles],
+  )
 
   // -------------------------------------------------------------------------
   // aria-valuemin / aria-valuemax 给 DraggableDivider 的 clamp 边界
@@ -196,9 +341,6 @@ export function DraftingZone({ data }: { data: DraftingData }) {
   const maxRatio =
     containerHeight > 0 ? clampSplitRatio(1, containerHeight) : 1
 
-  // -------------------------------------------------------------------------
-  // 渲染
-  // -------------------------------------------------------------------------
   return (
     <main
       data-testid="drafting-zone"
@@ -251,14 +393,27 @@ export function DraftingZone({ data }: { data: DraftingData }) {
               className="overflow-hidden"
             >
               <AuxFilesPane
-                auxFiles={data.auxFiles}
+                auxFiles={auxFiles}
                 onOpen={handleAuxOpen}
                 onCreate={handleAuxCreate}
+                onCreateClick={handleAuxCreate}
+                onUpload={handleAuxUpload}
               />
             </div>
           </div>
         </div>
       </div>
+
+      {/* 新建对话框(issue 06) — 提交或取消都关闭;错误(冲突)留在 dialog 内 */}
+      <NewAuxFileDialog
+        open={showNewDialog}
+        errorMessage={newDialogError}
+        onClose={() => {
+          setShowNewDialog(false)
+          setNewDialogError(null)
+        }}
+        onSubmit={handleAuxCreateSubmit}
+      />
 
       {/* 辅助文件抽屉(issue 05) —— 用 portal 思路直接渲染在主元素末尾,
           固定定位 + 高 z-index 覆盖全屏。父组件(DraftingZone)持有:
@@ -266,7 +421,7 @@ export function DraftingZone({ data }: { data: DraftingData }) {
           - 跨生命周期编辑内容(auxBodies) */}
       <AuxDrawer
         openAuxId={openAuxId}
-        auxFiles={data.auxFiles}
+        auxFiles={auxFiles}
         auxBodies={auxBodies}
         onClose={handleAuxClose}
         onBodyChange={handleAuxBodyChange}

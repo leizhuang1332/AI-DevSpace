@@ -964,16 +964,13 @@ describe('DraftingZone · 辅助文件卡片 + 拖拽分割 (issue 04)', () => {
     ).toBe('true')
   })
 
-  it('空态点击占位卡 → 触发 console.info(占位 onCreate)', async () => {
-    const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {})
-    try {
-      render(<DraftingZone data={emptyDrafting('NEW')} />)
-      const user = userEvent.setup()
-      await user.click(screen.getByTestId('aux-empty-placeholder'))
-      expect(consoleSpy).toHaveBeenCalledWith('[drafting-aux] create')
-    } finally {
-      consoleSpy.mockRestore()
-    }
+  it('空态点击占位卡 → 打开新建对话框(issue 06)', async () => {
+    render(<DraftingZone data={emptyDrafting('NEW')} />)
+    const user = userEvent.setup()
+    // 点击前对话框不存在
+    expect(screen.queryByTestId('new-aux-dialog')).toBeNull()
+    await user.click(screen.getByTestId('aux-empty-placeholder'))
+    expect(screen.getByTestId('new-aux-dialog')).toBeInTheDocument()
   })
 
   // -------------------------------------------------------------------------
