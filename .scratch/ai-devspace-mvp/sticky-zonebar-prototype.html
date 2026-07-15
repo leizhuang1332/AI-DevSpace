@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ZoneBar Sticky — A vs B 视觉对比</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root {
+    --bg: #f8fafc;
+    --bg-elevated: #ffffff;
+    --bg-subtle: #f1f5f9;
+    --border: #e2e8f0;
+    --text-2: #64748b;
+    --text-1: #0f172a;
+    --brand-50: #faf5ff;
+    --brand-600: #9333ea;
+    --brand-700: #7e22ce;
+  }
+  body { background: var(--bg); }
+  .panel-scroll {
+    height: 72vh;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-elevated);
+  }
+  .row {
+    height: 56px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 24px;
+    color: var(--text-2);
+    font-size: 14px;
+    gap: 8px;
+  }
+  .row:last-child { border-bottom: none; }
+</style>
+</head>
+<body class="p-8 font-sans">
+
+<header class="mb-6">
+  <h1 class="text-2xl font-semibold text-slate-900 mb-2">ZoneBar Sticky — 方案 A vs 方案 B 对比</h1>
+  <p class="text-sm text-slate-600 leading-relaxed">
+    两栏各自带可滚动主体（72vh 高）。在每栏内滚动鼠标滚轮，观察顶部
+    <strong>StatusBar + ZoneBar</strong> 是否随滚而消失。配色与高度（StatusBar h-10 / ZoneBar h-11）与真实工作空间一致。
+  </p>
+</header>
+
+<div class="grid grid-cols-2 gap-6">
+
+  <!-- ============== 方案 A ============== -->
+  <section>
+    <div class="mb-2">
+      <span class="text-base font-semibold text-slate-900">方案 A</span>
+      <span class="text-sm text-slate-600 ml-2">容器只挂 sticky 骨架，StatusBar / ZoneBar 内部 bg+border 各自保留</span>
+    </div>
+
+    <div class="panel-scroll">
+      <div class="sticky top-0 z-50 flex flex-col">
+        <header class="sticky top-0 z-50 h-10 px-4 flex items-center gap-2 bg-[color:var(--bg-elevated)] border-b border-[color:var(--border)]">
+          <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+          <span class="text-sm font-medium text-[color:var(--brand-700)] bg-[color:var(--brand-50)] px-2 py-0.5 rounded">Req-001 · In Progress</span>
+          <span class="text-sm text-slate-500 px-2 py-0.5">Req-002 · Draft</span>
+          <span class="text-sm text-slate-500 px-2 py-0.5">Req-003 · Backlog</span>
+        </header>
+        <nav class="h-11 px-6 flex items-center gap-1 bg-[color:var(--bg-elevated)] border-b border-[color:var(--border)]">
+          <a class="text-sm text-slate-600 px-3 py-1.5 rounded hover:bg-[color:var(--bg-subtle)]">📊 Overview</a>
+          <a class="text-sm font-semibold text-[color:var(--brand-600)] border-b-2 border-[color:var(--brand-600)] px-3 py-1.5">✍️ DRAFTING</a>
+          <a class="text-sm text-slate-600 px-3 py-1.5 rounded hover:bg-[color:var(--bg-subtle)]">🔍 ANALYZING</a>
+          <a class="text-sm text-slate-600 px-3 py-1.5 rounded hover:bg-[color:var(--bg-subtle)]">💬 CLARIFYING</a>
+          <a class="text-sm text-slate-600 px-3 py-1.5 rounded hover:bg-[color:var(--bg-subtle)]">🎨 DESIGNING</a>
+          <a class="text-sm text-slate-600 px-3 py-1.5 rounded hover:bg-[color:var(--bg-subtle)]">⚙️ EXECUTING</a>
+          <a class="text-sm text-slate-600 px-3 py-1.5 rounded hover:bg-[color:var(--bg-subtle)]">📦 WRAP-UP</a>
+        </nav>
+      </div>
+
+      <div class="px-6 py-4 space-y-0">
+        <div class="text-xs uppercase tracking-wider text-slate-500 font-semibold py-3">DRAFTING 工位内容</div>
+        <div class="row">📌 PRD 大纲 · 锚点 1: 目标</div>
+        <div class="row">📌 PRD 大纲 · 锚点 2: 用户故事</div>
+        <div class="row">📌 PRD 大纲 · 锚点 3: 验收标准</div>
+        <div class="h-40 my-3 bg-[color:var(--bg-subtle)] rounded flex items-center justify-center text-slate-400 text-sm">[ Markdown 编辑区 · 200px 高 ]</div>
+        <div class="row">📝 草稿段落 1</div>
+        <div class="row">📝 草稿段落 2</div>
+        <div class="row">📝 草稿段落 3</div>
+        <div class="row">📝 草稿段落 4</div>
+        <div class="row">📝 草稿段落 5</div>
+        <div class="row">📝 草稿段落 6</div>
+        <div class="row">📝 草稿段落 7</div>
+        <div class="row">📝 草稿段落 8</div>
+        <div class="row">📝 草稿段落 9</div>
+        <div class="row">📝 草稿段落 10</div>
+        <div class="row">📝 草稿段落 11</div>
+        <div class="row">📝 草稿段落 12</div>
+        <div class="row">📝 草稿段落 13</div>
+        <div class="row">📝 草稿段落 14</div>
+        <div class="row text-emerald-700 font-medium">✓ 内容结束</div>
+      </div>
+    </div>
+
+    <p class="text-xs text-slate-500 mt-2 leading-relaxed">
+      ✓ 滚动时 StatusBar + ZoneBar 始终钉顶<br>
+      ✓ StatusBar/ZoneBar 间分割线 = StatusBar 的 border-b（来自内部）<br>
+      ✓ ZoneBar 与内容区分割线 = ZoneBar 的 border-b（来自内部）<br>
+      ⚠ 容器是「空」sticky 骨架，纯靠内部样式撑视觉
+    </p>
+  </section>
+
+  <!-- ============== 方案 B ============== -->
+  <section>
+    <div class="mb-2">
+      <span class="text-base font-semibold text-slate-900">方案 B</span>
+      <span class="text-sm text-slate-600 ml-2">容器 own bg+border-b，StatusBar/ZoneBar 内部去 bg+border-b</span>
+    </div>
+
+    <div class="panel-scroll">
+      <div class="sticky top-0 z-50 flex flex-col bg-[color:var(--bg-elevated)] border-b border-[color:var(--border)]">
+        <header class="h-10 px-4 flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+          <span class="text-sm font-medium text-[color:var(--brand-700)] bg-[color:var(--brand-50)] px-2 py-0.5 rounded">Req-001 · In Progress</span>
+          <span class="text-sm text-slate-500 px-2 py-0.5">Req-002 · Draft</span>
+          <span class="text-sm text-slate-500 px-2 py-0.5">Req-003 · Backlog</span>
+        </header>
+        <nav class="h-11 px-6 flex items-center gap-1">
+          <a class="text-sm text-slate-600 px-3 py-1.5 rounded hover:bg-[color:var(--bg-subtle)]">📊 Overview</a>
+          <a class="text-sm font-semibold text-[color:var(--brand-600)] border-b-2 border-[color:var(--brand-600)] px-3 py-1.5">✍️ DRAFTING</a>
+          <a class="text-sm text-slate-600 px-3 py-1.5 rounded hover:bg-[color:var(--bg-subtle)]">🔍 ANALYZING</a>
+          <a class="text-sm text-slate-600 px-3 py-1.5 rounded hover:bg-[color:var(--bg-subtle)]">💬 CLARIFYING</a>
+          <a class="text-sm text-slate-600 px-3 py-1.5 rounded hover:bg-[color:var(--bg-subtle)]">🎨 DESIGNING</a>
+          <a class="text-sm text-slate-600 px-3 py-1.5 rounded hover:bg-[color:var(--bg-subtle)]">⚙️ EXECUTING</a>
+          <a class="text-sm text-slate-600 px-3 py-1.5 rounded hover:bg-[color:var(--bg-subtle)]">📦 WRAP-UP</a>
+        </nav>
+      </div>
+
+      <div class="px-6 py-4 space-y-0">
+        <div class="text-xs uppercase tracking-wider text-slate-500 font-semibold py-3">DRAFTING 工位内容</div>
+        <div class="row">📌 PRD 大纲 · 锚点 1: 目标</div>
+        <div class="row">📌 PRD 大纲 · 锚点 2: 用户故事</div>
+        <div class="row">📌 PRD 大纲 · 锚点 3: 验收标准</div>
+        <div class="h-40 my-3 bg-[color:var(--bg-subtle)] rounded flex items-center justify-center text-slate-400 text-sm">[ Markdown 编辑区 · 200px 高 ]</div>
+        <div class="row">📝 草稿段落 1</div>
+        <div class="row">📝 草稿段落 2</div>
+        <div class="row">📝 草稿段落 3</div>
+        <div class="row">📝 草稿段落 4</div>
+        <div class="row">📝 草稿段落 5</div>
+        <div class="row">📝 草稿段落 6</div>
+        <div class="row">📝 草稿段落 7</div>
+        <div class="row">📝 草稿段落 8</div>
+        <div class="row">📝 草稿段落 9</div>
+        <div class="row">📝 草稿段落 10</div>
+        <div class="row">📝 草稿段落 11</div>
+        <div class="row">📝 草稿段落 12</div>
+        <div class="row">📝 草稿段落 13</div>
+        <div class="row">📝 草稿段落 14</div>
+        <div class="row text-emerald-700 font-medium">✓ 内容结束</div>
+      </div>
+    </div>
+
+    <p class="text-xs text-slate-500 mt-2 leading-relaxed">
+      ✓ 滚动时 StatusBar + ZoneBar 始终钉顶<br>
+      ✓ 容器 own 一整块背景 + 一根底 border（视觉更聚合）<br>
+      ✓ StatusBar/ZoneBar 间不再有视觉分割线（同一背景）<br>
+      ⚠ StatusBar 单独复用时丢掉 sticky + bg 行为（未来回归风险）<br>
+      ⚠ StatusBar/ZoneBar 之间没有视觉分割线 — 如果你想要区分，要再加一根
+    </p>
+  </section>
+
+</div>
+
+<footer class="mt-8 p-4 bg-amber-50 border border-amber-200 rounded text-xs text-amber-900 leading-relaxed">
+  <strong>共同注意：</strong>两栏内各自是 <code>overflow-y: auto</code> 的滚动容器，所以这里的 sticky 是相对栏内滚动。<br>
+  在真实 workspace 里，<code>&lt;main class="overflow-auto"&gt;</code> 也承担部分滚动，但因外层 flex 没补 <code>min-h-0</code>，
+  当前 DRAFTING 等工位超长时也会触发外层 body 滚动（你正在被这个 bug 烦的根因）。<br>
+  sticky 容器在两种滚动模式下都钉在 viewport 顶 — 两种都覆盖。
+</footer>
+
+</body>
+</html>

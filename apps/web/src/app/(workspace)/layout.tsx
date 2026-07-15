@@ -20,8 +20,14 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }) {
     <QueryProvider>
       <UIOverlayProvider>
         <div className="min-h-screen flex flex-col">
-          <StatusBar tabs={requirements} currentId="req-001" />
-          <ZoneBar />
+          {/* StatusBar + ZoneBar 共享一个 sticky 容器(issue: sticky zone-bar):
+              两者在主区滚动时始终钉在 viewport 顶部。容器只挂 sticky 骨架,
+              内部 StatusBar/ZoneBar 各自的 bg / border 保留,视觉与改动前一致。
+              总高度 84px(h-10 + h-11),与 ZoneShell 的 WORKSPACE_SHELL_OFFSET_PX 对齐。 */}
+          <div className="sticky top-0 z-50 flex flex-col">
+            <StatusBar tabs={requirements} currentId="req-001" />
+            <ZoneBar />
+          </div>
           <div className="flex-1 grid grid-cols-[56px_1fr]">
             <Sidebar />
             <main className="overflow-auto">{children}</main>

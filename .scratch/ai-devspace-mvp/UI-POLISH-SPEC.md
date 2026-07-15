@@ -185,6 +185,14 @@ Related: PRD.md
 - 永远在视线上方
 - ~~AI 实时状态条~~：2026-07 删除，原占据第二行的「任务上下文 + 🟢思考中 + ⌘K 提示」已下线。AI 状态改由 Inline 提示栏 / 会话卡 / Toast 承载（见 §5.3 / §10.3）
 
+**shell 层 1 sticky 容器**（2026-07 改动：固定 ZoneBar）：
+
+- StatusBar 与下方的 ZoneBar 在 `apps/web/src/app/(workspace)/layout.tsx` 共同包进一个 `sticky top-0 z-50 flex flex-col` 容器
+- 主区（`<main class="overflow-auto">`）滚动时，两者作为整体始终钉在 viewport 顶部
+- 容器**只挂 sticky 骨架**，不接管背景或边框 — StatusBar / ZoneBar 内部各自的 `bg-bg-elevated` + `border-b` 保留，视觉与改动前一致
+- 总高度 84px（StatusBar h-10 + ZoneBar h-11），与 `ZoneShell` 的 `WORKSPACE_SHELL_OFFSET_PX` 常量对齐
+- z-index 取值与现状 StatusBar 相同（z-50），overlay（command palette / cheatsheet / drawer 等 z-100+）仍能正常覆盖
+
 ### 4.3 需求详情页（核心，三栏）
 
 ```
