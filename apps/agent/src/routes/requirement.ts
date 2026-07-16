@@ -98,8 +98,9 @@ export async function requirementRoutes(
     }
     const { repoIds, branchName } = parsed.data
 
-    // 2. 分支名 strip 非法字符(后端兜底 —— 前端 attach-repos-dialog 已实时过滤)
-    const branchCheck = validateBranchName(branchName)
+    // 2. 分支名校验(strict 模式:原始输入含任何非法字符即 reject,
+    //    ticket 02 验收 #11"Agent 端再校验一次(前端已过滤,后端兜底)")
+    const branchCheck = validateBranchName(branchName, { strict: true })
     if (!branchCheck.ok) {
       return reply.code(400).send({
         error: 'E_INVALID_BRANCH_NAME',

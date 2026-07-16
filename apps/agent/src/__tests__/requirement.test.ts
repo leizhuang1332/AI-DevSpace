@@ -203,26 +203,17 @@ describe('POST /api/requirement/:id/repos — worktree attach', () => {
     expect(body.error).toBe('invalid_body')
   })
 
-  it('含路径非法字符 \\ → 服务 strip 后仍合法,返回 200 + sanitized', async () => {
-    // `feat\bad` 通过 Zod(长度 OK),服务 sanitize → `featbad` → 合法 → 200
-    // 决策 ticket 02 验收 #11:Agent 端再校验一次;
-    // strip 后非空 = 接受,sanitized 写入分支名
-    ;(service.attachRepos as ReturnType<typeof vi.fn>).mockResolvedValue([
-      {
-        ok: true,
-        repoId: 'r1',
-        branch: 'featbad',
-        worktreePath: '/a/b/r1',
-        base: 'main',
-      },
-    ])
+  it('含路径非法字符 \\ → strict reject(400 E_INVALID_BRANCH_NAME)', async () => {
+    // ticket 02 验收 #11:Agent 端再校验一次(前端已过滤,后端兜底)
+    // strict 模式:含任何非法字符即 reject,即使 strip 后仍合法也不算通过
     const { statusCode, body } = await authed(
       'POST',
       '/api/requirement/req-001/repos',
       { repoIds: ['r1'], branchName: 'feat\\bad' },
     )
-    expect(statusCode).toBe(200)
-    expect(body.branchName).toBe('featbad')
+    expect(statusCode).toBe(400)
+    expect(body.error).toBe('E_INVALID_BRANCH_NAME')
+    expect(body.message).toMatch(/非法字符/)
   })
 
   it('400 E_INVALID_BRANCH_NAME: sanitize 后为空', async () => {

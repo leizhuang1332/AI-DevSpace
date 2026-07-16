@@ -59,6 +59,40 @@ describe('validateBranchName', () => {
     expect(r.ok).toBe(true)
     expect(r.sanitized.length).toBe(BRANCH_MAX_LENGTH)
   })
+
+  // ============================================================================
+  // strict 模式(后端兜底,ticket 02 验收 #11)
+  // ============================================================================
+
+  describe('validateBranchName · strict mode', () => {
+    it('rejects when input contains forbidden chars (even if strip result is valid)', () => {
+      // 'feat/bad:branch' 含 ':',strip 后变 'feat/badbranch' 本身合法
+      // strict 模式下应 reject(后端兜底语义)
+      const r = validateBranchName('feat/bad:branch', { strict: true })
+      expect(r.ok).toBe(false)
+      expect(r.error).toMatch(/非法字符/)
+    })
+
+    it('accepts clean input under strict mode', () => {
+      const r = validateBranchName('feat/refund-optimization', { strict: true })
+      expect(r.ok).toBe(true)
+      expect(r.sanitized).toBe('feat/refund-optimization')
+    })
+
+    it('rejects all-illegal input under strict mode (empty after strip)', () => {
+      const r = validateBranchName('\\\\:*?"<>|', { strict: true })
+      expect(r.ok).toBe(false)
+      // 两种 error message 都可以(strict 优先命中,否则 trim 空)
+      expect(r.error).toBeDefined()
+    })
+
+    it('default (non-strict) mode still accepts stripped-and-clean input', () => {
+      // 前端 dialog 的 silent strip 语义保留
+      const r = validateBranchName('feat/bad:branch')
+      expect(r.ok).toBe(true)
+      expect(r.sanitized).toBe('feat/badbranch')
+    })
+  })
 })
 
 // ============================================================================

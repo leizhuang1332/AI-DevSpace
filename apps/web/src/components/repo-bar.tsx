@@ -41,6 +41,12 @@ export interface RepoBarProps {
   repos: DraftingRepo[]
   /** 已选中仓库 id 列表(决定哪些 chip 是 "on" 态) */
   selectedRepoIds: string[]
+  /**
+   * 失败的 repo id 列表(ticket 02 验收 #8 ticket 02 partial success)。
+   * 失败的 chip 渲染为红色边框 + 错误图标 + 文案。
+   * 由父组件基于最近一次 attachRepos 的 results 派生。
+   */
+  failedRepoIds?: readonly string[]
   /** 切换 chip 的回调(id 不存在 → no-op) */
   onToggleRepo: (repoId: string) => void
   /**
@@ -65,6 +71,13 @@ export interface RepoBarProps {
    * 跳过 —— 它们的"添加更多"语义已由本按钮接管。
    */
   onRequestAttach?: () => void
+  /**
+   * ticket 02 验收 #9:已关联 repo chip 显示绿色小圆点 🟢 + 分支名。
+   * 由父组件传入 lockedBranchName(首次 attach 后写入),用于在 chip 后追加
+   * "🟢 <repo-name> <branch>" 视觉。lockedBranchName 为空时 chip 仍显示选中态,
+   * 但不追加绿色小圆点(向后兼容:分支名未锁前已存在的 repo)。
+   */
+  attachedBranchName?: string
 }
 
 /** 仓库软警告文案模板:N 由 selectedRepoIds.length 替换 */
@@ -77,11 +90,13 @@ const PLACEHOLDER_PREFIX = '＋'
 export function RepoBar({
   repos,
   selectedRepoIds,
+  failedRepoIds = [],
   onToggleRepo,
   canLaunch,
   launchDisabledHint,
   onLaunch,
   onRequestAttach,
+  attachedBranchName,
 }: RepoBarProps) {
   // -------------------------------------------------------------------------
   // 软警告可见性(纯函数;selectedRepoIds 变化时 O(1) 重新计算)
@@ -204,6 +219,9 @@ export function RepoBar({
         >
           {selectableRepos.map((repo) => {
             const selected = selectedRepoIds.includes(repo.id)
+            const failed = failedRepoIds.includes(repo.id)
+            // ticket 02 验收 #9:已关联 + 锁定分支名 → 显示绿色小圆点 + 分支名
+            const showGreenDot = selected && attachedBranchName
             return (
               <button
                 key={repo.id}
@@ -214,6 +232,7 @@ export function RepoBar({
                 data-repo-id={repo.id}
                 data-repo-name={repo.name}
                 data-selected={selected ? 'true' : 'false'}
+                data-failed={failed ? 'true' : 'false'}
                 onClick={() => handleChipClick(repo.id)}
                 onKeyDown={(e) => handleChipKeyDown(e, repo.id)}
                 className={[
@@ -221,13 +240,29 @@ export function RepoBar({
                   'h-[30px] px-3 rounded-full text-sm',
                   'transition-colors duration-100',
                   'focus:outline-none focus:ring-2 focus:ring-brand-50',
-                  selected
-                    ? 'bg-brand-50 border border-brand text-brand-700 font-medium'
-                    : 'bg-bg border border-border-strong text-text-2 hover:border-brand hover:text-brand-700',
+                  failed
+                    ? // 失败 repo 标红(ticket 02 验收 #8)
+                      'bg-error-50 border border-error text-error'
+                    : selected
+                      ? 'bg-brand-50 border border-brand text-brand-700 font-medium'
+                      : 'bg-bg border border-border-strong text-text-2 hover:border-brand hover:text-brand-700',
                 ].join(' ')}
               >
-                <span aria-hidden>{selected ? '✓' : '＋'}</span>
-                <span>{repo.name}</span>
+                <span aria-hidden>
+                  {failed ? '✕' : selected ? '✓' : '＋'}
+                </span>
+                <span>
+                  {showGreenDot ? '🟢 ' : ''}
+                  {repo.name}
+                </span>
+                {showGreenDot && (
+                  <span
+                    data-testid="drafting-repo-chip-branch"
+                    className="font-mono text-xs opacity-80"
+                  >
+                    {attachedBranchName}
+                  </span>
+                )}
               </button>
             )
           })}

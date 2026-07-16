@@ -117,4 +117,37 @@ describe('DraftingBanner · error 态', () => {
       '创建失败,请重试',
     )
   })
+
+  // ticket 02 验收 #5:鉴权失败 → E_AUTH 红色 banner + [查看] 按钮跳设置页
+  it('鉴权失败(errorMessage="鉴权失败")→ 显示 [查看] 按钮(data-error-kind="auth")', () => {
+    // jsdom 没真正跳页;stub window.location.href 写入断言
+    const originalHref = window.location.href
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, href: '' },
+    })
+    try {
+      renderBanner({ state: 'error', errorMessage: '鉴权失败' })
+      const banner = screen.getByTestId('drafting-banner')
+      expect(banner.getAttribute('data-error-kind')).toBe('auth')
+      const viewBtn = screen.getByTestId('drafting-banner-auth-view')
+      expect(viewBtn).toBeInTheDocument()
+      expect(viewBtn.textContent).toBe('查看')
+      // 仍然显示 [重试] 按钮
+      expect(screen.getByTestId('drafting-banner-retry')).toBeInTheDocument()
+    } finally {
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: { ...window.location, href: originalHref },
+      })
+    }
+  })
+
+  it('非鉴权失败 → data-error-kind="other",无 [查看] 按钮', () => {
+    renderBanner({ state: 'error', errorMessage: '磁盘空间不足' })
+    const banner = screen.getByTestId('drafting-banner')
+    expect(banner.getAttribute('data-error-kind')).toBe('other')
+    expect(screen.queryByTestId('drafting-banner-auth-view')).toBeNull()
+    expect(screen.getByTestId('drafting-banner-retry')).toBeInTheDocument()
+  })
 })

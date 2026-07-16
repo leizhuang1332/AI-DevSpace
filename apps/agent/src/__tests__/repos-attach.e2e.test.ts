@@ -260,6 +260,47 @@ describe.skipIf(process.platform === 'win32')('repos-attach e2e — 真实 git w
     expect(body.error).toBe('E_REQUIREMENT_NOT_FOUND')
     expect(body.requirementId).toBe('req-missing')
   }, 15_000)
+
+  // ============================================================================
+  // ticket 02 验收 #12:端到端 — 模拟 ticket 01 弹层提交路径
+  // "弹层提交后,真实文件系统 worktree 目录被创建"
+  //
+  // 这里用真实 fetch 调 API,断言 worktree 真实创建。验收 #12 强调的是
+  // "提交后 fs 真实创建",这个 case 已经覆盖 ticket 01 弹层 submit 后调
+  // agentFetch<AttachReposResponse> 的同样契约。
+  // (完整 UI 链路 e2e 涉及 web jsdom + 跨包 server 启动,见 PR 备注)。
+  // ============================================================================
+  it('端到端:提交 contract 等同 ticket 01 弹层 onSubmit → fs 真实创建 worktree', async () => {
+    const { url, root, token } = await boot()
+    await makePoolRepo(root, 'coupon-service')
+    mkdirSync(join(root, 'requirements', 'req-chain'), { recursive: true })
+
+    // 模拟 attach-repos-dialog onSubmit 调用的 wrapper(repo-attach.ts)
+    const res = await fetch(`${url}/api/requirement/req-chain/repos`, {
+      method: 'POST',
+      headers: {
+        'x-aidevspace-token': token,
+        'content-type': 'application/json',
+        origin: 'http://localhost:3333',
+      },
+      body: JSON.stringify({
+        repoIds: ['coupon-service'],
+        branchName: 'feat/chain',
+      }),
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      results: Array<{ ok: boolean; base: string; worktreePath: string }>
+    }
+    expect(body.results[0].ok).toBe(true)
+    expect(body.results[0].base).toBe('master')
+
+    // 真实 fs 断言(ticket 02 验收 #12 核心)
+    const wtPath = join(root, 'requirements', 'req-chain', 'repos', 'coupon-service')
+    expect(existsSync(wtPath)).toBe(true)
+    const { stdout: gitDir } = await execFileP('git', ['-C', wtPath, 'rev-parse', '--git-dir'])
+    expect(gitDir.trim()).toContain('worktrees/coupon-service')
+  }, 15_000)
 })
 
 // 静默 unused-import 警告

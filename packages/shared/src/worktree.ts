@@ -22,17 +22,35 @@ export const BRANCH_FORBIDDEN_RE = /[\\:*?"<>|\s]/g
 export const BRANCH_MAX_LENGTH = 100
 
 /**
- * 校验统一分支名:trim + strip 非法字符 + 长度检查
- * - 前端 attach-repos-dialog 已有 BRANCH_FORBIDDEN_RE 实时过滤;后端再做一次兜底
- * - 返回 `sanitized` 字段:无论 ok 与否都给调用方一个可用字符串,便于直接落库
+ * 校验统一分支名
+ *
+ * 两种模式:
+ * - 默认(silent strip):用于前端 attach-repos-dialog 的 input 过滤链;
+ *   含非法字符 → strip 后再判断,trim 后合法即视为合法。
+ * - `{ strict: true }`:用于后端兜底(ticket 02 验收 #11);
+ *   原始输入含任何非法字符即 reject,即使 strip 后仍合法也不算通过。
+ *   这样保证:用户绕过前端 dialog 直接打 API,后端也能防御性拒绝。
+ *
+ * 返回 `sanitized` 字段:无论 ok 与否都给调用方一个可用字符串,便于直接落库。
  */
-export function validateBranchName(raw: string): {
+export function validateBranchName(
+  raw: string,
+  opts?: { strict?: boolean },
+): {
   ok: boolean
   error?: string
   sanitized: string
 } {
   const sanitized = raw.replace(BRANCH_FORBIDDEN_RE, '')
   const trimmed = sanitized.trim()
+  // strict 模式:原始输入含任何非法字符 → 拒绝(ticket 02 验收 #11 语义)
+  if (opts?.strict && sanitized !== raw) {
+    return {
+      ok: false,
+      error: '分支名包含路径非法字符(后端兜底拒绝)',
+      sanitized,
+    }
+  }
   if (trimmed.length === 0) {
     return { ok: false, error: '请填写分支名', sanitized }
   }
@@ -54,11 +72,13 @@ export function validateBranchName(raw: string): {
  * RepoAttach 错误码。
  *
  * 注意:
- * - E_AUTH **不**进 per-repo 结果 —— authPlugin 在路由前已拦截 401/403;
- *   前端 agentFetch 收到非 2xx 抛 AgentError,在 catch 层处理。
- * - 这里保留 E_AUTH 为"参考性"枚举值,顶层 catch 兜底会用。
+ * - E_AUTH 不进 per-repo 结果 —— authPlugin 在路由前已拦截 401/403;
+ *   前端 agentFetch 收到非 2xx 抛 AgentError,在 catch 层根据 status === 401
+ *   映射为 `code: 'E_AUTH'`,banner 渲染红色 + [查看] 按钮跳设置页
+ *   (ticket 02 验收 #5)。
  */
 export const RepoAttachErrorCode = {
+  E_AUTH: 'E_AUTH',
   E_BASE_BRANCH_NOT_FOUND: 'E_BASE_BRANCH_NOT_FOUND',
   E_DISK_FULL: 'E_DISK_FULL',
   E_NETWORK: 'E_NETWORK',

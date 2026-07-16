@@ -71,10 +71,13 @@ export function DraftingBanner({
   if (state === 'hidden') return null
 
   if (state === 'error') {
+    // ticket 02 验收 #5:鉴权失败 → 报 E_AUTH 红色 banner [查看] 按钮跳设置页
+    const isAuthError = errorMessage === '鉴权失败'
     return (
       <div
         data-testid="drafting-banner"
         data-banner-state="error"
+        data-error-kind={isAuthError ? 'auth' : 'other'}
         role="alert"
         className={[
           'px-6 py-3 bg-[#fef2f2] border-b border-[#fecaca]',
@@ -93,6 +96,25 @@ export function DraftingBanner({
           data-testid="drafting-banner-actions"
           className="flex items-center gap-2"
         >
+          {/* E_AUTH 专属:[查看] 跳设置页(决策 34 + 决策 71) */}
+          {isAuthError && (
+            <button
+              type="button"
+              data-testid="drafting-banner-auth-view"
+              onClick={() => {
+                if (typeof window !== 'undefined') {
+                  window.location.href = '/settings'
+                }
+              }}
+              className={[
+                'h-7 px-3 rounded-md bg-bg-elevated border border-[#fecaca]',
+                'text-sm text-[#991b1b] hover:bg-[#fef2f2]',
+                'focus:outline-none focus:ring-2 focus:ring-[#fecaca]',
+              ].join(' ')}
+            >
+              查看
+            </button>
+          )}
           {onRetry && (
             <button
               type="button"

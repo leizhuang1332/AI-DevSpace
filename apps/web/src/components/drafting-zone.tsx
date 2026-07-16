@@ -658,16 +658,25 @@ export function DraftingZone({ data }: { data: DraftingData }) {
 
   /**
    * ticket 02 部分成功 → 「重试该 repo」按钮回调
-   * - 重新打开 attach dialog(first / append 由 lockedBranchName 决定)
-   * - 把 failedRepoIds 注入 pickedRepoIds 让它们默认勾选
-   *   (实现:通过 openAttachDialog 打开弹层;用户提交时调 submitAttach,会调真实 API)
+   * - 重新打开 attach dialog,模式由 lockedBranchName 决定
+   * - 把 failedRepoIds 注入 pickedRepoIds 让它们默认勾选(用户提交时直接重试这些)
+   * - 把 failedRepoIds 同步写到 selectedRepoIds state 以让 RepoBar 在 dialog 期间
+   *   显示这些 chip 为"已选中 + 待重试"
    */
   const handleBannerRetryFailed = useCallback(
-    (_failedNames: string[]) => {
-      // 简单实现:重新打开弹层,用户重新选;暂不预填(避免与 attach-repos-dialog
-      // 的 pickedRepoIds prop 双向绑定增加复杂度)
+    (failedNames: string[]) => {
+      // 把失败的 repo 临时加进 selectedRepoIds,这样打开 dialog 时 pickedRepoIds
+      // 会包含它们(默认勾选)
+      setSelectedRepoIds((prev) => {
+        const merged = [...prev]
+        for (const id of failedNames) {
+          if (!merged.includes(id)) merged.push(id)
+        }
+        return merged
+      })
       setBannerErrorMessage(null)
       setBannerPartialSummary(undefined)
+      // 打开弹层;attach-repos-dialog 会用 selectedRepoIds 作 pickedRepoIds 默认勾选
       openAttachDialog('banner-plus')
     },
     [openAttachDialog],
@@ -791,12 +800,14 @@ export function DraftingZone({ data }: { data: DraftingData }) {
             </div>
           </div>
 
-          {/* 仓库底部条(issue 08 + 01 ticket)—— sticky bottom,
-              含 chips / 软警告 / 「＋」追加 / 启动 */}
+          {/* 仓库底部条(issue 08 + 01 ticket + ticket 02 验收 #8 #9)—— sticky bottom,
+              含 chips / 软警告 / 「＋」追加 / 启动 / 失败标红 / 绿色小圆点 */}
           <div className="mt-3 -mx-6 -mb-6">
             <RepoBar
               repos={data.repos}
               selectedRepoIds={selectedRepoIds}
+              failedRepoIds={failedRepoIds}
+              attachedBranchName={lockedBranchName}
               onToggleRepo={handleToggleRepo}
               canLaunch={validity.canLaunch}
               launchDisabledHint={launchDisabledHint}
