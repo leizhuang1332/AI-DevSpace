@@ -4,15 +4,14 @@ import { useCallback } from 'react'
 import { shouldShowRepoSoftWarning, type DraftingRepo } from '@/lib/drafting'
 
 /**
- * DRAFTING 工位的底部仓库条(issue 08)
+ * DRAFTING 工位的底部仓库条(issue 08 + issue 01 ticket)
  *
  * 视觉对照基线:`docs/design/pages/19-final-drafting.html` 的 `.repo-bar` 区域
  *
- * 布局(issue 08 验收 #1 #2 #3):
+ * 布局(issue 08 + issue 01 形态 —— PRD 顶置 + 拖拽分割 + 辅助文件网格 + 仓库底部条):
  * ┌──────────────────────────────────────────────────────────────────────┐
- * │ 关联仓库  ✓ refund-service  ✓ order-service  ＋ coupon-service  ＋…│
- * │                                                  [⚠ 仅 N 个仓库…] │
- * │                                                       [▶ 进入 ANALYZING] │
+ * │ 关联仓库  [✓ refund] [✓ order]  [＋ 添加仓库…]  ⚠ 仅 N 个仓库…  ▶   │
+ * │  (N=0 态:仅 [＋ 添加仓库…] + hint 「💡 首次添加仓库时会请你填写统一分支名」)│
  * └──────────────────────────────────────────────────────────────────────┘
  *
  * 设计要点:
@@ -21,8 +20,14 @@ import { shouldShowRepoSoftWarning, type DraftingRepo } from '@/lib/drafting'
  *   而非"漂浮在 viewport 底部";前者与设计稿 `.repo-bar` 一致。
  * - **chips 多选**:点击 chip 切换 on/off 状态;`on` chip 蓝底蓝字,`off` chip
  *   灰底灰字(对应设计稿 `.chip.on` vs `.chip`)
- * - **软警告**(验收 #4 #5 #6):`shouldShowRepoSoftWarning(selectedIds)` 为 true
- *   时,渲染 ⚠ 提示。纯函数,不参与 launch validity。
+ * - **N=0 空态(issue 01 ticket)**:`selectedRepoIds.length === 0` 时
+ *   - 渲染 `＋ 添加仓库…` 主色 chip(brand-50 底 + brand-500 边)
+ *   - 显示 hint `💡 首次添加仓库时会请你填写统一分支名`
+ *   - 用 `data-testid="repo-bar-empty"` 包住整条空态
+ * - **触发关联弹层**:`onRequestAttach` 存在 → 渲染 `＋ 添加仓库…` 按钮;
+ *   否则保持 issue 08 形态(无此按钮)
+ * - **软警告**(issue 08 验收 #4 #5 #6):`shouldShowRepoSoftWarning(selectedIds)`
+ *   为 true 时,渲染 ⚠ 提示。纯函数,不参与 launch validity。
  * - **启动按钮**(验收 #7 #8):`canLaunch` 完全由父组件基于 title + PRD 计算,
  *   本组件只负责呈现 + 点击回调。disabled 时按钮半透明 + cursor: not-allowed。
  * - **不影响 launch**:本组件**不**自行计算 validity、不读取仓库数量来调整
@@ -51,11 +56,23 @@ export interface RepoBarProps {
   launchDisabledHint?: string
   /** 启动按钮点击回调(canLaunch=false 时不应被调用;父组件已校验) */
   onLaunch: () => void
+  /**
+   * 触发关联仓库弹层的回调(issue 01 ticket):
+   * - 提供:渲染 `＋ 添加仓库…` 按钮,N=0 时显示 brand 色空态 + hint
+   * - 不提供:维持 issue 08 旧行为(不渲染新按钮;N=0 时显示 `暂无可选仓库`)
+   *
+   * 提供后,Repos 列表里 `name` 以 `＋` 开头的占位条目(issue 08 mock)自动
+   * 跳过 —— 它们的"添加更多"语义已由本按钮接管。
+   */
+  onRequestAttach?: () => void
 }
 
 /** 仓库软警告文案模板:N 由 selectedRepoIds.length 替换 */
 const SOFT_WARNING_PREFIX = '⚠ 仅 '
 const SOFT_WARNING_SUFFIX = ' 个仓库 · ANALYZING 可能无法完整关联代码上下文'
+
+/** 占位条目 name 前缀(issue 08 mock 期的"＋ 更多仓库…"占位) */
+const PLACEHOLDER_PREFIX = '＋'
 
 export function RepoBar({
   repos,
@@ -64,6 +81,7 @@ export function RepoBar({
   canLaunch,
   launchDisabledHint,
   onLaunch,
+  onRequestAttach,
 }: RepoBarProps) {
   // -------------------------------------------------------------------------
   // 软警告可见性(纯函数;selectedRepoIds 变化时 O(1) 重新计算)
@@ -73,6 +91,16 @@ export function RepoBar({
     SOFT_WARNING_PREFIX +
     String(selectedRepoIds.length) +
     SOFT_WARNING_SUFFIX
+
+  // -------------------------------------------------------------------------
+  // 真实可选仓库列表(过滤掉以 "＋" 开头的占位条目 —— onRequestAttach 提供后
+  // 它们的"添加更多"语义已由 `＋ 添加仓库…` 按钮接管)
+  // -------------------------------------------------------------------------
+  const selectableRepos = onRequestAttach
+    ? repos.filter((r) => !r.name.startsWith(PLACEHOLDER_PREFIX))
+    : repos
+
+  const isEmptyState = selectedRepoIds.length === 0
 
   // -------------------------------------------------------------------------
   // chip 切换(防御性:id 不在 repos 中 → 忽略)
@@ -110,6 +138,7 @@ export function RepoBar({
       data-soft-warning={showSoftWarning ? 'true' : 'false'}
       data-can-launch={canLaunch ? 'true' : 'false'}
       data-repo-count={String(repos.length)}
+      data-empty-state={isEmptyState ? 'true' : 'false'}
       role="region"
       aria-label="仓库选择与启动操作"
       className={[
@@ -130,20 +159,50 @@ export function RepoBar({
         关联仓库
       </span>
 
-      {/* chips 容器 */}
-      <div
-        data-testid="drafting-repo-bar-chips"
-        className="flex-1 flex items-center gap-2 flex-wrap min-w-0"
-      >
-        {repos.length === 0 ? (
-          <span
-            data-testid="drafting-repo-bar-empty"
-            className="text-text-3 text-xs italic"
-          >
-            暂无可选仓库
-          </span>
-        ) : (
-          repos.map((repo) => {
+      {/* N=0 空态包裹(issue 01 ticket):整条 bar 的右侧统一呈现"加仓库"入口 + hint */}
+      {isEmptyState ? (
+        <div
+          data-testid="repo-bar-empty"
+          className="flex-1 flex items-center gap-3 min-w-0 flex-wrap"
+        >
+          {/* 「＋ 添加仓库…」按钮(主色,引导点击) */}
+          {onRequestAttach ? (
+            <button
+              type="button"
+              data-testid="repo-bar-add"
+              onClick={onRequestAttach}
+              className={[
+                'inline-flex items-center h-[30px] px-3 rounded-md text-sm',
+                'border border-brand bg-brand-50 text-brand-700',
+                'hover:bg-brand-100',
+                'focus:outline-none focus:ring-2 focus:ring-brand-50',
+              ].join(' ')}
+            >
+              ＋ 添加仓库…
+            </button>
+          ) : (
+            <span className="text-text-3 text-xs italic">暂无可选仓库</span>
+          )}
+
+          {/* 空态 hint(issue 01 ticket):「💡 首次添加仓库时会请你填写统一分支名」 */}
+          {onRequestAttach && (
+            <span
+              data-testid="repo-bar-empty-hint"
+              className="text-xs text-text-3"
+            >
+              💡 首次添加仓库时会请你填写统一分支名
+            </span>
+          )}
+        </div>
+      ) : (
+        // -------------------------------------------------------------------
+        // N≥1:渲染 chips + 「＋」追加按钮
+        // -------------------------------------------------------------------
+        <div
+          data-testid="drafting-repo-bar-chips"
+          className="flex-1 flex items-center gap-2 flex-wrap min-w-0"
+        >
+          {selectableRepos.map((repo) => {
             const selected = selectedRepoIds.includes(repo.id)
             return (
               <button
@@ -171,9 +230,30 @@ export function RepoBar({
                 <span>{repo.name}</span>
               </button>
             )
-          })
-        )}
-      </div>
+          })}
+
+          {/* 「＋」追加按钮(issue 01 ticket):N≥1 时仍可继续追加仓库,
+              触发同一弹层的 append 模式 */}
+          {onRequestAttach && (
+            <button
+              type="button"
+              data-testid="repo-bar-add-more"
+              onClick={onRequestAttach}
+              aria-label="追加仓库"
+              className={[
+                'inline-flex items-center gap-1',
+                'h-[30px] px-3 rounded-full text-sm',
+                'border border-dashed border-border-strong text-text-3',
+                'hover:border-brand hover:text-brand-700 hover:bg-brand-50',
+                'focus:outline-none focus:ring-2 focus:ring-brand-50',
+              ].join(' ')}
+            >
+              <span aria-hidden>＋</span>
+              <span>添加</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* 软警告:仅 N 个仓库 · …(验收 #4 #5) */}
       {showSoftWarning && (

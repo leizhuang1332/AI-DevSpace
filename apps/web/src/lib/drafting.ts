@@ -237,6 +237,39 @@ export function shouldShowRepoSoftWarning(selectedRepoIds: readonly string[]): b
   return selectedRepoIds.length < 2
 }
 
+// ---------------------------------------------------------------------------
+// issue 01 · 顶部"未关联仓库"banner 可见性 + 全局仓库池(issue 01 ticket)
+// ---------------------------------------------------------------------------
+
+/**
+ * 顶部"未关联仓库"banner 在已选仓库数 = 0 时可见(issue 01 ticket 1 + 决策 E10)。
+ *
+ * - 已选 ≥ 1 → false(banner 隐藏,含「首次勾选第一个 repo 后自动消失」场景)
+ * - 已选 = 0 → true(banner 显示,提示用户添加仓库)
+ *
+ * 注意:banner 还有"用户主动 ✕ 关闭"与"错误态"两种受控隐藏,
+ * 此函数只表达"是否应该展示"——具体 UI 隐藏由父组件持有额外状态决定。
+ */
+export function shouldShowAttachBanner(selectedRepoIds: readonly string[]): boolean {
+  return selectedRepoIds.length === 0
+}
+
+/**
+ * 全局仓库池 —— 当前 mock 用,后续接入 agent API 后由 server 注入。
+ *
+ * 设计要点:
+ * - 全局池 ≠ 需求私有已选集合;前者是「可选仓库源」,后者是「已选仓库集合」
+ * - 故意不包含「＋ 更多仓库…」占位 chip —— 那是 issue 08 RepoBar 的
+ *   视觉引导,不属于真实仓库;UI 层遇到 name 以「＋」开头的应跳过
+ */
+export const GLOBAL_REPO_POOL: readonly DraftingRepo[] = [
+  { id: 'repo-refund-service', name: 'refund-service' },
+  { id: 'repo-order-service', name: 'order-service' },
+  { id: 'repo-coupon-service', name: 'coupon-service' },
+  { id: 'repo-payment-gateway', name: 'payment-gateway' },
+  { id: 'repo-notification-service', name: 'notification-service' },
+]
+
 const EMPTY_TOOLBAR: DraftingToolbar = {
   crumb: [],
   statusText: '',
@@ -251,6 +284,8 @@ const EMPTY_TOOLBAR: DraftingToolbar = {
  * - **issue 04** auxFiles = [] → AuxFilesPane 走 EmptyAuxPlaceholder 占位
  * - **issue 08** repos = [] / selectedRepoIds = [] → RepoBar 渲染空态;
  *   软警告 `shouldShowRepoSoftWarning([]) === true`(0 个仓库触发警告)
+ * - **issue 01 ticket** empty 态注入全局仓库池,使得 banner 可见 + RepoBar
+ *   N=0 占位 chip 可点;但 selectedRepoIds 仍为空,触发 banner 显示
  */
 export function emptyDrafting(requirementId: string): DraftingData {
   return {
@@ -260,8 +295,9 @@ export function emptyDrafting(requirementId: string): DraftingData {
     prdMarkdown: '',
     skills: [],
     auxFiles: [],
-    // issue 08:空草稿默认没有任何仓库选项和选中项
-    repos: [],
+    // issue 01 ticket:空草稿注入全局仓库池(供 banner / RepoBar / 关联弹层使用);
+    // 但 selectedRepoIds 仍为空 → banner 可见 + RepoBar N=0 占位 chip 显示
+    repos: [...GLOBAL_REPO_POOL],
     selectedRepoIds: [],
     autosaveIntervalMs: 30_000,
     lastSavedAt: null,

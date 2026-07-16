@@ -13,6 +13,7 @@ import {
   DEFAULT_PRD_RATIO,
   SPLIT_RESIZER_HEIGHT_PX,
   clampSplitRatio,
+  shouldShowAttachBanner,
   type DraftingData,
 } from '@/lib/drafting'
 import { DraftingPrdPane, type DraftingPrdPaneHandle } from './drafting-prd-pane'
@@ -21,6 +22,31 @@ import { DraggableDivider } from './draggable-divider'
 import { AuxDrawer } from './aux-drawer'
 import { NewAuxFileDialog } from './new-aux-file-dialog'
 import { RepoBar } from './repo-bar'
+import {
+  DraftingBanner,
+  type DraftingBannerState,
+} from './drafting-banner'
+import { DraftingSkeleton } from './drafting-skeleton'
+import { AttachReposDialog } from './attach-repos-dialog'
+
+/**
+ * 弹层关闭后焦点回弹到触发按钮(issue 01 ticket 验收 #12)。
+ *
+ * 用 setTimeout 0 等 React commit 完成后再 focus(避免被卸载的 dialog 抢回焦点)。
+ * trigger 是触发的入口标识;N=0 时 banner [+] 通常已被自动隐藏,可能落空 no-op。
+ */
+function focusReturnToTrigger(
+  trigger: 'banner-plus' | 'repo-bar-add',
+): void {
+  window.setTimeout(() => {
+    const selector =
+      trigger === 'banner-plus'
+        ? '[data-testid="drafting-banner-plus"]'
+        : '[data-testid="repo-bar-add"], [data-testid="repo-bar-add-more"]'
+    const el = document.querySelector<HTMLButtonElement>(selector)
+    el?.focus()
+  }, 0)
+}
 
 /**
  * DRAFTING 工位组件(issue 02 + 04 + 05 + 06 + 08)
@@ -83,6 +109,60 @@ export function DraftingZone({ data }: { data: DraftingData }) {
   const [selectedRepoIds, setSelectedRepoIds] = useState<string[]>(
     data.selectedRepoIds,
   )
+
+  // -------------------------------------------------------------------------
+  // 关联仓库弹层 + 分支名 + banner(issue 01 ticket)
+  // - mountSkeletonDone:首挂时 1.5s skeleton,完成后才显示主区
+  // - bannerState:hidden / success / error 三态,受 DraftingZone 持有
+  // - attachDialogOpen / attachDialogMode:弹层受控 + 首次/追加两种 mode
+  // - lockedBranchName:首次关联成功后写入,后续追加模式复用
+  // - pendingAttachTrigger:弹层关闭后焦点回触发按钮(banner [+] / RepoBar ＋)
+  // - attachInFlight:防止重复提交期间的 UI 闪烁
+  // -------------------------------------------------------------------------
+  const [mountSkeletonDone, setMountSkeletonDone] = useState<boolean>(false)
+  const [bannerState, setBannerState] = useState<DraftingBannerState>(
+    shouldShowAttachBanner(data.selectedRepoIds) ? 'success' : 'hidden',
+  )
+  const [bannerDismissed, setBannerDismissed] = useState<boolean>(false)
+  const [bannerErrorMessage, setBannerErrorMessage] = useState<string | null>(
+    null,
+  )
+  const [attachDialogOpen, setAttachDialogOpen] = useState<boolean>(false)
+  const [attachDialogMode, setAttachDialogMode] =
+    useState<'first' | 'append'>('first')
+  const [lockedBranchName, setLockedBranchName] = useState<string>('')
+  const [pendingAttachTrigger, setPendingAttachTrigger] = useState<
+    'banner-plus' | 'repo-bar-add' | null
+  >(null)
+  const [attachInFlight, setAttachInFlight] = useState<boolean>(false)
+
+  // Mount 后 1.5s skeleton 切换到主区(决策 30 + issue 01 ticket 验收 #1)
+  // 仅在「新建需求」(data.empty === true)时启用;已存需求直接进入主区
+  useEffect(() => {
+    if (!data.empty) {
+      setMountSkeletonDone(true)
+      return
+    }
+    const id = window.setTimeout(() => {
+      setMountSkeletonDone(true)
+    }, 1500)
+    return () => window.clearTimeout(id)
+  }, [data.empty])
+
+  // 当 selectedRepoIds 首次出现 ≥1 时,自动隐藏 success banner(决策 E10 +
+  // ticket 验收「首次在 RepoBar 成功勾选第一个 repo 后 banner 自动消失」)
+  const prevSelectedCountRef = useRef<number>(data.selectedRepoIds.length)
+  useEffect(() => {
+    const wasZero = prevSelectedCountRef.current === 0
+    const isZero = selectedRepoIds.length === 0
+    prevSelectedCountRef.current = selectedRepoIds.length
+    if (wasZero && !isZero && bannerState === 'success') {
+      setBannerState('hidden')
+      setBannerDismissed(false)
+    }
+    // 注:用户主动 ✕ 后(bannerDismissed=true)selectedRepoIds 仍为 0 时,
+    // 不再恢复 success —— 保持「关后不闪」的语义(ticket 验收 #7)
+  }, [selectedRepoIds.length, bannerState])
 
   // -------------------------------------------------------------------------
   // 命令式句柄:DraftingPrdPane 暴露 saveNow(),用于 launch 前立刻落盘
@@ -428,6 +508,113 @@ export function DraftingZone({ data }: { data: DraftingData }) {
   )
 
   // -------------------------------------------------------------------------
+  // 关联仓库弹层(issue 01 ticket)—— 入口共两处(banner [+] / RepoBar ＋)
+  // 模式由 selectedRepoIds 当前状态决定:
+  // - 空 → 'first',首次关联,需填分支名
+  // - 已选 ≥1 → 'append',追加,分支名沿用 lockedBranchName
+  // -------------------------------------------------------------------------
+  const openAttachDialog = useCallback(
+    (trigger: 'banner-plus' | 'repo-bar-add') => {
+      if (attachInFlight) return
+      setPendingAttachTrigger(trigger)
+      // mode 决策:lockedBranchName 非空 = 已锁定(append);否则 = 首次关联(first)
+      // 注:不能用 selectedRepoIds.length 判定 —— 已有需求(预选 N repo 但未走弹层
+      // 锁定分支)点 ＋ 也会进入 append 模式,但此时 lockedBranchName==='' 会导致
+      // 锁定 banner 渲染成「将使用统一分支名 —」(UI-POLISH-SPEC §9.2 语义违和)
+      setAttachDialogMode(lockedBranchName ? 'append' : 'first')
+      setAttachDialogOpen(true)
+    },
+    [attachInFlight, lockedBranchName],
+  )
+
+  const closeAttachDialog = useCallback(() => {
+    const trigger = pendingAttachTrigger
+    setAttachDialogOpen(false)
+    setPendingAttachTrigger(null)
+    // 弹层关闭后焦点回到触发按钮(spec 要求)
+    if (trigger) focusReturnToTrigger(trigger)
+  }, [pendingAttachTrigger])
+
+  // -------------------------------------------------------------------------
+  // 关联仓库提交(issue 01 ticket)—— mock 后端 worktree 创建
+  // - success:更新 selectedRepoIds + 锁定 branchName + 关闭弹层 + 隐藏 banner
+  // - error:弹层关闭,切换 banner 到 error 态
+  //
+  // mock 实现:ticket 04 后端尚未接通;通过 query param `?fail=true` 或
+  // 全局 `__forceAttachFail` 触发失败(便于测试)。生产接 ticket 02 / 04 时
+  // 把这块换成真实的 fetch。
+  // -------------------------------------------------------------------------
+  const submitAttach = useCallback(
+    async (value: { repoIds: string[]; branchName: string }) => {
+      setAttachInFlight(true)
+      try {
+        // mock:失败路径可通过 URL `?fail=network|auth|disk` 触发
+        const search =
+          typeof window !== 'undefined' ? window.location.search : ''
+        const failMatch = search.match(/[?&]fail=(\w+)/)
+        if (failMatch) {
+          const failType = failMatch[1]
+          const message =
+            failType === 'auth'
+              ? '鉴权失败'
+              : failType === 'disk'
+                ? '磁盘空间不足'
+                : '网络异常'
+          throw new Error(message)
+        }
+        // 模拟网络延迟,让 UI 看到 submitting 中态
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        setSelectedRepoIds((prev) => {
+          const merged = [...prev]
+          for (const id of value.repoIds) {
+            if (!merged.includes(id)) merged.push(id)
+          }
+          return merged
+        })
+        if (value.branchName) setLockedBranchName(value.branchName)
+        setBannerState('hidden')
+        setBannerErrorMessage(null)
+        setBannerDismissed(false)
+        setAttachDialogOpen(false)
+        // 弹层关闭后焦点回到触发按钮
+        const trigger = pendingAttachTrigger
+        setPendingAttachTrigger(null)
+        if (trigger) focusReturnToTrigger(trigger)
+      } catch (err) {
+        // 失败:保持弹层关闭,切换 banner 到 error
+        setAttachDialogOpen(false)
+        setBannerState('error')
+        setBannerErrorMessage(
+          err instanceof Error ? err.message : '未知错误',
+        )
+        setPendingAttachTrigger(null)
+      } finally {
+        setAttachInFlight(false)
+      }
+    },
+    [pendingAttachTrigger],
+  )
+
+  const handleBannerDismiss = useCallback(() => {
+    setBannerState('hidden')
+    setBannerDismissed(true)
+  }, [])
+
+  const handleBannerRetry = useCallback(() => {
+    // 重试:回到 first / append 弹层(由 selectedRepoIds 决定),用户重新选
+    setBannerErrorMessage(null)
+    setBannerState('hidden')
+    openAttachDialog('banner-plus')
+  }, [openAttachDialog])
+
+  // -------------------------------------------------------------------------
+  // 包装 RepoBar 的 onRequestAttach —— 记录触发源,便于关闭后焦点回弹
+  // -------------------------------------------------------------------------
+  const handleRepoBarRequestAttach = useCallback(() => {
+    openAttachDialog('repo-bar-add')
+  }, [openAttachDialog])
+
+  // -------------------------------------------------------------------------
   // 启动 ANALYZING(issue 02 验收 #7 + issue 08 验收 #7 #8)
   // - validity 已确保 canLaunch=true(否则 RepoBar 不会调用 onLaunch)
   // - 启动前触发一次"立刻落盘",保证下游工位拿到最新内容(issue 02 行为)
@@ -458,9 +645,25 @@ export function DraftingZone({ data }: { data: DraftingData }) {
       data-prd-ratio={String(prdRatio)}
       data-effective-prd-ratio={String(effectiveRatio)}
       data-launch-valid={validity.canLaunch ? 'true' : 'false'}
-      className="flex flex-col h-full overflow-hidden bg-bg"
+      className="flex flex-col h-full overflow-hidden bg-bg relative"
     >
+      {/* 主区始终渲染 —— 骨架屏以 overlay 形式覆盖,避免阻塞主区挂载
+          (这样现有依赖即时查询 DOM 的测试仍可工作) */}
       <DraftingToolbar toolbar={data.toolbar} />
+
+      {/* 顶部 banner(issue 01 ticket):hidden / success / error 三态 */}
+      <DraftingBanner
+        state={bannerState}
+        errorMessage={bannerErrorMessage ?? undefined}
+        onRequestAttach={(trigger) => {
+          // banner [+] / 重试 共用 openAttachDialog;banner-retry 归一为 banner-plus
+          openAttachDialog(
+            trigger === 'banner-retry' ? 'banner-plus' : trigger,
+          )
+        }}
+        onDismiss={handleBannerDismiss}
+        onRetry={handleBannerRetry}
+      />
 
       {/* 主区:上下分割的 flex 列(issue 04) */}
       <div
@@ -520,7 +723,8 @@ export function DraftingZone({ data }: { data: DraftingData }) {
             </div>
           </div>
 
-          {/* 仓库底部条(issue 08)—— sticky bottom,包含 chips + 软警告 + 启动 */}
+          {/* 仓库底部条(issue 08 + 01 ticket)—— sticky bottom,
+              含 chips / 软警告 / 「＋」追加 / 启动 */}
           <div className="mt-3 -mx-6 -mb-6">
             <RepoBar
               repos={data.repos}
@@ -529,10 +733,24 @@ export function DraftingZone({ data }: { data: DraftingData }) {
               canLaunch={validity.canLaunch}
               launchDisabledHint={launchDisabledHint}
               onLaunch={handleLaunch}
+              onRequestAttach={handleRepoBarRequestAttach}
             />
           </div>
         </div>
       </div>
+
+      {/* 骨架屏 overlay(issue 01 ticket · 决策 30):
+          - 仅在新建需求(data.empty === true)时启用 1.5s
+          - 渲染为绝对定位 overlay 覆盖整个 main;1.5s 后自动隐藏
+          - 用 `pointer-events-none` 让下层内容在挂载后即可交互(测试 / 自动化) */}
+      {!mountSkeletonDone && data.empty && (
+        <div
+          data-testid="drafting-skeleton-overlay"
+          className="absolute inset-0 z-30 bg-bg/90 flex items-center justify-center pointer-events-none"
+        >
+          <DraftingSkeleton />
+        </div>
+      )}
 
       {/* 新建对话框(issue 06) — 提交或取消都关闭;错误(冲突)留在 dialog 内 */}
       <NewAuxFileDialog
@@ -543,6 +761,19 @@ export function DraftingZone({ data }: { data: DraftingData }) {
           setNewDialogError(null)
         }}
         onSubmit={handleAuxCreateSubmit}
+      />
+
+      {/* 关联 / 追加仓库弹层(issue 01 ticket)—— 受控 mode + open */}
+      <AttachReposDialog
+        open={attachDialogOpen}
+        mode={attachDialogMode}
+        titlePrefix={attachDialogMode === 'first' ? '关联仓库' : '追加仓库'}
+        requirementTitle={data.title || data.requirementId}
+        availableRepos={data.repos}
+        pickedRepoIds={selectedRepoIds}
+        lockedBranchName={lockedBranchName}
+        onSubmit={submitAttach}
+        onClose={closeAttachDialog}
       />
 
       {/* 辅助文件抽屉(issue 05) —— 用 portal 思路直接渲染在主元素末尾,

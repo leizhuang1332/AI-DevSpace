@@ -54,16 +54,19 @@ describe('shouldShowRepoSoftWarning', () => {
 // ============================================================================
 
 describe('DraftingData · repos / selectedRepoIds 字段', () => {
-  it('emptyDrafting 返回空 repos / 空 selectedRepoIds(0 仓库触发软警告)', () => {
+  it('emptyDrafting 返回全局仓库池 + 空 selectedRepoIds(0 选中触发软警告 + 顶部 banner)', () => {
+    // issue 01 ticket:空草稿注入全局仓库池(让 banner 与 RepoBar N=0 空态可见),
+    // 但 selectedRepoIds 仍为空,触发软警告 + banner 显示
     const data = emptyDrafting('NEW')
-    expect(data.repos).toEqual([])
+    expect(data.repos.length).toBeGreaterThan(0)
     expect(data.selectedRepoIds).toEqual([])
     expect(shouldShowRepoSoftWarning(data.selectedRepoIds)).toBe(true)
   })
 
-  it('getDraftingData(req-001) 返回样例数据带 5 个仓库 + 2 个已选中(软警告隐藏)', async () => {
+  it('getDraftingData(req-001) 返回样例数据带 ≥4 个仓库 + 2 个已选中(软警告隐藏)', async () => {
     const data = await getDraftingData('req-001')
-    // 5 个 chip:refund / order / coupon / payment / 更多…
+    // 5 个 chip:refund / order / coupon / payment / 更多…(其中「＋ 更多仓库…」占位
+    // 被 issue 01 ticket 过滤;但 data.repos 仍含 5 条目)
     expect(data.repos.length).toBeGreaterThanOrEqual(4)
     // 默认勾选 refund + order → 软警告应隐藏(2 个 = 阈值边界)
     expect(data.selectedRepoIds.length).toBe(2)

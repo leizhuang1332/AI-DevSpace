@@ -14,13 +14,15 @@ import {
 } from '@ai-devspace/shared'
 
 // ============================================================================
-// DraftingData 形状(issue 02 + 04 + 08):
+// DraftingData 形状(issue 02 + 04 + 08 + 01):
 // - 旧 acceptanceCriteria / actions 字段不再出现
-// - repos / selectedRepoIds 已就位(issue 08);空草稿两者均为 []
+// - repos / selectedRepoIds 已就位(issue 08);空草稿两者**注入全局仓库池**
+//   + selectedRepoIds 仍为 0(issue 01 ticket:使得 banner 可见 + RepoBar N=0
+//   占位 chip 显示;待用户从关联弹层选仓库后,banner 自动隐藏)
 // ============================================================================
 
 describe('emptyDrafting', () => {
-  it('返回全空草稿结构(空 title + 空 PRD + empty=true)', () => {
+  it('返回全空草稿结构(空 title + 空 PRD + empty=true + 全局仓库池)', () => {
     const d = emptyDrafting('NEW')
     expect(d.requirementId).toBe('NEW')
     expect(d.title).toBe('')
@@ -38,8 +40,9 @@ describe('emptyDrafting', () => {
     expect(Array.isArray(d.skills)).toBe(true)
     // issue 04:auxFiles 默认为空数组(走 EmptyAuxPlaceholder 占位)
     expect(d.auxFiles).toEqual([])
-    // issue 08:空草稿默认无仓库、无选中
-    expect(d.repos).toEqual([])
+    // issue 01 ticket:空草稿注入全局仓库池(≥ 1),selectedRepoIds 仍为 0
+    // —— 这样 banner 与 RepoBar N=0 占位 chip 都能正常显示
+    expect(d.repos.length).toBeGreaterThan(0)
     expect(d.selectedRepoIds).toEqual([])
   })
 })

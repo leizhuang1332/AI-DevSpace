@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, cleanup } from '@testing-library/react'
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 // mock next/navigation(避免在测试中真的调 router)
@@ -623,6 +623,198 @@ describe('DraftingZone · 抽屉切换(issue 07 验收 #7 #8)', () => {
     expect(screen.getByTestId('aux-drawer-filename').textContent).toBe(
       'api-draft.md',
     )
+  })
+})
+
+// ============================================================================
+// issue 01 ticket:DRAFTING banner + 关联仓库弹层端到端(issue 01 ticket 验收 #1-#13)
+// ============================================================================
+
+describe('DraftingZone · issue 01 ticket · banner + 关联仓库弹层端到端', () => {
+  // 用全新草稿(empty=true)→ 触发 banner success + skeleton overlay
+  function freshDraft(): ReturnType<typeof emptyDrafting> {
+    const d = emptyDrafting('req-fresh')
+    d.empty = true
+    // emptyDrafting 自带 GLOBAL_REPO_POOL + 空 selectedRepoIds
+    return d
+  }
+
+  afterEach(() => cleanup())
+
+  it('fresh(empty=true)→ skeleton overlay 挂载,banner success 可见 + 关联仓库弹层默认关闭', () => {
+    render(<DraftingZone data={freshDraft()} />)
+
+    // banner success 可见
+    const banner = screen.getByTestId('drafting-banner')
+    expect(banner.getAttribute('data-banner-state')).toBe('success')
+    expect(banner.textContent).toContain('未关联任何仓库')
+    expect(screen.getByTestId('drafting-banner-plus')).toBeInTheDocument()
+    expect(screen.getByTestId('drafting-banner-close')).toBeInTheDocument()
+
+    // 关联仓库弹层默认关闭
+    expect(screen.queryByTestId('attach-repos-dialog')).toBeNull()
+
+    // skeleton overlay 挂载(覆盖主区)
+    expect(screen.getByTestId('drafting-skeleton-overlay')).toBeInTheDocument()
+    expect(screen.getByTestId('drafting-skeleton')).toBeInTheDocument()
+  })
+
+  it('点 banner [+] → first 模式弹层打开,标题含 "关联仓库"', async () => {
+    render(<DraftingZone data={freshDraft()} />)
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('drafting-banner-plus'))
+
+    const dialog = screen.getByTestId('attach-repos-dialog')
+    expect(dialog.getAttribute('data-mode')).toBe('first')
+    expect(screen.getByTestId('attach-repos-dialog-title').textContent).toContain(
+      '关联仓库',
+    )
+    // first 模式:分支名 input + locked-banner 不存在
+    expect(screen.getByTestId('attach-repos-dialog-branch')).toBeInTheDocument()
+    expect(
+      screen.queryByTestId('attach-repos-dialog-locked-banner'),
+    ).toBeNull()
+  })
+
+  it('点 RepoBar ＋ (N=0)→ 同样触发 first 模式弹层(两个入口同弹层)', async () => {
+    render(<DraftingZone data={freshDraft()} />)
+    const user = userEvent.setup()
+    // N=0 空态下 repo-bar-add 按钮可见
+    expect(screen.getByTestId('repo-bar-add')).toBeInTheDocument()
+    await user.click(screen.getByTestId('repo-bar-add'))
+    expect(screen.getByTestId('attach-repos-dialog')).toBeInTheDocument()
+    expect(screen.getByTestId('attach-repos-dialog').getAttribute('data-mode')).toBe(
+      'first',
+    )
+  })
+
+  it('提交弹层 → selectedRepoIds 写入 + banner 自动消失', async () => {
+    render(<DraftingZone data={freshDraft()} />)
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('repo-bar-add'))
+
+    // 勾 2 个仓库 + 填分支名
+    await user.click(
+      screen
+        .getAllByTestId('attach-repos-dialog-repo-option')
+        .find((o) => o.getAttribute('data-repo-id') === 'repo-refund-service')!,
+    )
+    await user.click(
+      screen
+        .getAllByTestId('attach-repos-dialog-repo-option')
+        .find((o) => o.getAttribute('data-repo-id') === 'repo-order-service')!,
+    )
+    fireEvent.change(screen.getByTestId('attach-repos-dialog-branch'), {
+      target: { value: 'feat/refund-optimization' },
+    })
+    await user.click(screen.getByTestId('attach-repos-dialog-submit'))
+
+    // submit 是异步(有 50ms mock 延迟),等待弹层关闭 + banner 消失
+    await waitFor(() => {
+      expect(screen.queryByTestId('attach-repos-dialog')).toBeNull()
+    })
+    // banner 自动消失(issue 01 ticket 验收 #6 「首次勾选第一个 repo 后自动消失」)
+    expect(screen.queryByTestId('drafting-banner')).toBeNull()
+    // RepoBar 进入 N≥1 状态:chips 渲染 + repo-bar-add-more 出现
+    const chips = screen.getAllByTestId('drafting-repo-chip')
+    expect(chips.find((c) => c.getAttribute('data-selected') === 'true')).toBeDefined()
+    expect(screen.getByTestId('repo-bar-add-more')).toBeInTheDocument()
+    expect(screen.queryByTestId('repo-bar-add')).toBeNull()
+  })
+
+  it('点 banner ✕ → banner 隐藏(进入"用户主动关闭"态),RepoBar 仍引导入口', async () => {
+    render(<DraftingZone data={freshDraft()} />)
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('drafting-banner-close'))
+    expect(screen.queryByTestId('drafting-banner')).toBeNull()
+    // RepoBar 仍是引导入口(N=0 add button)
+    expect(screen.getByTestId('repo-bar-add')).toBeInTheDocument()
+  })
+
+  it('已有仓库(N=1)→ 点 RepoBar ＋ 触发 append 模式弹层(无分支名 input)', async () => {
+    const data = freshDraft()
+    data.selectedRepoIds = ['repo-refund-service']
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+
+    // review fix:mode 由 lockedBranchName 决定(非 selectedRepoIds.length)
+    // 当前 lockedBranchName==='' → first 模式(避免 append 模式渲染「—」锁定 banner)
+    expect(screen.getByTestId('repo-bar-add-more')).toBeInTheDocument()
+    await user.click(screen.getByTestId('repo-bar-add-more'))
+    expect(screen.getByTestId('attach-repos-dialog').getAttribute('data-mode')).toBe(
+      'first',
+    )
+    // 关闭弹层
+    await user.click(screen.getByTestId('attach-repos-dialog-cancel'))
+
+    // 走完首次提交后,lockedBranchName 写入 → 后续追加走 append 模式
+    await user.click(screen.getByTestId('repo-bar-add-more'))
+    // 勾仓库 + 填分支名
+    await user.click(
+      screen
+        .getAllByTestId('attach-repos-dialog-repo-option')
+        .find((o) => o.getAttribute('data-repo-id') === 'repo-order-service')!,
+    )
+    fireEvent.change(screen.getByTestId('attach-repos-dialog-branch'), {
+      target: { value: 'feat/refund' },
+    })
+    await user.click(screen.getByTestId('attach-repos-dialog-submit'))
+
+    // 等异步关闭
+    await waitFor(() => {
+      expect(screen.queryByTestId('attach-repos-dialog')).toBeNull()
+    })
+
+    // 现在 lockedBranchName 已写入,后续追加走 append 模式
+    await user.click(screen.getByTestId('repo-bar-add-more'))
+    const dialog = screen.getByTestId('attach-repos-dialog')
+    expect(dialog.getAttribute('data-mode')).toBe('append')
+    // append 模式:无分支名 input
+    expect(screen.queryByTestId('attach-repos-dialog-branch')).toBeNull()
+    // 锁定 banner 显示 + 含已锁定的分支名(不再是「—」)
+    const locked = screen.getByTestId('attach-repos-dialog-locked-banner')
+    expect(locked).toBeInTheDocument()
+    expect(locked.textContent).toContain('feat/refund')
+  })
+
+  it('失败路径:URL `?fail=network` → banner 切换为 error 态 + [重试] 按钮', async () => {
+    // 用 jsdom 的 window.location 注入 ?fail=network
+    const originalHref = window.location.href
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, href: 'http://localhost/drafting?fail=network', search: '?fail=network' },
+    })
+    try {
+      render(<DraftingZone data={freshDraft()} />)
+      const user = userEvent.setup()
+      await user.click(screen.getByTestId('repo-bar-add'))
+      // 勾 1 个仓库 + 填分支名 + 提交
+      await user.click(
+        screen
+          .getAllByTestId('attach-repos-dialog-repo-option')
+          .find((o) => o.getAttribute('data-repo-id') === 'repo-refund-service')!,
+      )
+      fireEvent.change(screen.getByTestId('attach-repos-dialog-branch'), {
+        target: { value: 'feat/refund' },
+      })
+      await user.click(screen.getByTestId('attach-repos-dialog-submit'))
+
+      // banner 切到 error 态,文案 = "网络异常"
+      const banner = await screen.findByTestId('drafting-banner')
+      expect(banner.getAttribute('data-banner-state')).toBe('error')
+      expect(banner.textContent).toContain('网络异常')
+      expect(screen.getByTestId('drafting-banner-retry')).toBeInTheDocument()
+      // 弹层已关闭
+      expect(screen.queryByTestId('attach-repos-dialog')).toBeNull()
+      // selectedRepoIds 没有写入(失败回滚)
+      const bar = screen.getByTestId('drafting-repo-bar')
+      expect(bar.getAttribute('data-selected-count')).toBe('0')
+    } finally {
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: { ...window.location, href: originalHref, search: '' },
+      })
+    }
   })
 })
 
