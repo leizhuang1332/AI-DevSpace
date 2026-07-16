@@ -14,6 +14,8 @@ import { requirementRoutes } from './routes/requirement.js'
 import { bootstrapRoutes } from './routes/bootstrap.js'
 import { analysisRoutes } from './routes/analysis.js'
 import { spikeRoutes } from './routes/spike.js'
+import { createWorktreeManager, createDefaultGitExec } from './worktree/WorktreeManager.js'
+import { RequirementService } from './services/RequirementService.js'
 import { createSseHub, type SseHub } from './sse/SseHub.js'
 import { sseRoutes } from './sse/requirementEventsRoute.js'
 import { sessionSseRoutes } from './sse/sessionEventsRoute.js'
@@ -218,7 +220,19 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   })
   fastify.get('/api/health', { config: { public: true } }, async () => healthService.collect())
   await fastify.register(workspaceRoutes, { workspace })
-  await fastify.register(requirementRoutes)
+
+  // ticket 02:实装 POST /api/requirement/:id/repos(worktree 真实创建)
+  // - 默认注入 createDefaultGitExec(生产)
+  // - 测试 buildServer 时可通过 BuildServerOptions 覆盖 deps(后续 ticket 拓展)
+  const gitExec = createDefaultGitExec()
+  const worktreeMgr = createWorktreeManager({ root: workspaceRoot, git: gitExec })
+  const requirementService = new RequirementService({
+    root: workspaceRoot,
+    git: gitExec,
+    worktreeMgr,
+  })
+  await fastify.register(requirementRoutes, { requirementService })
+
   await fastify.register(analysisRoutes, { hub })
   await fastify.register(spikeRoutes, { hub, provider, ccSwitch, store: sessionStore, mirror: messagesMirror, registry: sessionStateRegistry })
   await fastify.register(bootstrapRoutes, { tokenManager, apiBase: 'http://localhost:7777' })

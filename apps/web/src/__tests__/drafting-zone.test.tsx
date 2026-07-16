@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi, beforeEach, beforeAll } from 'vitest'
-import { render, screen, cleanup, within, act, fireEvent } from '@testing-library/react'
+import { render, screen, cleanup, within, act, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { DraftingZone } from '@/components/drafting-zone'
 import {
@@ -1515,5 +1515,262 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
     expect(screen.getByTestId('drafting-autosaved')).toBeInTheDocument()
     // 跳转也正常触发
     expect(routerPush).toHaveBeenCalledWith('/requirements/req-001/analyzing/')
+  })
+})
+
+// ============================================================================
+// ticket 02 · 关联仓库 API 接入(.scratch/new-requirement-modal/issues/02)
+// ============================================================================
+
+// mock bootstrap,让真实 agentFetch 跑通;fetch mock 返回 controlled Response
+const mockFetch = vi.fn()
+vi.mock('@/lib/agent-bootstrap', () => ({
+  hasAuthCookie: () => true,
+  getOrBootstrap: vi.fn(),
+  resetBootstrapCache: vi.fn(),
+}))
+
+function makeSuccessResponse(body: Record<string, unknown>): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  })
+}
+
+function makeErrorResponse(status: number, body: Record<string, unknown>): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  })
+}
+
+function mockAttachReposFetch(body: unknown, status = 200): void {
+  mockFetch.mockReset()
+  mockFetch.mockResolvedValue(makeSuccessResponse(body as Record<string, unknown>))
+  if (status !== 200) {
+    mockFetch.mockResolvedValue(makeErrorResponse(status, body as Record<string, unknown>))
+  }
+  // @ts-ignore - mock fetch
+  globalThis.fetch = mockFetch
+}
+
+describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
+  beforeEach(() => {
+    mockFetch.mockReset()
+  })
+
+  afterEach(() => {
+    mockFetch.mockReset()
+    // @ts-ignore - restore default fetch
+    delete (globalThis as { fetch?: unknown }).fetch
+  })
+
+  it('全成功:fetch 200 + 2 ok=true → selectedRepoIds 合并 + lockedBranchName 写入 + banner hidden', async () => {
+    const data = {
+      ...emptyDrafting('req-attach-ok'),
+      title: '退款',
+      prdMarkdown: generatePrdSkeleton('退款'),
+      empty: false,
+      repos: [
+        { id: 'r1', name: 'refund-service' },
+        { id: 'r2', name: 'order-service' },
+      ],
+      selectedRepoIds: [],
+    }
+    mockAttachReposFetch({
+      requirementId: 'req-attach-ok',
+      branchName: 'feat/refund',
+      succeeded: 2,
+      failed: 0,
+      results: [
+        { ok: true, repoId: 'r1', branch: 'feat/refund', worktreePath: '/x/r1', base: 'main' },
+        { ok: true, repoId: 'r2', branch: 'feat/refund', worktreePath: '/x/r2', base: 'main' },
+      ],
+    })
+
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+
+    // 打开弹层 → 填分支名 + 勾 2 个 → 提交
+    await user.click(screen.getByTestId('repo-bar-add'))
+    const branchInput = screen.getByTestId('attach-repos-dialog-branch')
+    await user.type(branchInput, 'feat/refund')
+    const checkboxes = screen.getAllByTestId('attach-repos-dialog-repo-checkbox')
+    await user.click(checkboxes[0])
+    await user.click(checkboxes[1])
+    await user.click(screen.getByTestId('attach-repos-dialog-submit'))
+
+    // banner 应隐藏
+    await waitFor(() => {
+      expect(screen.queryByTestId('drafting-banner')).toBeNull()
+    })
+    // selectedRepoIds 应包含 r1 + r2
+    const bar = screen.getByTestId('drafting-repo-bar')
+    expect(bar.getAttribute('data-selected-count')).toBe('2')
+
+    // fetch 被调一次
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    const [url, init] = mockFetch.mock.calls[0]
+    expect(url).toContain('/api/requirement/req-attach-ok/repos')
+    expect(init.method).toBe('POST')
+    const body = JSON.parse(init.body as string)
+    expect(body.repoIds.sort()).toEqual(['r1', 'r2'])
+    expect(body.branchName).toBe('feat/refund')
+  })
+
+  it('部分成功:1 ok + 1 fail → selectedRepoIds 仅成功 + banner partial(橙色)', async () => {
+    const data = {
+      ...emptyDrafting('req-partial'),
+      title: '退款',
+      prdMarkdown: generatePrdSkeleton('退款'),
+      empty: false,
+      repos: [
+        { id: 'r1', name: 'refund-service' },
+        { id: 'r2', name: 'order-service' },
+      ],
+      selectedRepoIds: [],
+    }
+    mockAttachReposFetch({
+      requirementId: 'req-partial',
+      branchName: 'feat/x',
+      succeeded: 1,
+      failed: 1,
+      results: [
+        { ok: true, repoId: 'r1', branch: 'feat/x', worktreePath: '/x/r1', base: 'main' },
+        { ok: false, repoId: 'r2', code: 'E_DISK_FULL', message: 'No space left' },
+      ],
+    })
+
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+
+    await user.click(screen.getByTestId('repo-bar-add'))
+    await user.type(screen.getByTestId('attach-repos-dialog-branch'), 'feat/x')
+    const checkboxes = screen.getAllByTestId('attach-repos-dialog-repo-checkbox')
+    await user.click(checkboxes[0])
+    await user.click(checkboxes[1])
+    await user.click(screen.getByTestId('attach-repos-dialog-submit'))
+
+    // banner partial 态
+    await waitFor(() => {
+      expect(screen.getByTestId('drafting-banner')).toHaveAttribute('data-banner-state', 'partial')
+    })
+    const banner = screen.getByTestId('drafting-banner')
+    expect(banner.getAttribute('data-failed-count')).toBe('1')
+    expect(banner.textContent).toMatch(/已关联 1/)
+    expect(banner.textContent).toMatch(/失败 1/)
+    expect(banner.textContent).toContain('r2')
+
+    // 部分成功:成功 repo 进 selectedRepoIds
+    const bar = screen.getByTestId('drafting-repo-bar')
+    expect(bar.getAttribute('data-selected-count')).toBe('1')
+
+    // 「重试该 repo」按钮出现
+    expect(screen.getByTestId('drafting-banner-retry-failed')).toBeInTheDocument()
+  })
+
+  it('全失败:2 ok=false → banner error + errorMessage 含 repoId', async () => {
+    const data = {
+      ...emptyDrafting('req-all-fail'),
+      title: '退款',
+      prdMarkdown: generatePrdSkeleton('退款'),
+      empty: false,
+      repos: [
+        { id: 'r1', name: 'r1' },
+        { id: 'r2', name: 'r2' },
+      ],
+      selectedRepoIds: [],
+    }
+    mockAttachReposFetch({
+      requirementId: 'req-all-fail',
+      branchName: 'feat/x',
+      succeeded: 0,
+      failed: 2,
+      results: [
+        { ok: false, repoId: 'r1', code: 'E_REPO_NOT_FOUND', message: 'r1 not found' },
+        { ok: false, repoId: 'r2', code: 'E_REPO_NOT_FOUND', message: 'r2 not found' },
+      ],
+    })
+
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+
+    await user.click(screen.getByTestId('repo-bar-add'))
+    await user.type(screen.getByTestId('attach-repos-dialog-branch'), 'feat/x')
+    const checkboxes = screen.getAllByTestId('attach-repos-dialog-repo-checkbox')
+    await user.click(checkboxes[0])
+    await user.click(checkboxes[1])
+    await user.click(screen.getByTestId('attach-repos-dialog-submit'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('drafting-banner')).toHaveAttribute('data-banner-state', 'error')
+    })
+    const banner = screen.getByTestId('drafting-banner')
+    // 全失败 banner 只显示首个失败 repo(避免文案过长;详细看 failedRepoIds state)
+    expect(banner.textContent).toContain('r1')
+    // error 态无 partial retry 按钮
+    expect(screen.queryByTestId('drafting-banner-retry-failed')).toBeNull()
+  })
+
+  it('鉴权 401 → banner error + errorMessage = "鉴权失败"(中文文案)', async () => {
+    const data = {
+      ...emptyDrafting('req-401'),
+      title: '退款',
+      prdMarkdown: generatePrdSkeleton('退款'),
+      empty: false,
+      repos: [{ id: 'r1', name: 'r1' }],
+      selectedRepoIds: [],
+    }
+    mockFetch.mockReset()
+    mockFetch.mockResolvedValue(
+      makeErrorResponse(401, { error: 'unauthorized' }),
+    )
+    // @ts-ignore - mock fetch
+    globalThis.fetch = mockFetch
+
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+
+    await user.click(screen.getByTestId('repo-bar-add'))
+    await user.type(screen.getByTestId('attach-repos-dialog-branch'), 'feat/x')
+    await user.click(screen.getAllByTestId('attach-repos-dialog-repo-checkbox')[0])
+    await user.click(screen.getByTestId('attach-repos-dialog-submit'))
+
+    await waitFor(() => {
+      const banner = screen.getByTestId('drafting-banner')
+      expect(banner).toHaveAttribute('data-banner-state', 'error')
+      expect(banner.textContent).toContain('鉴权失败')
+      // 不应含 AgentError 的 JSON
+      expect(banner.textContent).not.toContain('"error":"unauthorized"')
+    })
+  })
+
+  it('网络错:fetch reject → banner error', async () => {
+    const data = {
+      ...emptyDrafting('req-network'),
+      title: '退款',
+      prdMarkdown: generatePrdSkeleton('退款'),
+      empty: false,
+      repos: [{ id: 'r1', name: 'r1' }],
+      selectedRepoIds: [],
+    }
+    mockFetch.mockReset()
+    mockFetch.mockRejectedValue(new Error('Failed to fetch'))
+    // @ts-ignore - mock fetch
+    globalThis.fetch = mockFetch
+
+    render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+
+    await user.click(screen.getByTestId('repo-bar-add'))
+    await user.type(screen.getByTestId('attach-repos-dialog-branch'), 'feat/x')
+    await user.click(screen.getAllByTestId('attach-repos-dialog-repo-checkbox')[0])
+    await user.click(screen.getByTestId('attach-repos-dialog-submit'))
+
+    await waitFor(() => {
+      const banner = screen.getByTestId('drafting-banner')
+      expect(banner).toHaveAttribute('data-banner-state', 'error')
+      expect(banner.textContent).toContain('Failed to fetch')
+    })
   })
 })

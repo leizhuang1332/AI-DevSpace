@@ -9,6 +9,10 @@ import {
   type UsageTag,
 } from '@ai-devspace/shared'
 import {
+  attachReposToRequirement,
+  isAttachReposError,
+} from '@/lib/repo-attach'
+import {
   AUX_PANE_MIN_HEIGHT_PX,
   DEFAULT_PRD_RATIO,
   SPLIT_RESIZER_HEIGHT_PX,
@@ -111,13 +115,15 @@ export function DraftingZone({ data }: { data: DraftingData }) {
   )
 
   // -------------------------------------------------------------------------
-  // 关联仓库弹层 + 分支名 + banner(issue 01 ticket)
+  // 关联仓库弹层 + 分支名 + banner(issue 01 ticket · ticket 02 部分成功)
   // - mountSkeletonDone:首挂时 1.5s skeleton,完成后才显示主区
-  // - bannerState:hidden / success / error 三态,受 DraftingZone 持有
+  // - bannerState:hidden / success / partial / error 四态,受 DraftingZone 持有
+  // - bannerPartialSummary:partial 态显示「已关联 N · 失败 M:…」+ 重试按钮
   // - attachDialogOpen / attachDialogMode:弹层受控 + 首次/追加两种 mode
   // - lockedBranchName:首次关联成功后写入,后续追加模式复用
   // - pendingAttachTrigger:弹层关闭后焦点回触发按钮(banner [+] / RepoBar ＋)
   // - attachInFlight:防止重复提交期间的 UI 闪烁
+  // - failedRepoIds:本次关联中失败的 repo(用于 chip 标红 / 重试该 repo)
   // -------------------------------------------------------------------------
   const [mountSkeletonDone, setMountSkeletonDone] = useState<boolean>(false)
   const [bannerState, setBannerState] = useState<DraftingBannerState>(
@@ -127,6 +133,10 @@ export function DraftingZone({ data }: { data: DraftingData }) {
   const [bannerErrorMessage, setBannerErrorMessage] = useState<string | null>(
     null,
   )
+  const [bannerPartialSummary, setBannerPartialSummary] = useState<
+    { succeeded: number; failedNames: string[] } | undefined
+  >(undefined)
+  const [failedRepoIds, setFailedRepoIds] = useState<string[]>([])
   const [attachDialogOpen, setAttachDialogOpen] = useState<boolean>(false)
   const [attachDialogMode, setAttachDialogMode] =
     useState<'first' | 'append'>('first')
@@ -536,63 +546,102 @@ export function DraftingZone({ data }: { data: DraftingData }) {
   }, [pendingAttachTrigger])
 
   // -------------------------------------------------------------------------
-  // 关联仓库提交(issue 01 ticket)—— mock 后端 worktree 创建
-  // - success:更新 selectedRepoIds + 锁定 branchName + 关闭弹层 + 隐藏 banner
-  // - error:弹层关闭,切换 banner 到 error 态
-  //
-  // mock 实现:ticket 04 后端尚未接通;通过 query param `?fail=true` 或
-  // 全局 `__forceAttachFail` 触发失败(便于测试)。生产接 ticket 02 / 04 时
-  // 把这块换成真实的 fetch。
+  // 关联仓库提交(issue 01 ticket + ticket 02 真实 worktree 创建)
+  // - 三态:
+  //   - 全部成功 → banner hidden + 锁定 branchName + selectedRepoIds 合并
+  //   - 部分成功 → banner partial(橙色) + 成功的写入 selectedRepoIds
+  //   - 全部失败 / 网络 / 鉴权错 → banner error + errorMessage
+  // - 鉴权 401 单独映射为「鉴权失败」中文文案(不让 AgentError JSON 暴露给用户)
+  // - 重试该 repo:父组件把 failedRepoIds 重新塞进弹层(下次 onSubmit 自动用)
   // -------------------------------------------------------------------------
   const submitAttach = useCallback(
     async (value: { repoIds: string[]; branchName: string }) => {
       setAttachInFlight(true)
       try {
-        // mock:失败路径可通过 URL `?fail=network|auth|disk` 触发
-        const search =
-          typeof window !== 'undefined' ? window.location.search : ''
-        const failMatch = search.match(/[?&]fail=(\w+)/)
-        if (failMatch) {
-          const failType = failMatch[1]
-          const message =
-            failType === 'auth'
-              ? '鉴权失败'
-              : failType === 'disk'
-                ? '磁盘空间不足'
-                : '网络异常'
-          throw new Error(message)
-        }
-        // 模拟网络延迟,让 UI 看到 submitting 中态
-        await new Promise((resolve) => setTimeout(resolve, 50))
-        setSelectedRepoIds((prev) => {
-          const merged = [...prev]
-          for (const id of value.repoIds) {
-            if (!merged.includes(id)) merged.push(id)
-          }
-          return merged
+        // 调用真实 Agent 端 API
+        const res = await attachReposToRequirement(data.requirementId, {
+          repoIds: value.repoIds,
+          branchName: value.branchName,
         })
-        if (value.branchName) setLockedBranchName(value.branchName)
-        setBannerState('hidden')
-        setBannerErrorMessage(null)
-        setBannerDismissed(false)
+
+        // 1. 分类 results(类型守卫 done by Zod)
+        const succeededIds: string[] = []
+        const failedIds: string[] = []
+        const failedMessages: string[] = []
+        for (const r of res.results) {
+          if (r.ok) succeededIds.push(r.repoId)
+          else {
+            failedIds.push(r.repoId)
+            failedMessages.push(`${r.repoId}:${r.message}`)
+          }
+        }
+
+        // 2. 合并 selectedRepoIds(只增不删,失败的不进)
+        if (succeededIds.length > 0) {
+          setSelectedRepoIds((prev) => {
+            const merged = [...prev]
+            for (const id of succeededIds) {
+              if (!merged.includes(id)) merged.push(id)
+            }
+            return merged
+          })
+        }
+
+        // 3. 锁分支名(只有至少 1 个成功才锁定,避免追加模式误锁空分支)
+        if (succeededIds.length > 0 && value.branchName) {
+          setLockedBranchName(value.branchName)
+        }
+
+        // 4. 状态机分支
+        if (failedIds.length === 0) {
+          // 全成功
+          setFailedRepoIds([])
+          setBannerPartialSummary(undefined)
+          setBannerState('hidden')
+          setBannerErrorMessage(null)
+          setBannerDismissed(false)
+        } else if (succeededIds.length > 0) {
+          // 部分成功(橙色 #fff7ed banner)
+          setFailedRepoIds(failedIds)
+          setBannerPartialSummary({
+            succeeded: succeededIds.length,
+            failedNames: failedIds,
+          })
+          setBannerState('partial')
+          setBannerErrorMessage(null)
+        } else {
+          // 全失败(走 error banner,显示首个失败详情)
+          setFailedRepoIds(failedIds)
+          setBannerPartialSummary(undefined)
+          setBannerState('error')
+          setBannerErrorMessage(
+            failedMessages[0] ?? '关联失败,请重试',
+          )
+        }
+
         setAttachDialogOpen(false)
-        // 弹层关闭后焦点回到触发按钮
         const trigger = pendingAttachTrigger
         setPendingAttachTrigger(null)
         if (trigger) focusReturnToTrigger(trigger)
       } catch (err) {
-        // 失败:保持弹层关闭,切换 banner 到 error
+        // 网络错 / 鉴权错 / schema 校验错 等
         setAttachDialogOpen(false)
+        setFailedRepoIds(value.repoIds)
+        setBannerPartialSummary(undefined)
         setBannerState('error')
-        setBannerErrorMessage(
-          err instanceof Error ? err.message : '未知错误',
-        )
+        // 401 鉴权失败 → 中文文案(避免 AgentError 的 JSON 直接显示给用户)
+        const message = isAttachReposError(err) && err.status === 401
+          ? '鉴权失败'
+          : err instanceof Error
+            ? err.message
+            : '关联失败,请重试'
+        setBannerErrorMessage(message)
         setPendingAttachTrigger(null)
       } finally {
         setAttachInFlight(false)
       }
     },
-    [pendingAttachTrigger],
+    [data.requirementId, pendingAttachTrigger],
   )
 
   const handleBannerDismiss = useCallback(() => {
@@ -606,6 +655,23 @@ export function DraftingZone({ data }: { data: DraftingData }) {
     setBannerState('hidden')
     openAttachDialog('banner-plus')
   }, [openAttachDialog])
+
+  /**
+   * ticket 02 部分成功 → 「重试该 repo」按钮回调
+   * - 重新打开 attach dialog(first / append 由 lockedBranchName 决定)
+   * - 把 failedRepoIds 注入 pickedRepoIds 让它们默认勾选
+   *   (实现:通过 openAttachDialog 打开弹层;用户提交时调 submitAttach,会调真实 API)
+   */
+  const handleBannerRetryFailed = useCallback(
+    (_failedNames: string[]) => {
+      // 简单实现:重新打开弹层,用户重新选;暂不预填(避免与 attach-repos-dialog
+      // 的 pickedRepoIds prop 双向绑定增加复杂度)
+      setBannerErrorMessage(null)
+      setBannerPartialSummary(undefined)
+      openAttachDialog('banner-plus')
+    },
+    [openAttachDialog],
+  )
 
   // -------------------------------------------------------------------------
   // 包装 RepoBar 的 onRequestAttach —— 记录触发源,便于关闭后焦点回弹
@@ -651,10 +717,11 @@ export function DraftingZone({ data }: { data: DraftingData }) {
           (这样现有依赖即时查询 DOM 的测试仍可工作) */}
       <DraftingToolbar toolbar={data.toolbar} />
 
-      {/* 顶部 banner(issue 01 ticket):hidden / success / error 三态 */}
+      {/* 顶部 banner(issue 01 ticket + ticket 02 部分成功态):hidden / success / partial / error 四态 */}
       <DraftingBanner
         state={bannerState}
         errorMessage={bannerErrorMessage ?? undefined}
+        partialSummary={bannerPartialSummary}
         onRequestAttach={(trigger) => {
           // banner [+] / 重试 共用 openAttachDialog;banner-retry 归一为 banner-plus
           openAttachDialog(
@@ -663,6 +730,7 @@ export function DraftingZone({ data }: { data: DraftingData }) {
         }}
         onDismiss={handleBannerDismiss}
         onRetry={handleBannerRetry}
+        onRetryFailed={handleBannerRetryFailed}
       />
 
       {/* 主区:上下分割的 flex 列(issue 04) */}

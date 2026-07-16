@@ -2,6 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
+// mock bootstrap:agentFetch 不再走 bootstrap;真实 fetch 由 global.fetch mock 控制
+vi.mock('@/lib/agent-bootstrap', () => ({
+  hasAuthCookie: () => true,
+  getOrBootstrap: vi.fn(),
+  resetBootstrapCache: vi.fn(),
+}))
+
 // mock next/navigation(避免在测试中真的调 router)
 vi.mock('next/navigation', () => ({
   useRouter: () => ({
@@ -639,7 +646,41 @@ describe('DraftingZone · issue 01 ticket · banner + 关联仓库弹层端到�
     return d
   }
 
-  afterEach(() => cleanup())
+  // ticket 02:用 mock fetch 控制 attach repos API 响应
+  const mockFetch = vi.fn()
+  beforeEach(() => {
+    mockFetch.mockReset()
+    // 默认 mock:解析请求 body,把任意 repoId 都返回 ok
+    mockFetch.mockImplementation(async (_url: string, init?: RequestInit) => {
+      const body = init?.body ? JSON.parse(String(init.body)) : { repoIds: [], branchName: '' }
+      const results = (body.repoIds ?? []).map((id: string) => ({
+        ok: true,
+        repoId: id,
+        branch: body.branchName ?? 'feat/x',
+        worktreePath: `/x/${id}`,
+        base: 'master',
+      }))
+      return new Response(
+        JSON.stringify({
+          requirementId: 'req-fresh',
+          branchName: body.branchName ?? 'feat/x',
+          succeeded: results.length,
+          failed: 0,
+          results,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
+    })
+    // @ts-ignore - test-only mock
+    globalThis.fetch = mockFetch
+  })
+
+  afterEach(() => {
+    cleanup()
+    mockFetch.mockReset()
+    // @ts-ignore - restore
+    delete (globalThis as { fetch?: unknown }).fetch
+  })
 
   it('fresh(empty=true)→ skeleton overlay 挂载,banner success 可见 + 关联仓库弹层默认关闭', () => {
     render(<DraftingZone data={freshDraft()} />)
@@ -777,44 +818,37 @@ describe('DraftingZone · issue 01 ticket · banner + 关联仓库弹层端到�
     expect(locked.textContent).toContain('feat/refund')
   })
 
-  it('失败路径:URL `?fail=network` → banner 切换为 error 态 + [重试] 按钮', async () => {
-    // 用 jsdom 的 window.location 注入 ?fail=network
-    const originalHref = window.location.href
-    Object.defineProperty(window, 'location', {
-      configurable: true,
-      value: { ...window.location, href: 'http://localhost/drafting?fail=network', search: '?fail=network' },
-    })
-    try {
-      render(<DraftingZone data={freshDraft()} />)
-      const user = userEvent.setup()
-      await user.click(screen.getByTestId('repo-bar-add'))
-      // 勾 1 个仓库 + 填分支名 + 提交
-      await user.click(
-        screen
-          .getAllByTestId('attach-repos-dialog-repo-option')
-          .find((o) => o.getAttribute('data-repo-id') === 'repo-refund-service')!,
-      )
-      fireEvent.change(screen.getByTestId('attach-repos-dialog-branch'), {
-        target: { value: 'feat/refund' },
-      })
-      await user.click(screen.getByTestId('attach-repos-dialog-submit'))
+  it('失败路径:fetch 网络错 → banner 切换为 error 态 + [重试] 按钮', async () => {
+    // ticket 02:替换 ticket 01 ticket 的 `?fail=...` URL mock 机制为 fetch mock
+    mockFetch.mockReset()
+    mockFetch.mockRejectedValue(new TypeError('Network request failed'))
+    // @ts-ignore - test-only mock
+    globalThis.fetch = mockFetch
 
-      // banner 切到 error 态,文案 = "网络异常"
-      const banner = await screen.findByTestId('drafting-banner')
-      expect(banner.getAttribute('data-banner-state')).toBe('error')
-      expect(banner.textContent).toContain('网络异常')
-      expect(screen.getByTestId('drafting-banner-retry')).toBeInTheDocument()
-      // 弹层已关闭
-      expect(screen.queryByTestId('attach-repos-dialog')).toBeNull()
-      // selectedRepoIds 没有写入(失败回滚)
-      const bar = screen.getByTestId('drafting-repo-bar')
-      expect(bar.getAttribute('data-selected-count')).toBe('0')
-    } finally {
-      Object.defineProperty(window, 'location', {
-        configurable: true,
-        value: { ...window.location, href: originalHref, search: '' },
-      })
-    }
+    render(<DraftingZone data={freshDraft()} />)
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('repo-bar-add'))
+    // 勾 1 个仓库 + 填分支名 + 提交
+    await user.click(
+      screen
+        .getAllByTestId('attach-repos-dialog-repo-option')
+        .find((o) => o.getAttribute('data-repo-id') === 'repo-refund-service')!,
+    )
+    fireEvent.change(screen.getByTestId('attach-repos-dialog-branch'), {
+      target: { value: 'feat/refund' },
+    })
+    await user.click(screen.getByTestId('attach-repos-dialog-submit'))
+
+    // banner 切到 error 态,文案 = 网络异常
+    const banner = await screen.findByTestId('drafting-banner')
+    expect(banner.getAttribute('data-banner-state')).toBe('error')
+    expect(banner.textContent).toContain('Network request failed')
+    expect(screen.getByTestId('drafting-banner-retry')).toBeInTheDocument()
+    // 弹层已关闭
+    expect(screen.queryByTestId('attach-repos-dialog')).toBeNull()
+    // selectedRepoIds 没有写入(失败回滚)
+    const bar = screen.getByTestId('drafting-repo-bar')
+    expect(bar.getAttribute('data-selected-count')).toBe('0')
   })
 })
 
