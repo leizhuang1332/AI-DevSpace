@@ -3,6 +3,7 @@ import { StatCard } from '@/components/stat-card';
 import { RequestCard } from '@/components/request-card';
 import { ActiveSessionCard } from '@/components/active-session-card';
 import { InboxItem as InboxItemComp } from '@/components/inbox-item';
+import { NewRequirementButton } from '@/components/new-requirement-button';
 
 export default function DashboardPage() {
   const ongoing = requirements.filter(r => r.status !== 'done' && r.status !== 'archived');
@@ -15,7 +16,7 @@ export default function DashboardPage() {
         </div>
         <div className="flex gap-2">
           <button className="h-8 px-3 rounded-md text-md font-medium bg-bg-elevated text-text-1 border border-border-strong hover:bg-bg-subtle">查看历史</button>
-          <button className="h-8 px-3 rounded-md text-md font-medium bg-brand text-white hover:bg-brand-600">+ 新建需求</button>
+          <NewRequirementButton />
         </div>
       </div>
 

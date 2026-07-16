@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { Requirement, RequirementStatus } from '@/app/(workspace)/data/mock';
 import { requirements } from '@/app/(workspace)/data/mock';
 import { StatusBadge } from '@/components/status-badge';
+import { NewRequirementButton } from '@/components/new-requirement-button';
 
 const STATUS_FILTERS: RequirementStatus[] = [
   'draft', 'analyzing', 'designing', 'planning', 'implementing', 'submitting', 'done', 'archived', 'clarifying',
@@ -24,7 +25,7 @@ export default function RequirementsPage() {
         </div>
         <div className="flex gap-2">
           <input className="h-8 px-3 rounded-md border border-border bg-bg-elevated text-sm" placeholder="搜索…" />
-          <button className="h-8 px-3 rounded-md text-md font-medium bg-brand text-white hover:bg-brand-600">+ 新建需求</button>
+          <NewRequirementButton />
         </div>
       </div>
 
