@@ -1,0 +1,52 @@
+apps/web/src/components/new-requirement-modal.tsx
+  s_89d1082608ed84::t_0f0eba24d5ea11 59,62,71-78
+  s_89d1082608ed84::t_01791bf7ad3a0a 79-81
+  s_89d1082608ed84::t_5eeb4816af6af5 124,128
+  s_89d1082608ed84::t_a271a9df854b27 202,210
+  s_89d1082608ed84::t_1c742b68809e6a 24
+  s_89d1082608ed84::t_fd4892de4fc9a2 145
+  s_89d1082608ed84::t_1889721436c2f3 26
+  s_89d1082608ed84::t_cc756a556f24bc 82
+apps/web/src/components/attach-repos-dialog.tsx
+  s_89d1082608ed84::t_5349bbff6a799e 5
+  s_89d1082608ed84::t_bad925039dad8c 106,141,155-157,217
+apps/web/src/__tests__/command-palette-zones.test.tsx
+  s_89d1082608ed84::t_101402cf0c2fd1 38
+  s_89d1082608ed84::t_6ed769c790791e 39
+  s_89d1082608ed84::t_f57c0a61a51d68 45,47-48,61-62,262-292
+apps/web/src/__tests__/trigger-entries.test.tsx
+  s_89d1082608ed84::t_163dcf64b57831 1-177
+apps/web/src/hooks/use-tab-focus-trap.ts
+  s_89d1082608ed84::t_440862fb0ee97f 1-55
+apps/web/src/components/ui-overlay-store.tsx
+  s_89d1082608ed84::t_d9f59fcbb08e87 2,12,20-26,33-44,57,62,67,77-80,83
+  s_89d1082608ed84::t_7a859e1255d8aa 82
+  s_89d1082608ed84::t_06eda81ea15d68 13-19
+apps/web/src/components/command-palette.tsx
+  s_89d1082608ed84::t_e43cf8292f2183 15-21
+  s_89d1082608ed84::t_3c34066aa710a9 47-60
+  s_89d1082608ed84::t_5e7cbf7ac8500d 61-63
+  s_89d1082608ed84::t_e9c68240865639 64-68,78,152,158-162,196,199,328-340,343-350,365
+apps/web/src/components/__tests__/new-requirement-modal.test.tsx
+  s_89d1082608ed84::t_664c002637af98 1-265
+apps/web/src/app/(workspace)/page.tsx
+  s_89d1082608ed84::t_2a772a50cd9e19 19
+apps/web/src/components/new-requirement-button.tsx
+  s_89d1082608ed84::t_c48ffeb4b63558 18-20,22,27,31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "09b7ef6253ac83690b12d01a0a8e991c860e7697",
+  "prompts": {},
+  "sessions": {
+    "s_89d1082608ed84": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83e70816-ff72-4ce4-a91a-06ab19d41290",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
