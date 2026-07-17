@@ -231,7 +231,9 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     git: gitExec,
     worktreeMgr,
   })
-  await fastify.register(requirementRoutes, { requirementService })
+  // ticket 04:注入 sseHub 让 POST /api/requirements 创建成功 / 失败时推
+  // `requirement_created` 事件到新建 id 通道,Web 端 DRAFTING 据此切正常态 / 红色 banner
+  await fastify.register(requirementRoutes, { requirementService, sseHub: hub })
 
   await fastify.register(analysisRoutes, { hub })
   await fastify.register(spikeRoutes, { hub, provider, ccSwitch, store: sessionStore, mirror: messagesMirror, registry: sessionStateRegistry })

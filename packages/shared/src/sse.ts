@@ -202,5 +202,29 @@ export type SseEvent =
       ts: number
       recentWrites: number
     }
+  /**
+   * 需求创建结果(issue 04 — `POST /api/requirements`)。
+   *
+   * Agent 端在创建成功 / 失败时通过 `SseHub.publish(id, ...)` 推此 variant
+   * 到**新建 id**的通道(Web 端通常在弹窗 onSubmit → router.push 之前已经
+   * 在新 id 的 `/api/requirement/:id/events` 上预订阅)。
+   *
+   * - `reqId`: 新建的需求 id(= `req-NNN-<slug>`)
+   * - `ok: true`  → 携带 `title` + `createdAt`,Web 端 DRAFTING 骨架屏切正常态
+   * - `ok: false`  → 携带 `code` + `message`,Web 端 DRAFTING 切红色 banner
+   *
+   * 路由层 HTTP 201 + JSON 响应仍是主契约;SSE 是「推送」语义,
+   * 用于解耦 Web 端 router.push 与文件落盘的竞态(详见 ticket 04 验收)。
+   */
+  | {
+      type: 'requirement_created'
+      reqId: string
+      ok: boolean
+      ts: number
+      title?: string
+      createdAt?: string
+      code?: string
+      message?: string
+    }
 
 export const SSE_HEARTBEAT_MS = 30_000

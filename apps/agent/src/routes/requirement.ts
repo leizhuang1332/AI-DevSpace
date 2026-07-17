@@ -1,10 +1,18 @@
 import type { FastifyInstance } from 'fastify'
 import {
   AttachReposRequestSchema,
+  CreateRequirementRequestSchema,
   validateBranchName,
   type AttachReposResponse,
+  type CreateRequirementResponse,
+  type RequirementErrorCodeT,
 } from '@ai-devspace/shared'
-import type { RequirementService } from '../services/RequirementService.js'
+import {
+  RequirementServiceError,
+  RequirementIdCollisionError,
+  type RequirementService,
+} from '../services/RequirementService.js'
+import type { SseHub } from '../sse/SseHub.js'
 
 function notImplemented(feature: string, issue: string): {
   error: 'not_implemented'
@@ -24,22 +32,25 @@ function notImplemented(feature: string, issue: string): {
  * requirementRoutes —— Requirement 工作台相关 REST endpoints
  *
  * 历史背景(决策 / issue tracker):
- * - issue 04(POST /api/requirements 文件落盘):本期仍未实装 → 保留 501 占位
- * - issue 02 ticket(POST /api/requirement/:id/repos):本 slice 实装
- *   - 真实 git worktree 创建 + base 分支 fallback + 网络错重试
- *   - 部分成功语义:每个 repo 独立 Ok/Err,前端按结果分类
- *   - 鉴权:由 authPlugin 全局 onRequest hook 拦截 401/403,
- *     无需在此路由内重复校验
+ * - issue 04 ticket(POST /api/requirements 文件落盘):本期实装
+ *   - slug 派生(PRD §8.3) + ID 自增 + 冲突重试 3 次
+ *   - mkdir 0700 + 写 meta.yaml + requirement.md
+ *   - 鉴权由 authPlugin 全局 onRequest hook 拦截 401/403
+ *   - 失败路径通过 SseHub 推 `requirement_created{ok:false}` 让 DRAFTING
+ *     切红色 banner(决策 31 + PRD §9 E6-E9)
+ * - issue 02 ticket(POST /api/requirement/:id/repos):上一 slice 实装
  *
  * 后续 slice 替换剩余 4 个 501 stub(逐 ticket 推进)。
  */
 export interface RequirementRoutesDeps {
   /**
-   * 实装 POST /api/requirement/:id/repos 的服务。
+   * 实装 requirement 业务的服务。
    * - 未注入时新路由返回 503 `service_not_ready`(兼容旧测试)
    * - 注入但缺少 repo pool 时,route 仍会返回 per-repo `E_REPO_NOT_FOUND`
    */
   requirementService?: RequirementService
+  /** SSE hub —— 创建成功 / 失败时推 `requirement_created` 事件(决策 31) */
+  sseHub?: SseHub
 }
 
 export async function requirementRoutes(
@@ -47,12 +58,8 @@ export async function requirementRoutes(
   deps: RequirementRoutesDeps = {},
 ): Promise<void> {
   // ============================================================================
-  // 5 个 501 stub(后续 ticket 逐个替换)
+  // 4 个 501 stub(后续 ticket 逐个替换)
   // ============================================================================
-
-  app.post('/api/requirement', async (_req, reply) => {
-    return reply.code(501).send(notImplemented('requirement.create', '05'))
-  })
 
   app.get('/api/requirements', async (_req, reply) => {
     return reply.code(501).send(notImplemented('requirement.list', '05'))
@@ -72,6 +79,70 @@ export async function requirementRoutes(
       return reply.code(501).send(notImplemented('requirement.run_skill', '08'))
     },
   )
+
+  // ============================================================================
+  // POST /api/requirements —— issue 04 ticket(文件落盘 + SSE 推送)
+  // ============================================================================
+
+  app.post<{ Body: unknown }>('/api/requirements', async (req, reply) => {
+    const { requirementService: service, sseHub } = deps
+
+    if (!service) {
+      return reply.code(503).send({ error: 'service_not_ready' })
+    }
+
+    // 1. body schema 校验(title trim + 长度 1-50)
+    const parsed = CreateRequirementRequestSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: 'E_INVALID_TITLE',
+        details: parsed.error.issues,
+      })
+    }
+    const { title } = parsed.data
+
+    // 2. 调 service 落盘
+    let result: CreateRequirementResponse
+    try {
+      const created = service.createRequirement(title)
+      result = { id: created.id, title: created.title, createdAt: created.createdAt }
+    } catch (err) {
+      // 错误码映射:RequirementServiceError.code → 顶层 HTTP code + 推送失败 SSE
+      const code: RequirementErrorCodeT =
+        err instanceof RequirementIdCollisionError
+          ? 'E_ID_COLLISION'
+          : err instanceof RequirementServiceError
+            ? err.code
+            : 'E_INTERNAL'
+      const message = err instanceof Error ? err.message : 'unknown error'
+      req.log.error({ err, code }, 'createRequirement failed')
+      // SSE 推送失败事件(用临时 id 占位 channel,无订阅者 → no-op)
+      const tempId = `req-pending-${Date.now()}`
+      sseHub?.publish(tempId, {
+        type: 'requirement_created',
+        reqId: tempId,
+        ok: false,
+        ts: Date.now(),
+        code,
+        message,
+      })
+      const httpStatus = code === 'E_DISK_FULL' ? 507 : 500
+      return reply.code(httpStatus).send({ error: code, message })
+    }
+
+    // 3. SSE 推送成功事件 —— 推送到新建 id 的通道
+    sseHub?.publish(result.id, {
+      type: 'requirement_created',
+      reqId: result.id,
+      ok: true,
+      ts: Date.now(),
+      title: result.title,
+      createdAt: result.createdAt,
+    })
+
+    // 4. 返回 201 + body
+    return reply.code(201).send(result)
+  })
 
   // ============================================================================
   // POST /api/requirement/:id/repos —— issue 02 ticket(worktree 真实创建)
