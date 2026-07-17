@@ -21,8 +21,9 @@
  *   - 需求列表页 `+ 新建需求` 按钮 — (workspace)/requirements/page.tsx
  */
 import { useUIOverlay } from './ui-overlay-store';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTabFocusTrap } from '@/hooks/use-tab-focus-trap';
 
 /**
  * slug 生成规则 — PRD §8.3
@@ -55,9 +56,10 @@ function filterForbidden(input: string): string {
 }
 
 export function NewRequirementModal() {
-  const { cmdN, close } = useUIOverlay();
+  const { cmdN, close, restoreFocus } = useUIOverlay();
   const router = useRouter();
   const [name, setName] = useState('');
+  const formRef = useRef<HTMLFormElement | null>(null);
 
   // 打开时重置(决策 E10 — 取消无副作用)
   useEffect(() => {
@@ -65,6 +67,18 @@ export function NewRequirementModal() {
       setName('');
     }
   }, [cmdN]);
+
+  // 关闭时焦点回触发按钮(决策 24 / 30 a11y)——
+  // 参考 aux-drawer.tsx 的 prop-driven effect 模式,而不是 setTimeout,
+  // 避免 React 18 batching 抖动。`restoreFocus` 内部用 captureTrigger
+  // 在 open/keydown 阶段采下的 lastFocusedRef。
+  useEffect(() => {
+    if (!cmdN) restoreFocus();
+  }, [cmdN, restoreFocus]);
+
+  // Tab/Shift+Tab 焦点陷阱(spec §11) — 抽到 useTabFocusTrap 与 attach-repos-dialog 复用,
+  // 这里只关注 Tab;Escape 由 store 全局 keydown 处理。
+  useTabFocusTrap(cmdN, formRef);
 
   // 实时过滤 + 截断 50 字(决策 E2 + E3)
   const handleNameChange = (v: string) => {
@@ -96,7 +110,6 @@ export function NewRequirementModal() {
     const nn = String(Date.now()).slice(-6);
     const id = `req-${nn}-${slug}`;
     // Step 11 仅 mock 跳转;P1+ Agent 接通 (POST /api/requirements + 写文件)
-    console.log('[NewRequirementModal] create', { id, title: name.trim(), slug });
     close();
     router.push(`/requirements/${id}/drafting/`);
   };
@@ -108,9 +121,11 @@ export function NewRequirementModal() {
       role="presentation"
     >
       <form
+        ref={formRef}
         onSubmit={submit}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
+        data-testid="new-req-modal"
         aria-modal="true"
         aria-labelledby="new-req-modal-title"
         aria-describedby="new-req-modal-desc"
@@ -127,6 +142,7 @@ export function NewRequirementModal() {
           </h2>
           <button
             type="button"
+            data-testid="new-req-modal-close"
             onClick={close}
             title="关闭 (ESC)"
             aria-label="关闭"
@@ -183,6 +199,7 @@ export function NewRequirementModal() {
           <div className="flex gap-2">
             <button
               type="button"
+              data-testid="new-req-modal-cancel"
               onClick={close}
               className="inline-flex items-center h-8 px-4 rounded-md text-md font-medium text-text-2 hover:text-text-1"
             >
@@ -190,6 +207,7 @@ export function NewRequirementModal() {
             </button>
             <button
               type="submit"
+              data-testid="new-req-modal-submit"
               disabled={!canSubmit}
               className="inline-flex items-center h-8 px-4 rounded-md text-md font-medium bg-brand-500 text-white hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed"
             >

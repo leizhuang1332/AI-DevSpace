@@ -12,6 +12,13 @@ interface Item {
   desc?: string;
   shortcut?: string[];
   section?: string;
+  /**
+   * 可选:点击后执行的动作(issue 03 触发入口 #2 ——「新建需求」打开弹窗)。
+   * 设置后 Item 渲染为可交互 `<button>`,否则渲染为只读 `<div>`。
+   */
+  action?: () => void;
+  /** 可选:用于测试断言 */
+  testId?: string;
 }
 
 /**
@@ -37,15 +44,28 @@ interface ZoneJump {
 
 type Jump = OverviewJump | ZoneJump;
 
-const ALL: Item[] = [
-  { icon: '▶', label: '运行 code-stage Skill', desc: '继续执行下一个 Task（当前 #12 退款接口开发）', shortcut: ['⌘', 'R'], section: '需求操作' },
-  { icon: '⏸', label: '暂停当前 Skill', desc: '保存 AI 会话上下文到 conversations/', section: '需求操作' },
-  { icon: '⟳', label: '重新运行 code-stage', desc: '丢弃当前进度，重新执行', section: '需求操作' },
-  { icon: '📄', label: '打开 design/02-api.md', desc: '当前需求 · 设计阶段 · API 定义', section: '导航' },
-  { icon: '📦', label: '打开 artifacts/refund.sql', desc: '产物 · 5 分钟前由 design-stage 生成', section: '导航' },
-  { icon: '⌘⇧E', label: '在 IDEA 打开 refund-service worktree', desc: '~/.aidevspace/requirements/req-2024-007/refund-service', shortcut: ['⌘', '⇧', 'E'], section: '导航' },
-  { icon: '📚', label: '添加知识：refund-idempotency', desc: '从历史需求沉淀 · 已存在于知识库', section: '仓库 / 知识库' },
-];
+/**
+ * 命令面板默认命令项(issue 03 触发入口 #2)。
+ *
+ * 抽成函数而非模块常量 —— 「新建需求」的 `action` 需要闭包 `open` / `close`,
+ * 而它们只在 `useUIOverlay()` 解构后才存在。函数让组件按需构造,避免把 React
+ * 状态绑进 module load。
+ */
+function buildAllCommands(
+  open: (k: 'cmdK' | 'cmdSlash' | 'cmdN') => void,
+  close: () => void,
+): Item[] {
+  return [
+    { icon: '✨', label: '新建需求', shortcut: ['⌘', 'N'], section: '需求操作', testId: 'cmd-new-requirement', action: () => { open('cmdN'); close(); } },
+    { icon: '▶', label: '运行 code-stage Skill', desc: '继续执行下一个 Task（当前 #12 退款接口开发）', shortcut: ['⌘', 'R'], section: '需求操作' },
+    { icon: '⏸', label: '暂停当前 Skill', desc: '保存 AI 会话上下文到 conversations/', section: '需求操作' },
+    { icon: '⟳', label: '重新运行 code-stage', desc: '丢弃当前进度，重新执行', section: '需求操作' },
+    { icon: '📄', label: '打开 design/02-api.md', desc: '当前需求 · 设计阶段 · API 定义', section: '导航' },
+    { icon: '📦', label: '打开 artifacts/refund.sql', desc: '产物 · 5 分钟前由 design-stage 生成', section: '导航' },
+    { icon: '⌘⇧E', label: '在 IDEA 打开 refund-service worktree', desc: '~/.aidevspace/requirements/req-2024-007/refund-service', shortcut: ['⌘', '⇧', 'E'], section: '导航' },
+    { icon: '📚', label: '添加知识：refund-idempotency', desc: '从历史需求沉淀 · 已存在于知识库', section: '仓库 / 知识库' },
+  ];
+}
 
 const HISTORY: Item[] = [
   { icon: '⚡', label: 'code-stage 启动', desc: '5 分钟前 · req-001', section: '今天' },
@@ -55,7 +75,7 @@ const HISTORY: Item[] = [
   { icon: '✨', label: 'AI: "会员成长值并发更新 Bug"', desc: '昨天 17:30', section: '昨天' },
 ];
 
-const CMD_FILTERED = (q: string) => ALL.filter((i) => i.label.includes(q));
+const CMD_FILTERED = (q: string, all: Item[]) => all.filter((i) => i.label.includes(q));
 const AI_SUGGEST = (q: string) => [{ icon: '✨', label: `AI: "${q}"` }];
 
 /**
@@ -129,12 +149,17 @@ export function matchZoneJumps(query: string, requirementId: string | null): Jum
 }
 
 export function CommandPalette() {
-  const { cmdK, close } = useUIOverlay();
+  const { cmdK, open, close, closeKey } = useUIOverlay();
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<Mode>('command');
   const pathname = usePathname();
   const router = useRouter();
   const requirementId = useMemo(() => parseRequirementId(pathname), [pathname]);
+  // 「新建需求」项需要 open/close 闭包,按 render 构造一次即可
+  const allItems = useMemo(
+    () => buildAllCommands(open, () => closeKey('cmdK')),
+    [open, closeKey],
+  );
 
   // Reset query when palette opens; ⌘I toggles AI mode
   useEffect(() => {
@@ -168,10 +193,10 @@ export function CommandPalette() {
 
   let items: Item[];
   if (mode === 'history') items = HISTORY;
-  else if (query.startsWith('>')) items = CMD_FILTERED(query.slice(1));
+  else if (query.startsWith('>')) items = CMD_FILTERED(query.slice(1), allItems);
   else if (query.startsWith('✨')) items = AI_SUGGEST(query.slice(1));
   else if (mode === 'ai') items = query ? AI_SUGGEST(query) : [];
-  else items = CMD_FILTERED(query);
+  else items = CMD_FILTERED(query, allItems);
 
   return (
     <div className="fixed inset-0 z-[100] flex items-start justify-center pt-20 bg-slate-900/40 backdrop-blur-sm">
@@ -300,8 +325,29 @@ export function CommandPalette() {
 }
 
 function Item({ item }: { item: Item }) {
+  // 带 action 的项(issue 03 「新建需求」)渲染为可交互按钮,与工位 jump 按钮一致
+  if (item.action) {
+    return (
+      <button
+        type="button"
+        data-testid={item.testId}
+        onClick={item.action}
+        className="w-full flex items-center gap-3 px-5 py-2 text-left hover:bg-bg-subtle"
+      >
+        <ItemBody item={item} />
+      </button>
+    );
+  }
   return (
     <div className="flex items-center gap-3 px-5 py-2 cursor-pointer text-md hover:bg-bg-subtle">
+      <ItemBody item={item} />
+    </div>
+  );
+}
+
+function ItemBody({ item }: { item: Item }) {
+  return (
+    <>
       <div className="w-7 h-7 rounded-md bg-bg-subtle flex items-center justify-center text-sm text-text-2">
         {item.icon}
       </div>
@@ -316,6 +362,6 @@ function Item({ item }: { item: Item }) {
           ))}
         </span>
       )}
-    </div>
+    </>
   );
 }

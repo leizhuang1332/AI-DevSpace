@@ -35,13 +35,17 @@ let mockCmdKOpen = false
 const mockClose = vi.fn(() => {
   mockCmdKOpen = false
 })
+const mockOpen = vi.fn()
+const mockCloseKey = vi.fn()
 vi.mock('@/components/ui-overlay-store', () => ({
   useUIOverlay: () => ({
     cmdK: mockCmdKOpen,
     cmdSlash: false,
     cmdN: false,
-    open: vi.fn(),
+    open: mockOpen,
     close: mockClose,
+    closeKey: mockCloseKey,
+    restoreFocus: vi.fn(),
   }),
 }))
 
@@ -54,6 +58,8 @@ beforeEach(() => {
   mockPush.mockClear()
   mockReplace.mockClear()
   mockClose.mockClear()
+  mockOpen.mockClear()
+  mockCloseKey.mockClear()
 })
 
 afterEach(() => cleanup())
@@ -251,6 +257,37 @@ describe('CommandPalette 工位搜索(ADR-0012 §7 · issue 14)', () => {
       mockCmdKOpen = true
       rerender(<CommandPalette />)
       expect(screen.queryByTestId('cmd-zone-executing')).toBeNull()
+    })
+  })
+
+  // ============================================================================
+  // issue 03 触发入口 #2:命令面板搜「新建需求」
+  // ============================================================================
+  describe('「新建需求」命令项(issue 03 触发入口 #2)', () => {
+    it('输入 "新建需求" 出现 cmd-new-requirement 项', async () => {
+      const user = userEvent.setup()
+      render(<CommandPalette />)
+      await user.type(screen.getByPlaceholderText(/搜索命令/), '新建需求')
+      expect(screen.getByTestId('cmd-new-requirement')).toBeInTheDocument()
+      expect(screen.getByTestId('cmd-new-requirement')).toHaveTextContent(/新建需求/)
+    })
+
+    it('点击「新建需求」 → 调用 mocked open("cmdN") + closeKey("cmdK")', async () => {
+      const user = userEvent.setup()
+      render(<CommandPalette />)
+      await user.type(screen.getByPlaceholderText(/搜索命令/), '新建需求')
+      await user.click(screen.getByTestId('cmd-new-requirement'))
+      expect(mockOpen).toHaveBeenCalledWith('cmdN')
+      // 用 closeKey 避免 React 18 batching 把 open 覆盖(issue 03 触发入口 #2)
+      expect(mockCloseKey).toHaveBeenCalledWith('cmdK')
+    })
+
+    it('「新建需求」项渲染为可交互 button(非 div)', async () => {
+      const user = userEvent.setup()
+      render(<CommandPalette />)
+      await user.type(screen.getByPlaceholderText(/搜索命令/), '新建需求')
+      const item = screen.getByTestId('cmd-new-requirement')
+      expect(item.tagName).toBe('BUTTON')
     })
   })
 })

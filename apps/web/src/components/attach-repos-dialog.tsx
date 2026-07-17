@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { DraftingRepo } from '@/lib/drafting'
+import { useTabFocusTrap } from '@/hooks/use-tab-focus-trap'
 
 /**
  * 关联 / 追加仓库弹层(issue 01 ticket · UI-POLISH-SPEC §9)
@@ -102,6 +103,7 @@ export function AttachReposDialog({
 }: AttachReposDialogProps) {
   const headingId = useId()
   const branchInputRef = useRef<HTMLInputElement | null>(null)
+  const dialogRef = useRef<HTMLFormElement | null>(null)
 
   // ---------------------------------------------------------------------------
   // 受控表单状态
@@ -136,7 +138,7 @@ export function AttachReposDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, mode])
 
-  // Escape 关闭 + Tab/Shift+Tab 焦点陷阱(issue 01 ticket 验收 #12)
+  // Escape 关闭(issue 01 ticket 验收 #12) — stopPropagation 防止 store 全局 Esc 同时重置其他 overlay。
   useEffect(() => {
     if (!open) return
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -144,38 +146,14 @@ export function AttachReposDialog({
         e.preventDefault()
         e.stopPropagation()
         onClose()
-        return
-      }
-      if (e.key !== 'Tab') return
-      // 焦点陷阱:首尾循环 —— 收集弹层内所有可聚焦元素
-      const dialog = document.querySelector<HTMLElement>(
-        '[data-testid="attach-repos-dialog"]',
-      )
-      if (!dialog) return
-      const focusables = Array.from(
-        dialog.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
-        ),
-      ).filter((el) => !el.hasAttribute('hidden'))
-      if (focusables.length === 0) return
-      const first = focusables[0]
-      const last = focusables[focusables.length - 1]
-      const active = document.activeElement as HTMLElement | null
-      if (e.shiftKey) {
-        if (active === first || !dialog.contains(active)) {
-          e.preventDefault()
-          last.focus()
-        }
-      } else {
-        if (active === last || !dialog.contains(active)) {
-          e.preventDefault()
-          first.focus()
-        }
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [open, onClose])
+
+  // Tab/Shift+Tab 焦点陷阱(issue 01 ticket 验收 #12) — 抽到 useTabFocusTrap 与 new-requirement-modal 复用
+  useTabFocusTrap(open, dialogRef)
 
   // ---------------------------------------------------------------------------
   // 派生:校验 + 启用条件
@@ -236,6 +214,7 @@ export function AttachReposDialog({
       className="fixed inset-0 z-[300] flex items-center justify-center bg-[rgba(15,23,42,0.4)] backdrop-blur-sm p-6"
     >
       <form
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={headingId}

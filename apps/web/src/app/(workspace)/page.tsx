@@ -16,7 +16,7 @@ export default function DashboardPage() {
         </div>
         <div className="flex gap-2">
           <button className="h-8 px-3 rounded-md text-md font-medium bg-bg-elevated text-text-1 border border-border-strong hover:bg-bg-subtle">查看历史</button>
-          <NewRequirementButton />
+          <NewRequirementButton label={requirements.length === 0 ? '创建你的第一个需求' : '+ 新建需求'} />
         </div>
       </div>
 

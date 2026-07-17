@@ -15,16 +15,20 @@ import { useUIOverlay } from './ui-overlay-store'
  *
  * 拆为独立 client 组件是因为父 page.tsx / requirements/page.tsx 是
  * server component,不能直接传函数 prop。
+ *
+ * `label` 参数(issue 03 ticket 验收):空需求列表场景下,概览页传入
+ * 「创建你的第一个需求」引导文案(原 ticket §8.3)。默认保持原 「+ 新建需求」 副本。
  */
-export function NewRequirementButton() {
+export function NewRequirementButton({ label = '+ 新建需求' }: { label?: string } = {}) {
   const { open } = useUIOverlay()
   return (
     <button
       type="button"
+      data-testid="new-requirement-button"
       onClick={() => open('cmdN')}
       className="h-8 px-3 rounded-md text-md font-medium bg-brand text-white hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-50"
     >
-      + 新建需求
+      {label}
     </button>
   )
 }
