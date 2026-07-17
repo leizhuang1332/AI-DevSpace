@@ -18,6 +18,7 @@ import { createWorktreeManager, createDefaultGitExec } from './worktree/Worktree
 import { RequirementService } from './services/RequirementService.js'
 import { createSseHub, type SseHub } from './sse/SseHub.js'
 import { sseRoutes } from './sse/requirementEventsRoute.js'
+import { globalEventsRoutes } from './sse/globalEventsRoute.js'
 import { sessionSseRoutes } from './sse/sessionEventsRoute.js'
 import { sessionStateRoutes } from './routes/sessionStateRoute.js'
 import { makeStateChangePublisher } from './sse/sessionBroadcaster.js'
@@ -104,6 +105,8 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   // 3. SSE hub + routes
   const hub: SseHub = createSseHub()
   await fastify.register(sseRoutes, { hub })
+  // ticket 07a:全局需求事件通道(dashboard / list 页面订阅 'requirements' channel)
+  await fastify.register(globalEventsRoutes, { hub })
 
   // 4. Workspace (init idempotent)
   const workspace = new WorkspaceService(workspaceRoot)

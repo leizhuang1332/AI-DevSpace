@@ -39,8 +39,11 @@ function notImplemented(feature: string, issue: string): {
  *   - 失败路径通过 SseHub 推 `requirement_created{ok:false}` 让 DRAFTING
  *     切红色 banner(决策 31 + PRD §9 E6-E9)
  * - issue 02 ticket(POST /api/requirement/:id/repos):上一 slice 实装
+ * - issue 05 ticket 07a 实装 GET /api/requirements(由 filesystem 产物目录派生
+ *   status / progress / repos,按 updatedAt 倒序),并对 POST 双推全局 SSE 通道
+ *   `'requirements'`(决策 4 · ADR-0014)
  *
- * 后续 slice 替换剩余 4 个 501 stub(逐 ticket 推进)。
+ * 后续 slice 替换剩余 3 个 501 stub(逐 ticket 推进)。
  */
 export interface RequirementRoutesDeps {
   /**
@@ -58,11 +61,21 @@ export async function requirementRoutes(
   deps: RequirementRoutesDeps = {},
 ): Promise<void> {
   // ============================================================================
-  // 4 个 501 stub(后续 ticket 逐个替换)
+  // 3 个 501 stub(后续 ticket 逐个替换;ticket 07a 已实装 GET /api/requirements)
   // ============================================================================
 
   app.get('/api/requirements', async (_req, reply) => {
-    return reply.code(501).send(notImplemented('requirement.list', '05'))
+    const { requirementService: service } = deps
+    if (!service) {
+      return reply.code(503).send({ error: 'service_not_ready' })
+    }
+    try {
+      const requirements = service.listRequirements()
+      return reply.code(200).send({ requirements })
+    } catch (err) {
+      _req.log.error({ err }, 'listRequirements failed')
+      return reply.code(500).send({ error: 'E_INTERNAL', message: 'list failed' })
+    }
   })
 
   app.get<{ Params: { id: string } }>('/api/requirement/:id', async (req, reply) => {
@@ -132,6 +145,18 @@ export async function requirementRoutes(
 
     // 3. SSE 推送成功事件 —— 推送到新建 id 的通道
     sseHub?.publish(result.id, {
+      type: 'requirement_created',
+      reqId: result.id,
+      ok: true,
+      ts: Date.now(),
+      title: result.title,
+      createdAt: result.createdAt,
+    })
+
+    // 3b. 全局通道(决策 4 · ticket 07a):通知所有 dashboard / list 订阅者,
+    //     channelId = 'requirements'(固定字符串,SseHub 不区分语义,key 是任意字符串)。
+    //     无订阅者时 publish 是 no-op(SseHub.ts:104),不报错。
+    sseHub?.publish('requirements', {
       type: 'requirement_created',
       reqId: result.id,
       ok: true,

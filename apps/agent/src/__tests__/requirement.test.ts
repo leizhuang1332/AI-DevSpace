@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TokenManager } from '../auth/TokenManager.js'
@@ -88,11 +88,9 @@ async function authed(
 }
 
 describe('requirement routes return 501 not_implemented', () => {
-  it('GET /api/requirements → 501 with feature=requirement.list', async () => {
-    const { statusCode, body } = await authed('GET', '/api/requirements')
-    expect(statusCode).toBe(501)
-    expect(body.feature).toBe('requirement.list')
-  })
+  // 注:ticket 07a 实装 GET /api/requirements(由文件系统派生),
+  // 它的完整断言在下面"GET /api/requirements — ticket 07a list endpoint"
+  // describe 块。这里只保留仍为 stub 的 3 个 endpoint 的 501 断言。
 
   it('GET /api/requirement/:id → 501 with feature=requirement.detail', async () => {
     const { statusCode, body } = await authed('GET', '/api/requirement/REFUND-001')
@@ -114,7 +112,7 @@ describe('requirement routes return 501 not_implemented', () => {
   })
 
   it('all routes require auth (401 without token)', async () => {
-    const res = await app.inject({ method: 'GET', url: '/api/requirements' })
+    const res = await app.inject({ method: 'GET', url: '/api/requirement/REFUND-001' })
     expect(res.statusCode).toBe(401)
   })
 })
@@ -703,4 +701,200 @@ describe('POST /api/requirements — ticket 04 文件落盘', () => {
       await cleanup()
     }
   })
+})
+
+// ============================================================================
+// ticket 07a — GET /api/requirements(由文件系统产物目录派生)
+// ============================================================================
+
+describe('GET /api/requirements — ticket 07a list endpoint', () => {
+  it('200:空目录 → requirements=[]', async () => {
+    const { app, token, cleanup } = await freshApp()
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/requirements',
+        headers: { 'x-aidevspace-token': token },
+      })
+      expect(res.statusCode).toBe(200)
+      const body = res.json() as { requirements: unknown[] }
+      expect(body.requirements).toEqual([])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('200:1 个 req 无产物 → status=draft, progress=0, repos=[]', async () => {
+    const { app, root, token, cleanup } = await freshApp()
+    try {
+      mkdirSync(join(root, 'requirements', 'req-001-foo'), { recursive: true })
+      writeFileSync(
+        join(root, 'requirements', 'req-001-foo', 'meta.yaml'),
+        'id: req-001-foo\ntitle: foo\ncreatedAt: 2026-07-17T00:00:00.000Z\n',
+      )
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/requirements',
+        headers: { 'x-aidevspace-token': token },
+      })
+      expect(res.statusCode).toBe(200)
+      const body = res.json() as {
+        requirements: Array<{
+          id: string
+          title: string
+          status: string
+          progress: number
+          repos: string[]
+        }>
+      }
+      expect(body.requirements).toHaveLength(1)
+      expect(body.requirements[0]).toMatchObject({
+        id: 'req-001-foo',
+        title: 'foo',
+        status: 'draft',
+        progress: 0,
+        repos: [],
+      })
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('200:1 个 req 有 analysis/ → status=analyzing, progress=20', async () => {
+    const { app, root, token, cleanup } = await freshApp()
+    try {
+      mkdirSync(join(root, 'requirements', 'req-001-foo'), { recursive: true })
+      writeFileSync(
+        join(root, 'requirements', 'req-001-foo', 'meta.yaml'),
+        'id: req-001-foo\ntitle: foo\ncreatedAt: 2026-07-17T00:00:00.000Z\n',
+      )
+      mkdirSync(join(root, 'requirements', 'req-001-foo', 'analysis'))
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/requirements',
+        headers: { 'x-aidevspace-token': token },
+      })
+      const body = res.json() as {
+        requirements: Array<{ status: string; progress: number }>
+      }
+      expect(body.requirements[0].status).toBe('analyzing')
+      expect(body.requirements[0].progress).toBe(20)
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('401:无 token', async () => {
+    const { app, cleanup } = await freshApp()
+    try {
+      const res = await app.inject({ method: 'GET', url: '/api/requirements' })
+      expect(res.statusCode).toBe(401)
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('503:未注入 service', async () => {
+    const localRoot = mkdtempSync(join(tmpdir(), 'aidevsp-list-503-'))
+    const tm = new TokenManager(localRoot)
+    const localToken = await tm.ensure()
+    const localApp = Fastify({ logger: false })
+    await localApp.register(authPlugin, { tokenManager: tm, allowedOrigins: [] })
+    await localApp.register(requirementRoutes) // 无 deps
+    await localApp.ready()
+    const res = await localApp.inject({
+      method: 'GET',
+      url: '/api/requirements',
+      headers: { 'x-aidevspace-token': localToken },
+    })
+    expect(res.statusCode).toBe(503)
+    expect(res.json().error).toBe('service_not_ready')
+    await localApp.close()
+    rmSync(localRoot, { recursive: true, force: true })
+  })
+
+  it('500:service.listRequirements 抛错 → E_INTERNAL', async () => {
+    // 重新构造 app + service,spyOn listRequirements 让它抛错
+    const localRoot = mkdtempSync(join(tmpdir(), 'aidevsp-list-500-'))
+    try {
+      const tm = new TokenManager(localRoot)
+      const localToken = await tm.ensure()
+      const realService = new RequirementService({
+        root: localRoot,
+        git: vi.fn(async () => ({ code: 0, stdout: '', stderr: '' })) as RequirementServiceDeps['git'],
+        sleep: () => Promise.resolve(),
+      })
+      vi.spyOn(realService, 'listRequirements').mockImplementation(() => {
+        throw new Error('boom')
+      })
+      const localApp = Fastify({ logger: false })
+      await localApp.register(authPlugin, { tokenManager: tm, allowedOrigins: [] })
+      await localApp.register(requirementRoutes, { requirementService: realService })
+      await localApp.ready()
+      const res = await localApp.inject({
+        method: 'GET',
+        url: '/api/requirements',
+        headers: { 'x-aidevspace-token': localToken },
+      })
+      expect(res.statusCode).toBe(500)
+      expect(res.json().error).toBe('E_INTERNAL')
+      await localApp.close()
+    } finally {
+      rmSync(localRoot, { recursive: true, force: true })
+    }
+  })
+})
+
+// ============================================================================
+// ticket 07a — POST /api/requirements 双推 SSE(全局 + per-req)
+// ============================================================================
+
+describe('POST /api/requirements — ticket 07a SSE 双推(per-req + global)', () => {
+  it('成功时双推:per-req 通道 + 全局 requirements 通道都收到 requirement_created', async () => {
+    const hub = createSseHub()
+    const { app, token, cleanup } = await freshApp({ hub })
+    try {
+      const perReqReceived: SseEvent[] = []
+      const globalReceived: SseEvent[] = []
+      // 先订阅全局通道(模拟 dashboard / list 页面已连接)
+      const unsubGlobal = hub.subscribe('requirements', (e) => globalReceived.push(e))
+
+      // 提交创建
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/requirements',
+        headers: {
+          'x-aidevspace-token': token,
+          'content-type': 'application/json',
+        },
+        payload: JSON.stringify({ title: '双推测试' }),
+      })
+      const body = res.json() as CreateResBody
+
+      // 在 publish 之后订阅 per-req(模拟 web router.push 后订阅)
+      const unsubPerReq = hub.subscribe(body.id, (e) => perReqReceived.push(e))
+      // 触发心跳验证订阅生效
+      hub.publish(body.id, { type: 'heartbeat', ts: 1 })
+      unsubPerReq()
+
+      unsubGlobal()
+
+      // per-req:心跳到达(说明订阅 + 投递机制正常)
+      expect(perReqReceived.some((e) => e.type === 'heartbeat')).toBe(true)
+
+      // global:全局通道已收到 requirement_created(POST 双推时已发送)
+      expect(globalReceived.some((e) => e.type === 'requirement_created')).toBe(true)
+      const ev = globalReceived.find((e) => e.type === 'requirement_created')
+      expect(ev).toBeDefined()
+      if (ev && ev.type === 'requirement_created') {
+        expect(ev.reqId).toBe(body.id)
+        expect(ev.ok).toBe(true)
+      }
+    } finally {
+      await cleanup()
+    }
+  })
+
+  // 注:失败路径(createRequirement 抛错)的全局通道推送留给后续 ticket
+  // —— plan 步骤 3 只要求成功路径双推,失败路径目前仅推 per-req 占位 channel。
 })

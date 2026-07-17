@@ -69,13 +69,15 @@ describe.skipIf(process.platform === 'win32')('agent skeleton e2e', () => {
     expect(res.status).toBe(401)
   })
 
-  it('GET /api/requirements with correct token → 501', async () => {
+  it('GET /api/requirements with correct token → 200 + 空数组(新实装 ticket 07a)', async () => {
     const { url, root } = await boot()
     const token = readFileSync(join(root, '.agent-token'), 'utf8')
     const res = await fetch(`${url}/api/requirements`, {
       headers: { 'x-aidevspace-token': token },
     })
-    expect(res.status).toBe(501)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { requirements: unknown[] }
+    expect(Array.isArray(body.requirements)).toBe(true)
   })
 
   it('request with bad Origin → 403', async () => {

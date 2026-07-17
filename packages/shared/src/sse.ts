@@ -31,7 +31,23 @@ export type AiSsePayload =
     }
 
 export type SseEvent =
-  | { type: 'hello'; sid: string; reqId: string; ts: number }
+  | {
+      type: 'hello'
+      sid: string
+      ts: number
+      /**
+       * per-req 通道标识(决策 4 / ticket 07a 之前的所有 SSE 路由都用 reqId)。
+       * 与 `channel` 互斥:per-req 路由填 `reqId`,全局 channel 路由填 `channel`。
+       */
+      reqId?: string
+      /**
+       * 全局 channel key(ticket 07a 新增)。固定字符串如 `'requirements'` /
+       * `'sessions'` / `'repos'`,用于 dashboard / list 类页面订阅"任何 req
+       * 的 created/updated"事件。EventSource 收到后用 channel 标识本连接
+       * 绑定的业务范围。
+       */
+      channel?: string
+    }
   | { type: 'heartbeat'; ts: number }
   | { type: 'placeholder'; message: string }
   /**

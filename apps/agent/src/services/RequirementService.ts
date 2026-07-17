@@ -15,17 +15,20 @@
  *   而是由本服务先 resolveBaseBranch 再显式传 base —— 保证 main 优先
  */
 
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import yaml from 'yaml'
 import {
   RepoAttachErrorCode,
   RequirementErrorCode,
+  STATUS_PROGRESS_MAP,
   buildRequirementMdTemplate,
   slugify,
   type AttachRepoResult,
   type RepoAttachErrorCodeT,
   type RequirementMeta,
+  type RequirementStatusT,
+  type RequirementSummary,
 } from '@ai-devspace/shared'
 
 /**
@@ -404,6 +407,145 @@ export class RequirementService {
   /** 写 `requirement.md` 空模板 */
   private writeRequirementMd(reqDir: string, title: string): void {
     writeFileSync(join(reqDir, 'requirement.md'), buildRequirementMdTemplate(title), 'utf8')
+  }
+
+  // ===========================================================================
+  // ticket 07a —— 列出所有需求(ADR-0014 状态软标签 + progress 派生)
+  // ===========================================================================
+
+  /**
+   * 区分 draft / drafting 的 requirement.md 字节阈值(> 此值视为已起草)。
+   *
+   * 默认空模板含 "# <title>\n\n<!-- ... -->\n\n" 约 50+ 字,远大于 10;
+   * 纯空白或单标题的极短文件视为 draft(尚未开始写内容)。
+   */
+  private static readonly DRAFTING_CONTENT_MIN_BYTES = 10
+
+  /**
+   * 列出所有需求(ticket 07a · ADR-0014)。
+   *
+   * 算法:
+   * 1. 扫 <root>/requirements/ 顶层,过滤 ^req-\d+- 目录(与 maxRequirementSeq 一致)
+   * 2. 每个 reqDir 读 meta.yaml → { id, title, createdAt }
+   * 3. 派生 status(方案 β,见 deriveStatus)
+   * 4. 派生 progress = STATUS_PROGRESS_MAP[status]
+   * 5. 派生 repos = requirements/<id>/repos/ 子目录名列表(过滤 . 开头)
+   * 6. 派生 updatedAt = fs.statSync(reqDir).mtime.toISOString()
+   * 7. 排序:按 updatedAt 倒序
+   *
+   * 容错:某 reqDir 读 meta.yaml / stat 失败 → 跳过该目录(不抛)。
+   */
+  listRequirements(): RequirementSummary[] {
+    const out: RequirementSummary[] = []
+    const dir = this.requirementsDir
+    if (!existsSync(dir)) return out
+
+    for (const name of readdirSync(dir)) {
+      if (!/^req-\d+-/.test(name)) continue
+      const reqDir = this.requirementDirPath(name)
+      try {
+        const meta = this.readMetaYaml(reqDir)
+        if (!meta) continue
+        const status = this.deriveStatus(reqDir)
+        const summary: RequirementSummary = {
+          id: meta.id,
+          title: meta.title,
+          status,
+          progress: STATUS_PROGRESS_MAP[status],
+          repos: this.deriveRepos(reqDir),
+          createdAt: meta.createdAt,
+          updatedAt: this.deriveUpdatedAt(reqDir),
+        }
+        out.push(summary)
+      } catch (err) {
+        // 容错:残缺 reqDir 不阻塞整体列表;不引入 logger 依赖,用 console.warn 兜底
+        // eslint-disable-next-line no-console
+        console.warn(`[RequirementService] skipping malformed reqDir=${reqDir}:`, err)
+        continue
+      }
+    }
+
+    // 按 updatedAt 倒序
+    out.sort((a, b) =>
+      a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0,
+    )
+    return out
+  }
+
+  /** 读 meta.yaml(返回 RequirementMeta);格式不对或字段缺失返回 null */
+  private readMetaYaml(reqDir: string): RequirementMeta | null {
+    const file = join(reqDir, 'meta.yaml')
+    if (!existsSync(file)) return null
+    try {
+      const raw = readFileSync(file, 'utf8')
+      const parsed = yaml.parse(raw) as
+        | { id?: unknown; title?: unknown; createdAt?: unknown }
+        | null
+      if (
+        !parsed ||
+        typeof parsed.id !== 'string' ||
+        typeof parsed.title !== 'string' ||
+        typeof parsed.createdAt !== 'string'
+      ) {
+        return null
+      }
+      return { id: parsed.id, title: parsed.title, createdAt: parsed.createdAt }
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * 派生 status(ADR-0014 D2 方案 β)
+   *
+   * 优先级(高 → 低):
+   * - 顶层 .archived 文件存在 → 'archived'
+   * - wrapup/ 子目录存在 → 'done'
+   * - plan/tasks.md 存在 → 'planning'(优先于 implementing,因 plan 是 implementing 前置)
+   * - design/ 子目录存在 → 'designing'
+   * - clarifying/ 子目录存在 → 'clarifying'
+   * - analysis/ 子目录存在 → 'analyzing'
+   * - requirement.md 存在且非空(> 10 字节) → 'drafting'
+   * - 否则 → 'draft'
+   */
+  private deriveStatus(reqDir: string): RequirementStatusT {
+    if (existsSync(join(reqDir, '.archived'))) return 'archived'
+    if (existsSync(join(reqDir, 'wrapup'))) return 'done'
+    if (existsSync(join(reqDir, 'plan', 'tasks.md'))) return 'planning'
+    if (existsSync(join(reqDir, 'design'))) return 'designing'
+    if (existsSync(join(reqDir, 'clarifying'))) return 'clarifying'
+    if (existsSync(join(reqDir, 'analysis'))) return 'analyzing'
+    // drafting 与 draft 区分:requirement.md 存在且非空(> DRAFTING_CONTENT_MIN_BYTES)
+    const reqMd = join(reqDir, 'requirement.md')
+    if (existsSync(reqMd)) {
+      try {
+        const content = readFileSync(reqMd, 'utf8')
+        if (content.length > RequirementService.DRAFTING_CONTENT_MIN_BYTES) return 'drafting'
+      } catch {
+        /* fallthrough to draft */
+      }
+    }
+    return 'draft'
+  }
+
+  /** 派生 repos = reqDir/repos/ 子目录名列表(过滤 . 开头) */
+  private deriveRepos(reqDir: string): string[] {
+    const reposDir = join(reqDir, 'repos')
+    if (!existsSync(reposDir)) return []
+    try {
+      return readdirSync(reposDir).filter((n) => !n.startsWith('.'))
+    } catch {
+      return []
+    }
+  }
+
+  /** 派生 updatedAt = reqDir mtime(ISO);失败兜底 epoch 0 */
+  private deriveUpdatedAt(reqDir: string): string {
+    try {
+      return statSync(reqDir).mtime.toISOString()
+    } catch {
+      return new Date(0).toISOString()
+    }
   }
 }
 

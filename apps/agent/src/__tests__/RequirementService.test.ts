@@ -20,10 +20,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { RepoAttachErrorCode } from '@ai-devspace/shared'
+import { RepoAttachErrorCode, STATUS_PROGRESS_MAP } from '@ai-devspace/shared'
 import {
   RequirementService,
   mapGitError,
@@ -539,3 +539,297 @@ describe('RequirementService.attachRepos — batch + partial failure', () => {
 
 // ROOT 是 plan 文档里出现的常量子名,这里保留引用占位避免 lint
 void ROOT
+
+// ============================================================================
+// ticket 07a —— listRequirements + status 派生(ADR-0014 D2 方案 β)
+// ============================================================================
+
+/** 写一个最小可用的 meta.yaml(id / title / createdAt) */
+function writeMetaYaml(reqDir: string, opts: { id: string; title: string; createdAt: string }): void {
+  mkdirSync(reqDir, { recursive: true })
+  writeFileSync(
+    join(reqDir, 'meta.yaml'),
+    `id: ${opts.id}\ntitle: ${opts.title}\ncreatedAt: ${opts.createdAt}\n`,
+  )
+}
+
+/** 强制设置目录 mtime(用于测试排序) */
+function setMtime(reqDir: string, time: Date): void {
+  utimesSync(reqDir, time, time)
+}
+
+describe('RequirementService.listRequirements', () => {
+  it('空目录 → []', () => {
+    const svc = new RequirementService({ root: realRoot, git: vi.fn(), sleep: noSleep })
+    expect(svc.listRequirements()).toEqual([])
+  })
+
+  it('1 个 req:无产物 → status=draft, progress=0, repos=[]', () => {
+    writeMetaYaml(join(realRoot, 'requirements', 'req-001-foo'), {
+      id: 'req-001-foo',
+      title: 'foo',
+      createdAt: '2026-07-17T00:00:00.000Z',
+    })
+    const svc = new RequirementService({ root: realRoot, git: vi.fn(), sleep: noSleep })
+    const r = svc.listRequirements()
+    expect(r).toHaveLength(1)
+    expect(r[0]).toMatchObject({
+      id: 'req-001-foo',
+      title: 'foo',
+      status: 'draft',
+      progress: 0,
+      repos: [],
+    })
+    expect(typeof r[0].createdAt).toBe('string')
+    expect(typeof r[0].updatedAt).toBe('string')
+  })
+
+  it('1 个 req:requirement.md 空白(< 10 字节) → status=draft', () => {
+    writeMetaYaml(join(realRoot, 'requirements', 'req-001-foo'), {
+      id: 'req-001-foo',
+      title: 'foo',
+      createdAt: '2026-07-17T00:00:00.000Z',
+    })
+    writeFileSync(join(realRoot, 'requirements', 'req-001-foo', 'requirement.md'), '# x\n')
+    const svc = new RequirementService({ root: realRoot, git: vi.fn(), sleep: noSleep })
+    expect(svc.listRequirements()[0].status).toBe('draft')
+  })
+
+  it('1 个 req:requirement.md 非空(> 10 字节) → status=drafting', () => {
+    writeMetaYaml(join(realRoot, 'requirements', 'req-001-foo'), {
+      id: 'req-001-foo',
+      title: 'foo',
+      createdAt: '2026-07-17T00:00:00.000Z',
+    })
+    writeFileSync(
+      join(realRoot, 'requirements', 'req-001-foo', 'requirement.md'),
+      '# 退款功能优化\n\n<!-- 在 DRAFTING 工位编写需求背景、目标、AC -->\n',
+    )
+    const svc = new RequirementService({ root: realRoot, git: vi.fn(), sleep: noSleep })
+    expect(svc.listRequirements()[0].status).toBe('drafting')
+    expect(svc.listRequirements()[0].progress).toBe(0)
+  })
+
+  it('1 个 req:有 analysis/ → status=analyzing, progress=20', () => {
+    writeMetaYaml(join(realRoot, 'requirements', 'req-001-foo'), {
+      id: 'req-001-foo',
+      title: 'foo',
+      createdAt: '2026-07-17T00:00:00.000Z',
+    })
+    mkdirSync(join(realRoot, 'requirements', 'req-001-foo', 'analysis'))
+    const svc = new RequirementService({ root: realRoot, git: vi.fn(), sleep: noSleep })
+    const r = svc.listRequirements()[0]
+    expect(r.status).toBe('analyzing')
+    expect(r.progress).toBe(STATUS_PROGRESS_MAP.analyzing)
+    expect(r.progress).toBe(20)
+  })
+
+  it('1 个 req:有 clarifying/ → status=clarifying, progress=30', () => {
+    writeMetaYaml(join(realRoot, 'requirements', 'req-001-foo'), {
+      id: 'req-001-foo',
+      title: 'foo',
+      createdAt: '2026-07-17T00:00:00.000Z',
+    })
+    mkdirSync(join(realRoot, 'requirements', 'req-001-foo', 'clarifying'))
+    const svc = new RequirementService({ root: realRoot, git: vi.fn(), sleep: noSleep })
+    const r = svc.listRequirements()[0]
+    expect(r.status).toBe('clarifying')
+    expect(r.progress).toBe(30)
+  })
+
+  it('1 个 req:有 design/ → status=designing, progress=40', () => {
+    writeMetaYaml(join(realRoot, 'requirements', 'req-001-foo'), {
+      id: 'req-001-foo',
+      title: 'foo',
+      createdAt: '2026-07-17T00:00:00.000Z',
+    })
+    mkdirSync(join(realRoot, 'requirements', 'req-001-foo', 'design'))
+    const svc = new RequirementService({ root: realRoot, git: vi.fn(), sleep: noSleep })
+    const r = svc.listRequirements()[0]
+    expect(r.status).toBe('designing')
+    expect(r.progress).toBe(40)
+  })
+
+  it('1 个 req:有 plan/tasks.md → status=planning, progress=50', () => {
+    writeMetaYaml(join(realRoot, 'requirements', 'req-001-foo'), {
+      id: 'req-001-foo',
+      title: 'foo',
+      createdAt: '2026-07-17T00:00:00.000Z',
+    })
+    mkdirSync(join(realRoot, 'requirements', 'req-001-foo', 'plan'), { recursive: true })
+    writeFileSync(join(realRoot, 'requirements', 'req-001-foo', 'plan', 'tasks.md'), '- [ ] t1')
+    const svc = new RequirementService({ root: realRoot, git: vi.fn(), sleep: noSleep })
+    const r = svc.listRequirements()[0]
+    expect(r.status).toBe('planning')
+    expect(r.progress).toBe(50)
+  })
+
+  it('1 个 req:有 wrapup/ → status=done, progress=100', () => {
+    writeMetaYaml(join(realRoot, 'requirements', 'req-001-foo'), {
+      id: 'req-001-foo',
+      title: 'foo',
+      createdAt: '2026-07-17T00:00:00.000Z',
+    })
+    mkdirSync(join(realRoot, 'requirements', 'req-001-foo', 'wrapup'))
+    const svc = new RequirementService({ root: realRoot, git: vi.fn(), sleep: noSleep })
+    const r = svc.listRequirements()[0]
+    expect(r.status).toBe('done')
+    expect(r.progress).toBe(100)
+  })
+
+  it('1 个 req:有 .archived → status=archived, progress=100', () => {
+    writeMetaYaml(join(realRoot, 'requirements', 'req-001-foo'), {
+      id: 'req-001-foo',
+      title: 'foo',
+      createdAt: '2026-07-17T00:00:00.000Z',
+    })
+    writeFileSync(join(realRoot, 'requirements', 'req-001-foo', '.archived'), '')
+    const svc = new RequirementService({ root: realRoot, git: vi.fn(), sleep: noSleep })
+    const r = svc.listRequirements()[0]
+    expect(r.status).toBe('archived')
+    expect(r.progress).toBe(100)
+  })
+
+  it('1 个 req:wrapup/ + .archived → status=archived(优先级最高)', () => {
+    writeMetaYaml(join(realRoot, 'requirements', 'req-001-foo'), {
+      id: 'req-001-foo',
+      title: 'foo',
+      createdAt: '2026-07-17T00:00:00.000Z',
+    })
+    mkdirSync(join(realRoot, 'requirements', 'req-001-foo', 'wrapup'))
+    writeFileSync(join(realRoot, 'requirements', 'req-001-foo', '.archived'), '')
+    const svc = new RequirementService({ root: realRoot, git: vi.fn(), sleep: noSleep })
+    expect(svc.listRequirements()[0].status).toBe('archived')
+  })
+
+  it('排序:3 个 req mtime 不同 → updatedAt 倒序', () => {
+    writeMetaYaml(join(realRoot, 'requirements', 'req-001-a'), {
+      id: 'req-001-a',
+      title: 'a',
+      createdAt: '2026-07-17T00:00:00.000Z',
+    })
+    writeMetaYaml(join(realRoot, 'requirements', 'req-002-b'), {
+      id: 'req-002-b',
+      title: 'b',
+      createdAt: '2026-07-17T00:00:00.000Z',
+    })
+    writeMetaYaml(join(realRoot, 'requirements', 'req-003-c'), {
+      id: 'req-003-c',
+      title: 'c',
+      createdAt: '2026-07-17T00:00:00.000Z',
+    })
+    setMtime(join(realRoot, 'requirements', 'req-001-a'), new Date('2026-07-10T00:00:00Z'))
+    setMtime(join(realRoot, 'requirements', 'req-002-b'), new Date('2026-07-15T00:00:00Z'))
+    setMtime(join(realRoot, 'requirements', 'req-003-c'), new Date('2026-07-17T00:00:00Z'))
+    const svc = new RequirementService({ root: realRoot, git: vi.fn(), sleep: noSleep })
+    const r = svc.listRequirements()
+    expect(r.map((x) => x.id)).toEqual([
+      'req-003-c',
+      'req-002-b',
+      'req-001-a',
+    ])
+  })
+
+  it('容错:meta.yaml 损坏 → 跳过该目录,其他目录仍返回', () => {
+    writeMetaYaml(join(realRoot, 'requirements', 'req-001-good'), {
+      id: 'req-001-good',
+      title: 'good',
+      createdAt: '2026-07-17T00:00:00.000Z',
+    })
+    mkdirSync(join(realRoot, 'requirements', 'req-002-bad'), { recursive: true })
+    writeFileSync(
+      join(realRoot, 'requirements', 'req-002-bad', 'meta.yaml'),
+      'garbage: : : not yaml {{{',
+    )
+    const svc = new RequirementService({ root: realRoot, git: vi.fn(), sleep: noSleep })
+    const r = svc.listRequirements()
+    expect(r).toHaveLength(1)
+    expect(r[0].id).toBe('req-001-good')
+  })
+
+  it('容错:requirements/ 下残留 .DS_Store 等隐藏项 → 不算 req', () => {
+    writeMetaYaml(join(realRoot, 'requirements', 'req-001-foo'), {
+      id: 'req-001-foo',
+      title: 'foo',
+      createdAt: '2026-07-17T00:00:00.000Z',
+    })
+    // 残留 .DS_Store(不应被识别为 req)
+    mkdirSync(join(realRoot, 'requirements', '.DS_Store'))
+    // 残留临时目录(以 . 开头)
+    mkdirSync(join(realRoot, 'requirements', '.tmp-debug'))
+    const svc = new RequirementService({ root: realRoot, git: vi.fn(), sleep: noSleep })
+    const r = svc.listRequirements()
+    expect(r).toHaveLength(1)
+    expect(r[0].id).toBe('req-001-foo')
+  })
+
+  it('repos 派生:requirements/<id>/repos/<repoName> 子目录名 → repos 数组', () => {
+    writeMetaYaml(join(realRoot, 'requirements', 'req-001-foo'), {
+      id: 'req-001-foo',
+      title: 'foo',
+      createdAt: '2026-07-17T00:00:00.000Z',
+    })
+    mkdirSync(join(realRoot, 'requirements', 'req-001-foo', 'repos', 'refund-service'), {
+      recursive: true,
+    })
+    mkdirSync(join(realRoot, 'requirements', 'req-001-foo', 'repos', 'order-service'), {
+      recursive: true,
+    })
+    const svc = new RequirementService({ root: realRoot, git: vi.fn(), sleep: noSleep })
+    const r = svc.listRequirements()[0]
+    expect(r.repos.sort()).toEqual(['order-service', 'refund-service'])
+  })
+
+  it('repos 派生:repos/ 目录不存在 → repos=[]', () => {
+    writeMetaYaml(join(realRoot, 'requirements', 'req-001-foo'), {
+      id: 'req-001-foo',
+      title: 'foo',
+      createdAt: '2026-07-17T00:00:00.000Z',
+    })
+    const svc = new RequirementService({ root: realRoot, git: vi.fn(), sleep: noSleep })
+    expect(svc.listRequirements()[0].repos).toEqual([])
+  })
+
+  it('updatedAt 用 reqDir 的 mtime(避免与 meta.yaml createdAt 混淆)', () => {
+    writeMetaYaml(join(realRoot, 'requirements', 'req-001-foo'), {
+      id: 'req-001-foo',
+      title: 'foo',
+      createdAt: '2026-07-01T00:00:00.000Z',
+    })
+    setMtime(join(realRoot, 'requirements', 'req-001-foo'), new Date('2026-07-17T05:42:23.000Z'))
+    const svc = new RequirementService({ root: realRoot, git: vi.fn(), sleep: noSleep })
+    const r = svc.listRequirements()[0]
+    expect(r.updatedAt).toBe('2026-07-17T05:42:23.000Z')
+    expect(r.createdAt).toBe('2026-07-01T00:00:00.000Z')
+  })
+})
+
+describe('STATUS_PROGRESS_MAP 集成(service 返回的 progress 与 shared 一致)', () => {
+  it('抽样验证 3 个 status 的 progress 一致', () => {
+    writeMetaYaml(join(realRoot, 'requirements', 'req-001-draft'), {
+      id: 'req-001-draft',
+      title: 'd',
+      createdAt: '2026-07-17T00:00:00.000Z',
+    })
+    writeMetaYaml(join(realRoot, 'requirements', 'req-002-planning'), {
+      id: 'req-002-planning',
+      title: 'p',
+      createdAt: '2026-07-17T00:00:00.000Z',
+    })
+    writeMetaYaml(join(realRoot, 'requirements', 'req-003-done'), {
+      id: 'req-003-done',
+      title: 'D',
+      createdAt: '2026-07-17T00:00:00.000Z',
+    })
+    mkdirSync(join(realRoot, 'requirements', 'req-002-planning', 'plan'), { recursive: true })
+    writeFileSync(join(realRoot, 'requirements', 'req-002-planning', 'plan', 'tasks.md'), '')
+    mkdirSync(join(realRoot, 'requirements', 'req-003-done', 'wrapup'))
+
+    const svc = new RequirementService({ root: realRoot, git: vi.fn(), sleep: noSleep })
+    const r = svc.listRequirements()
+    const byId = new Map(r.map((x) => [x.id, x]))
+    expect(byId.get('req-001-draft')?.progress).toBe(STATUS_PROGRESS_MAP.draft)
+    expect(byId.get('req-002-planning')?.progress).toBe(STATUS_PROGRESS_MAP.planning)
+    expect(byId.get('req-003-done')?.progress).toBe(STATUS_PROGRESS_MAP.done)
+  })
+})

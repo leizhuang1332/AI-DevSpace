@@ -13,6 +13,12 @@ import { describe, it, expect } from 'vitest'
 import {
   REQUIREMENT_ID_RE,
   REQUIREMENT_SLUG_MAX,
+  STATUS_PROGRESS_MAP,
+  RequirementListResponseSchema,
+  RequirementStatus,
+  RequirementStatusSchema,
+  RequirementStatusT,
+  RequirementSummarySchema,
   buildRequirementMdTemplate,
   parseRequirementSeq,
   slugify,
@@ -281,5 +287,177 @@ describe('RequirementErrorCode', () => {
     expect(RequirementErrorCode.E_DISK_FULL).toBe('E_DISK_FULL')
     expect(RequirementErrorCode.E_NETWORK).toBe('E_NETWORK')
     expect(RequirementErrorCode.E_INTERNAL).toBe('E_INTERNAL')
+  })
+})
+
+// ============================================================================
+// ticket 07a — ADR-0014 STATUS_PROGRESS_MAP(决策 15-v2 派生映射)
+// ============================================================================
+
+describe('STATUS_PROGRESS_MAP', () => {
+  it('all 10 status keys covered with 0-100 integer values', () => {
+    for (const k of Object.values(RequirementStatus)) {
+      const v = STATUS_PROGRESS_MAP[k]
+      expect(v).toBeGreaterThanOrEqual(0)
+      expect(v).toBeLessThanOrEqual(100)
+      expect(Number.isInteger(v)).toBe(true)
+    }
+  })
+
+  it('monotonic non-decreasing across lifecycle (draft < analyzing < ... < done)', () => {
+    const order: RequirementStatusT[] = [
+      'draft',
+      'drafting',
+      'analyzing',
+      'clarifying',
+      'designing',
+      'planning',
+      'implementing',
+      'submitting',
+      'done',
+    ]
+    for (let i = 1; i < order.length; i++) {
+      expect(STATUS_PROGRESS_MAP[order[i]]).toBeGreaterThanOrEqual(
+        STATUS_PROGRESS_MAP[order[i - 1]],
+      )
+    }
+  })
+
+  it('draft 与 drafting 都映射到 0(决策 22:P1 阶段允许 draft 与 drafting 同进度)', () => {
+    expect(STATUS_PROGRESS_MAP.draft).toBe(0)
+    expect(STATUS_PROGRESS_MAP.drafting).toBe(0)
+  })
+
+  it('done 与 archived 都映射到 100', () => {
+    expect(STATUS_PROGRESS_MAP.done).toBe(100)
+    expect(STATUS_PROGRESS_MAP.archived).toBe(100)
+  })
+
+  it('覆盖 10 个 key,无遗漏', () => {
+    const expectedKeys: RequirementStatusT[] = [
+      'draft',
+      'drafting',
+      'analyzing',
+      'clarifying',
+      'designing',
+      'planning',
+      'implementing',
+      'submitting',
+      'done',
+      'archived',
+    ]
+    expect(Object.keys(STATUS_PROGRESS_MAP).sort()).toEqual([...expectedKeys].sort())
+  })
+})
+
+// ============================================================================
+// ticket 07a — RequirementStatusSchema(枚举)
+// ============================================================================
+
+describe('RequirementStatusSchema', () => {
+  it('accepts all 10 valid statuses', () => {
+    for (const s of Object.values(RequirementStatus)) {
+      expect(RequirementStatusSchema.safeParse(s).success).toBe(true)
+    }
+  })
+
+  it('rejects unknown status strings', () => {
+    expect(RequirementStatusSchema.safeParse('unknown').success).toBe(false)
+    expect(RequirementStatusSchema.safeParse('').success).toBe(false)
+    expect(RequirementStatusSchema.safeParse('DRAFT').success).toBe(false) // 大写
+  })
+
+  it('rejects non-string values', () => {
+    expect(RequirementStatusSchema.safeParse(123).success).toBe(false)
+    expect(RequirementStatusSchema.safeParse(null).success).toBe(false)
+    expect(RequirementStatusSchema.safeParse(undefined).success).toBe(false)
+  })
+})
+
+// ============================================================================
+// ticket 07a — RequirementSummarySchema / RequirementListResponseSchema
+// ============================================================================
+
+describe('RequirementSummarySchema', () => {
+  const validSummary = {
+    id: 'req-001-foo',
+    title: '退款功能优化',
+    status: 'analyzing',
+    progress: 20,
+    repos: ['refund-service'],
+    createdAt: '2026-07-17T00:00:00.000Z',
+    updatedAt: '2026-07-17T01:00:00.000Z',
+  }
+
+  it('accepts valid summary', () => {
+    expect(RequirementSummarySchema.safeParse(validSummary).success).toBe(true)
+  })
+
+  it('accepts empty repos array', () => {
+    expect(
+      RequirementSummarySchema.safeParse({ ...validSummary, repos: [] }).success,
+    ).toBe(true)
+  })
+
+  it('rejects id not matching req-NNN-slug pattern', () => {
+    expect(
+      RequirementSummarySchema.safeParse({ ...validSummary, id: 'REQ-001-foo' }).success,
+    ).toBe(false)
+  })
+
+  it('rejects progress outside 0-100', () => {
+    expect(
+      RequirementSummarySchema.safeParse({ ...validSummary, progress: -1 }).success,
+    ).toBe(false)
+    expect(
+      RequirementSummarySchema.safeParse({ ...validSummary, progress: 101 }).success,
+    ).toBe(false)
+  })
+
+  it('rejects non-integer progress', () => {
+    expect(
+      RequirementSummarySchema.safeParse({ ...validSummary, progress: 20.5 }).success,
+    ).toBe(false)
+  })
+
+  it('rejects invalid status', () => {
+    expect(
+      RequirementSummarySchema.safeParse({ ...validSummary, status: 'frozen' }).success,
+    ).toBe(false)
+  })
+})
+
+describe('RequirementListResponseSchema', () => {
+  it('accepts empty list', () => {
+    expect(RequirementListResponseSchema.safeParse({ requirements: [] }).success).toBe(true)
+  })
+
+  it('accepts list of summaries', () => {
+    const r = RequirementListResponseSchema.safeParse({
+      requirements: [
+        {
+          id: 'req-001-a',
+          title: 'a',
+          status: 'draft',
+          progress: 0,
+          repos: [],
+          createdAt: '2026-07-17T00:00:00.000Z',
+          updatedAt: '2026-07-17T00:00:00.000Z',
+        },
+      ],
+    })
+    expect(r.success).toBe(true)
+  })
+
+  it('rejects missing requirements field', () => {
+    expect(RequirementListResponseSchema.safeParse({}).success).toBe(false)
+  })
+
+  it('rejects nested invalid summary', () => {
+    expect(
+      RequirementListResponseSchema.safeParse({
+        requirements: [{ id: 'bad' }],
+      }).success,
+    ).toBe(false)
   })
 })

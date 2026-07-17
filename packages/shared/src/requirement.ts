@@ -160,9 +160,12 @@ export type CreateRequirementResponse = z.infer<typeof CreateRequirementResponse
 /**
  * `~/.aidevspace/requirements/<id>/meta.yaml` 顶层结构(写盘 + 解析共用)。
  *
- * 字段冻结规则(决策 15 + 57):
- * - 不写 `status`(决策 15 反对状态机;决策 57 默认 redirect 不基于 status)
+ * 字段冻结规则(决策 15-v2 / ADR-0014):
+ * - 不写 `status`(派生机制 — ADR-0014 D4);status 由文件系统产物目录派生
  * - 不写 `current_focus`(由用户后续在工位设置)
+ *
+ * 注:状态机启用(ADR-0014 D1)用于 UI 信号(分组色 / 进度条 / 过滤),
+ * 但 AI 仍不推动流程(决策 15 后半段保留 / ADR-0014 D5)。
  */
 export interface RequirementMeta {
   id: string
@@ -190,3 +193,73 @@ export function buildRequirementMdTemplate(title: string): string {
     '',
   ].join('\n')
 }
+
+// ============================================================================
+// ticket 07a — ADR-0014 状态软标签 + progress 派生(决策 15-v2)
+// ============================================================================
+
+/** 10 状态枚举(决策 15-v2 / ADR-0014 D6:跨端契约)
+ *  - 比 web 端 mock 期 9 状态多 1 个 'drafting',表示"已建目录但 requirement.md 仍空白"
+ *  - 'implementing' / 'submitting' 本期 P1+ 不实装派生(ADR-0014 D7)
+ *
+ * 单一真相源:`RequirementStatusSchema` 与 `STATUS_PROGRESS_MAP` 都从这里派生,
+ * 新增/删除 status 必须改本表(`satisfies` 会强制 STATUS_PROGRESS_MAP 覆盖所有 key)。
+ */
+export const RequirementStatus = {
+  DRAFT: 'draft',
+  DRAFTING: 'drafting',
+  ANALYZING: 'analyzing',
+  CLARIFYING: 'clarifying',
+  DESIGNING: 'designing',
+  PLANNING: 'planning',
+  IMPLEMENTING: 'implementing',
+  SUBMITTING: 'submitting',
+  DONE: 'done',
+  ARCHIVED: 'archived',
+} as const
+
+export type RequirementStatusT = (typeof RequirementStatus)[keyof typeof RequirementStatus]
+
+// z.enum 派生自常量对象,避免三处枚举重复(Shotgun Surgery):
+// 单测已覆盖 accepts all 10 valid statuses / rejects unknown(见 requirement.test.ts)
+export const RequirementStatusSchema = z.enum(
+  Object.values(RequirementStatus) as [RequirementStatusT, ...RequirementStatusT[]],
+)
+
+/** status → progress 派生映射(ADR-0014 D3)
+ *  - 跨端契约,改一处生效
+ *  - monotonic non-decreasing(单测覆盖)
+ *  - draft/drafting 同为 0;done/archived 同为 100
+ *
+ *  `satisfies` 在编译期保证:新增 RequirementStatus 但忘了在本表加映射 → TS 报错。
+ */
+export const STATUS_PROGRESS_MAP = {
+  draft: 0,
+  drafting: 0,
+  analyzing: 20,
+  clarifying: 30,
+  designing: 40,
+  planning: 50,
+  implementing: 70,
+  submitting: 90,
+  done: 100,
+  archived: 100,
+} as const satisfies Record<RequirementStatusT, number>
+
+/** 列表项 schema — GET /api/requirements 响应元素 */
+export const RequirementSummarySchema = z.object({
+  id: z.string().regex(REQUIREMENT_ID_RE, 'id must match req-NNN-slug pattern'),
+  title: z.string().min(1),
+  status: RequirementStatusSchema,
+  progress: z.number().int().min(0).max(100),
+  repos: z.array(z.string()),
+  createdAt: z.string(), // ISO 8601
+  updatedAt: z.string(), // ISO 8601
+})
+export type RequirementSummary = z.infer<typeof RequirementSummarySchema>
+
+/** GET /api/requirements 200 响应体 */
+export const RequirementListResponseSchema = z.object({
+  requirements: z.array(RequirementSummarySchema),
+})
+export type RequirementListResponse = z.infer<typeof RequirementListResponseSchema>
