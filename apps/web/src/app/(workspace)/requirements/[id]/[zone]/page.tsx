@@ -9,9 +9,7 @@ import { getExecutingData } from '@/lib/executing'
 import { ExecutingZone } from '@/components/executing-zone'
 import { getAnalyzingData } from '@/lib/analyzing.server'
 import { AnalyzingZone } from '@/components/analyzing-zone'
-import {
-  getDraftingData,
-} from '@/lib/drafting'
+import { getDraftingDataFromFs } from '@/lib/drafting.server'
 import { DraftingZone } from '@/components/drafting-zone'
 import { DraftingSkillRail } from '@/components/drafting-skill-rail'
 import { getClarifyingData } from '@/lib/clarifying'
@@ -67,8 +65,13 @@ export default async function ZonePage({
 
   // DRAFTING 工位(issue 18 / issue 01 重新设计):Form 居中布局 + 标题/PRD/AC/关联仓库
   // 主区 1 列 + 右侧 Inline 栏(Skill 候命) —— 不再渲染左 240px 资源树
+  //
+  // zone-data-fidelity-fixes/01 — 改用 server-only `getDraftingDataFromFs`,
+  // 让真实新建需求(`requirement.md` 超过 10 字节)进入 DRAFTING 拿到非空数据
+  // (prdMarkdown = 文件内容),不再闪 1.5s 骨架 overlay。
+  // `drafting.ts` 里的 mock `getDraftingData` 保留,组件测试继续依赖它。
   if (zone.id === 'drafting') {
-    const data = await getDraftingData(params.id)
+    const data = await getDraftingDataFromFs(params.id)
     return (
       <ZoneShell
         id={params.id}
