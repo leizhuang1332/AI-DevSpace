@@ -28,7 +28,7 @@
  */
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import type {
   AnalysisSession,
   AnalysisSessionAngle,
@@ -179,14 +179,21 @@ export function countUnresolvedItems(text: string): number {
 /**
  * 拉取 ANALYZING 工位数据(SSR 期 mock —— 后续替换为 `await fetch(...)`)。
  *
- * - 已知 id(req-001)→ REFUND_ANALYZING 样例数据
- * - 未知 id / 新建需求 → emptyAnalyzing(id)
+ * - 已知 id(req-001)→ REFUND_ANALYZING 样例数据(短路在 default options
+ *   注入**之前**;即便 fs 里有 _index.yaml 也用硬编码 mock)
+ * - 其他 id:若 caller 没传 `analysisDir` / `analysisSessionsDir`,自动按
+ *   `<requirementsRoot>/<reqId>/analysis[/sessions]` 注入;fs 缺产物时
+ *   走 fallback(default 单会话 / 0 待裁决 / 5 维度 + pending verdict)
  *
  * options 用于接入真实数据源(后续 VS 接 server action):
  * - `skillFrontmatter`: Skill SKILL.md frontmatter(读 admission_dimensions + admission_override)
- * - `analysisDir`: 需求 analysis 目录(读 adjudication.md 计数)
- *
- * 不传 options 时,返回默认 5 维度 + 0 待裁决 + pending verdict。
+ * - `analysisDir`: 需求 analysis 目录(读 adjudication.md 计数);
+ *   **缺省时**按 `requirementsRoot + reqId + analysis` 自动注入
+ * - `analysisSessionsDir`: 读 _index.yaml + 各会话 chunks.jsonl;**缺省时**按
+ *   `analysisDir + sessions` 自动注入
+ * - `lastSessionId`: cookie 注入的 active session;**透传逻辑不变**
+ * - `requirementsRoot`: 覆盖 dev 默认的 `<repo-root>/requirements/`(主要给
+ *   测试用)
  */
 export async function getAnalyzingData(
   requirementId: string,
@@ -195,8 +202,36 @@ export async function getAnalyzingData(
   if (requirementId === 'req-001') {
     return { ...REFUND_ANALYZING, requirementId }
   }
-  // 未知 id / 新建需求 → 走 emptyAnalyzing,但仍通过装配函数(保留 wiring)
-  return emptyAnalyzingWithOptions(requirementId, options)
+  // 未知 id / 新建需求 → 走 emptyAnalyzing + fs 装配(wiring 保留)
+  const resolved = resolveAnalysisPaths(requirementId, options)
+  return emptyAnalyzingWithOptions(requirementId, resolved)
+}
+
+/**
+ * 把 options 中缺省的 `analysisDir` / `analysisSessionsDir` 解析为绝对路径。
+ *
+ * - caller 显式传入的字段保留原值(后续 agent API 仍可接管)
+ * - 缺省字段按 `requirementsRoot + reqId + analysis[/sessions]` 拼:
+ *   - `requirementsRoot` 缺省 → dev 默认 `<repo-root>/requirements/`
+ *   - `analysisSessionsDir` 缺省且 `analysisDir` 已解析 → 拼 `<analysisDir>/sessions`
+ *
+ * 返回新对象,不动原 options(避免污染调用方)。
+ */
+function resolveAnalysisPaths(
+  requirementId: string,
+  options: GetAnalyzingDataOptions | undefined,
+): GetAnalyzingDataOptions {
+  const requirementsRoot =
+    options?.requirementsRoot ?? defaultRequirementsRoot()
+  const defaultAnalysisDir = resolve(requirementsRoot, requirementId, 'analysis')
+  const analysisDir = options?.analysisDir ?? defaultAnalysisDir
+  const analysisSessionsDir =
+    options?.analysisSessionsDir ?? resolve(analysisDir, 'sessions')
+  return {
+    ...options,
+    analysisDir,
+    analysisSessionsDir,
+  }
 }
 
 /** getAnalyzingData options —— 后续切 server action 时注入真实数据源 */
@@ -213,6 +248,28 @@ export interface GetAnalyzingDataOptions {
    * 不存在或不在 sessions 列表中 → 退回到 sessions[0].id。
    */
   lastSessionId?: string
+  /**
+   * requirements 根目录覆盖(主要为测试方便注入 fs 路径)。
+   * - 默认:dev 时 cwd = `<repo-root>/apps/web/`,即 `<repo-root>/requirements/`
+   * - 显式传入 → `analysisDir` / `analysisSessionsDir` 缺省时按
+   *   `<requirementsRoot>/<reqId>/analysis[/sessions]` 解析
+   * - 同时显式传 `analysisDir` / `analysisSessionsDir` 时,这两项优先生效
+   *   (本字段只影响未显式传入的字段)
+   */
+  requirementsRoot?: string
+}
+
+// ---------------------------------------------------------------------------
+// 默认路径解析(issue: zone-data-fidelity-fixes · 02 / ANALYZING 部分)
+//
+// 复用 drafting.server.ts 的 dev 路径策略:cwd = `<repo-root>/apps/web/` 时,
+// `../../requirements/` 指向 `<repo-root>/requirements/`。production 部署
+// cwd 不一致的处理留 TODO 注释,由后续部署 ticket 解决(对齐 PRD N-2)。
+// ---------------------------------------------------------------------------
+
+/** 默认 requirements 根:dev 时 cwd = `<repo-root>/apps/web/`,`../../requirements/` 即仓库根 */
+function defaultRequirementsRoot(): string {
+  return resolve(process.cwd(), '../../requirements')
 }
 
 /**
@@ -220,6 +277,11 @@ export interface GetAnalyzingDataOptions {
  * pendingAdjudicationCount 也走 countPendingAdjudications(容错返回 0)。
  *
  * 拆分函数而非 inline:让 getAnalyzingData 主线保持直白,装配逻辑单测容易。
+ *
+ * empty 字段判定:
+ * - fs 里有真实 sessions 内容(非 default 单会话兜底)+ 至少 1 个 chunks.jsonl 有内容
+ *   → `empty: false`(满足 PRD 验收:"_index.yaml 存在 + 至少 1 个会话 chunks 有内容 → 构造非空")
+ * - 否则 → `empty: true`(沿用 emptyAnalyzing 默认)
  */
 function emptyAnalyzingWithOptions(
   requirementId: string,
@@ -231,6 +293,8 @@ function emptyAnalyzingWithOptions(
     : 0
   const sessionsBundle = loadSessionsBundle(options?.analysisSessionsDir, options?.lastSessionId)
   const techBrief = options?.analysisDir ? loadTechBriefFromAnalysisDir(options.analysisDir) : null
+  // empty 判定:fs 有真实 sessions(非 fallback)→ 非空
+  const hasFsSessions = hasFsSessionContent(options?.analysisSessionsDir)
   return {
     ...emptyAnalyzing(requirementId),
     admission: buildAdmissionData({
@@ -241,7 +305,29 @@ function emptyAnalyzingWithOptions(
     sessions: sessionsBundle.sessions,
     activeSessionId: sessionsBundle.activeSessionId,
     ...techBrief,
+    empty: !hasFsSessions,
   }
+}
+
+/**
+ * 判定 fs 是否真的有 sessions 内容(非默认单会话兜底):
+ * - analysisSessionsDir 缺省 / `_index.yaml` 不存在 / 解析失败 → false
+ * - 至少 1 个会话的 `chunks.jsonl` 非空 → true
+ * - 否则 → false(仅有 sessions 元数据但没真实内容,仍算空)
+ */
+function hasFsSessionContent(analysisSessionsDir: string | undefined): boolean {
+  if (!analysisSessionsDir) return false
+  const bundle = loadSessionsBundle(analysisSessionsDir, undefined)
+  // sessions 来自 fallback(id='default')说明 fs 没内容
+  if (bundle.sessions.length === 1 && bundle.sessions[0].id === 'default') {
+    return false
+  }
+  // 检查每个会话是否有 chunks.jsonl 内容
+  for (const session of bundle.sessions) {
+    const chunks = loadSessionChunks(analysisSessionsDir, session.id)
+    if (chunks.length > 0) return true
+  }
+  return false
 }
 
 /**
