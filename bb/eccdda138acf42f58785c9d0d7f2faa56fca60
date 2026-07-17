@@ -1,0 +1,59 @@
+apps/agent/src/worktree/pathUtil.ts
+  s_46a251f09a93ec::t_18e414c3f9c701 7-13,18-19,22-25,62
+  s_46a251f09a93ec::t_c7353ed7c550a3 26,28-32,36-58,74
+  s_46a251f09a93ec::t_e98bf043bf6eea 59-61
+  s_46a251f09a93ec::t_73035d96ee6622 63-65
+  s_46a251f09a93ec::t_5db75d02423e2b 75
+  s_46a251f09a93ec::t_eac1db3389c413 66-72
+apps/agent/src/worktree/WorktreeManager.ts
+  s_46a251f09a93ec::t_9528150be43cd6 12-19
+  s_46a251f09a93ec::t_644251793bd479 22
+  s_46a251f09a93ec::t_74ef4bd0aa36a6 23
+  s_46a251f09a93ec::t_166004a4c9b6c1 76,78,81,83,92-93,111-112,121,139-141
+docs/design/pages/01-new-requirement-modal.html
+  s_46a251f09a93ec::t_ad0df7805eee7e 759-781
+apps/agent/src/__tests__/pathUtil.test.ts
+  s_46a251f09a93ec::t_4f95d1e0a95084 28-35,41,52-53
+  s_46a251f09a93ec::t_20de3465363337 6,36,42,48,54,58,62
+  s_46a251f09a93ec::t_5a08f2dd47587e 37-40
+  s_46a251f09a93ec::t_51f0aa60d69f3b 43-47
+  s_46a251f09a93ec::t_4cb9cdd42a4079 49-51
+  s_46a251f09a93ec::t_8649a2430b7241 55-57
+  s_46a251f09a93ec::t_4d7d8c71ddbeca 59-61
+.scratch/new-requirement-modal/issues/06-web-post-api-requirements-alignment.md
+  s_46a251f09a93ec::t_d3a10714c2bc88 1-50
+apps/web/src/components/__tests__/new-requirement-modal.test.tsx
+  s_46a251f09a93ec::t_e37389d17bd540 142-208
+docs/design/pages/15-new-requirement-modal.html
+  s_46a251f09a93ec::t_53510103861ad6 222-235
+  s_46a251f09a93ec::t_43335f5dc4a5fc 30-32
+docs/design/pages/screenshots/new-requirement-modal/README.md
+  s_46a251f09a93ec::t_6023786aab66ec 1-23
+.scratch/new-requirement-modal/issues/05-e2e-verification-prd-checklist.md
+  s_46a251f09a93ec::t_c5a3bb7e48e726 57
+  s_46a251f09a93ec::t_0ad75bfaf7d7cc 2,16,18-20,31-56
+apps/web/package.json
+  s_46a251f09a93ec::t_f612382a40b29e 21-22
+pnpm-lock.yaml
+  s_46a251f09a93ec::t_a3bf3aa7cb44f0 105-107
+.scratch/ai-devspace-mvp/PRD.md
+  s_46a251f09a93ec::t_dabb7244f11b9d 116-117
+apps/agent/src/__tests__/WorktreeManager.test.ts
+  s_46a251f09a93ec::t_907db556b9b1fd 13-19,22,58,75,88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "bbeccdda138acf42f58785c9d0d7f2faa56fca60",
+  "prompts": {},
+  "sessions": {
+    "s_46a251f09a93ec": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8ab8c542-9781-401d-a97d-cbb9fd674829",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
