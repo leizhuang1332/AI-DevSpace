@@ -1,8 +1,8 @@
-import type { Requirement } from '@/app/(workspace)/data/mock';
+import type { RequirementSummary } from '@ai-devspace/shared';
 import { STATUS_DOT } from './status-badge';
 
 interface Props {
-  tabs: Requirement[]; // 当前工作空间的需求集
+  tabs: RequirementSummary[]; // 当前工作空间的需求集
   currentId: string | null;
 }
 

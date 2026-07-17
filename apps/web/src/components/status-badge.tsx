@@ -1,8 +1,9 @@
 import { clsx } from 'clsx';
-import type { RequirementStatus } from '@/app/(workspace)/data/mock';
+import type { RequirementStatusT } from '@ai-devspace/shared';
 
-const VARIANTS: Record<RequirementStatus, { dot: string; bg: string; label: string }> = {
+const VARIANTS: Record<RequirementStatusT, { dot: string; bg: string; label: string }> = {
   draft:        { dot: 'bg-[#cbd5e1]', bg: 'bg-bg-subtle',          label: '草稿' },
+  drafting:     { dot: 'bg-[#e2e8f0]', bg: 'bg-bg-subtle',          label: '写 PRD' },
   analyzing:    { dot: 'bg-[#a5b4fc]', bg: 'bg-bg-subtle',          label: '分析中' },
   designing:    { dot: 'bg-[#a5b4fc]', bg: 'bg-bg-subtle',          label: '设计中' },
   planning:     { dot: 'bg-[#a5b4fc]', bg: 'bg-bg-subtle',          label: '计划中' },
@@ -17,8 +18,9 @@ const VARIANTS: Record<RequirementStatus, { dot: string; bg: string; label: stri
 // Shared dot color map for cross-component reuse (e.g. StatusBar).
 // Values match the resolved CSS color used by StatusBadge's `dot` class
 // so any consumer (status dot, inline style, etc.) renders the same color.
-export const STATUS_DOT: Record<RequirementStatus, string> = {
+export const STATUS_DOT: Record<RequirementStatusT, string> = {
   draft:        'var(--text-3)',
+  drafting:     '#cbd5e1',
   analyzing:    '#a5b4fc',
   designing:    '#a5b4fc',
   planning:     '#a5b4fc',
@@ -29,7 +31,7 @@ export const STATUS_DOT: Record<RequirementStatus, string> = {
   clarifying:   'var(--brand)',
 };
 
-export function StatusBadge({ status }: { status: RequirementStatus }) {
+export function StatusBadge({ status }: { status: RequirementStatusT }) {
   const v = VARIANTS[status];
   return (
     <span className={clsx('inline-flex items-center gap-1.5 h-5 px-2 rounded text-xs font-medium', v.bg, 'text-text-2')}>

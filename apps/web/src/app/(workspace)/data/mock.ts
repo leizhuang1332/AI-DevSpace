@@ -1,41 +1,24 @@
-export type RequirementStatus =
-  | 'draft' | 'analyzing' | 'designing' | 'planning'
-  | 'implementing' | 'submitting' | 'done' | 'archived' | 'clarifying';
+// ticket 07b:`RequirementStatusT` 与 `Requirement` 类型已迁到 `@ai-devspace/shared` 的
+// `RequirementSummary` / `RequirementStatusT`(跨端契约)。本文件仍 re-export `Requirement`
+// 作 alias,便于后续消费方渐进迁移。
+export type { RequirementSummary as Requirement } from '@ai-devspace/shared'
+// 同时 re-export RequirementStatusT 方便旧 import 兼容(下个迭代清掉)。
+export type { RequirementStatusT as RequirementStatus } from '@ai-devspace/shared'
 
 export type AIStatus =
   | 'idle' | 'thinking' | 'tool_calling'
   | 'writing' | 'awaiting_user' | 'error';
-
-export interface Requirement {
-  id: string;
-  title: string;
-  status: RequirementStatus;
-  progress: number;
-  repos: string[];
-  updatedAt: string;
-  currentStage?: string;
-  currentTask?: number;
-}
 
 export interface Session { id: string; requirementId: string; title: string; aiStatus: AIStatus; currentTask?: string; filesRead?: number; ageMinutes: number; }
 export interface InboxItem { id: string; kind: 'question' | 'error' | 'todo'; requirementTitle: string; message: string; agoMinutes: number; }
 export interface Repository { name: string; branch: string; latestCommit: string; changedFiles: number; }
 export interface Artifact { id: string; name: string; type: 'database' | 'config' | 'api' | 'test' | 'doc' | 'other'; requirementId: string; createdBy: string; agoMinutes: number; size: number; }
 
+// ticket 07b:`requirements` mock 数组已收敛,真实数据走 `GET /api/requirements`(见
+// apps/web/src/lib/requirement-list.server.ts)。sessions / inbox / repositories /
+// knowledge / skills / settings / artifacts / repoDetails 等其他 mock 暂保留
+// (P1+ 才收敛)。
 // mock 集合（Step 2 内增长；P1+ 改 SSE 接入）
-export const requirements: Requirement[] = [
-  { id: 'req-001', title: '退款功能优化', status: 'implementing', progress: 62, repos: ['refund-service', 'order-service'], updatedAt: '2026-07-09T15:00:00Z', currentStage: 'code-stage', currentTask: 12 },
-  { id: 'req-002', title: '会员等级体系重构', status: 'clarifying', progress: 25, repos: ['member-service'], updatedAt: '2026-07-09T12:00:00Z', currentStage: 'analyze-stage' },
-  { id: 'req-003', title: '支付链路灰度切流', status: 'designing', progress: 38, repos: ['pay-gateway', 'risk-service'], updatedAt: '2026-07-09T11:00:00Z', currentStage: 'design-stage' },
-  { id: 'req-004', title: '订单导出（CSV）', status: 'done', progress: 100, repos: ['order-service'], updatedAt: '2026-07-08T09:00:00Z' },
-  { id: 'req-005', title: '优惠券叠加规则', status: 'planning', progress: 48, repos: ['coupon-service'], updatedAt: '2026-07-07T14:00:00Z' },
-  { id: 'req-006', title: '风险决策引擎接入', status: 'analyzing', progress: 15, repos: ['risk-service', 'pay-gateway'], updatedAt: '2026-07-06T16:00:00Z' },
-  { id: 'req-007', title: '2023 Q4 活动复盘归档', status: 'archived', progress: 100, repos: ['promo-service'], updatedAt: '2026-05-01T10:00:00Z' },
-  { id: 'req-008', title: '草稿：活动反作弊策略', status: 'draft', progress: 5, repos: [], updatedAt: '2026-07-09T08:00:00Z' },
-  { id: 'req-009', title: '风控拦截 PR 提交', status: 'submitting', progress: 90, repos: ['risk-service'], updatedAt: '2026-07-09T13:30:00Z' },
-  { id: 'req-010', title: '秒杀链路压测报告', status: 'done', progress: 100, repos: ['seckill-service', 'pay-gateway'], updatedAt: '2026-07-05T18:00:00Z' },
-  { id: 'req-011', title: '购物车持久化重构', status: 'analyzing', progress: 30, repos: ['cart-service'], updatedAt: '2026-07-08T20:00:00Z' },
-];
 
 export const sessions: Session[] = [
   { id: 'sess-1', requirementId: 'req-001', title: '退款功能 · 实施中', aiStatus: 'thinking', currentTask: 'code-stage · Task #12 退款接口开发', filesRead: 8, ageMinutes: 0 },

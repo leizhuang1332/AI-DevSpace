@@ -1,11 +1,14 @@
 import Link from 'next/link';
-import type { Requirement, RequirementStatus } from '@/app/(workspace)/data/mock';
-import { requirements } from '@/app/(workspace)/data/mock';
+import { fetchRequirementsServer } from '@/lib/requirement-list.server';
+import type { RequirementStatusT } from '@ai-devspace/shared';
 import { StatusBadge } from '@/components/status-badge';
 import { NewRequirementButton } from '@/components/new-requirement-button';
 
-const STATUS_FILTERS: RequirementStatus[] = [
-  'draft', 'analyzing', 'designing', 'planning', 'implementing', 'submitting', 'done', 'archived', 'clarifying',
+// ticket 07b 决策 ❻:9 → 10 状态按钮对齐契约;新增 'drafting'(已建目录但 requirement.md 仍空白)
+// 按钮目前是"死按钮",无 onClick 过滤逻辑(沿用 mock 期现状)
+const STATUS_FILTERS: RequirementStatusT[] = [
+  'draft', 'drafting', 'analyzing', 'clarifying', 'designing',
+  'planning', 'implementing', 'submitting', 'done', 'archived',
 ];
 
 function ago(iso: string) {
@@ -15,7 +18,9 @@ function ago(iso: string) {
   return `${Math.floor(m / 60 / 24)} 天前`;
 }
 
-export default function RequirementsPage() {
+export default async function RequirementsPage() {
+  const requirements = await fetchRequirementsServer()
+
   return (
     <main className="p-6 lg:p-8 overflow-auto">
       <div className="flex items-end justify-between mb-6">
@@ -37,19 +42,25 @@ export default function RequirementsPage() {
         ))}
       </div>
 
-      <div className="flex flex-col divide-y divide-border border border-border rounded-lg overflow-hidden">
-        {requirements.map((r: Requirement) => (
-          <Link key={r.id} href={`/requirements/${r.id}`}
-            className="grid grid-cols-[120px_1fr_120px_80px] items-center gap-4 h-12 px-4 hover:bg-bg-subtle text-sm">
-            <StatusBadge status={r.status} />
-            <div className="text-text-1 font-medium">{r.title}</div>
-            <div className="flex gap-1 flex-wrap">
-              {r.repos.map(p => <span key={p} className="h-[18px] px-1.5 bg-bg-subtle rounded-sm font-mono text-[11px] text-text-2 flex items-center">{p}</span>)}
-            </div>
-            <div className="text-xs text-text-3 text-right">{ago(r.updatedAt)}</div>
-          </Link>
-        ))}
-      </div>
+      {requirements.length === 0 ? (
+        <div className="border border-dashed border-border rounded-lg p-12 text-center text-text-3 text-sm">
+          暂无需求。点击右上「+ 新建需求」开始。
+        </div>
+      ) : (
+        <div className="flex flex-col divide-y divide-border border border-border rounded-lg overflow-hidden">
+          {requirements.map((r) => (
+            <Link key={r.id} href={`/requirements/${r.id}`}
+              className="grid grid-cols-[120px_1fr_120px_80px] items-center gap-4 h-12 px-4 hover:bg-bg-subtle text-sm">
+              <StatusBadge status={r.status} />
+              <div className="text-text-1 font-medium">{r.title}</div>
+              <div className="flex gap-1 flex-wrap">
+                {r.repos.map(p => <span key={p} className="h-[18px] px-1.5 bg-bg-subtle rounded-sm font-mono text-[11px] text-text-2 flex items-center">{p}</span>)}
+              </div>
+              <div className="text-xs text-text-3 text-right">{ago(r.updatedAt)}</div>
+            </Link>
+          ))}
+        </div>
+      )}
     </main>
   );
 }

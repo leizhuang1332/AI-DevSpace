@@ -1,4 +1,5 @@
-import { requirements, artifactsFor, type ArtifactV2 } from '@/app/(workspace)/data/mock';
+import { artifactsFor, type ArtifactV2 } from '@/app/(workspace)/data/mock';
+import { fetchRequirementsServer } from '@/lib/requirement-list.server';
 
 interface Props { params: { id: string }; }
 
@@ -11,9 +12,26 @@ const TYPE_LABEL: Record<ArtifactV2['type'], string> = {
   other: '其他',
 };
 
-export default function RequirementArtifactsPage({ params }: Props) {
-  const req = requirements.find(r => r.id === params.id) ?? requirements[0];
+export default async function RequirementArtifactsPage({ params }: Props) {
+  // ticket 07b D5:保留 `?? requirements[0]` fallback(本期 0 N+1 优化,后续 07c 加详情接口后改)
+  const all = await fetchRequirementsServer()
+  const req = all.find(r => r.id === params.id) ?? all[0];
   const arts = artifactsFor(params.id);
+
+  if (!req) {
+    return (
+      <section className="flex flex-col bg-bg-elevated overflow-hidden">
+        <div className="flex items-center h-10 px-4 border-b border-border bg-bg-subtle text-xs text-text-3 gap-2">
+          <span className="font-mono">📄 {params.id}</span>
+          <span>/</span>
+          <span className="text-text-1 font-medium">📦 产物</span>
+        </div>
+        <div className="flex-1 grid place-items-center text-text-3 text-sm">
+          需求 <code className="font-mono text-text-1 ml-1">{params.id}</code> 不存在
+        </div>
+      </section>
+    );
+  }
 
   const countByType = arts.reduce<Record<string, number>>((acc, a) => {
     acc[a.type] = (acc[a.type] ?? 0) + 1;

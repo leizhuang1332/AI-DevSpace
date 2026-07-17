@@ -12,7 +12,7 @@ import type {
   OverviewProgress,
   OverviewZoneCard,
 } from '@/lib/requirement-overview'
-import type { RequirementStatus } from '@/app/(workspace)/data/mock'
+import type { RequirementStatusT } from '@ai-devspace/shared'
 import { EmptyState } from './empty-state'
 
 /**
@@ -168,7 +168,7 @@ function MetaItem({
 }
 
 // 与 status-badge.tsx 的语义对齐 —— 简化版(只点 + 文字)
-function StatusDot({ status }: { status: RequirementStatus }) {
+function StatusDot({ status }: { status: RequirementStatusT }) {
   // 复用 STATUS_DOT 颜色策略,内联简化版避免组件耦合
   const dotColor =
     status === 'done'
@@ -179,7 +179,9 @@ function StatusDot({ status }: { status: RequirementStatus }) {
           ? 'bg-warning'
           : status === 'implementing'
             ? 'bg-brand'
-            : 'bg-[#a5b4fc]'
+            : status === 'drafting'
+              ? 'bg-[#cbd5e1]'
+              : 'bg-[#a5b4fc]'
   return (
     <span
       data-testid="overview-status-dot"

@@ -1,12 +1,17 @@
-import { requirements, sessions, inbox } from '@/app/(workspace)/data/mock';
+import { sessions, inbox } from '@/app/(workspace)/data/mock';
+import { fetchRequirementsServer } from '@/lib/requirement-list.server';
 import { StatCard } from '@/components/stat-card';
 import { RequestCard } from '@/components/request-card';
 import { ActiveSessionCard } from '@/components/active-session-card';
 import { InboxItem as InboxItemComp } from '@/components/inbox-item';
 import { NewRequirementButton } from '@/components/new-requirement-button';
 
-export default function DashboardPage() {
-  const ongoing = requirements.filter(r => r.status !== 'done' && r.status !== 'archived');
+export default async function DashboardPage() {
+  // ticket 07b:从 agent 拉真实需求;sessions / inbox 仍走 mock(P1+ 收敛)
+  const allRequirements = await fetchRequirementsServer()
+  const ongoing = allRequirements.filter(r => r.status !== 'done' && r.status !== 'archived');
+  const total = allRequirements.length
+
   return (
     <main className="p-6 lg:p-8 overflow-auto">
       <div className="flex items-end justify-between mb-6">
@@ -16,7 +21,7 @@ export default function DashboardPage() {
         </div>
         <div className="flex gap-2">
           <button className="h-8 px-3 rounded-md text-md font-medium bg-bg-elevated text-text-1 border border-border-strong hover:bg-bg-subtle">查看历史</button>
-          <NewRequirementButton label={requirements.length === 0 ? '创建你的第一个需求' : '+ 新建需求'} />
+          <NewRequirementButton label={total === 0 ? '创建你的第一个需求' : '+ 新建需求'} />
         </div>
       </div>
 
@@ -40,9 +45,15 @@ export default function DashboardPage() {
           <h2 className="text-xl font-semibold tracking-tight">进行中的需求</h2>
           <span className="text-text-3 text-sm">{ongoing.length} 个 · {sessions.length} 个 AI 活跃</span>
         </div>
-        <div className="grid grid-cols-3 gap-4">
-          {ongoing.map(r => <RequestCard key={r.id} requirement={r} />)}
-        </div>
+        {ongoing.length === 0 ? (
+          <div className="border border-dashed border-border rounded-lg p-8 text-center text-text-3 text-sm">
+            暂无进行中需求。点击右上「+ 新建需求」开始。
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-4">
+            {ongoing.map(r => <RequestCard key={r.id} requirement={r} />)}
+          </div>
+        )}
       </section>
 
       {/* 当前活跃会话 */}
@@ -68,7 +79,7 @@ export default function DashboardPage() {
       </section>
 
       <div className="mt-4 p-4 bg-[#fffbeb] border border-[#fde68a] rounded-md text-sm text-[#78350f]">
-        <strong className="text-[#451a03]">设计说明：</strong>Dashboard 是首屏，遵循 Linear「3 段信息密度」—— 统计 → 进行中需求 → 活跃会话 → 待办。所有数字都是 mock 数据（[P1+ 接 SSE](file:///d:/TraeProject/AI-DevSpace/.scratch/ai-devspace-mvp/issues/03-agent-skeleton.md)）。
+        <strong className="text-[#451a03]">设计说明：</strong>Dashboard 是首屏，遵循 Linear「3 段信息密度」—— 统计 → 进行中需求 → 活跃会话 → 待办。需求数据来自 agent (ticket 07b),会话 / 待办仍是 mock。
       </div>
     </main>
   );

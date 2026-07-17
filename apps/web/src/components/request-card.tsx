@@ -1,15 +1,15 @@
 import Link from 'next/link';
-import type { Requirement } from '@/app/(workspace)/data/mock';
+import type { RequirementSummary } from '@ai-devspace/shared';
 import { StatusBadge } from './status-badge';
 import { ProgressBar } from './progress-bar';
 
-const PROGRESS_COLOR = (status: Requirement['status']): 'brand' | 'warning' | 'planning' => {
+const PROGRESS_COLOR = (status: RequirementSummary['status']): 'brand' | 'warning' | 'planning' => {
   if (status === 'clarifying') return 'warning';
   if (status === 'designing' || status === 'planning') return 'planning';
   return 'brand';
 };
 
-export function RequestCard({ requirement: r }: { requirement: Requirement }) {
+export function RequestCard({ requirement: r }: { requirement: RequirementSummary }) {
   return (
     <Link href={`/requirements/${r.id}`}
       className="block bg-bg-elevated border border-border rounded-lg p-4 hover:-translate-y-px hover:shadow-md hover:border-border-strong transition">

@@ -10,7 +10,7 @@
  * - 空数据兜底:新建需求时返回 empty=true,UI 渲染空状态引导
  * - 永不基于 status 推断工位(决策 15 反对状态机)—— currentZone 由调用方传入
  */
-import type { RequirementStatus } from '@/app/(workspace)/data/mock'
+import type { RequirementStatusT } from '@ai-devspace/shared'
 
 // ---------------------------------------------------------------------------
 // 类型定义
@@ -82,7 +82,7 @@ export interface OverviewMeta {
   title: string
   /** 类似 "REF-2024-089" 的展示 ID;与 path id 解耦 */
   reqIdLabel: string
-  status: RequirementStatus
+  status: RequirementStatusT
   repos: string[]
   owner: string
   /** 形如 "2026-07-08 · 4 天前" */
