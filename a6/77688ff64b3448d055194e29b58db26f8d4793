@@ -1,0 +1,84 @@
+apps/agent/src/__tests__/requirement.test.ts
+  s_403a14d7d6cb34::t_719ea93c2d0ac3 13-14,59,307-405,409-416,418-420,422-425,429-436,438-440,442-445,449-456,458-460,462-465,469-476,478,482-485,489-496,498,502-505,508-509,528-531,534-535,538-544,546-548,550-553,560,565,573-576,580-583,586,588-591,614,619,622-628,630-631,639,643-646,651,657-663,665-666,675-678,681-689,691-692,702-705
+  s_403a14d7d6cb34::t_4f285d7925a35e 3
+  s_403a14d7d6cb34::t_9f2ddcae8e2c57 406-408
+  s_403a14d7d6cb34::t_7ed83570ef9182 417
+  s_403a14d7d6cb34::t_48206c315d698c 421
+  s_403a14d7d6cb34::t_04d648f679cd60 426-428
+  s_403a14d7d6cb34::t_ace506fc7e31ff 437
+  s_403a14d7d6cb34::t_5fb5b2d7e8ec35 441
+  s_403a14d7d6cb34::t_a3e8932adfa613 446-448
+  s_403a14d7d6cb34::t_1665ca947d0de7 457
+  s_403a14d7d6cb34::t_ecf81792ef9151 461
+  s_403a14d7d6cb34::t_9ec67d1ac15e8b 466-468
+  s_403a14d7d6cb34::t_fe43995bc20f5e 477
+  s_403a14d7d6cb34::t_0852ac4c8803b0 479-481
+  s_403a14d7d6cb34::t_df1f156dbdfa1e 486-488
+  s_403a14d7d6cb34::t_a592e72f3ee450 497
+  s_403a14d7d6cb34::t_75db1df568c19c 499-501
+  s_403a14d7d6cb34::t_d7b11845b8e6ef 506-507
+  s_403a14d7d6cb34::t_7b6662d4fdc567 510-512,525-527
+  s_403a14d7d6cb34::t_4897a0fd83686b 532-533
+  s_403a14d7d6cb34::t_613cbc3ac8c3da 536-537
+  s_403a14d7d6cb34::t_3cc1e02ee1c33e 545
+  s_403a14d7d6cb34::t_f282bdda5b6373 549
+  s_403a14d7d6cb34::t_fd930160fd3e2c 554-559
+  s_403a14d7d6cb34::t_a7f88b6613fb44 561-564
+  s_403a14d7d6cb34::t_db983c347356c7 566-568,570-572
+  s_403a14d7d6cb34::t_341266a325465f 577-579
+  s_403a14d7d6cb34::t_e52325957962ea 584-585
+  s_403a14d7d6cb34::t_f1bf0352464f2b 587
+  s_403a14d7d6cb34::t_1bc961ec32e997 592-594,611-613
+  s_403a14d7d6cb34::t_b385a532de9eaf 615-618
+  s_403a14d7d6cb34::t_2f53a70b5f9de0 620-621
+  s_403a14d7d6cb34::t_5e5813829d88ae 629
+  s_403a14d7d6cb34::t_e61d3e8607e193 632-634,636-638
+  s_403a14d7d6cb34::t_178747a6e615d9 640-642
+  s_403a14d7d6cb34::t_215bd113288f8c 647-650
+  s_403a14d7d6cb34::t_8bfe7b227b7c55 652-656
+  s_403a14d7d6cb34::t_515e4ee5f6300f 664
+  s_403a14d7d6cb34::t_7208b15db6330a 667-669,672-674
+  s_403a14d7d6cb34::t_45b99df96159b5 679-680
+  s_403a14d7d6cb34::t_7c93d5754bb6c4 690
+  s_403a14d7d6cb34::t_5e6637e92e1616 693-695,699-701
+  s_403a14d7d6cb34::t_c3d195c2610bae 706
+  s_403a14d7d6cb34::t_b4afb28215d876 513-524,569,595-610,635,670-671,696-698
+packages/shared/src/__tests__/requirement.test.ts
+  s_403a14d7d6cb34::t_95516418c95317 1-285
+apps/agent/src/services/RequirementService.ts
+  s_403a14d7d6cb34::t_bfa35e3767ed2a 18,20,23-25,28
+  s_403a14d7d6cb34::t_c49ad04f703293 283-448
+packages/shared/src/requirement.ts
+  s_403a14d7d6cb34::t_961672b3882ce0 1-64,70,75,78-89,100-192
+  s_403a14d7d6cb34::t_2238b801ac49f3 90-99
+  s_403a14d7d6cb34::t_fae1ce536f9026 77
+  s_403a14d7d6cb34::t_3bb4a68e6075a9 67-68,71-74,76
+  s_403a14d7d6cb34::t_212610915f85d9 65-66,69
+apps/agent/src/routes/requirement.ts
+  s_403a14d7d6cb34::t_99ef14f0922337 4,7-8,10-15,35-41,47,52-53,61,83-85
+  s_403a14d7d6cb34::t_6f7278efb52b58 86-146
+apps/agent/src/__tests__/requirement-create.e2e.test.ts
+  s_403a14d7d6cb34::t_d2cfa6deb9a4f7 1-221
+apps/agent/src/server.ts
+  s_403a14d7d6cb34::t_92649e98a61d93 234-236
+packages/shared/src/index.ts
+  s_403a14d7d6cb34::t_0f5c6928b47e5c 9-10
+packages/shared/src/sse.ts
+  s_403a14d7d6cb34::t_0a0a48c77679f3 205-228
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "a677688ff64b3448d055194e29b58db26f8d4793",
+  "prompts": {},
+  "sessions": {
+    "s_403a14d7d6cb34": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b16e8482-595e-4eac-be2a-fd2ec02238e8",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
