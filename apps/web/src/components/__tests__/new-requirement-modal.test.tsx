@@ -139,6 +139,73 @@ describe('NewRequirementModal · 校验', () => {
     expect(input.value.length).toBe(50)
     expect(screen.getByText('50 / 50')).toBeInTheDocument()
   })
+
+  it('E5 允许同名(决策 c1):重复 title 不报错,提交流程不变', async () => {
+    // 决策 c1:允许同名需求,ID 唯一即可。这里验证两次输入相同 title,
+    // 提交按钮仍可用,且 slug 派生一致。
+    renderModal()
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('trigger-btn'))
+
+    const input = screen.getByLabelText(/需求名称/) as HTMLInputElement
+    await user.type(input, '退款功能优化')
+    const submit = screen.getByTestId('new-req-modal-submit') as HTMLButtonElement
+    expect(submit.disabled).toBe(false)
+  })
+
+  it('E10 取消无副作用:打开 → 取消 → 再打开 → input 为空(不残留)', async () => {
+    // 决策 E10:用户取消后无副作用,需求未创建,二次打开 input 应清空。
+    renderModal()
+    const user = userEvent.setup()
+    const trigger = screen.getByTestId('trigger-btn')
+
+    // 第一次:输入 → 取消
+    await user.click(trigger)
+    const input = screen.getByLabelText(/需求名称/) as HTMLInputElement
+    await user.type(input, '退款')
+    await user.click(screen.getByTestId('new-req-modal-cancel'))
+    expect(screen.queryByTestId('new-req-modal')).toBeNull()
+    expect(mockPush).not.toHaveBeenCalled()
+
+    // 第二次:再次打开,input 应为空
+    await user.click(trigger)
+    const input2 = screen.getByLabelText(/需求名称/) as HTMLInputElement
+    expect(input2.value).toBe('')
+  })
+
+  it('slug 预览:退款功能优化 → req-NNN-退款功能优化(中文保留)', async () => {
+    renderModal()
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('trigger-btn'))
+
+    const input = screen.getByLabelText(/需求名称/) as HTMLInputElement
+    await user.type(input, '退款功能优化')
+    // slug 预览应显示中文原样保留
+    expect(screen.getByText(/退款功能优化/)).toBeInTheDocument()
+  })
+
+  it('slug 预览:Order Refund V2! → req-NNN-order-refund-v2', async () => {
+    renderModal()
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('trigger-btn'))
+
+    const input = screen.getByLabelText(/需求名称/) as HTMLInputElement
+    await user.type(input, 'Order Refund V2!')
+    // kebab-case + 去标点
+    expect(screen.getByText(/order-refund-v2/)).toBeInTheDocument()
+  })
+
+  it('slug 预览:输入含路径非法字符 → 实时同步过滤后 slug', async () => {
+    renderModal()
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('trigger-btn'))
+
+    const input = screen.getByLabelText(/需求名称/) as HTMLInputElement
+    // 包含 : 和 / 应该被过滤;前后的 空格 也应被处理为 -
+    await user.type(input, '  测试 / 边界  ')
+    // 期望 slug:测试-边界(去前后 -, / → 删,空白 → -)
+    expect(screen.getByText(/测试-边界/)).toBeInTheDocument()
+  })
 })
 
 describe('NewRequirementModal · 关闭路径 + 焦点回触发(决策 24 / 30 a11y)', () => {

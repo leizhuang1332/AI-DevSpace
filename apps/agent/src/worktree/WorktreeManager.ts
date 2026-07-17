@@ -9,9 +9,18 @@
  * 所有 git 命令经过 `gitExec` 抽象层(由 deps.git 注入),便于测试 & 替换实现。
  *
  * 失败处理:git 退出码 ≠ 0 时,组装一个包含 stderr 的 Error 抛出。
+ *
+ * 路径语义(cross-platform):
+ *   - getPoolRepoPath / getWorktreePath 返回 **OS-native 路径**(Windows 上是
+ *     `C:\...\repos\a`,POSIX 上是 `/repos/a`),用于 fs.existsSync 等系统调用。
+ *   - 实际传给 git 的 `-C <repoPath>` / `worktree add <wtPath>` 参数走
+ *     `toPosixPath` 转换(Windows 上变 `/c/...`、POSIX 上保持 `/...`)。
+ *   - 这是 ticket 02 在 Windows 上 fs.existsSync 失败的修复 —— 之前的实现把
+ *     路径统一走 posixJoin 但只 prepend `/`,Windows 上得到 `/C:/...` 不存在。
  */
 
-import { posixJoin } from './pathUtil.js'
+import { join } from 'node:path'
+import { posixJoin, toPosixPath } from './pathUtil.js'
 
 export interface GitExecResult {
   code: number
@@ -64,12 +73,14 @@ export interface WorktreeManager {
 export function createWorktreeManager(deps: WorktreeManagerDeps): WorktreeManager {
   const { root, git } = deps
 
+  /** OS-native path,用于 fs.existsSync / fs.mkdir 等系统调用 */
   function getPoolRepoPath(repoName: string): string {
-    return posixJoin(root, 'repos', repoName)
+    return join(root, 'repos', repoName)
   }
 
+  /** OS-native path,用于 fs 系统调用 */
   function getWorktreePath(reqId: string, repoName: string): string {
-    return posixJoin(root, 'requirements', reqId, 'repos', repoName)
+    return join(root, 'requirements', reqId, 'repos', repoName)
   }
 
   async function createWorktree(
@@ -78,8 +89,8 @@ export function createWorktreeManager(deps: WorktreeManagerDeps): WorktreeManage
     branchName: string,
     base = 'master',
   ): Promise<void> {
-    const repoPath = getPoolRepoPath(repoName)
-    const wtPath = getWorktreePath(reqId, repoName)
+    const repoPath = toPosixPath(getPoolRepoPath(repoName))
+    const wtPath = toPosixPath(getWorktreePath(reqId, repoName))
     const args = [
       '-C',
       repoPath,
@@ -97,8 +108,8 @@ export function createWorktreeManager(deps: WorktreeManagerDeps): WorktreeManage
   }
 
   async function removeWorktree(reqId: string, repoName: string): Promise<void> {
-    const repoPath = getPoolRepoPath(repoName)
-    const wtPath = getWorktreePath(reqId, repoName)
+    const repoPath = toPosixPath(getPoolRepoPath(repoName))
+    const wtPath = toPosixPath(getWorktreePath(reqId, repoName))
     const args = ['-C', repoPath, 'worktree', 'remove', wtPath]
     const result = await git(args)
     if (result.code !== 0) {
@@ -107,7 +118,7 @@ export function createWorktreeManager(deps: WorktreeManagerDeps): WorktreeManage
   }
 
   async function listWorktrees(repoName: string): Promise<WorktreeInfo[]> {
-    const repoPath = getPoolRepoPath(repoName)
+    const repoPath = toPosixPath(getPoolRepoPath(repoName))
     const args = ['-C', repoPath, 'worktree', 'list', '--porcelain']
     const result = await git(args)
     if (result.code !== 0) {
@@ -124,6 +135,9 @@ export function createWorktreeManager(deps: WorktreeManagerDeps): WorktreeManage
     listWorktrees,
   }
 }
+
+// 重新导出 posixJoin 供调用方(比如 spec 测试)使用;WorktreeManager 内部不再依赖。
+export { posixJoin }
 
 /** git worktree list --porcelain 输出 → WorktreeInfo[] */
 /** detached HEAD (无 branch 行) 直接跳过 —— 我们只关心「分支上的 worktree」 */

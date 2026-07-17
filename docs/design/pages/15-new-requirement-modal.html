@@ -27,6 +27,9 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<!-- ⚠️ DEPRECATED · 此页 5s 后自动跳转 v1.0.3 新设计稿;请使用 ./01-new-requirement-modal.html -->
+<meta http-equiv="refresh" content="5;url=./01-new-requirement-modal.html">
+<link rel="canonical" href="./01-new-requirement-modal.html">
 <title>[DEPRECATED v1.0] 15 · 新建需求 · AI-DevSpace</title>
 <link rel="preconnect" href="https://rsms.me/">
 <link rel="stylesheet" href="https://rsms.me/inter/inter.css">
@@ -214,6 +217,20 @@ body{font-family:'Inter',sans-serif;background:#1a1a2e;color:var(--text-1);font-
 
 <div class="note">
   <strong>设计说明：</strong>新建需求 = 创建工作的起点。MVP 简化为单页表单（不分多步），3 个必填：名称、关联仓库、PRD。提交后 → Agent 端 (1) 创建 <code style="font-family:'JetBrains Mono',monospace">~/.aidevspace/requirements/req-xxx/</code> 目录，(2) 写 <code style="font-family:'JetBrains Mono',monospace">meta.yaml</code>，(3) 对每个 repo 在需求下建 worktree，(4) 写入 <code style="font-family:'JetBrains Mono',monospace">requirement.md</code>，(5) 状态置 <code style="font-family:'JetBrains Mono',monospace">DRAFT</code>。空态对应需求列表 0 条记录时显示。
+</div>
+
+<!-- ⚠️ DEPRECATED 跳转提示(覆盖在内容之上;用户点 ✕ 关闭) -->
+<div
+  id="deprecated-overlay"
+  style="position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:9999;background:#fff7ed;border:1px solid #fdba74;color:#7c2d12;border-radius:8px;padding:12px 16px;box-shadow:0 4px 12px rgba(0,0,0,0.1);max-width:560px;font-size:13px;display:flex;align-items:center;gap:12px"
+>
+  <span style="flex:1">
+    ⚠️ 此页面是 v1.0 设计稿,已被
+    <a href="./01-new-requirement-modal.html" style="color:#9a3412;text-decoration:underline">01-new-requirement-modal.html (v1.0.3)</a>
+    取代。
+  </span>
+  <a href="./01-new-requirement-modal.html" style="background:#9a3412;color:#fff;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:12px">立即跳转 →</a>
+  <button onclick="document.getElementById('deprecated-overlay').remove()" style="background:transparent;border:none;color:#7c2d12;cursor:pointer;font-size:16px;line-height:1">✕</button>
 </div>
 
 </body>

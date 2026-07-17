@@ -756,5 +756,28 @@ body{
   <strong>三件套:</strong><a href="../../scratch/new-requirement-modal/PRD.md" style="color:#525bc7">PRD.md</a> · <a href="../../scratch/new-requirement-modal/UI-POLISH-SPEC.md" style="color:#525bc7">UI-POLISH-SPEC.md</a> · <a href="15-new-requirement-modal.html" style="color:#525bc7;color:#525bc7;text-decoration:line-through">15-new-requirement-modal.html (deprecated)</a>
 </div>
 
+<!-- ===== 视觉归档占位(ticket 05 e2e 验证 + PRD §12 验收清单收尾) ===== -->
+<section
+  id="visual-archive"
+  style="max-width:1280px;margin:32px auto;padding:var(--space-6);background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-lg)"
+>
+  <h3 style="font-size:var(--text-xl);font-weight:600;margin-bottom:var(--space-4);color:var(--text-1)">
+    📸 视觉归档(PRD §12 验收清单收尾 · ticket 05)
+  </h3>
+  <p style="font-size:var(--text-sm);color:var(--text-2);line-height:1.7;margin-bottom:var(--space-4)">
+    ticket 05 e2e 验证要求"截 4 张图归档"——本节是占位,实际截图通过本地 `pnpm dev` 浏览器手动截取后归档到 <code style="font-family:'JetBrains Mono',monospace;font-size:12px;background:var(--bg-subtle);padding:2px 6px;border-radius:4px">docs/design/pages/screenshots/new-requirement-modal/</code> 目录(MVP 阶段非阻塞,文件命名约定见下)。
+  </p>
+  <ol style="font-size:var(--text-sm);color:var(--text-2);line-height:1.8;padding-left:24px">
+    <li><strong>01-modal-empty.png</strong> — 弹窗初始状态(空 input + 占位 slug 预览)</li>
+    <li><strong>02-modal-typing.png</strong> — 输入"退款功能优化" + slug 实时预览 + 字数计数</li>
+    <li><strong>03-drafting-banner.png</strong> — DRAFTING 顶部淡黄 banner"未关联任何仓库" + 骨架屏消失后</li>
+    <li><strong>04-attach-repos-dialog.png</strong> — 首次关联 480px 弹层(checkbox + 统一分支名 input)</li>
+    <li><strong>05-append-repos-dialog.png</strong> — 追加场景 480px 弹层(顶部紫色 banner + 无分支名 input)</li>
+  </ol>
+  <p style="font-size:var(--text-xs);color:var(--text-3);margin-top:var(--space-4);font-style:italic">
+    注:实际 e2e 截图为视觉回归基线,不强制进 git(mvp 文件大小考虑);决策 50 工位级 e2e 截图单独归档。
+  </p>
+</section>
+
 </body>
 </html>

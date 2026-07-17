@@ -113,6 +113,8 @@ Feature: ai-devspace-mvp
 /settings                 全局设置
 ```
 
+> **子 PRD 引用**:需求创建(↗ `/requirements/new` 弹窗)的 v1.0.3 重构(420px / 1 字段 / slug 预览)由 [.scratch/new-requirement-modal/PRD.md](./new-requirement-modal/PRD.md) 承载,实现落地在 ticket 01-05;弹窗提交后跳 DRAFTING 工位(决策 57),关联仓库 / 写 PRD 等后置动作**不在弹窗内**。本节路由树未变,新增点只是 `+ 新建需求` 入口的弹窗语义细化(4 个入口共用同一 overlay,见 sub-PRD §5 触发入口)。
+
 ---
 
 ## 6. 核心页面布局

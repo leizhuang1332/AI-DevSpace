@@ -10,8 +10,16 @@
  *  - gitExec 失败 → createWorktree reject
  *
  * 不依赖真实 git:GitExec 通过 factory 注入,fake 实现记录命令。
+ *
+ * 路径语义(ticket 02 修复):
+ *   - getPoolRepoPath / getWorktreePath 返回 OS-native path(`path.join(root, ...)`),
+ *     用于 fs 操作。
+ *   - 传给 git 的 -C / worktree add 参数走 toPosixPath 转 POSIX(`/c/...` on Windows)。
+ *   - 这里 ROOT 用 POSIX 风格(`/fake/aidevspace`),所以两种输出都是 `/fake/...`,
+ *     测试断言统一。
  */
 
+import { join } from 'node:path'
 import { describe, it, expect, vi } from 'vitest'
 import {
   createWorktreeManager,
@@ -47,7 +55,7 @@ describe('createWorktreeManager', () => {
       const { git } = makeFakeGit()
       const mgr = createWorktreeManager({ root: ROOT, git })
       expect(mgr.getWorktreePath('REFUND-001', 'order-svc')).toBe(
-        '/fake/aidevspace/requirements/REFUND-001/repos/order-svc',
+        join(ROOT, 'requirements', 'REFUND-001', 'repos', 'order-svc'),
       )
     })
 
@@ -64,7 +72,7 @@ describe('createWorktreeManager', () => {
     it('computes the global pool path repos/<repoName>', () => {
       const { git } = makeFakeGit()
       const mgr = createWorktreeManager({ root: ROOT, git })
-      expect(mgr.getPoolRepoPath('order-svc')).toBe('/fake/aidevspace/repos/order-svc')
+      expect(mgr.getPoolRepoPath('order-svc')).toBe(join(ROOT, 'repos', 'order-svc'))
     })
   })
 
@@ -77,6 +85,7 @@ describe('createWorktreeManager', () => {
 
       expect(calls).toHaveLength(1)
       // argv 顺序:worktree add <path> -b <branch> <base>
+      // 路径走 toPosixPath(Windows 上 drive-letter 转 /c/...)
       expect(calls[0]).toEqual([
         '-C',
         '/fake/aidevspace/repos/order-svc',
