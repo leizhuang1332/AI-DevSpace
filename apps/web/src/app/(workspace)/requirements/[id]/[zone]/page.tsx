@@ -14,7 +14,7 @@ import { DraftingZone } from '@/components/drafting-zone'
 import { DraftingSkillRail } from '@/components/drafting-skill-rail'
 import { getClarifyingData } from '@/lib/clarifying'
 import { ClarifyingZone } from '@/components/clarifying-zone'
-import { getDesigningData } from '@/lib/designing'
+import { getDesigningDataFromFs } from '@/lib/designing.server'
 import { DesigningZone } from '@/components/designing-zone'
 import {
   getWrapupData,
@@ -125,8 +125,13 @@ export default async function ZonePage({
   // - 底部"取舍点详情 + AI 建议" + 自定义调整输入框
   // - onSelect / onRegenerate 为 client 回调(默认 no-op),后续接 agent API
   //   时包一层 client wrapper(类似 DRAFTING 的 DraftingSkillRail)注入回调。
+  //
+  // zone-data-fidelity-fixes/03 — 改用 server-only `getDesigningDataFromFs`,
+  // 让真实需求(已由 Agent 写入 `requirements/{id}/design/*.yaml`)进入
+  // DESIGNING 拿到非空候选方案;否则 `emptyDesigning(reqId)` 兜底。
+  // `designing.ts` 里的 mock `getDesigningData` 保留,组件测试继续依赖它。
   if (zone.id === 'designing') {
-    const data = await getDesigningData(params.id)
+    const data = await getDesigningDataFromFs(params.id)
     return (
       <ZoneShell id={params.id} zone={zone}>
         <DesigningZone data={data} />
