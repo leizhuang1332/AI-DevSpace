@@ -31,6 +31,23 @@ function writeRequirement(id: string, content: string): void {
   writeFileSync(join(dir, 'requirement.md'), content, 'utf8')
 }
 
+/** 在 tmpRoot 下建 requirements/<id>/meta.yaml 并写入 raw yaml 内容 */
+function writeMeta(id: string, raw: string): void {
+  const dir = join(tmpRoot, 'requirements', id)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'meta.yaml'), raw, 'utf8')
+}
+
+/** 在 tmpRoot/config.yaml 写 workspaceRoot,返回 config 绝对路径(给 `configPath` 选项) */
+function writeWorkspaceRootConfig(workspaceRoot: string): string {
+  writeFileSync(
+    join(tmpRoot, 'config.yaml'),
+    `workspaceRoot: ${workspaceRoot}\n`,
+    'utf8',
+  )
+  return join(tmpRoot, 'config.yaml')
+}
+
 // ============================================================================
 // 文件不存在(新建需求场景)
 // ============================================================================
@@ -237,11 +254,13 @@ describe('getDraftingDataFromFs · 错误 / 边界', () => {
   // 回归 ticket 01 review 抓到的路径解析 bug:之前 `defaultRequirementsRoot()`
   // 直接返回 `process.cwd()`,再拼 `requirements/{id}/requirement.md`,dev 时 cwd
   // = `<repo-root>/apps/web/` → 解析到 `<repo-root>/apps/web/requirements/...` ❌
-  // 修复后 `defaultRequirementsRoot()` 返回 `resolve(process.cwd(), '../..')`,
-  // 拼好后恰好是 spec 字面要求的 `<repo-root>/requirements/{id}/requirement.md`。
-  // 本测试 mock process.cwd() 模拟 `apps/web/` 形态,放 fixture 在期望的最终路径上,
-  // 验证默认路径解析真的能找到文件(不只 "不抛错 + empty=true")。
-  it('回归:默认路径解析为 `<cwd>/../../requirements/{id}/requirement.md`', async () => {
+  // 修复后 `defaultRequirementsRoot()` 走 `resolveRequirementsRoot()` 三层 fallback
+  // (ticket 05 / D-6),最终 fallback 是 `resolve(process.cwd(), '../..')`。
+  // 本测试 mock process.cwd() 模拟 `apps/web/` 形态,并显式注入一个不存在的
+  // configPath 让 config 层短路,同时 AIDEVSPACE_HOME 已在 beforeEach 里清空,
+  // 走到第三层 cwd fallback → 放 fixture 在期望的最终路径上,验证默认路径解析
+  // 真的能找到文件(不只 "不抛错 + empty=true")。
+  it('回归:默认路径解析 fallback 到 `<cwd>/../../requirements/{id}/requirement.md`', async () => {
     // 构造 `<mockRoot>/apps/web/` 作为 mock cwd(模拟 dev 形态)
     const mockCwd = join(tmpRoot, 'apps', 'web')
     mkdirSync(mockCwd, { recursive: true })
@@ -250,13 +269,166 @@ describe('getDraftingDataFromFs · 错误 / 边界', () => {
     mkdirSync(join(tmpRoot, 'requirements', 'req-default-fs'), { recursive: true })
     writeFileSync(realReqFile, '从默认路径解析到的 fixture 内容', 'utf8')
 
+    // 注入不存在的 configPath + beforeEach 已清空 AIDEVSPACE_HOME → 走到 cwd fallback
+    const fakeConfigPath = join(tmpRoot, 'not-exists-config.yaml')
+
     const spy = vi.spyOn(process, 'cwd').mockReturnValue(mockCwd)
     try {
-      const data = await getDraftingDataFromFs('req-default-fs')
+      const data = await getDraftingDataFromFs('req-default-fs', {
+        configPath: fakeConfigPath,
+      })
       expect(data.empty).toBe(false)
       expect(data.prdMarkdown).toBe('从默认路径解析到的 fixture 内容')
     } finally {
       spy.mockRestore()
     }
+  })
+})
+
+// ============================================================================
+// meta.yaml 读取(issue: zone-data-fidelity-fixes · 05 · D-6.3,影响 bug 2)
+//
+// 验收点:
+// - meta.yaml 存在 + 含 `title:` 字段 + requirement.md > 10 字节 → title === meta.yaml.title
+// - meta.yaml 缺失 → title === '' (向后兼容)
+// - meta.yaml 无 title 字段 → title === ''
+// - meta.yaml 解析失败 → title === ''
+// - requirement.md ≤ 10 字节 → emptyDrafting(不读 meta.yaml,空态无 title 语义)
+//
+// 路径解析:fixture 用 `requirementsRoot` 选项直接注入父目录,跳过
+// `resolveRequirementsRoot`(避免依赖宿主 `~/.aidevspace/config.yaml`)
+// ============================================================================
+
+describe('getDraftingDataFromFs · meta.yaml 读取(bug 2 修复)', () => {
+  it('meta.yaml 含 title + requirement.md > 10 字节 → title = meta.yaml.title, prdMarkdown = 文件内容', async () => {
+    // 构造 fixture:
+    //   <tmpRoot>/requirements/req-test/{meta.yaml, requirement.md}
+    // 注入 requirementsRoot = tmpRoot(根据 drafting.server.ts 的路径拼装,
+    // 这等价于 "<requirementsRoot>/requirements/<reqId>/..." 形式)
+    writeMeta(
+      'req-test',
+      ['id: req-test', 'title: 测试需求', 'createdAt: 2026-07-18T00:00:00Z', ''].join(
+        '\n',
+      ),
+    )
+    writeRequirement('req-test', '# foo\nbar baz qux\n')
+
+    const data = await getDraftingDataFromFs('req-test', {
+      requirementsRoot: tmpRoot,
+    })
+
+    // bug 2 修复的核心断言:title 来自 meta.yaml
+    expect(data.requirementId).toBe('req-test')
+    expect(data.empty).toBe(false)
+    expect(data.title).toBe('测试需求')
+    expect(data.prdMarkdown).toBe('# foo\nbar baz qux\n')
+  })
+
+  it('meta.yaml 含 title 但 requirement.md ≤ 10 字节 → emptyDrafting(title === "",不读 meta.yaml)', async () => {
+    writeMeta('req-empty-pri', 'title: 测试需求\n')
+    writeRequirement('req-empty-pri', 'hi') // 2 字节
+
+    const data = await getDraftingDataFromFs('req-empty-pri', {
+      requirementsRoot: tmpRoot,
+    })
+
+    expect(data.empty).toBe(true)
+    // 空态语义对齐 emptyDrafting 默认:title === ''(即便有 meta.yaml 也不读)
+    expect(data.title).toBe('')
+  })
+
+  it('requirement.md > 10 字节但 meta.yaml 缺失 → title === ""(向后兼容)', async () => {
+    writeRequirement('req-no-meta', '# foo\nbar baz qux\n')
+    // 故意不写 meta.yaml
+
+    const data = await getDraftingDataFromFs('req-no-meta', {
+      requirementsRoot: tmpRoot,
+    })
+
+    expect(data.empty).toBe(false)
+    expect(data.prdMarkdown).toBe('# foo\nbar baz qux\n')
+    expect(data.title).toBe('')
+  })
+
+  it('requirement.md > 10 字节 + meta.yaml 无 title 字段 → title === ""(字段缺失容错)', async () => {
+    writeMeta('req-meta-no-title', 'id: req-meta-no-title\ncreatedAt: 2026-07-18\n')
+    writeRequirement('req-meta-no-title', '# foo\nbar baz qux\n')
+
+    const data = await getDraftingDataFromFs('req-meta-no-title', {
+      requirementsRoot: tmpRoot,
+    })
+
+    expect(data.empty).toBe(false)
+    expect(data.title).toBe('')
+  })
+
+  it('meta.yaml 解析失败(yaml 损坏) → title === ""(静默降级,不抛错)', async () => {
+    writeMeta('req-meta-broken', '\x00\x01\x02not yaml at all\xff')
+    writeRequirement('req-meta-broken', '# foo\nbar baz qux\n')
+
+    const data = await getDraftingDataFromFs('req-meta-broken', {
+      requirementsRoot: tmpRoot,
+    })
+
+    expect(data.empty).toBe(false)
+    // meta.yaml 解析失败 → title 降级到 '',不影响 prdMarkdown 渲染
+    expect(data.title).toBe('')
+    expect(data.prdMarkdown).toBe('# foo\nbar baz qux\n')
+  })
+
+  it('meta.yaml title 字段含中文 → 原样保留(parseFlatMap 不破坏 UTF-8)', async () => {
+    writeMeta(
+      'req-cn-title',
+      ['id: req-cn-title', 'title: test托尔斯泰', ''].join('\n'),
+    )
+    writeRequirement('req-cn-title', '# foo\nbar baz qux\n')
+
+    const data = await getDraftingDataFromFs('req-cn-title', {
+      requirementsRoot: tmpRoot,
+    })
+
+    expect(data.empty).toBe(false)
+    expect(data.title).toBe('test托尔斯泰')
+  })
+
+  it('meta.yaml title 字段带引号 → 引号被剥离', async () => {
+    writeMeta('req-quoted-title', ['title: "test需求"', ''].join('\n'))
+    writeRequirement('req-quoted-title', '# foo\nbar baz qux\n')
+
+    const data = await getDraftingDataFromFs('req-quoted-title', {
+      requirementsRoot: tmpRoot,
+    })
+
+    expect(data.empty).toBe(false)
+    expect(data.title).toBe('test需求')
+  })
+
+  it('configPath 注入 + meta.yaml:验证 resolveRequirementsRoot(configPath) 真实被读取', async () => {
+    // 模拟 ticket 05 / D-6.1 的真实场景:configPath 指向的 config.yaml 含
+    // workspaceRoot → 根路径按 config 解析(非 cwd fallback)
+    writeMeta('req-config', 'title: 来自config路径解析的需求\n')
+    writeRequirement('req-config', '# foo\nbar baz qux\n')
+    const configPath = writeWorkspaceRootConfig(tmpRoot)
+
+    const data = await getDraftingDataFromFs('req-config', { configPath })
+
+    expect(data.empty).toBe(false)
+    expect(data.title).toBe('来自config路径解析的需求')
+  })
+
+  it('回归:req-001 走硬编码,即便 fs 里有 meta.yaml 也用硬编码(短路在 fs 检查之前)', async () => {
+    // 即便 fs 里有 meta.yaml,req-001 仍走 REFUND_DRAFTING(向后兼容)
+    writeMeta('req-001', 'title: 完全不同的标题\n')
+    writeRequirement('req-001', '# foo\nbar baz qux\n')
+
+    const data = await getDraftingDataFromFs('req-001', {
+      requirementsRoot: tmpRoot,
+    })
+
+    expect(data.requirementId).toBe('req-001')
+    expect(data.empty).toBe(false)
+    // REFUND_DRAFTING.title 是 '退款功能优化'(不是 '完全不同的标题')
+    expect(data.title).not.toBe('完全不同的标题')
+    expect(data.title).toContain('退款')
   })
 })

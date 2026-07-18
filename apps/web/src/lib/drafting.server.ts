@@ -29,16 +29,16 @@
  *   `requirement.md` 也能拿到完整样例数据)
  * - 其他 reqId → 读 `requirement.md`:
  *   - 文件存在且内容字节数 > 10(对齐后端 `RequirementService.DRAFTING_CONTENT_MIN_BYTES`,
- *     跟 `deriveStatus` 阈值一致)→ 构造非空 `DraftingData`(`prdMarkdown` = 文件内容)
+ *     跟 `deriveStatus` 阈值一致)→ 构造非空 `DraftingData`(`prdMarkdown` = 文件内容,
+ *     `title` 从 `meta.yaml.title` 提取)
  *   - 否则 → `emptyDrafting(reqId)`(空草稿态;组件侧生成骨架)
  *
- * 路径解析(对照 PRD N-2 · TODO):
- * - dev: `path.resolve(process.cwd(), '../../requirements/{reqId}/requirement.md')`
- *   (cwd = `<repo-root>/apps/web/`,所以路径指向 `<repo-root>/requirements/`)
- * - production: cwd 可能是仓库根或子目录,**留 TODO**,由后续部署 ticket 解决
- *   (本期假设 dev 路径正确 —— 后端 agent 当前并未真的在 `<repo-root>/requirements/`
- *   落盘,而是写到 `~/.aidevspace/requirements/`,本期 D-1.1 仅修复"进入 DRAFTING
- *   不闪骨架"的最小路径;后续接 agent 的统一落盘路径时再统一修正)
+ * 路径解析(对照 PRD D-6 · ticket 05):
+ * - 默认 `<requirementsRoot>` 由 `resolveRequirementsRoot()` 解析
+ *   (config.yaml.workspaceRoot → AIDEVSPACE_HOME → cwd + ../.. 三层 fallback)
+ * - 与后端 `RequirementService.root` 在 dev/production 都对齐到
+ *   `~/.aidevspace`(dev)或 `AIDEVSPACE_HOME`(production),前端 loader 不再
+ *   硬编码 `cwd + ../../requirements`
  */
 
 import { existsSync, readFileSync } from 'node:fs'
@@ -48,6 +48,8 @@ import {
   getDraftingData,
   type DraftingData,
 } from './drafting'
+import { resolveRequirementsRoot } from './requirements-root.server'
+import { parseFlatMap, readYamlFileOrNull } from './yaml.server'
 
 // ---------------------------------------------------------------------------
 // 后端 `deriveStatus` 阈值(对齐后端 `RequirementService.DRAFTING_CONTENT_MIN_BYTES`,
@@ -65,28 +67,26 @@ const PRD_EMPTY_THRESHOLD_BYTES = 10
 const HARD_CODED_REQ_ID = 'req-001'
 
 /**
- * `getDraftingDataFromFs` options —— 主要为测试方便注入 fs 路径。
+ * `getDraftingDataFromFs` options —— 主要为测试方便注入 fs 路径 + config 路径。
  *
- * - `requirementsRoot`:覆盖 dev 默认的 `<repo-root>/requirements/`。生产部署
- *   路径不一致时,后续 ticket 通过 AIDEVSPACE_ROOT env 或调用方注入解决
- *   (本期不动)
+ * - `requirementsRoot`:覆盖默认的 requirements 根。生产部署路径不一致时,
+ *   后续 ticket 通过 AIDEVSPACE_ROOT env 或调用方注入解决(本期不动)。
+ *   测试也用该字段指向 fixture 目录。
+ * - `configPath`:覆盖 `resolveRequirementsRoot` 用的 config.yaml 路径,
+ *   主要为测试方便注入 fixture config(避免依赖 `~/.aidevspace/config.yaml`)。
  */
 export interface GetDraftingDataFromFsOptions {
   requirementsRoot?: string
+  configPath?: string
 }
 
 /**
- * 默认 requirements 根的父目录:dev 时 cwd = `<repo-root>/apps/web/`,
- * 所以 `../..` 即 `<repo-root>/`。本函数返回的是 `requirements/` 的**父目录**,
- * 后续在 `getDraftingDataFromFs` 内会拼上 `requirements/<reqId>/requirement.md`,
- * 拼好后恰好等于 spec 字面要求的:
- *   `path.resolve(process.cwd(), '../../requirements/{reqId}/requirement.md')`
- *
- * TODO(PRD N-2 · production 部署):production cwd 可能不同,留待后续部署 ticket
- * 决定走 env var 还是调用方注入;本期假设 dev 路径。
+ * 默认 requirements 根:走 `resolveRequirementsRoot()` 三层 fallback
+ * (config.yaml.workspaceRoot → AIDEVSPACE_HOME → cwd + ../..),
+ * 与后端 `RequirementService.root` 完全对齐(见 PRD D-6)
  */
 function defaultRequirementsRoot(): string {
-  return resolve(process.cwd(), '../..')
+  return resolveRequirementsRoot()
 }
 
 /**
@@ -95,7 +95,8 @@ function defaultRequirementsRoot(): string {
  * - 已知 id(`req-001`)→ REFUND_DRAFTING 样例数据(空 PRD 字段已存,组件不填充)
  * - 其他 id:
  *   - `<requirementsRoot>/<reqId>/requirement.md` 存在 + 字节数 > 10 →
- *     构造非空 `DraftingData`(`prdMarkdown` 取文件内容)
+ *     构造非空 `DraftingData`(`prdMarkdown` 取文件内容,`title` 从
+ *     同目录 `meta.yaml` 的 `title` 字段取)
  *   - 否则 → `emptyDrafting(reqId)`(组件侧 detect 后调用 `generatePrdSkeleton`)
  *
  * 与原 `getDraftingData(reqId)` 的差异:
@@ -115,10 +116,14 @@ export async function getDraftingDataFromFs(
     return getDraftingData(HARD_CODED_REQ_ID)
   }
 
-  const root = options.requirementsRoot ?? defaultRequirementsRoot()
+  const root =
+    options.requirementsRoot ??
+    (options.configPath
+      ? resolveRequirementsRoot({ configPath: options.configPath })
+      : defaultRequirementsRoot())
   // 路径:`<root>/requirements/<reqId>/requirement.md`(对齐 ADR-0002 文件系统结构)
-  // 与 spec 字面要求 `path.resolve(process.cwd(), '../../requirements/{reqId}/requirement.md')` 完全等价
   const file = resolve(root, 'requirements', requirementId, 'requirement.md')
+  const metaFile = resolve(root, 'requirements', requirementId, 'meta.yaml')
 
   // 2) 文件不存在 / 读取失败 → emptyDrafting(容错)
   let content: string | null = null
@@ -131,19 +136,24 @@ export async function getDraftingDataFromFs(
   }
 
   // 3) 字节数 ≤ 阈值 → emptyDrafting(对齐后端 `deriveStatus`)
+  //    注意:这里**不**读 meta.yaml —— 空态语义不应有 title 字段(对齐
+  //    `emptyDrafting` 默认行为)
   if (content === null || Buffer.byteLength(content, 'utf8') <= PRD_EMPTY_THRESHOLD_BYTES) {
     return emptyDrafting(requirementId)
   }
 
   // 4) 构造非空 DraftingData:
   // - prdMarkdown = 文件内容
+  // - title = meta.yaml 的 `title` 字段(读不到 → '',向后兼容)
   // - 顶部 toolbar.crumb = 单元素面包屑,反映"我在写这个 req 的草稿"
-  // - 其他字段(auxFiles / repos / selectedRepoIds / skills / title / statusText /
+  // - 其他字段(auxFiles / repos / selectedRepoIds / skills / statusText /
   //   autosaveIntervalMs / lastSavedAt)沿用 emptyDrafting 行为(空 auxFiles / 空
-  //   selectedRepoIds / 全局仓库池 / 空 title),不引入 fs 的虚假数据
+  //   selectedRepoIds / 全局仓库池 / 空 statusText),不引入 fs 的虚假数据
+  const title = readMetaTitle(metaFile)
   return {
     ...emptyDrafting(requirementId),
     prdMarkdown: content,
+    title,
     toolbar: {
       crumb: [
         { label: requirementId },
@@ -154,4 +164,24 @@ export async function getDraftingDataFromFs(
     },
     empty: false,
   }
+}
+
+/**
+ * 读 `<reqDir>/meta.yaml` 的 `title` 字段。
+ *
+ * - 文件不存在 / 解析失败 / 无 `title` 字段 → ''(向后兼容,沿用 `emptyDrafting.title`)
+ * - title 是字符串 → 原样返回(去除引号由 `parseFlatMap` 处理)
+ *
+ * 实现要点:
+ * - 只在 `requirement.md` 已被判为非空后调用(`getDraftingDataFromFs` 主体保证);
+ *   空态时**不**读 meta.yaml —— 空态语义不应有 title
+ * - 故意不报错:meta.yaml 缺失时降级到 `''`,避免脏数据毁非空判定
+ */
+function readMetaTitle(metaFile: string): string {
+  const raw = readYamlFileOrNull(metaFile)
+  if (raw === null) return ''
+  const map = parseFlatMap(raw, 'title')
+  if (!map) return ''
+  const title = map.title
+  return typeof title === 'string' ? title : ''
 }

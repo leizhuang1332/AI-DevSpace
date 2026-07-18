@@ -45,6 +45,8 @@ import {
 } from './analyzing'
 import { loadTechBrief, loadModules } from './tech-brief.server'
 import type { TechBriefModulesFile } from './tech-brief'
+import { resolveRequirementsRoot } from './requirements-root.server'
+import { stripQuotes } from './yaml.server'
 
 // ---------------------------------------------------------------------------
 // analysis/sessions/<session-id>/chunks.jsonl 数据源(issue 19b · 验收 #12)
@@ -223,7 +225,15 @@ function resolveAnalysisPaths(
 ): GetAnalyzingDataOptions {
   const requirementsRoot =
     options?.requirementsRoot ?? defaultRequirementsRoot()
-  const defaultAnalysisDir = resolve(requirementsRoot, requirementId, 'analysis')
+  // 路径:`<root>/requirements/<reqId>/analysis`(对齐 ADR-0002 文件系统结构)
+  // root = workspace 根(由 `resolveRequirementsRoot()` 解析),所有 loader 统一
+  // 拼接 `requirements/<id>/...` 以跟后端 `RequirementService.root` 对齐。
+  const defaultAnalysisDir = resolve(
+    requirementsRoot,
+    'requirements',
+    requirementId,
+    'analysis',
+  )
   const analysisDir = options?.analysisDir ?? defaultAnalysisDir
   const analysisSessionsDir =
     options?.analysisSessionsDir ?? resolve(analysisDir, 'sessions')
@@ -260,16 +270,18 @@ export interface GetAnalyzingDataOptions {
 }
 
 // ---------------------------------------------------------------------------
-// 默认路径解析(issue: zone-data-fidelity-fixes · 02 / ANALYZING 部分)
+// 默认路径解析(issue: zone-data-fidelity-fixes · 02 / ANALYZING 部分 · ticket 05 / D-6)
 //
-// 复用 drafting.server.ts 的 dev 路径策略:cwd = `<repo-root>/apps/web/` 时,
-// `../../requirements/` 指向 `<repo-root>/requirements/`。production 部署
-// cwd 不一致的处理留 TODO 注释,由后续部署 ticket 解决(对齐 PRD N-2)。
+// 走 `resolveRequirementsRoot()` 三层 fallback
+// (config.yaml.workspaceRoot → AIDEVSPACE_HOME → cwd + ../..),与后端
+// `RequirementService.root` 在 dev/production 都对齐到 `~/.aidevspace`
+// (dev) 或 `AIDEVSPACE_HOME`(production)。前端 loader 不再硬编码
+// `cwd + ../../requirements`(PRD N-2 已废止)。
 // ---------------------------------------------------------------------------
 
-/** 默认 requirements 根:dev 时 cwd = `<repo-root>/apps/web/`,`../../requirements/` 即仓库根 */
+/** 默认 requirements 根:走 `resolveRequirementsRoot()` 三层 fallback(见 PRD D-6) */
 function defaultRequirementsRoot(): string {
-  return resolve(process.cwd(), '../../requirements')
+  return resolveRequirementsRoot()
 }
 
 /**
@@ -551,18 +563,6 @@ function assignField(
     default:
       return
   }
-}
-
-/** 去除字符串两端单/双引号(用于 `"foo"` / `'foo'` 形式) */
-function stripQuotes(s: string): string {
-  if (s.length >= 2) {
-    const first = s[0]
-    const last = s[s.length - 1]
-    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
-      return s.slice(1, -1)
-    }
-  }
-  return s
 }
 
 /** 解析整数,失败 → fallback */
