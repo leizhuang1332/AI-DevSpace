@@ -45,19 +45,39 @@ export function generateStaticParams() {
   return ZONE_META.map((z) => ({ zone: z.route_segment }))
 }
 
+/**
+ * 安全 decodeURIComponent:对已 decode 字符串、不含 `%XX` 的字符串是 no-op;
+ * 仅在 `requirementId / params.zone` 仍带 URL 编码时(实测 Next.js 14 dynamic
+ * route 对中文 reqId 不会自动 decode)触发解码,真正修正路径解析。
+ */
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s)
+  } catch {
+    return s
+  }
+}
+
 export default async function ZonePage({
   params,
 }: {
   params: { id: string; zone: string }
 }) {
-  const zone = getZoneByRouteSegment(params.zone)
+  // Next.js 14 dynamic route 的 params 在某些编码路径下不会自动 decodeURIComponent
+  // (实测:`/requirements/req-007-test%E6%89%98.../drafting` 的 requirementId 仍带 `%XX`),
+  // 导致中文 reqId 拼路径时报"文件不存在" → drafting 进 emptyDrafting → 闪骨架
+  // (bug 3 真正根因)。这里加一层兜底 decode;`decodeURIComponent` 对已 decode 字符串
+  // 是 no-op,对不含 `%` 的字符串也是 no-op,只在 `%XX` 形式时触发解码,安全。
+  const requirementId = safeDecode((params as { id: string }).id)
+  const zoneSegment = safeDecode((params as { zone: string }).zone)
+  const zone = getZoneByRouteSegment(zoneSegment)
   if (!zone) notFound()
 
   // EXECUTING 工位样板:三列 Mission Control 布局
   if (zone.id === 'executing') {
-    const data = await getExecutingData(params.id)
+    const data = await getExecutingData(requirementId)
     return (
-      <ZoneShell id={params.id} zone={zone}>
+      <ZoneShell id={requirementId} zone={zone}>
         <ExecutingZone data={data} />
       </ZoneShell>
     )
@@ -71,16 +91,16 @@ export default async function ZonePage({
   // (prdMarkdown = 文件内容),不再闪 1.5s 骨架 overlay。
   // `drafting.ts` 里的 mock `getDraftingData` 保留,组件测试继续依赖它。
   if (zone.id === 'drafting') {
-    const data = await getDraftingDataFromFs(params.id)
+    const data = await getDraftingDataFromFs(requirementId)
     return (
       <ZoneShell
-        id={params.id}
+        id={requirementId}
         zone={zone}
         // 用 client 包装器替代默认 InlineRail —— 因为 Skill 点击需要函数回调
         // (server component 不能直接传函数 prop)
         inlineRailSlot={
           <DraftingSkillRail
-            requirementId={params.id}
+            requirementId={requirementId}
             skills={data.skills}
           />
         }
@@ -97,11 +117,11 @@ export default async function ZonePage({
   if (zone.id === 'analyzing') {
     const cookieStore = cookies()
     const lastSessionId = cookieStore.get('last_session_id')?.value
-    const data = await getAnalyzingData(params.id, {
+    const data = await getAnalyzingData(requirementId, {
       ...(lastSessionId ? { lastSessionId } : {}),
     })
     return (
-      <ZoneShell id={params.id} zone={zone}>
+      <ZoneShell id={requirementId} zone={zone}>
         <AnalyzingZone data={data} />
       </ZoneShell>
     )
@@ -112,9 +132,9 @@ export default async function ZonePage({
   // 由 ClarifyingZone 内部 useState 管理(onAnswer / onBack 为可选,默认 no-op)。
   // 后续接 agent API 时,包一层 client wrapper(类似 DRAFTING 的 DraftingSkillRail)注入回调即可。
   if (zone.id === 'clarifying') {
-    const data = await getClarifyingData(params.id)
+    const data = await getClarifyingData(requirementId)
     return (
-      <ZoneShell id={params.id} zone={zone}>
+      <ZoneShell id={requirementId} zone={zone}>
         <ClarifyingZone data={data} />
       </ZoneShell>
     )
@@ -131,9 +151,9 @@ export default async function ZonePage({
   // DESIGNING 拿到非空候选方案;否则 `emptyDesigning(reqId)` 兜底。
   // `designing.ts` 里的 mock `getDesigningData` 保留,组件测试继续依赖它。
   if (zone.id === 'designing') {
-    const data = await getDesigningDataFromFs(params.id)
+    const data = await getDesigningDataFromFs(requirementId)
     return (
-      <ZoneShell id={params.id} zone={zone}>
+      <ZoneShell id={requirementId} zone={zone}>
         <DesigningZone data={data} />
       </ZoneShell>
     )
@@ -149,10 +169,10 @@ export default async function ZonePage({
   // - onArchive / onReopen 为 client 回调(默认 no-op),后续接 agent API
   //   时包一层 client wrapper 注入回调。
   if (zone.id === 'wrapup') {
-    const data = await getWrapupData(params.id)
+    const data = await getWrapupData(requirementId)
     return (
       <ZoneShell
-        id={params.id}
+        id={requirementId}
         zone={zone}
         wrapupSummary={extractWrapupTreeSummary(data)}
       >
@@ -172,7 +192,7 @@ export default async function ZonePage({
           : '主区全宽'
 
   return (
-    <ZoneShell id={params.id} zone={zone}>
+    <ZoneShell id={requirementId} zone={zone}>
       <main
         data-testid="zone-page"
         data-zone-id={zone.id}
@@ -192,7 +212,7 @@ export default async function ZonePage({
 
           <dl className="grid grid-cols-[120px_1fr] gap-y-1 text-sm bg-bg-subtle border border-border rounded-lg p-4 max-w-[560px]">
             <dt className="text-text-3">requirement</dt>
-            <dd className="font-mono">{params.id}</dd>
+            <dd className="font-mono">{requirementId}</dd>
             <dt className="text-text-3">status_color</dt>
             <dd>{ZONE_STATUS_COLOR_LABEL[zone.status_color]}</dd>
             <dt className="text-text-3">status_pulse</dt>
