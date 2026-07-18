@@ -171,51 +171,39 @@ describe('resolveAuxLink', () => {
 })
 
 // ============================================================================
-// validateLaunch — 启动校验(issue 01 验收 #5)
+// validateLaunch — 启动校验(issue 01 验收 #5 + issue 04 ticket 收窄)
+//
+// 接口收窄后:`validateLaunch({ prdMarkdown })`,title 不再参与校验
+// (由 NewRequirementModal 一次性写入 meta.yaml.title)。
 // ============================================================================
 
 describe('validateLaunch', () => {
-  it('trim 后 title 非空 + PRD 有非空白内容 → canLaunch=true', () => {
-    expect(
-      validateLaunch({ title: '退款功能优化', prdMarkdown: '# PRD' }).canLaunch,
-    ).toBe(true)
+  it('PRD 有实质内容 → canLaunch=true', () => {
+    expect(validateLaunch({ prdMarkdown: '# foo\nbar' }).canLaunch).toBe(true)
   })
 
-  it('title 仅有空白 → canLaunch=false', () => {
-    expect(validateLaunch({ title: '   \t\n', prdMarkdown: '# PRD' }).canLaunch).toBe(
-      false,
-    )
-  })
-
-  it('title 为空 → canLaunch=false', () => {
-    expect(validateLaunch({ title: '', prdMarkdown: '# PRD' }).canLaunch).toBe(false)
-  })
-
-  it('PRD 仅空白 → canLaunch=false', () => {
-    expect(
-      validateLaunch({ title: 't', prdMarkdown: '   \n\t  ' }).canLaunch,
-    ).toBe(false)
+  it('PRD 全空白(空格 + 换行 + tab)→ canLaunch=false', () => {
+    expect(validateLaunch({ prdMarkdown: '   \n   ' }).canLaunch).toBe(false)
   })
 
   it('PRD 为空 → canLaunch=false', () => {
-    expect(validateLaunch({ title: 't', prdMarkdown: '' }).canLaunch).toBe(false)
+    expect(validateLaunch({ prdMarkdown: '' }).canLaunch).toBe(false)
   })
 
-  it('title 与 PRD 均通过 → canLaunch=true', () => {
-    expect(
-      validateLaunch({ title: 't', prdMarkdown: 'p' }).canLaunch,
-    ).toBe(true)
-  })
-
-  it('不依赖 auxFiles / repos(纯函数,接口最小)', () => {
-    // 仅依赖 title + prdMarkdown 两个字段;允许调用方传空对象 / 额外字段忽略
-    const r = validateLaunch({ title: 't', prdMarkdown: 'p' })
+  it('不依赖 auxFiles / repos / title(纯函数,接口最小)', () => {
+    // 仅依赖 prdMarkdown 一个字段;允许调用方传额外字段忽略
+    const r = validateLaunch({ prdMarkdown: 'p' })
     expect(r.canLaunch).toBe(true)
   })
 
-  it('返回 LaunchValidity 接口(不依赖 repos / aux_files)', () => {
-    const r = validateLaunch({ title: 't', prdMarkdown: 'p' })
+  it('返回 LaunchValidity 接口(canLaunch 为 boolean)', () => {
+    const r = validateLaunch({ prdMarkdown: 'p' })
     expect(typeof r.canLaunch).toBe('boolean')
+  })
+
+  it('类型守护:title 已不再是合法字段(传 title 必须编译失败)', () => {
+    // @ts-expect-error - title 已从 validateLaunch 入参中移除
+    validateLaunch({ title: 'x', prdMarkdown: 'y' })
   })
 })
 

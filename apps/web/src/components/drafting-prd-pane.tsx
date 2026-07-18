@@ -10,15 +10,15 @@ import { MarkdownPreview } from './markdown-preview'
 
 /**
  * DRAFTING 工位的 PRD 顶置面板(issue 02 · 已扩展 issue 03 锚点条 / issue 07 预览 /
- * issue 08 启动按钮下沉到 RepoBar)
+ * issue 08 启动按钮下沉到 RepoBar · issue 04 ticket 标题只读化)
  *
  * 视觉对照基线:[docs/design/pages/19-final-drafting.html](docs/design/pages/19-final-drafting.html)
  *
- * 布局(issue 08 形态 — PRD 卡片不再含底部动作):
+ * 布局(issue 04 形态 — 标题只读 hero,不可编辑):
  * ┌──────────────────────────────────────────────────┐
  * │ PRD · 主文档              已保存 · x 秒前          │
  * ├──────────────────────────────────────────────────┤
- * │ 标题 input                                       │
+ * │ [只读 hero] 大字号 标题 / 灰色副标题 "你在写这个需求"│
  * │ PRD Markdown                                     │
  * │ ┌─ anchor-bar ─────────────────────────────────┐ │
  * │ │ 大纲 ▾ H1 退款 ... H2 背景 ... H2 目标 ...     │ │
@@ -29,13 +29,16 @@ import { MarkdownPreview } from './markdown-preview'
  * │ └──────────────────────────────────────────────┘ │
  * └──────────────────────────────────────────────────┘
  *
- * 设计要点(issue 08 之后):
- * - **受控组件**:title / prdMarkdown 由父组件(DraftingZone)持有,本组件接收
- *   props 并通过 onChange 回调回写。父组件需要这两个值来计算 launch validity
+ * 设计要点(issue 08 + 04 之后):
+ * - **标题只读**:标题由 NewRequirementModal 在新建需求时一次性写入
+ *   `meta.yaml.title`,列表页 / 面包屑 / 本组件 hero 都读它。用户在 DRAFTING
+ *   里改不动也无意义(改了与列表页脱节),所以本期不暴露编辑入口。
+ * - **受控组件**:prdMarkdown 由父组件(DraftingZone)持有,本组件接收
+ *   props 并通过 onChange 回调回写。父组件用 prdMarkdown 计算 launch validity
  *   并在 RepoBar 上渲染启动按钮。
  * - 骨架自动填充:data.empty + prdMarkdown 为空 → mount 时一次性调用
- *   onPrdMarkdownChange(generatePrdSkeleton(title)) 回写父 state(保留"作者从
- *   空白开始"的语义,同时让新需求一键看到骨架)
+ *   onPrdMarkdownChange(generatePrdSkeleton(data.title)) 回写父 state(保留
+ *   "作者从空白开始"的语义,同时让新需求一键看到骨架)
  * - 自动保存:setInterval 周期写入(本期 mock:仅更新 UI 时间戳)
  * - 启动校验:虽然 validity 由父组件用 `validateLaunch` 计算,但本组件也会保留
  *   `data-empty` 等渲染分支需要的 state;具体 launch action 已迁到 RepoBar
@@ -43,18 +46,15 @@ import { MarkdownPreview } from './markdown-preview'
  *   prdTextareaRef 把 selectionStart/End 移到目标行,并按行号推算 scrollTop
  *
  * 不在本组件范围:
+ * - 标题编辑(issue 04 ticket)→ 仅 hero 只读展示
  * - 启动按钮(issue 08)→ 已迁到 RepoBar 的 "▶ 进入 ANALYZING"
  * - 仓库软警告(issue 08)→ RepoBar
  * - 预览模式(issue 07)→ 本组件渲染
  */
 export interface DraftingPrdPaneProps {
   data: DraftingData
-  /** 受控:title 值(由父组件持有,本组件回写) */
-  title: string
   /** 受控:prdMarkdown 值(由父组件持有,本组件回写) */
   prdMarkdown: string
-  /** title 受控 onChange */
-  onTitleChange: (next: string) => void
   /** prdMarkdown 受控 onChange */
   onPrdMarkdownChange: (next: string) => void
   /**
@@ -81,9 +81,7 @@ export interface DraftingPrdPaneHandle {
 
 export function DraftingPrdPane({
   data,
-  title,
   prdMarkdown,
-  onTitleChange,
   onPrdMarkdownChange,
   handle,
   onAuxLinkClick,
@@ -146,7 +144,9 @@ export function DraftingPrdPane({
   // -------------------------------------------------------------------------
   useEffect(() => {
     if (data.empty && !data.prdMarkdown && !prdMarkdown) {
-      onPrdMarkdownChange(generatePrdSkeleton(data.title || title))
+      // issue 04:data.title 在新建需求时由 NewRequirementModal 写入,
+      // 不再依赖组件内部 title state;空标题 fallback 由 generatePrdSkeleton 处理
+      onPrdMarkdownChange(generatePrdSkeleton(data.title))
     }
     // 仅在 mount 时执行一次;后续 title 变化不再次填充
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -163,14 +163,14 @@ export function DraftingPrdPane({
     const intervalMs = data.autosaveIntervalMs
     if (intervalMs <= 0) return
     const id = window.setInterval(() => {
-      // 仅在表单有内容时才自动保存;全空时静默不写(验收:clearing all content
-      // suppresses the autosave tick)
-      if (title.trim() || prdMarkdown.trim()) {
+      // 仅在 PRD 有内容时才自动保存;PRD 全空时静默不写
+      // (验收:clearing all content suppresses the autosave tick)
+      if (prdMarkdown.trim()) {
         saveDraft()
       }
     }, intervalMs)
     return () => window.clearInterval(id)
-  }, [data.autosaveIntervalMs, title, prdMarkdown, saveDraft])
+  }, [data.autosaveIntervalMs, prdMarkdown, saveDraft])
 
   // 父组件触发的"立刻保存一次"通道 —— 通过 ref 句柄暴露。
   // 父组件在 launch ANALYZING 之前调用 handle.current?.saveNow() 即可。
@@ -243,22 +243,16 @@ export function DraftingPrdPane({
           data-testid="drafting-prd-body"
           className="flex-1 overflow-auto p-5 flex flex-col gap-4 min-h-0"
         >
-          {/* 标题 */}
-          <div data-testid="drafting-field" data-field-label="标题">
-            <label className="block text-sm font-semibold text-text-2 mb-2">
-              标题{' '}
-              <span className="text-text-3 font-normal">
-                (独立字段,与 PRD Markdown 分离)
-              </span>
-            </label>
-            <input
-              type="text"
-              data-testid="drafting-title"
-              value={title}
-              onChange={(e) => onTitleChange(e.target.value)}
-              placeholder="一句话描述这个需求(如:退款功能优化)"
-              className="w-full h-9 px-3 border border-border-strong rounded-md text-md bg-bg focus:outline-none focus:border-brand focus:ring-2 focus:ring-brand-50"
-            />
+          {/* 标题只读 hero(issue 04 ticket)
+              - 标题由 NewRequirementModal 在新建需求时一次性写入 meta.yaml.title
+              - 列表页 / 面包屑 / 本 hero 都读 data.title,用户在 DRAFTING 不再编辑
+              - ticket 明确要求 data-testid="drafting-title" 不存在(原 input 语义),
+                这里改用 getByText(data.title) 来断言显示 */}
+          <div data-testid="drafting-title-hero" data-requirement-id={data.requirementId}>
+            <h1 className="text-2xl font-bold text-text-1 leading-tight">
+              {data.title || '未命名需求'}
+            </h1>
+            <p className="text-sm text-text-3 mt-1">你在写这个需求</p>
           </div>
 
           {/* PRD Markdown */}

@@ -78,9 +78,12 @@ function focusReturnToTrigger(
  * Inline 栏(候命 Skill)由 ZoneShell 通过 inlineRailSlot 注入 DraftingSkillRail。
  *
  * 关键设计点:
- * - **issue 08**:title / prdMarkdown 状态上提到本组件持有,作为受控 props
+ * - **issue 08**:prdMarkdown 状态上提到本组件持有,作为受控 props
  *   传给 DraftingPrdPane。父组件用 `validateLaunch` 派生 canLaunch,
- *   传给 RepoBar;RepoBar 完全不感知 title / prdMarkdown(单一职责)。
+ *   传给 RepoBar;RepoBar 完全不感知 prdMarkdown(单一职责)。
+ * - **issue 04 ticket**:title 不再受控(已由 NewRequirementModal 写入
+ *   meta.yaml.title),本组件直接读 data.title 用于弹层标题等场景,
+ *   DRAFTING 内不暴露编辑入口。
  * - **issue 08**:selectedRepoIds 由本组件持 state;切换由 RepoBar 触发
  *   onToggleRepo → setSelectedRepoIds(派生软警告 + chip on/off)。
  * - 上下比例 ratio ∈ [0, 1];clamp 由 `clampSplitRatio` 集中负责
@@ -102,9 +105,10 @@ export function DraftingZone({ data }: { data: DraftingData }) {
   const [prdRatio, setPrdRatio] = useState<number>(DEFAULT_PRD_RATIO)
 
   // -------------------------------------------------------------------------
-  // 受控 PRD 字段(issue 08 上提)—— DraftingPrdPane 改为受控组件
+  // 受控 PRD 字段(issue 08 上提 + issue 04 ticket 收窄)—— DraftingPrdPane 改为受控组件
+  // - title 不再是受控字段:由 NewRequirementModal 一次性写入 meta.yaml.title,
+  //   本组件直接读 data.title(列表页 / 面包屑 / hero 同源)
   // -------------------------------------------------------------------------
-  const [title, setTitle] = useState<string>(data.title)
   const [prdMarkdown, setPrdMarkdown] = useState<string>(data.prdMarkdown)
 
   // -------------------------------------------------------------------------
@@ -180,23 +184,25 @@ export function DraftingZone({ data }: { data: DraftingData }) {
   const prdPaneHandleRef = useRef<DraftingPrdPaneHandle | null>(null)
 
   // -------------------------------------------------------------------------
-  // Launch validity(issue 01 验收 #5 + issue 08 验收 #7 #8)
-  // - 仅依赖 title + prdMarkdown;不读仓库数量(issue 08 验收 #7)
+  // Launch validity(issue 01 验收 #5 + issue 04 ticket 收窄 + issue 08 验收 #7 #8)
+  // - 仅依赖 prdMarkdown(issue 04 ticket:title 不再是受控字段);
+  //   不读仓库数量(issue 08 验收 #7)
   // - 派生给 RepoBar 用于 disabled 态 + 给 hint 计算
   // -------------------------------------------------------------------------
   const validity = useMemo(
-    () => validateLaunch({ title, prdMarkdown }),
-    [title, prdMarkdown],
+    () => validateLaunch({ prdMarkdown }),
+    [prdMarkdown],
   )
 
   // -------------------------------------------------------------------------
-  // Launch disabled hint(issue 08)—— 父组件计算文案,传给 RepoBar
+  // Launch disabled hint(issue 08 + issue 04 ticket 收窄)—— 父组件计算文案,传给 RepoBar
   // 对应 issue 02 时期的 PRD 卡片脚提示文案(迁出 PRD 卡片后保留视觉反馈)
+  // issue 04 ticket:title 不再受控 → hint 简化为单分支文案
   // -------------------------------------------------------------------------
   const launchDisabledHint = useMemo<string | undefined>(() => {
     if (validity.canLaunch) return undefined
-    return title.trim() ? '请填写 PRD Markdown' : '请填写标题与 PRD Markdown'
-  }, [validity.canLaunch, title])
+    return '请填写 PRD Markdown'
+  }, [validity.canLaunch])
 
   // -------------------------------------------------------------------------
   // 辅助文件列表(issue 04 + 06)
@@ -206,11 +212,11 @@ export function DraftingZone({ data }: { data: DraftingData }) {
   const [auxFiles, setAuxFiles] = useState<AuxFile[]>(data.auxFiles)
   // 防止 props 改变时 state 被意外覆盖:仅首次拷贝,后续由本地操作驱动
   // (典型的 "lifting state up" 反模式规避)
+  // issue 04 ticket:title 不再上提为受控 state,同步列表里删去 setTitle(data.title)
   const [lastRequirementId, setLastRequirementId] = useState<string>(data.requirementId)
   useEffect(() => {
     if (lastRequirementId !== data.requirementId) {
       setAuxFiles(data.auxFiles)
-      setTitle(data.title)
       setPrdMarkdown(data.prdMarkdown)
       setSelectedRepoIds(data.selectedRepoIds)
       setLastRequirementId(data.requirementId)
@@ -762,9 +768,7 @@ export function DraftingZone({ data }: { data: DraftingData }) {
             >
               <DraftingPrdPane
                 data={data}
-                title={title}
                 prdMarkdown={prdMarkdown}
-                onTitleChange={setTitle}
                 onPrdMarkdownChange={setPrdMarkdown}
                 handle={prdPaneHandleRef}
                 onAuxLinkClick={handleAuxLinkClick}

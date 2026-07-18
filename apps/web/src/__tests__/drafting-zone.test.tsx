@@ -106,13 +106,23 @@ describe('DraftingZone · 满数据渲染', () => {
     expect(screen.queryByTestId('drafting-autosaved')).toBeNull()
   })
 
-  it('标题 input 渲染并带初始值', async () => {
+  it('标题只读 hero 渲染(data.title 大字号显示),不再有 title input', async () => {
+    // issue 04 ticket:title 在 DRAFTING 里只读,由 NewRequirementModal 一次性写入
     const data = await getDraftingData('req-001')
     render(<DraftingZone data={data} />)
 
-    const title = screen.getByTestId('drafting-title') as HTMLInputElement
-    expect(title).toBeInTheDocument()
-    expect(title.value).toContain('退款')
+    // 原 input 形态的 testid 不再存在(ticket 明确要求)
+    expect(screen.queryByTestId('drafting-title')).toBeNull()
+
+    // 只读 hero 显示 data.title
+    // 注:同名文案也出现在面包屑 + 锚点条 H1,所以用 within 限定到 hero 内查找
+    const hero = screen.getByTestId('drafting-title-hero')
+    expect(hero).toBeInTheDocument()
+    expect(within(hero).getByRole('heading', { level: 1 }).textContent).toBe(
+      '退款功能优化',
+    )
+    // hero 含副标题
+    expect(within(hero).getByText('你在写这个需求')).toBeInTheDocument()
   })
 
   it('PRD 编辑器渲染(含 toolbar + textarea + 字符计数)', async () => {
@@ -199,21 +209,12 @@ describe('DraftingZone · 骨架自动填充', () => {
 })
 
 // ============================================================================
-// 编辑交互(issue 02 验收 #3)
+// 编辑交互(issue 02 验收 #3 + issue 04 ticket 收窄)
 // ============================================================================
+// issue 04 ticket:title 不再受控,本 describe 仅覆盖 PRD Markdown 的受控编辑。
+// title 的 hero 只读展示已在上面的 "标题只读 hero 渲染" 用例中覆盖。
 
 describe('DraftingZone · 受控编辑', () => {
-  it('编辑标题 → title state 更新', async () => {
-    const data = await getDraftingData('req-001')
-    render(<DraftingZone data={data} />)
-    const user = userEvent.setup()
-
-    const title = screen.getByTestId('drafting-title') as HTMLInputElement
-    await user.clear(title)
-    await user.type(title, 'X')
-    expect(title.value).toBe('X')
-  })
-
   it('编辑 PRD → prdMarkdown state 更新(字符计数同步)', async () => {
     const data = await getDraftingData('req-001')
     render(<DraftingZone data={data} />)
@@ -230,19 +231,21 @@ describe('DraftingZone · 受控编辑', () => {
     ).toBe(String(prd.value.length))
   })
 
-  it('title 与 PRD 各自独立(title 不写入 PRD H1)', async () => {
+  it('title hero 在 PRD 编辑后仍显示原 data.title(不跟随 PRD 变化)', async () => {
     const data = await getDraftingData('req-001')
     render(<DraftingZone data={data} />)
     const user = userEvent.setup()
 
-    const title = screen.getByTestId('drafting-title') as HTMLInputElement
-    await user.clear(title)
-    await user.type(title, '新标题')
-
+    // PRD 改写 → 标题 hero 不变
     const prd = screen.getByTestId('drafting-prd') as HTMLTextAreaElement
-    // PRD H1 仍为原始 "退款功能优化",没有跟随 title 变化
-    expect(prd.value).toContain('# 退款功能优化')
-    expect(prd.value).not.toContain('# 新标题')
+    await user.click(prd)
+    await user.keyboard('\n# 在 PRD 内新写的 H1')
+
+    // hero 仍展示 NewRequirementModal 写入的原 title(在 hero 内查找以避开 anchor / crumb 同名文本)
+    const hero = screen.getByTestId('drafting-title-hero')
+    expect(within(hero).getByRole('heading', { level: 1 }).textContent).toBe(
+      '退款功能优化',
+    )
   })
 })
 
@@ -274,9 +277,9 @@ describe('DraftingZone · 自动保存', () => {
     render(<DraftingZone data={data} />)
 
     // 用 fireEvent 直接修改 React 状态(避免 userEvent + fake timers 集成问题)
+    // issue 04 ticket:title 不再受控,只需清空 PRD
     const prd = screen.getByTestId('drafting-prd') as HTMLTextAreaElement
     fireEvent.change(prd, { target: { value: '' } })
-    fireEvent.change(screen.getByTestId('drafting-title'), { target: { value: '' } })
 
     act(() => {
       vi.advanceTimersByTime(60_000)
@@ -317,19 +320,23 @@ describe('DraftingZone · 启动 ANALYZING', () => {
     expect(routerPush).toHaveBeenCalledWith('/requirements/req-001/analyzing/')
   })
 
-  it('title 为空 → 按钮 disabled 且点击不触发跳转', async () => {
-    // 用 empty=true + 手工写 title='' 的场景无法直接构造(骨架会覆盖 PRD)
-    // → 通过 user 清空 title 触发
+  it('PRD 全空白 → 按钮 disabled + launchDisabledHint = "请填写 PRD Markdown"', async () => {
+    // issue 04 ticket:title 不再受控,只 PRD 决定 canLaunch
     const data = await getDraftingData('req-001')
     render(<DraftingZone data={data} />)
     const user = userEvent.setup()
 
-    await user.clear(screen.getByTestId('drafting-title'))
+    await user.clear(screen.getByTestId('drafting-prd'))
     const btn = screen.getByTestId('drafting-action-launch')
     expect(btn.getAttribute('disabled')).not.toBeNull()
 
     await user.click(btn)
     expect(routerPush).not.toHaveBeenCalled()
+
+    // ticket 验收 #3:launchDisabledHint === '请填写 PRD Markdown'
+    expect(screen.getByTestId('drafting-launch-disabled-hint').textContent).toBe(
+      '请填写 PRD Markdown',
+    )
   })
 
   it('PRD 全空白 → 按钮 disabled', async () => {
@@ -353,7 +360,17 @@ describe('DraftingZone · 启动 ANALYZING', () => {
   })
 
   it('disabled 时点击 → 不跳转(disabled 按钮被 userEvent silent no-op)', async () => {
-    render(<DraftingZone data={emptyDrafting('NEW')} />)
+    // 用 empty=false + PRD='' 模拟"PRD 真为空"的 disabled 场景
+    // (emptyDrafting + empty=true 会触发骨架填充,会让按钮反而 enabled)
+    render(
+      <DraftingZone
+        data={{
+          ...emptyDrafting('NEW'),
+          prdMarkdown: '',
+          empty: false,
+        }}
+      />,
+    )
     const user = userEvent.setup()
 
     const btn = screen.getByTestId('drafting-action-launch')
@@ -385,23 +402,49 @@ describe('DraftingZone · 启动 ANALYZING', () => {
 // ============================================================================
 
 describe('DraftingZone · 空数据', () => {
-  it('empty=true → launch 按钮 disabled + PRD 字段被骨架填充', () => {
-    render(<DraftingZone data={emptyDrafting('NEW')} />)
+  it('empty=true → launch 按钮 disabled + PRD 字段被骨架填充 + title hero 显示 "未命名需求"', () => {
+    // 用 PRD=空白 + empty=false 模拟"PRD 真为空 + 不可被骨架填充"的场景
+    // (如果保留 empty=true,DraftingPrdPane 的 mount 副作用会触发骨架填充 →
+    // PRD 不空 → launch 反而 enabled,覆盖本用例的 disabled 断言)
+    const data = {
+      ...emptyDrafting('NEW'),
+      prdMarkdown: '   \n   ', // 空白 PRD:满足 validateLaunch 的 trim 非空判断为 false
+      empty: false,
+    }
+    render(<DraftingZone data={data} />)
 
     expect(screen.getByTestId('drafting-zone').getAttribute('data-empty')).toBe(
-      'true',
+      'false',
     )
-    expect((screen.getByTestId('drafting-title') as HTMLInputElement).value).toBe(
-      '',
+    // issue 04 ticket:title 不再受控 → 不再有 input;hero 显示 "未命名需求" 兜底文案
+    expect(screen.queryByTestId('drafting-title')).toBeNull()
+    // 仅在 hero 内查找,避开 anchor bar 等其它出现 "未命名需求" 的位置
+    const hero = screen.getByTestId('drafting-title-hero')
+    expect(within(hero).getByRole('heading', { level: 1 }).textContent).toBe(
+      '未命名需求',
     )
-    // PRD 已被骨架填充,验证骨架存在即可
-    expect(
-      (screen.getByTestId('drafting-prd') as HTMLTextAreaElement).value,
-    ).toContain('## 背景')
-    // launch 按钮 disabled(title 为空 → canLaunch=false)
+    // PRD 仍是空白 → launch 按钮 disabled
     expect(
       screen.getByTestId('drafting-action-launch').getAttribute('disabled'),
     ).not.toBeNull()
+    // launchDisabledHint 文案统一为「请填写 PRD Markdown」(issue 04 ticket)
+    expect(screen.getByTestId('drafting-launch-disabled-hint').textContent).toBe(
+      '请填写 PRD Markdown',
+    )
+  })
+
+  it('empty=true + PRD 为空 → mount 后骨架填充 + PRD 出现 + launch enabled', () => {
+    // 验证 mount 时骨架仍会触发(issue 02 行为不变)
+    render(<DraftingZone data={emptyDrafting('NEW')} />)
+
+    // 骨架在 mount 时通过 useEffect 填入,render 调用后已 flush
+    expect(
+      (screen.getByTestId('drafting-prd') as HTMLTextAreaElement).value,
+    ).toContain('## 背景')
+    // PRD 有内容 → 按钮 enabled
+    expect(
+      screen.getByTestId('drafting-action-launch').getAttribute('disabled'),
+    ).toBeNull()
   })
 })
 
@@ -1379,12 +1422,12 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
   })
 
   it('验收 #6:1 仓库 + PRD 不全 → launch 按钮 disabled', async () => {
+    // issue 04 ticket:title 不再受控,只 PRD 决定 canLaunch
+    // 用 PRD=空白 + empty=false 阻止骨架填充(否则 PRD 会被填上 → launch 反而 enabled)
     const data = {
       ...emptyDrafting('req-one-bad'),
-      // title 为空 → canLaunch=false
-      title: '',
-      prdMarkdown: '',
-      empty: true,
+      prdMarkdown: '   ', // 空白 → validateLaunch.trim 非空判断为 false
+      empty: false,
       repos: [{ id: 'r1', name: 'refund-service' }],
       selectedRepoIds: ['r1'],
     }
@@ -1393,13 +1436,13 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
     const bar = screen.getByTestId('drafting-repo-bar')
     // 警告显示(1 个仓库)
     expect(bar.getAttribute('data-soft-warning')).toBe('true')
-    // 但按钮 disabled
+    // 但按钮 disabled(PRD 为空白 → canLaunch=false)
     const btn = screen.getByTestId('drafting-action-launch')
     expect(btn.getAttribute('disabled')).not.toBeNull()
     expect(bar.getAttribute('data-can-launch')).toBe('false')
-    // 提示文案显示
+    // 提示文案统一(issue 04 ticket:title 不再受控,只剩 PRD 一支)
     expect(screen.getByTestId('drafting-launch-disabled-hint').textContent).toBe(
-      '请填写标题与 PRD Markdown',
+      '请填写 PRD Markdown',
     )
   })
 
@@ -1452,8 +1495,12 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
 
   // 旧 UI 不再渲染(issue 08 验收:启动按钮不在 PRD 卡片脚)
   it('PRD 卡片脚不再渲染 "drafting-launch-disabled-hint"(已迁到 RepoBar)', () => {
-    // 用空数据触发 canLaunch=false → disabled-hint 应在 RepoBar 内渲染
-    const data = emptyDrafting('NEW') // title='', prdMarkdown='', empty=true
+    // 用 PRD=空白 + empty=false 阻止骨架填充,确保 canLaunch=false 触发 hint 渲染
+    const data = {
+      ...emptyDrafting('NEW'),
+      prdMarkdown: '   ', // 空白 → canLaunch=false
+      empty: false,
+    }
     render(<DraftingZone data={data} />)
     const prdCard = screen.getByTestId('drafting-prd-card')
     // hint 在 RepoBar 内,不在 PRD 卡片子树

@@ -88,32 +88,24 @@ describe('getDraftingData', () => {
 })
 
 // ============================================================================
-// 启动校验的 web 端契约(issue 02 验收 #6 #7):
+// 启动校验的 web 端契约(issue 02 验收 #6 #7 + issue 04 ticket 收窄):
 // validateLaunch 在 packages/shared,web 端通过 validateLaunch 重新导出并使用;
-// 这里覆盖 web 端契约 —— title trim 非空 + PRD trim 非空 → canLaunch=true。
+// 这里覆盖 web 端契约 —— PRD trim 非空 → canLaunch=true(title 已不在接口内)。
 // ============================================================================
 
 describe('validateLaunch(web 端契约)', () => {
-  it('title 与 PRD 均有非空白内容 → canLaunch=true', () => {
-    expect(
-      validateLaunch({ title: '退款功能优化', prdMarkdown: '# PRD' }).canLaunch,
-    ).toBe(true)
-  })
-
-  it('title 全空白 → canLaunch=false', () => {
-    expect(
-      validateLaunch({ title: '   \t\n', prdMarkdown: '# PRD' }).canLaunch,
-    ).toBe(false)
+  it('PRD 有非空白内容 → canLaunch=true', () => {
+    expect(validateLaunch({ prdMarkdown: '# PRD' }).canLaunch).toBe(true)
   })
 
   it('PRD 全空白 → canLaunch=false', () => {
     expect(
-      validateLaunch({ title: 't', prdMarkdown: '   \n\t  ' }).canLaunch,
+      validateLaunch({ prdMarkdown: '   \n\t  ' }).canLaunch,
     ).toBe(false)
   })
 
-  it('不依赖仓库 / 辅助文件 —— 仅看 title + prdMarkdown 两个字段', () => {
-    const r = validateLaunch({ title: 't', prdMarkdown: 'p' })
+  it('不依赖仓库 / 辅助文件 / title —— 仅看 prdMarkdown 一个字段', () => {
+    const r = validateLaunch({ prdMarkdown: 'p' })
     expect(r.canLaunch).toBe(true)
     expect(typeof r.canLaunch).toBe('boolean')
   })

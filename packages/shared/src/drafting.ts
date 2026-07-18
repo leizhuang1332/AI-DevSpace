@@ -60,12 +60,14 @@ export interface PrdAnchor {
 }
 
 /**
- * 启动校验结果(issue 01 验收 #5)
+ * 启动校验结果(issue 01 验收 #5 + issue 04 ticket 收窄)
  *
  * - canLaunch:true 时调用方可进入 ANALYZING 工位
  *
- * 此接口只关心 title + prdMarkdown 的最小完备度;不检查 repos / aux_files,
- * 留给上层(execution policy / repo soft-warning)做更细的判断。
+ * 此接口只关心 prdMarkdown 的最小完备度;不检查 title(由 NewRequirementModal
+ * 在新建时一次性写入 meta.yaml.title,后续 DRAFTING 工位不暴露编辑入口)、
+ * 不检查 repos / aux_files,留给上层(execution policy / repo soft-warning)
+ * 做更细的判断。
  */
 export interface LaunchValidity {
   canLaunch: boolean
@@ -206,16 +208,17 @@ export function resolveAuxLink(
 // ---------------------------------------------------------------------------
 
 /**
- * 启动校验:title 与 prdMarkdown 各自 trim 后均非空 → canLaunch=true。
+ * 启动校验:prdMarkdown trim 后非空 → canLaunch=true。
+ *
+ * 标题不再参与校验 —— 标题在 NewRequirementModal 创建需求时已写入
+ * `meta.yaml.title`,列表页 / 面包屑 / 只读 hero 都依赖它,用户在
+ * DRAFTING 工位里改不动也无意义(改完与列表页脱节)。
  *
  * 不依赖仓库列表 / 辅助文件 —— 那些是后续 issue 08(repo soft-warning)/
  * 上层 execution policy 关心的,本函数只回答"能否启动 AI 分析"这个最小问题。
  */
-export function validateLaunch(input: {
-  title: string
-  prdMarkdown: string
-}): LaunchValidity {
-  const canLaunch = input.title.trim().length > 0 && input.prdMarkdown.trim().length > 0
+export function validateLaunch(input: { prdMarkdown: string }): LaunchValidity {
+  const canLaunch = input.prdMarkdown.trim().length > 0
   return { canLaunch }
 }
 
