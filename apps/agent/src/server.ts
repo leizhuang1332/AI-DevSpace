@@ -76,6 +76,11 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   // Dual-sink logger: stdout (for dev/pm2 dashboards) + append file.
   // Fastify's own logger option accepts a transport config — pino/file is bundled.
   const fastify = Fastify({
+    // ticket 03 (ADR-0015 D7) —— 上传 bodyLimit 默认 1 MiB,会拦截 ≥750 KB
+    // 的原文件(对应 base64 后 ≈ 1 MiB)。提至 16 MiB:
+    // - MAX_UPLOAD_BYTES = 10 MiB,base64 后 ≈ 13.3 MiB,留 buffer 给 JSON envelope
+    // - 与上传管道其他路径(校验 / 解析 / 落盘)保持上限一致
+    bodyLimit: 16 * 1024 * 1024,
     logger: {
       level: process.env.LOG_LEVEL ?? 'info',
       transport: {

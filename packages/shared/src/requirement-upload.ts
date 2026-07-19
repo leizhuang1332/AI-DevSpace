@@ -147,3 +147,89 @@ export const ResourceTreeNodeSchema: z.ZodType<ResourceTreeNodeShape> = z.object
   type: z.enum(['directory', 'file']),
   children: z.array(z.lazy(() => ResourceTreeNodeSchema)).optional(),
 })
+
+// ============================================================================
+// ticket 03 (ADR-0015 D3 / D8) —— 双入口 UI 共用 API 契约:
+//   - Dialog 预填 POST /api/uploads/parse        → 返回 markdown + images(不写盘)
+//   - DRAFTING 覆盖 POST /api/requirement/:id/upload-replace → 解析 + 写盘 + 返回新 markdown
+//
+// 上传体采用 JSON { filename, mime, contentBase64 } 而非 multipart:
+//   - 服务端无需引入 @fastify/multipart(纯 JS 即可)
+//   - 10 MB 上限对应 base64 ≈ 13.3 MB,JSON 体在常规浏览器 / fetch 下没问题
+//   - 与现有 ticket 04 CreateRequirementRequestSchema 风格统一
+// ============================================================================
+
+/**
+ * ticket 03 共用的失败原因字面量联合(前后端 + 路由 + 测试共享单一来源)。
+ *
+ * - `ext` / `mime` / `magic` / `size` / `image-too-large` —— Z3 闸门 + ADR-0015 Y3 单图上限
+ * - `parse-error`                  —— 服务端 mammoth 抛错(加密 / 损毁 docx 等)
+ * - `requirement-not-found`        —— upload-replace 时 req 目录不存在
+ * - `network`                      —— 客户端网络错(fetch 失败 / 后端不可达)
+ *
+ * 任何新增 reason 必须先在此处加,然后让 `REASON_TO_HTTP_STATUS` / `humanizeUploadFail`
+ * 自动 catch 住类型缩小 —— 不要在 route / lib 里再写 `as 'ext' | ...` 联合。
+ */
+export type UploadFailReason =
+  | 'ext'
+  | 'mime'
+  | 'magic'
+  | 'size'
+  | 'image-too-large'
+  | 'parse-error'
+  | 'requirement-not-found'
+  | 'network'
+
+/** 失败 reason → HTTP 状态码 + 错误码。`network` 不应进服务端(客户端加的) */
+export const REASON_TO_HTTP_STATUS: Record<
+  Exclude<UploadFailReason, 'network'>,
+  { code: string; status: number }
+> = {
+  ext: { code: 'E_UPLOAD_EXT', status: 400 },
+  mime: { code: 'E_UPLOAD_MIME', status: 400 },
+  magic: { code: 'E_UPLOAD_MAGIC', status: 400 },
+  size: { code: 'E_UPLOAD_SIZE', status: 400 },
+  'image-too-large': { code: 'E_UPLOAD_IMAGE_TOO_LARGE', status: 400 },
+  'parse-error': { code: 'E_UPLOAD_PARSE_ERROR', status: 400 },
+  'requirement-not-found': {
+    code: 'E_REQUIREMENT_NOT_FOUND',
+    status: 404,
+  },
+}
+
+/** ticket 03 上传请求体 —— 客户端把 File 转 base64 后塞这里 */
+export const UploadPayloadSchema = z.object({
+  /** 原始文件名(含扩展名),用于 ext / magic 校验 */
+  filename: z.string().min(1).max(255),
+  /** 浏览器声明的 MIME(text/markdown / text/plain / application/vnd.openxmlformats-…) */
+  mime: z.string().min(1).max(255),
+  /** 文件原始字节的 base64 编码(.md/.txt/.docx 通用) */
+  contentBase64: z.string().min(1),
+})
+export type UploadPayload = z.infer<typeof UploadPayloadSchema>
+
+/** 单张 docx 图片(与 apps/agent `ParsedUploadImage` 同形,放在 shared 便于 web 端复用) */
+export const ParsedUploadImageSchema = z.object({
+  name: z.string().min(1),
+  base64: z.string().min(1),
+  mime: z.string().min(1),
+})
+export type ParsedUploadImage = z.infer<typeof ParsedUploadImageSchema>
+
+/**
+ * Dialog 预填响应 —— 返回 markdown + 待落地的图片列表。
+ * Dialog 路径不在预填阶段写盘;真正的 landAssets 由 createRequirement 在用户
+ * 点"创建"那一刻调用(对齐 ticket 02 + ticket 03 D5)。
+ */
+export const ParseUploadResponseSchema = z.object({
+  markdown: z.string(),
+  images: z.array(ParsedUploadImageSchema),
+})
+export type ParseUploadResponse = z.infer<typeof ParseUploadResponseSchema>
+
+/** DRAFTING 覆盖响应 —— 写盘后把新 markdown + 落地的 assets 回给前端 */
+export const UploadReplaceResponseSchema = z.object({
+  markdown: z.string(),
+  assets: z.array(AssetMetaSchema),
+})
+export type UploadReplaceResponse = z.infer<typeof UploadReplaceResponseSchema>

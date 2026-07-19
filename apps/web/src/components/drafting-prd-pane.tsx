@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { generatePrdSkeleton } from '@ai-devspace/shared'
 import type { AuxFile, DraftingData } from '@/lib/drafting'
 import { formatRelativeTime } from '@/lib/format'
+import { uploadAndReplace } from '@/lib/requirement-upload'
 import { useMarkdownPreviewToggle } from '@/lib/use-markdown-preview-toggle'
 import { PrdAnchorBar } from './prd-anchor-bar'
 import { MarkdownPreview } from './markdown-preview'
@@ -79,6 +80,22 @@ export interface DraftingPrdPaneHandle {
   saveNow: () => void
 }
 
+/**
+ * ticket 03 (ADR-0015 D3 / D8) —— "上传新版本"流程的状态机。
+ *
+ * - `idle`         —— 默认态;用户可点按钮选文件
+ * - `uploading`    —— 文件已选,正在闸门 + 服务端解析 + 写盘(按钮 disabled 防重复)
+ * - `success`      —— 写盘成功 → 已用 `onPrdMarkdownChange` 覆盖父 state → 短暂高亮提示
+ * - `error`        —— 闸门 / 服务端失败 → 顶部红条保留现有 prdMarkdown(不写盘)
+ *
+ * 红条文案由 `uploadAndReplace()` 返回,失败自动保留 prdMarkdown,符合 ADR-0015 D8 W4。
+ */
+type UploadStatus =
+  | { kind: 'idle' }
+  | { kind: 'uploading' }
+  | { kind: 'success'; message: string }
+  | { kind: 'error'; message: string }
+
 export function DraftingPrdPane({
   data,
   prdMarkdown,
@@ -90,6 +107,60 @@ export function DraftingPrdPane({
   // 受控状态 —— 父组件持有,本组件只读取并触发 onChange
   // -------------------------------------------------------------------------
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(data.lastSavedAt)
+
+  // -------------------------------------------------------------------------
+  // ticket 03 —— 上传新版本的状态机 + 隐藏 input ref
+  // -------------------------------------------------------------------------
+  const [uploadStatus, setUploadStatus] = useState<UploadStatus>({ kind: 'idle' })
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  /**
+   * ticket 03 —— 用户选完 .md / .txt / .docx 后:
+   * 1) 调 `uploadAndReplace(reqId, file)`(前端闸门 + 服务端解析 + 写盘 + 落 assets/)
+   * 2) 成功 → `onPrdMarkdownChange(data.markdown)` 让父组件替换本地 state,
+   *    立即渲染新内容(无 modal / 无 diff / 无确认 —— ADR-0015 D8 W4)
+   * 3) 失败 → 保留现有 `prdMarkdown`,只更新 uploadStatus 显示顶部红条
+   *
+   * 把 input 的 value 清空,允许用户重选同一文件再次触发上传(否则浏览器会忽略同名文件)。
+   */
+  const handleUploadFile = useCallback(
+    async (file: File) => {
+      setUploadStatus({ kind: 'uploading' })
+      const result = await uploadAndReplace(data.requirementId, file)
+      if (result.ok) {
+        onPrdMarkdownChange(result.data.markdown)
+        // 同步触发 saveDraftRef 让 lastSavedAt 时间戳更新,沿用 issue 02 自动保存语义
+        saveDraftRef.current()
+        setUploadStatus({
+          kind: 'success',
+          message: `已替换为新版本(共 ${result.data.markdown.length} 字)`,
+        })
+      } else {
+        setUploadStatus({ kind: 'error', message: result.message })
+      }
+      // 清空 input value,允许同名文件再次上传
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    },
+    [data.requirementId, onPrdMarkdownChange],
+  )
+
+  const handleUploadButtonClick = useCallback(() => {
+    fileInputRef.current?.click()
+  }, [])
+
+  const handleUploadInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0]
+      if (file) {
+        void handleUploadFile(file)
+      }
+    },
+    [handleUploadFile],
+  )
+
+  const dismissUploadError = useCallback(() => {
+    setUploadStatus({ kind: 'idle' })
+  }, [])
 
   // -------------------------------------------------------------------------
   // 预览模式开关(issue 07)
@@ -227,16 +298,59 @@ export function DraftingPrdPane({
               — ANALYZING 首要消费对象 · 必填 · 不可删
             </span>
           </div>
-          {lastSavedAt && (
-            <span
-              data-testid="drafting-autosaved"
-              data-saved-at={lastSavedAt}
-              className="text-xs text-text-3 font-mono"
-            >
-              已保存 · {formatRelativeTime(lastSavedAt)}
-            </span>
-          )}
+          <div className="flex items-center gap-3">
+            {lastSavedAt && (
+              <span
+                data-testid="drafting-autosaved"
+                data-saved-at={lastSavedAt}
+                className="text-xs text-text-3 font-mono"
+              >
+                已保存 · {formatRelativeTime(lastSavedAt)}
+              </span>
+            )}
+          </div>
         </header>
+
+        {/* ticket 03 —— 顶部红条(闸门失败 / 服务端解析失败 / 服务端 404 等)
+            ADR-0015 D6:文案"⚠️ 无法解析此文件...";保留 prdMarkdown(不写盘)。 */}
+        {uploadStatus.kind === 'error' && (
+          <div
+            data-testid="drafting-prd-upload-error"
+            role="alert"
+            className="flex items-start gap-2 px-5 py-2.5 bg-[#fef2f2] border-b border-[#fecaca] text-sm text-[#991b1b] flex-shrink-0"
+          >
+            <span aria-hidden="true">⚠️</span>
+            <span className="flex-1">{uploadStatus.message}</span>
+            <button
+              type="button"
+              data-testid="drafting-prd-upload-error-dismiss"
+              onClick={dismissUploadError}
+              aria-label="关闭错误提示"
+              className="text-[#991b1b] hover:text-[#7f1d1d] text-base leading-none"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+        {/* ticket 03 —— 成功 toast(短暂显示,提示"已覆盖为新版本") */}
+        {uploadStatus.kind === 'success' && (
+          <div
+            data-testid="drafting-prd-upload-success"
+            className="flex items-center gap-2 px-5 py-2 bg-[#f0fdf4] border-b border-[#bbf7d0] text-sm text-[#166534] flex-shrink-0"
+          >
+            <span aria-hidden="true">✅</span>
+            <span className="flex-1">{uploadStatus.message}</span>
+            <button
+              type="button"
+              data-testid="drafting-prd-upload-success-dismiss"
+              onClick={dismissUploadError}
+              aria-label="关闭成功提示"
+              className="text-[#166534] hover:text-[#14532d] text-base leading-none"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {/* 卡片体:title + PRD 编辑器 */}
         <div
@@ -283,6 +397,21 @@ export function DraftingPrdPane({
                 <b>&lt;/&gt;</b>
                 <span>· 列表</span>
                 <span className="ml-auto font-mono text-xs flex items-center gap-3">
+                  {/* ticket 03 —— "上传新版本"按钮(DRAFTING 覆盖,W4 强度:无 modal / 无 diff / 无确认)
+                      位置:紧贴预览切换按钮旁(ticket 03 字面要求 "在 previewToggle.buttonProps 旁"),
+                      与预览按钮共用 toolbar 右侧栏,用户能一眼看到。 */}
+                  <button
+                    type="button"
+                    data-testid="drafting-prd-upload"
+                    data-uploading={uploadStatus.kind === 'uploading' ? 'true' : 'false'}
+                    onClick={handleUploadButtonClick}
+                    disabled={uploadStatus.kind === 'uploading'}
+                    title="上传新版本 PRD(.md / .txt / .docx,直接覆盖)"
+                    aria-label="上传新版本"
+                    className="inline-flex items-center gap-1.5 h-[22px] px-2 rounded text-xs font-medium bg-bg-elevated text-text-2 border border-border-strong hover:text-text-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {uploadStatus.kind === 'uploading' ? '上传中…' : '📤 上传新版本'}
+                  </button>
                   {/* issue 07:👁 预览 / ✏ 编辑 切换按钮(共享 useMarkdownPreviewToggle) */}
                   <button {...previewToggle.buttonProps}>
                     {previewToggle.label}
@@ -294,6 +423,15 @@ export function DraftingPrdPane({
                     {prdMarkdown.length} chars
                   </span>
                 </span>
+                {/* 隐藏的文件 input —— ticket 03 验收:只接 .md / .txt / .docx */}
+                <input
+                  ref={fileInputRef}
+                  data-testid="drafting-prd-upload-input"
+                  type="file"
+                  accept=".md,.txt,.docx"
+                  onChange={handleUploadInputChange}
+                  className="hidden"
+                />
               </div>
               {isPreview ? (
                 <div

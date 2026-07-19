@@ -9,6 +9,7 @@
  */
 
 import { z } from 'zod'
+import { ParsedUploadImageSchema } from './requirement-upload.js'
 
 // ---------------------------------------------------------------------------
 // 常量:title 长度边界(前后端共用,与 PRD §8.1 对齐)
@@ -131,6 +132,17 @@ export type RequirementErrorCodeT =
  * 长度限制是后端兜底(决策 b2 + ticket 04 验收 #2):
  * - 前端 input maxLength=50 已经在 UI 层拦截;
  * - 后端再用 Zod trim+length 校验一次,过滤直接打 API 的请求。
+ *
+ * ticket 03 (ADR-0015 D3) —— Dialog 预填:
+ * - `prdMarkdown` 可选字段;缺省 / 空 → 服务端走 `buildRequirementMdTemplate(title)`
+ *   默认模板(兼容 ticket 04 既有行为)
+ * - 用户上传 .md / .txt / .docx 后,前端 `parseForDialog()` 把解析结果 + 图片
+ *   一并发过来,服务端在创建时调 `landAssets` + `replaceDataUriWithAssetPath`,
+ *   与 DRAFTING "上传新版本" 行为对齐(都生成 `assets/prd-N.<ext>`)
+ *
+ * 注:不在 schema 上加 prdMarkdown 长度上限 —— 大小闸门由 Fastify bodyLimit +
+ * `MAX_UPLOAD_BYTES` (ticket 01) 负责,本 schema 只做字段存在性 / 类型校验,
+ * 避免 Zod 字符级 max() 与 ADR 没要求的边界混淆。
  */
 export const CreateRequirementRequestSchema = z.object({
   title: z
@@ -142,6 +154,15 @@ export const CreateRequirementRequestSchema = z.object({
         .min(REQUIREMENT_TITLE_MIN, 'title is empty after trim')
         .max(REQUIREMENT_TITLE_MAX, `title exceeds ${REQUIREMENT_TITLE_MAX} chars`),
     ),
+  /** ticket 03 —— 可选 PRD markdown 正文(Dialog 预填路径携带) */
+  prdMarkdown: z.string().optional(),
+  /**
+   * ticket 03 (ADR-0015 D3 / D5) —— Dialog 预填路径下,docx 解出的图片列表
+   * (在 `parseForDialog()` 阶段就由前端拿到,等用户点"创建"时随 POST 一并提交)。
+   * 服务端在 `createRequirement` 内调 `landAssets` + 替换 markdown data URI,
+   * 让 DRAFTING 打开就能看到完整 PRD(含图片),无需用户再走 DRAFTING 上传。
+   */
+  images: z.array(ParsedUploadImageSchema).optional(),
 })
 export type CreateRequirementRequest = z.infer<typeof CreateRequirementRequestSchema>
 

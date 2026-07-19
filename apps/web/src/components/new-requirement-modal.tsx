@@ -22,7 +22,7 @@
  *   - 需求列表页 `+ 新建需求` 按钮 — (workspace)/requirements/page.tsx
  */
 import { useUIOverlay } from './ui-overlay-store';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTabFocusTrap } from '@/hooks/use-tab-focus-trap';
 import {
@@ -30,6 +30,7 @@ import {
   isCreateRequirementError,
   type CreateRequirementError,
 } from '@/lib/requirement';
+import { parseForDialog } from '@/lib/requirement-upload';
 
 /**
  * slug 生成规则 — PRD §8.3
@@ -68,16 +69,34 @@ export function NewRequirementModal() {
   const { cmdN, close, restoreFocus } = useUIOverlay();
   const router = useRouter();
   const [name, setName] = useState('');
+  // ticket 03 (ADR-0015 D3 / D5) —— PRD Markdown 预填字段:用户上传文件后
+  // `parseForDialog()` 解析结果塞这里;继续走"创建"流程时随 POST body 提交,
+  // 服务端写入 `requirement.md`(等价 ticket 03 W4 覆盖强度的同款语义)。
+  const [prdMarkdown, setPrdMarkdown] = useState<string>('');
+  // docx 解出的图片 base64 列表 —— 等用户点"创建"时随 POST 发给服务端,
+  // 服务端在 createRequirement 阶段调 `landAssets` + 替换 data URI。
+  // 这是 ticket 03 验收"DRAFTING 打开看到完整 PRD(含图片)" 的关键通路。
+  const [prdImages, setPrdImages] = useState<
+    ReadonlyArray<{ name: string; base64: string; mime: string }>
+  >([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // ticket 03 —— 上传预填子状态:闸门 / 服务端解析中 → 按钮 disabled + 显示状态
+  const [isUploadingPrd, setIsUploadingPrd] = useState(false);
+  const [uploadHint, setUploadHint] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement | null>(null);
+  const prdFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // 打开时重置(决策 E10 — 取消无副作用)
   useEffect(() => {
     if (cmdN) {
       setName('');
+      setPrdMarkdown('');
+      setPrdImages([]);
       setSubmitError(null);
       setIsSubmitting(false);
+      setIsUploadingPrd(false);
+      setUploadHint(null);
     }
   }, [cmdN]);
 
@@ -99,12 +118,56 @@ export function NewRequirementModal() {
     if (submitError) setSubmitError(null);
   };
 
+  /**
+   * ticket 03 (ADR-0015 D3) —— "上传文件"按钮回调。
+   * 走 `parseForDialog(file)`:
+   * - 前端闸门失败 → 提示红字(沿用 uploadAndReplace 同一组 fallback 文案)
+   * - 服务端闸门 / 解析失败 → 同样提示,本地 textarea 保留现状
+   * - 成功 → `prdMarkdown` 替换为解析后 markdown,**不写盘**(真正的写盘在"创建"那一刻)
+   */
+  const handleUploadPrdFile = useCallback(
+    async (file: File) => {
+      setIsUploadingPrd(true);
+      setUploadHint(null);
+      const result = await parseForDialog(file);
+      if (result.ok) {
+        setPrdMarkdown(result.data.markdown);
+        setPrdImages(result.data.images);
+        const imageNote = result.data.images.length > 0
+          ? `,含 ${result.data.images.length} 张图片待落 assets/`
+          : ''
+        setUploadHint(
+          `已从 ${file.name} 解析(共 ${result.data.markdown.length} 字${imageNote})`,
+        );
+      } else {
+        setUploadHint(result.message);
+      }
+      setIsUploadingPrd(false);
+      if (prdFileInputRef.current) prdFileInputRef.current.value = '';
+    },
+    [],
+  );
+
+  const handleUploadPrdButtonClick = useCallback(() => {
+    prdFileInputRef.current?.click();
+  }, []);
+
+  const handleUploadPrdInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        void handleUploadPrdFile(file);
+      }
+    },
+    [handleUploadPrdFile],
+  );
+
   // slug 预览(决策 24 陪伴感)
   const slug = useMemo(() => slugify(name), [name]);
   const slugPreview = name.trim().length > 0 ? `req-${slug}` : 'req-NNN-<slug>';
 
   // 提交按钮启用条件(决策 E1 — trim 后非空 + 不在提交中)
-  const canSubmit = name.trim().length > 0 && !isSubmitting;
+  const canSubmit = name.trim().length > 0 && !isSubmitting && !isUploadingPrd;
 
   if (!cmdN) return null;
 
@@ -113,6 +176,9 @@ export function NewRequirementModal() {
    * 1. await POST /api/requirements → 拿后端分配的 id(meta.yaml 真实落盘)
    * 2. 成功 → 关闭弹窗 + router.push(`/requirements/<id>/drafting/`)(决策 57)
    * 3. 失败 → 弹窗不关,inline 红字(对齐 PRD §9 E6-E9 + 决策 34 E7)
+   *
+   * ticket 03 增强:若用户上传过文件,`prdMarkdown` 一并发到服务端,服务端
+   * 用它写入 `requirement.md`(替代默认 `buildRequirementMdTemplate` 模板)。
    *
    * 错误码映射(对齐 PRD §9):
    * - 400 E_INVALID_TITLE  → modal 不关,inline 红字
@@ -128,7 +194,14 @@ export function NewRequirementModal() {
     setIsSubmitting(true);
     setSubmitError(null);
     try {
-      const result = await createRequirement({ title: name });
+      const result = await createRequirement({
+        title: name,
+        // ticket 03 (ADR-0015 D5):上传的 .docx 图片随 POST 发到服务端,
+        // 由 createRequirement 阶段调 `landAssets` + 替换 data URI。
+        // 仅当上传过且 images 非空时携带 —— 纯 markdown / 纯粘贴场景不传。
+        ...(prdMarkdown.trim().length > 0 ? { prdMarkdown } : {}),
+        ...(prdImages.length > 0 ? { images: prdImages as { name: string; base64: string; mime: string }[] } : {}),
+      });
       // 成功:关闭弹窗 → 跳 DRAFTING(决策 57)
       close();
       router.push(`/requirements/${result.id}/drafting/`);
@@ -191,7 +264,7 @@ export function NewRequirementModal() {
           </button>
         </div>
 
-        {/* Body — 单字段(决策 8 i) */}
+        {/* Body — 单字段(决策 8 i)+ ticket 03 PRD 预填 textarea */}
         <div className="px-6 py-6">
           <div className="mb-5">
             <label
@@ -234,19 +307,89 @@ export function NewRequirementModal() {
                 {name.length} / 50
               </div>
             </div>
-            {/* 提交错误(ticket 06 · PRD §9 E6-E9 inline 提示) */}
-            {submitError && (
-              <div
-                id="new-req-modal-error"
-                data-testid="new-req-modal-error"
-                role="alert"
-                className="mt-3 px-3 py-2 bg-[#fef2f2] border border-[#fecaca] rounded-md text-sm text-[#991b1b] flex items-start gap-2"
-              >
-                <span aria-hidden="true">⚠️</span>
-                <span className="flex-1">{submitError}</span>
-              </div>
-            )}
           </div>
+
+          {/* ticket 03 (ADR-0015 D3) —— PRD 预填 textarea
+              - 用户可手写 markdown
+              - 旁有"📤 上传文件"按钮 → 走 `parseForDialog()` → 闸门 + 解析 → 预填
+              - 真正的写盘在用户点 ✓ 创建时由 createRequirement → 服务端 createRequirement 接管
+              - 空字符串 → 服务端走默认 `buildRequirementMdTemplate` 模板(对齐 ticket 04) */}
+          <div className="mb-2">
+            <div className="flex items-center justify-between mb-2">
+              <label
+                htmlFor="new-req-prd"
+                className="block text-sm font-medium text-text-1"
+              >
+                PRD Markdown
+                <span className="text-text-3 font-normal ml-2">(可选)</span>
+              </label>
+              <button
+                type="button"
+                data-testid="new-req-modal-upload-prd"
+                data-uploading={isUploadingPrd ? 'true' : 'false'}
+                onClick={handleUploadPrdButtonClick}
+                disabled={isUploadingPrd || isSubmitting}
+                title="上传 .md / .txt / .docx 文件预填 PRD Markdown"
+                aria-label="上传 PRD 文件"
+                className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium bg-bg-subtle border border-border-strong text-text-2 hover:text-text-1 hover:bg-bg-elevated disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isUploadingPrd ? '解析中…' : '📤 上传文件'}
+              </button>
+              <input
+                ref={prdFileInputRef}
+                data-testid="new-req-modal-upload-prd-input"
+                type="file"
+                accept=".md,.txt,.docx"
+                onChange={handleUploadPrdInputChange}
+                className="hidden"
+              />
+            </div>
+            <textarea
+              id="new-req-prd"
+              data-testid="new-req-modal-prd"
+              value={prdMarkdown}
+              onChange={(e) => {
+                setPrdMarkdown(e.target.value);
+                if (uploadHint) setUploadHint(null);
+              }}
+              placeholder={`# 需求标题\n\n## 背景\n...\n\n或点右侧"📤 上传文件"从 .md / .txt / .docx 预填`}
+              rows={8}
+              disabled={isSubmitting}
+              className="w-full px-3 py-2 bg-bg-subtle border border-border-strong rounded-md text-sm text-text-1 font-mono outline-none transition focus:border-brand-500 focus:bg-bg-elevated focus:shadow-[0_0_0_3px_rgba(94,106,210,0.15)] resize-y disabled:opacity-70 disabled:cursor-not-allowed"
+            />
+            <div className="flex items-center justify-between mt-1">
+              <div
+                data-testid="new-req-modal-upload-hint"
+                className={`text-xs ${
+                  uploadHint && uploadHint.startsWith('已')
+                    ? 'text-[#166534]'
+                    : 'text-[#991b1b]'
+                }`}
+              >
+                {uploadHint ?? '空时 DRAFTING 会自动填充骨架模板'}
+              </div>
+              <div
+                className="text-xs font-mono text-text-3"
+                data-testid="new-req-modal-prd-chars"
+                data-chars={prdMarkdown.length}
+              >
+                {prdMarkdown.length} chars
+              </div>
+            </div>
+          </div>
+
+          {/* 提交错误(ticket 06 · PRD §9 E6-E9 inline 提示) */}
+          {submitError && (
+            <div
+              id="new-req-modal-error"
+              data-testid="new-req-modal-error"
+              role="alert"
+              className="mt-3 px-3 py-2 bg-[#fef2f2] border border-[#fecaca] rounded-md text-sm text-[#991b1b] flex items-start gap-2"
+            >
+              <span aria-hidden="true">⚠️</span>
+              <span className="flex-1">{submitError}</span>
+            </div>
+          )}
         </div>
 
         {/* Foot */}

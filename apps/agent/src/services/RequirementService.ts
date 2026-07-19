@@ -530,7 +530,11 @@ export class RequirementService {
    * - 创建顺序:先 mkdir,再写 meta.yaml,最后 requirement.md;失败时 dir 残留由调用方决定清理
    *   (本方法失败即抛错,dir 是空目录,可被下一次 max-seq 计算跳过)
    */
-  createRequirement(rawTitle: string): CreateRequirementResult {
+  createRequirement(
+    rawTitle: string,
+    prdMarkdown?: string,
+    images?: readonly ParsedUploadImage[],
+  ): CreateRequirementResult {
     const title = rawTitle.trim()
     const slug = slugify(title)
     const id = this.nextRequirementId(slug)
@@ -556,7 +560,16 @@ export class RequirementService {
     const meta: RequirementMeta = { id, title, createdAt }
     try {
       this.writeMetaYaml(reqDir, meta)
-      this.writeRequirementMd(reqDir, title)
+      // ticket 03 (ADR-0015 D3 / D5) —— Dialog 预填路径:
+      // 1) 落 `assets/prd-N.<ext>`(若有 images,与 `landAssets` 行为一致);
+      // 2) 把 markdown 中的 `data:` URI 替换为相对路径;
+      // 3) 写 `requirement.md`(无 images / 无 prdMarkdown → 默认模板)。
+      // 关键:ticket 03 验收要求 DRAFTING 打开看到完整 PRD(含图片),
+      //   因此 images 落地必须发生在 createRequirement(而不是 parseForDialog)。
+      const finalMarkdown = images && images.length > 0
+        ? this.landAssetsAndRewrite(id, prdMarkdown ?? '', images)
+        : prdMarkdown
+      this.writeRequirementMd(reqDir, title, finalMarkdown)
     } catch (err) {
       throw new RequirementServiceError(
         RequirementErrorCode.E_INTERNAL,
@@ -567,15 +580,39 @@ export class RequirementService {
     return { id, title, createdAt, dirPath: reqDir }
   }
 
+  /**
+   * ticket 03 私有 helper:在 `createRequirement` 内一步完成 `landAssets` +
+   * `replaceDataUriWithAssetPath`,返回替换后的 markdown。
+   * - `prdMarkdown` 已经是 `parseForDialog` 解析后的形态(含 data URI)
+   * - `images` 与 `parseUpload` 返回的 images 数组一致
+   * - 写盘失败抛错(沿用 `landAssets` 语义)
+   */
+  private landAssetsAndRewrite(
+    reqId: string,
+    prdMarkdown: string,
+    images: readonly ParsedUploadImage[],
+  ): string {
+    this.landAssets(reqId, images)
+    return this.replaceDataUriWithAssetPath(reqId, prdMarkdown)
+  }
+
   /** 写 `meta.yaml` —— 顺序字段,lineWidth=0 防 yaml 库截断长字符串 */
   private writeMetaYaml(reqDir: string, meta: RequirementMeta): void {
     const body = yaml.stringify(meta, { indent: 2, lineWidth: 0 })
     writeFileSync(join(reqDir, 'meta.yaml'), body, { mode: 0o600 })
   }
 
-  /** 写 `requirement.md` 空模板 */
-  private writeRequirementMd(reqDir: string, title: string): void {
-    writeFileSync(join(reqDir, 'requirement.md'), buildRequirementMdTemplate(title), 'utf8')
+  /** 写 `requirement.md` —— 默认走模板;ticket 03 Dialog 预填时传入解析后的 markdown */
+  private writeRequirementMd(
+    reqDir: string,
+    title: string,
+    prdMarkdown?: string,
+  ): void {
+    const body =
+      prdMarkdown && prdMarkdown.trim().length > 0
+        ? prdMarkdown
+        : buildRequirementMdTemplate(title)
+    writeFileSync(join(reqDir, 'requirement.md'), body, 'utf8')
   }
 
   // ===========================================================================
@@ -796,6 +833,118 @@ export class RequirementService {
       n += 1
       return `assets/prd-${n}.${imageMimeToExtension(mime)}`
     })
+  }
+
+  // ===========================================================================
+  // ticket 03 (ADR-0015 D3 / D8) —— 上传管道 service entry
+  //
+  // 把 ticket 01 + 02 的 `parseUpload` / `landAssets` / `replaceDataUriWithAssetPath`
+  // 串成两条语义不同的入口:
+  // - `parseForDialog(buffer, filename, mime)`  —— 仅跑闸门 + 解析,返回 markdown,**不写盘**
+  //   用于 Dialog 预填;真正的写盘等到用户点"创建"时由 createRequirement 接管。
+  // - `uploadAndReplace(reqId, buffer, filename, mime)` —— 闸门 + 解析 + 落地 assets/
+  //   + 替换 data URI + 覆盖 requirement.md,用于 DRAFTING 工位"上传新版本"(W4)。
+  //
+  // 两条入口都先跑 `validateUpload`(ext + magic + MIME + size + 单图 ≤ 2 MB),
+  // 闸门失败 → 返回 `{ok:false, reason, message}`,调用方映射到顶部红条。
+  // ===========================================================================
+
+  /**
+   * Dialog 预填:闸门通过后跑 `parseUpload` 返回 markdown + 待落地的图片列表。
+   *
+   * **不写盘**(不调 `landAssets` / 不写 `requirement.md`)—— 真正的写盘在用户
+   * 点"创建"那一刻由 `createRequirement(title, markdown, images)` 接管。
+   *
+   * 返回结构:
+   * - `markdown`            —— 解析后的 markdown(图片仍是 `data:` URI)
+   * - `images`              —— 抽出的 base64 图片数组;前端 Dialog 不直接落盘,
+   *                           而是把它随 POST /api/requirements 一起发给服务端,
+   *                           在 createRequirement 阶段调 `landAssets`
+   * - 闸门/解析失败 → 返回 `{ok:false, reason, message}`,不写盘
+   */
+  async parseForDialog(
+    buffer: Buffer,
+    filename: string,
+    mime: string,
+  ): Promise<
+    | { ok: true; markdown: string; images: readonly ParsedUploadImage[] }
+    | { ok: false; reason: UploadValidationReason | 'parse-error'; message?: string }
+  > {
+    const validation = await this.validateUpload(buffer, filename, mime)
+    if (!validation.ok) return validation
+    const parsed = await this.parseUpload(buffer, filename)
+    if (!parsed.ok) return parsed
+    return { ok: true, markdown: parsed.markdown, images: parsed.images }
+  }
+
+  /**
+   * DRAFTING 覆盖:闸门 + 解析 + 落地 assets/ + 替换 data URI + 覆盖 requirement.md。
+   *
+   * 契约:
+   * - 闸门失败 / 解析失败 → `{ok:false, ...}`,**不写盘**;调用方显示顶部红条。
+   * - req 目录不存在 → `{ok:false, reason:'requirement-not-found'}`,前端提示用户该 req 已不存在。
+   * - 写盘失败抛错(landAssets / writeFileSync 自身错误)—— 由 route 层映射到 500。
+   * - 成功后返回 `{ok:true, markdown, assets}`:`markdown` 是已经替换为相对路径的版本,
+   *   `assets` 是 `landAssets` 返回的元数据(供前端 MarkdownPreview 渲染)。
+   *
+   * 覆盖强度 W4:不弹 modal / 不输入确认 / 不写历史快照 —— 本方法直接覆盖。
+   */
+  async uploadAndReplace(
+    reqId: string,
+    buffer: Buffer,
+    filename: string,
+    mime: string,
+  ): Promise<
+    | {
+        ok: true
+        markdown: string
+        assets: AssetMeta[]
+      }
+    | {
+        ok: false
+        reason:
+          | UploadValidationReason
+          | 'parse-error'
+          | 'requirement-not-found'
+        message?: string
+      }
+  > {
+    const reqDir = this.requirementDirPath(reqId)
+    if (!existsSync(reqDir)) {
+      return {
+        ok: false,
+        reason: 'requirement-not-found',
+        message: `requirement ${reqId} 不存在`,
+      }
+    }
+
+    const validation = await this.validateUpload(buffer, filename, mime)
+    if (!validation.ok) return validation
+
+    const parsed = await this.parseUpload(buffer, filename)
+    if (!parsed.ok) return parsed
+
+    // 1. 落地图片(若有);同步写盘 → 失败抛错,上层 route 映射 500
+    const landed = this.landAssets(reqId, parsed.images)
+
+    // 2. markdown 中的 data URI → 相对路径
+    const markdown = this.replaceDataUriWithAssetPath(reqId, parsed.markdown)
+
+    // 3. 覆盖 requirement.md(同步,沿用 landAssets 风格)
+    this.replaceRequirementMd(reqId, markdown)
+
+    return { ok: true, markdown, assets: landed }
+  }
+
+  /**
+   * 覆盖式写 `requirement.md`(ticket 03 W4 强度)。
+   * - 同步写盘(沿用本类其他 IO 风格)
+   * - 失败抛错,由 route 层映射到 500
+   * - 不重命名、不写历史、不动 `meta.yaml`(ADR-0015 D4 锁)
+   */
+  replaceRequirementMd(reqId: string, markdown: string): void {
+    const mdPath = join(this.requirementDirPath(reqId), 'requirement.md')
+    writeFileSync(mdPath, markdown, 'utf8')
   }
 
   // ===========================================================================

@@ -3,6 +3,10 @@ import type { FastifyInstance } from 'fastify'
 import {
   AttachReposRequestSchema,
   CreateRequirementRequestSchema,
+  ParseUploadResponseSchema,
+  REASON_TO_HTTP_STATUS,
+  UploadPayloadSchema,
+  UploadReplaceResponseSchema,
   validateBranchName,
   type AttachReposResponse,
   type CreateRequirementResponse,
@@ -147,7 +151,7 @@ export async function requirementRoutes(
       return reply.code(503).send({ error: 'service_not_ready' })
     }
 
-    // 1. body schema 校验(title trim + 长度 1-50)
+    // 1. body schema 校验(title trim + 长度 1-50, ticket 03 可选 prdMarkdown + images)
     const parsed = CreateRequirementRequestSchema.safeParse(req.body)
     if (!parsed.success) {
       return reply.code(400).send({
@@ -155,12 +159,16 @@ export async function requirementRoutes(
         details: parsed.error.issues,
       })
     }
-    const { title } = parsed.data
+    const { title, prdMarkdown, images } = parsed.data
 
-    // 2. 调 service 落盘
+    // 2. 调 service 落盘(ticket 03:有 prdMarkdown / images 时落 assets/ + 写盘)
     let result: CreateRequirementResponse
     try {
-      const created = service.createRequirement(title)
+      const created = service.createRequirement(
+        title,
+        prdMarkdown,
+        images ?? [],
+      )
       result = { id: created.id, title: created.title, createdAt: created.createdAt }
     } catch (err) {
       // 错误码映射:RequirementServiceError.code → 顶层 HTTP code + 推送失败 SSE
@@ -270,4 +278,108 @@ export async function requirementRoutes(
     }
     return reply.code(200).send(body)
   })
+
+  // ============================================================================
+  // ticket 03 (ADR-0015 D3 / D8) —— 双入口上传管道
+  //
+  // - POST /api/uploads/parse —— Dialog 预填
+  //   闸门 + parseUpload(不写盘),返回 markdown 让前端填进 textarea。
+  //   真正的写盘等到用户点"创建"时由 POST /api/requirements 接管(ticket 04)。
+  //
+  // - POST /api/requirement/:id/upload-replace —— DRAFTING 覆盖(W4)
+  //   闸门 + parseUpload + landAssets + replaceDataUriWithAssetPath + 覆盖 requirement.md。
+  //   不弹 modal / 不输入确认 / 不写历史(ADR-0015 D8 W4)。
+  // ============================================================================
+
+  /**
+   * 把 service 返回的 `{ok:false, reason, message?}` 映射到 HTTP 状态码 + 错误体。
+   * 直接读 `shared.REASON_TO_HTTP_STATUS`,不要在 route 层另写一份映射。
+   */
+  function uploadFailStatus(
+    reason: Exclude<keyof typeof REASON_TO_HTTP_STATUS, never>,
+  ): { code: string; status: number } {
+    return REASON_TO_HTTP_STATUS[reason]
+  }
+
+  app.post<{ Body: unknown }>('/api/uploads/parse', async (req, reply) => {
+    const { requirementService: service } = deps
+    if (!service) {
+      return reply.code(503).send({ error: 'service_not_ready' })
+    }
+    const parsed = UploadPayloadSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: 'E_INVALID_UPLOAD_PAYLOAD',
+        details: parsed.error.issues,
+      })
+    }
+    const { filename, mime, contentBase64 } = parsed.data
+    const buffer = Buffer.from(contentBase64, 'base64')
+
+    const result = await service.parseForDialog(buffer, filename, mime)
+    if (!result.ok) {
+      const { code, status } = uploadFailStatus(result.reason)
+      return reply.code(status).send({
+        error: code,
+        reason: result.reason,
+        message: result.message ?? null,
+      })
+    }
+    const body = ParseUploadResponseSchema.parse({
+      markdown: result.markdown,
+      images: result.images,
+    })
+    return reply.code(200).send(body)
+  })
+
+  app.post<{ Params: { id: string }; Body: unknown }>(
+    '/api/requirement/:id/upload-replace',
+    async (req, reply) => {
+      const { requirementService: service } = deps
+      if (!service) {
+        return reply.code(503).send({ error: 'service_not_ready' })
+      }
+      const parsed = UploadPayloadSchema.safeParse(req.body)
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'E_INVALID_UPLOAD_PAYLOAD',
+          details: parsed.error.issues,
+        })
+      }
+      const { filename, mime, contentBase64 } = parsed.data
+      const buffer = Buffer.from(contentBase64, 'base64')
+
+      try {
+        const result = await service.uploadAndReplace(
+          req.params.id,
+          buffer,
+          filename,
+          mime,
+        )
+        if (!result.ok) {
+          const { code, status } = uploadFailStatus(result.reason)
+          return reply.code(status).send({
+            error: code,
+            reason: result.reason,
+            message: result.message ?? null,
+          })
+        }
+        const body = UploadReplaceResponseSchema.parse({
+          markdown: result.markdown,
+          assets: result.assets,
+        })
+        return reply.code(200).send(body)
+      } catch (err) {
+        // landAssets / writeFile 抛错(磁盘满 / IO 错) → 500,前端顶部红条
+        req.log.error(
+          { err, reqId: req.params.id },
+          'uploadAndReplace 写盘失败',
+        )
+        return reply.code(500).send({
+          error: 'E_INTERNAL',
+          message: err instanceof Error ? err.message : 'unknown error',
+        })
+      }
+    },
+  )
 }
