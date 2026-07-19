@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import type { AuxFile } from '@ai-devspace/shared'
+import type { AssetMeta, AuxFile } from '@ai-devspace/shared'
 import { MarkdownPreview } from '../markdown-preview'
 
 // ============================================================================
@@ -497,5 +497,219 @@ describe('MarkdownPreview · onAuxLinkClick 缺失时', () => {
     )
     expect(screen.queryByTestId('md-preview-link')).toBeNull()
     expect(screen.getByTestId('md-preview-link-ignored')).toBeInTheDocument()
+  })
+})
+
+// ============================================================================
+// ticket 02 · ADR-0015 D5 —— 资产图片渲染(assets[] 解析)
+// ============================================================================
+
+const assetsFixture: AssetMeta[] = [
+  {
+    name: 'prd-1.png',
+    url: '/api/requirement/req-123/assets/prd-1.png',
+    path: 'requirements/req-123/assets/prd-1.png',
+    size: 68,
+    mime: 'image/png',
+  },
+  {
+    name: 'prd-2.jpg',
+    url: '/api/requirement/req-123/assets/prd-2.jpg',
+    path: 'requirements/req-123/assets/prd-2.jpg',
+    size: 1234,
+    mime: 'image/jpeg',
+  },
+]
+
+describe('MarkdownPreview · 资产图片渲染(ticket 02 验收)', () => {
+  afterEach(() => cleanup())
+
+  it('![](assets/prd-1.png) 命中 assets → src 解析为 /api/requirement/.../assets/prd-1.png', () => {
+    render(
+      <MarkdownPreview
+        markdown={'# 标题\n\n![](assets/prd-1.png)\n'}
+        currentFile="PRD.md"
+        auxFiles={auxFiles}
+        assets={assetsFixture}
+      />,
+    )
+    const img = screen.getByTestId('md-preview-image')
+    expect(img.tagName.toLowerCase()).toBe('img')
+    expect(img.getAttribute('src')).toBe(
+      '/api/requirement/req-123/assets/prd-1.png',
+    )
+    expect(img.getAttribute('data-asset-name')).toBe('prd-1.png')
+    expect(img.getAttribute('data-asset-src')).toBe('assets/prd-1.png')
+    expect(img.getAttribute('data-resolved-src')).toBe(
+      '/api/requirement/req-123/assets/prd-1.png',
+    )
+    expect(img.getAttribute('alt')).toBe('')
+  })
+
+  it('![alt 文本](assets/prd-1.png) → alt 属性保留', () => {
+    render(
+      <MarkdownPreview
+        markdown={'![示意图](assets/prd-1.png)\n'}
+        currentFile="PRD.md"
+        auxFiles={auxFiles}
+        assets={assetsFixture}
+      />,
+    )
+    const img = screen.getByTestId('md-preview-image')
+    expect(img.getAttribute('alt')).toBe('示意图')
+  })
+
+  it('./assets/prd-1.png(带 ./ 前缀)→ 仍命中 assets', () => {
+    render(
+      <MarkdownPreview
+        markdown={'![x](./assets/prd-2.jpg)\n'}
+        currentFile="PRD.md"
+        auxFiles={auxFiles}
+        assets={assetsFixture}
+      />,
+    )
+    const img = screen.getByTestId('md-preview-image')
+    expect(img.getAttribute('src')).toBe(
+      '/api/requirement/req-123/assets/prd-2.jpg',
+    )
+    expect(img.getAttribute('data-asset-src')).toBe('assets/prd-2.jpg')
+  })
+
+  it('assets[] 未传 → src 保持原样(向后兼容旧调用方)', () => {
+    render(
+      <MarkdownPreview
+        markdown={'![x](assets/prd-1.png)\n'}
+        currentFile="PRD.md"
+        auxFiles={auxFiles}
+      />,
+    )
+    const img = screen.getByTestId('md-preview-image')
+    expect(img.getAttribute('src')).toBe('assets/prd-1.png')
+    expect(img.getAttribute('data-resolved-src')).toBe('assets/prd-1.png')
+  })
+
+  it('asset name 不在 assets[] → src 保留原 markdown 路径(best-effort)', () => {
+    render(
+      <MarkdownPreview
+        markdown={'![x](assets/prd-99.png)\n'}
+        currentFile="PRD.md"
+        auxFiles={auxFiles}
+        assets={assetsFixture}
+      />,
+    )
+    const img = screen.getByTestId('md-preview-image')
+    expect(img.getAttribute('src')).toBe('assets/prd-99.png')
+    expect(img.getAttribute('data-resolved-src')).toBe('assets/prd-99.png')
+  })
+
+  it('图片行不打断段落:前后段落渲染 + 图片在中间', () => {
+    render(
+      <MarkdownPreview
+        markdown={
+          '第一段\n\n![图](assets/prd-1.png)\n\n第二段\n'
+        }
+        currentFile="PRD.md"
+        auxFiles={auxFiles}
+        assets={assetsFixture}
+      />,
+    )
+    expect(screen.getAllByTestId('md-preview-paragraph')).toHaveLength(2)
+    expect(screen.getByTestId('md-preview-image')).toBeInTheDocument()
+  })
+
+  it('图片行后跟非块级内容 → 仍是 image 块(自身独立)', () => {
+    const md = '![图](assets/prd-1.png)\n'
+    render(
+      <MarkdownPreview markdown={md} currentFile="PRD.md" auxFiles={auxFiles} assets={assetsFixture} />,
+    )
+    expect(screen.getByTestId('md-preview-image')).toBeInTheDocument()
+    expect(screen.queryByTestId('md-preview-paragraph')).toBeNull()
+  })
+
+  it('data-asset-count 反映传入的 assets 数量', () => {
+    render(
+      <MarkdownPreview
+        markdown={'hello\n'}
+        currentFile="PRD.md"
+        auxFiles={auxFiles}
+        assets={assetsFixture}
+      />,
+    )
+    expect(screen.getByTestId('markdown-preview').getAttribute('data-asset-count')).toBe('2')
+  })
+
+  it('不传 assets → data-asset-count = 0', () => {
+    render(
+      <MarkdownPreview
+        markdown={'hello\n'}
+        currentFile="PRD.md"
+        auxFiles={auxFiles}
+      />,
+    )
+    expect(screen.getByTestId('markdown-preview').getAttribute('data-asset-count')).toBe('0')
+  })
+})
+
+// ============================================================================
+// ticket 02 · 段落内嵌图片(spec 真实 gap 修复后回归)
+// ============================================================================
+
+describe('MarkdownPreview · 段落内嵌图片', () => {
+  afterEach(() => cleanup())
+
+  it('段落里嵌入 `![](assets/prd-1.png)` 渲染为内联 <img>', () => {
+    render(
+      <MarkdownPreview
+        markdown={'这是 ![](assets/prd-1.png) 的图说\n'}
+        currentFile="PRD.md"
+        auxFiles={auxFiles}
+        assets={assetsFixture}
+      />,
+    )
+    const img = screen.getByTestId('md-preview-image')
+    expect(img.tagName.toLowerCase()).toBe('img')
+    expect(img.getAttribute('data-asset-inline')).toBe('true')
+    expect(img.getAttribute('src')).toBe(
+      '/api/requirement/req-123/assets/prd-1.png',
+    )
+    // 段落本身仍然存在,文字在前图在后
+    const para = screen.getByTestId('md-preview-paragraph')
+    expect(para.textContent).toContain('这是')
+    expect(para.textContent).toContain('的图说')
+  })
+
+  it('段落文字 + image + 文字 三段共存(image 不被吃成独立 block)', () => {
+    render(
+      <MarkdownPreview
+        markdown={
+          '文本前 ![](assets/prd-1.png) 文本后\n'
+        }
+        currentFile="PRD.md"
+        auxFiles={auxFiles}
+        assets={assetsFixture}
+      />,
+    )
+    expect(screen.getAllByTestId('md-preview-paragraph')).toHaveLength(1)
+    expect(screen.getByTestId('md-preview-image')).toBeInTheDocument()
+  })
+
+  it('`![alt](... )` 与 `[link](...)` 解析互不抢:image 优先于 link', () => {
+    // link 形态若先匹配,则 `![alt](src)` 会被解读成 link 文本 + target,
+    // 我们要确保这种情形被解析为 image,不是 link。
+    render(
+      <MarkdownPreview
+        markdown={'这张是 ![示意图](assets/prd-2.jpg),参考 [API](./api-draft.md)\n'}
+        currentFile="PRD.md"
+        auxFiles={auxFiles}
+        assets={assetsFixture}
+        onAuxLinkClick={() => {}}
+      />,
+    )
+    const img = screen.getByTestId('md-preview-image')
+    expect(img.getAttribute('src')).toBe(
+      '/api/requirement/req-123/assets/prd-2.jpg',
+    )
+    expect(img.getAttribute('alt')).toBe('示意图')
+    expect(screen.getByTestId('md-preview-link')).toBeInTheDocument()
   })
 })

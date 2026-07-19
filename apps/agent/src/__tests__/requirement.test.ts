@@ -92,10 +92,11 @@ describe('requirement routes return 501 not_implemented', () => {
   // 它的完整断言在下面"GET /api/requirements — ticket 07a list endpoint"
   // describe 块。这里只保留仍为 stub 的 3 个 endpoint 的 501 断言。
 
-  it('GET /api/requirement/:id → 501 with feature=requirement.detail', async () => {
+  it('GET /api/requirement/:id 缺失 req → 404 with E_REQUIREMENT_NOT_FOUND (ticket 02 实装)', async () => {
     const { statusCode, body } = await authed('GET', '/api/requirement/REFUND-001')
-    expect(statusCode).toBe(501)
-    expect(body.feature).toBe('requirement.detail')
+    expect(statusCode).toBe(404)
+    expect(body.error).toBe('E_REQUIREMENT_NOT_FOUND')
+    expect(body.requirementId).toBe('REFUND-001')
   })
 
   it('PATCH /api/requirement/:id → 501 with feature=requirement.update', async () => {

@@ -16,7 +16,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import yaml from 'yaml'
 import mammoth from 'mammoth'
 import {
@@ -27,19 +27,45 @@ import {
   STATUS_PROGRESS_MAP,
   UPLOAD_VALIDATION_MESSAGES,
   buildRequirementMdTemplate,
+  extensionToImageMime,
   getUploadExtension,
   hasDocxMagic,
+  imageMimeToExtension,
   isSupportedUploadExtension,
   isSupportedUploadMime,
   slugify,
+  type AssetMeta,
   type AttachRepoResult,
   type RepoAttachErrorCodeT,
   type RequirementMeta,
   type RequirementStatusT,
   type RequirementSummary,
+  type ResourceTreeNode,
   type UploadValidationReason,
   type UploadValidationResult as SharedUploadValidationResult,
 } from '@ai-devspace/shared'
+
+/**
+ * 抽出 `name.ext` 末尾的扩展名(无 `.` 前缀);`a.b.c` → `c`,`a` → `''`。
+ * 抽到这里避免在 `listAssets` 与 `resolveAssetFile` 里出现相同 inline 切片。
+ */
+function extractExt(name: string): string {
+  if (!name.includes('.')) return ''
+  return name.slice(name.lastIndexOf('.') + 1)
+}
+
+/**
+ * 资源树节点排序:目录优先,然后按文件名升序(规避兄弟节点命名混排)。
+ * 抽出来让 `list()` 末尾读起来清楚 —— 直接 `out.sort(compareResourceNodes)`。
+ */
+function compareResourceNodes(a: ResourceTreeNode, b: ResourceTreeNode): number {
+  if (a.type !== b.type) {
+    return a.type === 'directory' ? -1 : 1
+  }
+  if (a.name < b.name) return -1
+  if (a.name > b.name) return 1
+  return 0
+}
 
 /**
  * 在 per-repo `AttachRepoResult` 失败分支 `code` 字段允许的错误码。
@@ -688,6 +714,279 @@ export class RequirementService {
       return statSync(reqDir).mtime.toISOString()
     } catch {
       return new Date(0).toISOString()
+    }
+  }
+
+  // ===========================================================================
+  // ticket 02 —— `assets/` 落地(ADR-0015 D5)
+  // ===========================================================================
+
+  /** `requirements/<id>/assets/` 绝对路径 */
+  assetsDir(reqId: string): string {
+    return join(this.requirementDirPath(reqId), 'assets')
+  }
+
+  /** `requirements/<id>/assets/<name>` 绝对路径 */
+  assetPath(reqId: string, name: string): string {
+    return join(this.assetsDir(reqId), name)
+  }
+
+  /**
+   * 把 `parseUpload()` 给的图片数组按顺序写到 `requirements/<id>/assets/`:
+   * 第 i 张 → `prd-<i>.<ext>`(`ext` 通过 `imageMimeToExtension(mime)` 派生)。
+   *
+   * 语义:
+   * - 同步写盘(沿用本类其他 IO 风格,如 `createRequirement`)。
+   * - `mkdir -p` 确保 `assets/` 存在(recursive: true)。
+   * - base64 → Buffer → `writeFileSync`(mode 0o600,与 `meta.yaml` 一致)。
+   * - 写盘失败抛错 —— **不**做写一半回滚,上游覆盖流程决定是否回滚。
+   * - 返回项里 `path` 与 `url` 分离:`path` 是相对 workspace root 的相对路径,
+   *   `url` 是 `/api/requirement/<id>/assets/<name>`(供前端 fetcher 使用)。
+   */
+  landAssets(
+    reqId: string,
+    images: readonly ParsedUploadImage[],
+  ): AssetMeta[] {
+    if (images.length === 0) return []
+    const dir = this.assetsDir(reqId)
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+
+    const out: AssetMeta[] = []
+    images.forEach((image, idx) => {
+      const name = `prd-${idx + 1}.${imageMimeToExtension(image.mime)}`
+      const bytes = Buffer.from(image.base64, 'base64')
+      const absPath = this.assetPath(reqId, name)
+      writeFileSync(absPath, bytes, { mode: 0o600 })
+      out.push({
+        name,
+        path: this.relativeAssetPath(reqId, name),
+        url: this.assetUrl(reqId, name),
+        size: bytes.length,
+        mime: image.mime,
+      })
+    })
+    return out
+  }
+
+  /** `path` 字段相对 workspace root(便于 agent 内部测试断言;实际写盘走 `assetPath`) */
+  private relativeAssetPath(reqId: string, name: string): string {
+    return join('requirements', reqId, 'assets', name)
+  }
+
+  /** `url` 字段:agent 路由路径(前端 fetcher 追加 agent base) */
+  private assetUrl(reqId: string, name: string): string {
+    return `/api/requirement/${encodeURIComponent(reqId)}/assets/${encodeURIComponent(name)}`
+  }
+
+  /**
+   * 替换 markdown 中的 `data:image/<mime>;base64,...` 段为相对路径。
+   *
+   * 契约:
+   * - 纯函数:不入参 mutation,返回新字符串。
+   * - 严格按出现顺序编号(第 1 张 → `prd-1.<ext>`、第 2 张 → `prd-2.<ext>` ……),
+   *   与 `landAssets` 的命名一致。
+   * - 不识别的 data URI(非 image / 缺 base64 / 非完整 URI)保留原文不动 —— 上游
+   *   `validateUpload` 已经把陌生内容挡在进栈前,这里再宽容一次。
+   * - 与 `landAssets` 共享 `imageMimeToExtension`,保证命名一致。
+   */
+  replaceDataUriWithAssetPath(reqId: string, markdown: string): string {
+    const re = /data:(image\/[a-z0-9.+-]+);base64,([a-zA-Z0-9+/=]+)/gi
+    let n = 0
+    return markdown.replace(re, (_match, mime: string, _b64: string) => {
+      n += 1
+      return `assets/prd-${n}.${imageMimeToExtension(mime)}`
+    })
+  }
+
+  // ===========================================================================
+  // ticket 02 —— get(reqId) 与 list(reqId) 资源树
+  // ===========================================================================
+
+  /** 拉取单个 requirement 详情,含 `assets[]` (ADR-0015 D5)。
+   *
+   * 返回结构:
+   * - `id` / `title` / `createdAt` —— 来自 `meta.yaml`
+   * - `requirementMarkdown` —— `requirement.md` 全文(缺失则 `null`)
+   * - `assets[]` —— `requirements/<id>/assets/` 内文件,按文件名升序
+   *   (ticket 02 验收:`get(reqId).assets` 含 `prd-1.png` 元数据)。
+   * - 不存在 → 返回 `null`(上层映射 404)
+   */
+  get(reqId: string): {
+    id: string
+    title: string
+    createdAt: string
+    requirementMarkdown: string | null
+    assets: AssetMeta[]
+  } | null {
+    const reqDir = this.requirementDirPath(reqId)
+    if (!existsSync(reqDir)) return null
+
+    const meta = this.readMetaYaml(reqDir)
+    if (!meta) return null
+
+    const mdPath = join(reqDir, 'requirement.md')
+    let requirementMarkdown: string | null = null
+    if (existsSync(mdPath)) {
+      try {
+        requirementMarkdown = readFileSync(mdPath, 'utf8')
+      } catch {
+        requirementMarkdown = null
+      }
+    }
+
+    const assets = this.listAssets(reqId)
+
+    return {
+      id: meta.id,
+      title: meta.title,
+      createdAt: meta.createdAt,
+      requirementMarkdown,
+      assets,
+    }
+  }
+
+  /**
+   * 列出 `requirements/<id>/assets/` 的元数据(按文件名升序)。
+   *
+   * 内部用于 `get(reqId).assets`,也供 list 树形扫描时子叶节点派生
+   * `AssetMeta`(避免在 `list()` 里又重写 stat 逻辑)。
+   *
+   * 文件大小由 `statSync` 拿实际磁盘字节数,与 `landAssets` 写入字节数
+   * 一致(同一文件,即便后续被覆盖也是当前字节数)。
+   */
+  listAssets(reqId: string): AssetMeta[] {
+    const dir = this.assetsDir(reqId)
+    if (!existsSync(dir)) return []
+    let names: string[]
+    try {
+      names = readdirSync(dir).filter((n) => !n.startsWith('.')).sort()
+    } catch {
+      return []
+    }
+    const out: AssetMeta[] = []
+    for (const name of names) {
+      const absPath = join(dir, name)
+      let st: ReturnType<typeof statSync>
+      try {
+        st = statSync(absPath)
+      } catch {
+        continue
+      }
+      if (!st.isFile()) continue
+      out.push({
+        name,
+        path: this.relativeAssetPath(reqId, name),
+        url: this.assetUrl(reqId, name),
+        size: st.size,
+        mime: extensionToImageMime(extractExt(name)),
+      })
+    }
+    return out
+  }
+
+  /**
+   * 列出指定 requirement 的资源树(顶层目录深度),应用 ADR-0015 D5 的过滤:
+   *
+   * - `_` 前缀目录排除(沿用既有 `_archived/` 处理)
+   * - `.` 前缀目录排除(隐藏文件,如 `.archived`、`.DS_Store`)
+   * - `assets/` 不带下划线因此**纳入**(ADR-0015 D5 + 验收)
+   * - 顶层文件:不递归到子目录(顶层 + 一层子目录共两层);子目录里只列文件名
+   *   不带路径前缀(验收:assets/ 节点下能看到 `prd-1.png`)
+   *
+   * 数据源说明:这里的实现是简单的两遍 `readdirSync`(顶层 + 直接子目录
+   * 各一次)。不递归更深,避免资源树因 worktree 之类深层结构膨胀。
+   */
+  list(reqId: string): ResourceTreeNode[] {
+    const reqDir = this.requirementDirPath(reqId)
+    if (!existsSync(reqDir)) return []
+    const out: ResourceTreeNode[] = []
+    let top: string[]
+    try {
+      top = readdirSync(reqDir)
+    } catch {
+      return []
+    }
+
+    for (const name of top) {
+      if (name.startsWith('_') || name.startsWith('.')) continue
+      const abs = join(reqDir, name)
+      let st
+      try {
+        st = statSync(abs)
+      } catch {
+        continue
+      }
+      if (st.isDirectory()) {
+        let children: string[]
+        try {
+          children = readdirSync(abs)
+            .filter((n) => !n.startsWith('.'))
+            .sort()
+        } catch {
+          children = []
+        }
+        out.push({
+          name,
+          path: name,
+          type: 'directory',
+          children: children.map((child) => ({
+            name: child,
+            path: `${name}${sep}${child}`,
+            type: 'file' as const,
+          })),
+        })
+      } else if (st.isFile()) {
+        out.push({ name, path: name, type: 'file' })
+      }
+    }
+
+    out.sort(compareResourceNodes)
+    return out
+  }
+
+  // ===========================================================================
+  // ticket 02 —— 单个 asset 文件读取 + 路径安全(API 用)
+  // ===========================================================================
+
+  /**
+   * 给定 `reqId` + 用户输入的 `filename`,返回:
+   * - `null` —— 路径不安全(穿越 / 含 null byte / 绝对路径 / 解析后超出 assets/)
+   * - `{ absPath, mime, size }` —— 安全且文件存在
+   *
+   * 安全策略:
+   * 1. 拒绝含 NUL byte 的输入(`\0`)
+   * 2. 拒绝含 `/` 或 `\` 的输入(路径分隔符穿越)
+   * 3. 拒绝绝对路径(以 `/` 或 Windows drive letter 开头)
+   * 4. 解析后的绝对路径必须以 `assetsDir(reqId)` 开头(`path.resolve` 风格)
+   * 5. 文件存在且为 regular file
+   */
+  resolveAssetFile(
+    reqId: string,
+    filename: string,
+  ): { absPath: string; mime: string; size: number } | null {
+    if (!filename || filename.includes('\0')) return null
+    // `filename` 必须是单段 basename:拒绝 `sub/x.png` / `..\x.png` / `..\\x.png`。
+    // 上面两个 include 已经覆盖 POSIX / 与 Windows \ 两种分隔符,够用。
+    if (filename.includes('/') || filename.includes('\\')) return null
+
+    const root = this.assetsDir(reqId)
+    const target = join(root, filename)
+    const normalizedRoot = root.endsWith(sep) ? root : root + sep
+    if (!target.startsWith(normalizedRoot) && target !== root) return null
+
+    if (!existsSync(target)) return null
+    let st
+    try {
+      st = statSync(target)
+    } catch {
+      return null
+    }
+    if (!st.isFile()) return null
+
+    return {
+      absPath: target,
+      mime: extensionToImageMime(extractExt(filename)),
+      size: st.size,
     }
   }
 }

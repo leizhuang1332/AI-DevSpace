@@ -1,7 +1,7 @@
 'use client'
 
 import { Fragment, useMemo, type ReactNode } from 'react'
-import { resolveAuxLink, type AuxFile } from '@ai-devspace/shared'
+import { resolveAuxLink, type AssetMeta, type AuxFile } from '@ai-devspace/shared'
 
 /**
  * Minimal Markdown preview component (issue 07).
@@ -15,6 +15,10 @@ import { resolveAuxLink, type AuxFile } from '@ai-devspace/shared'
  * - Unordered lists (dash or asterisk prefix; - [ ] / - [x] task-list accepted)
  * - Fenced code blocks (triple backtick ... triple backtick)
  * - Paragraphs (consecutive non-empty non-block lines)
+ * - Image blocks (ticket 02 / ADR-0015 D5):行首或单独一行的
+ *   `![alt](assets/prd-N.<ext>)` / `![alt](./assets/prd-N.<ext>)`。
+ *   src 在 `assets` 列表中找到匹配 → 用 `AssetMeta.url` 渲染 `<img>`;
+ *   找不到 → 原样渲染 `<img src={原始 src}>`,best-effort 不阻塞预览。
  *
  * Supported inline (within heading / paragraph / list-item text):
  * - Inline code (single backtick wrapping, no nested backticks)
@@ -56,6 +60,15 @@ export interface MarkdownPreviewProps {
   auxFiles: AuxFile[]
   /** Click handler for resolved aux links */
   onAuxLinkClick?: (target: AuxFile) => void
+  /**
+   * ticket 02 (ADR-0015 D5):已知 assets 元数据列表。
+   * 解析 `![alt](assets/prd-N.png)` 时按 `name`(=文件 basename)匹配,
+   * 命中后用 `AssetMeta.url`(agent 路由路径)作为 `<img>` 的 src。
+   *
+   * 为可选,与父组件向后兼容:不传时图片按原 src 渲染(便于 PR review 时
+   * 单独看 markdown 文本)。
+   */
+  assets?: AssetMeta[]
 }
 
 // ---------------------------------------------------------------------------
@@ -67,11 +80,15 @@ type Block =
   | { kind: 'paragraph'; lines: string[] }
   | { kind: 'list'; items: string[] }
   | { kind: 'code'; lang: string; body: string }
+  | { kind: 'image'; alt: string; src: string }
 
 const FENCE_RE = /^```(\S*)\s*$/
 const HEADING_RE = /^(#{1,3})\s+(.+?)\s*#*\s*$/
 // List item: - item / * item, with optional [ ] / [x] checkbox
 const LIST_ITEM_RE = /^[-*]\s+(?:\[(?: |x|X)\]\s+)?(.*)$/
+// Markdown image at line start(允许前置缩进),tail 不带其他字符(孤立成段)。
+// 例:`![Alt](assets/prd-1.png)` / `![Alt](./assets/prd-1.png)`
+const IMAGE_LINE_RE = /^\s*!\[([^\]]*)\]\((\.\/)?([^)\s]+)\)\s*$/
 
 function parseBlocks(markdown: string): Block[] {
   if (!markdown) return []
@@ -106,6 +123,19 @@ function parseBlocks(markdown: string): Block[] {
       i += 1
       continue
     }
+    // image at line start(ticket 02):整行仅含 image markdown → 独立 block
+    const imageMatch = line.match(IMAGE_LINE_RE)
+    if (imageMatch) {
+      const alt = imageMatch[1] ?? ''
+      const leadingDot = imageMatch[2] === './'
+      // `src` 把 `./` 前缀去掉(允许 mammoth 输出 `./assets/prd-1.png` 与
+      // `assets/prd-1.png` 两种形态),解析时统一按 basename 匹配。
+      const rawSrc = imageMatch[3]
+      const src = leadingDot ? rawSrc.replace(/^\.\//, '') : rawSrc
+      blocks.push({ kind: 'image', alt, src })
+      i += 1
+      continue
+    }
     // list block (consecutive list-item lines)
     if (LIST_ITEM_RE.test(line)) {
       const items: string[] = []
@@ -126,7 +156,8 @@ function parseBlocks(markdown: string): Block[] {
         cur.trim() === '' ||
         HEADING_RE.test(cur) ||
         LIST_ITEM_RE.test(cur) ||
-        FENCE_RE.test(cur)
+        FENCE_RE.test(cur) ||
+        IMAGE_LINE_RE.test(cur)
       ) {
         break
       }
@@ -139,25 +170,31 @@ function parseBlocks(markdown: string): Block[] {
 }
 
 // ---------------------------------------------------------------------------
-// Inline parser: split text into [code | link | text] tokens
+// Inline parser: split text into [code | link | image | text] tokens
 // ---------------------------------------------------------------------------
 
 type InlineToken =
   | { kind: 'text'; value: string }
   | { kind: 'code'; value: string }
   | { kind: 'link'; text: string; target: string }
+  | { kind: 'image'; alt: string; src: string }
 
 const INLINE_CODE_RE = /`([^`\n]+)`/
 const INLINE_LINK_RE = /\[([^\]\n]+)\]\(([^)\n]+)\)/
+// inline image `![alt](src)`,空 alt 也允许。src 与 alt 都不可含换行。
+// 注意:会和 INLINE_LINK_RE 的形态重合,但顺序(image 优先于 link)处理——
+// 否则 `![a](b)` 会被 link 的 `[a](b)` 抢先吃掉。详见 `parseInline`。
+const INLINE_IMAGE_RE = /!\[([^\]\n]*)\]\(([^)\n]+)\)/
 
 /**
- * Parse inline tokens left-to-right. We scan for the earliest match of either
- * inline-code or link, emit a text token for the prefix, then the matched
- * token, and continue from the end of the match.
+ * Parse inline tokens left-to-right. We scan for the earliest match among
+ * inline-code, inline-image, inline-link; emit a text token for the prefix,
+ * then the matched token, and continue from the end of the match.
  *
- * Order matters: inline-code must be checked first so that backticks inside
- * link text like [see `x.md`](...) still parse the backtick as a code span
- * (well, mixed content is rare; we keep it simple by checking code first).
+ * 顺序约束:
+ * - image **优先于** link(否则 `![alt](src)` 会被 link 的 `[alt](src)` 抢先吃掉)
+ * - code 仍然最先检查,让 backtick 在 link / image 文本里也保持字面
+ *   (虽然现实几乎不会出现 `[see `x.md`](...)` 这种嵌套)
  */
 function parseInline(text: string): InlineToken[] {
   const tokens: InlineToken[] = []
@@ -165,26 +202,44 @@ function parseInline(text: string): InlineToken[] {
   while (cursor < text.length) {
     const remaining = text.slice(cursor)
     const codeMatch = remaining.match(INLINE_CODE_RE)
+    const imageMatch = remaining.match(INLINE_IMAGE_RE)
     const linkMatch = remaining.match(INLINE_LINK_RE)
-    // pick the earliest match by index
-    let earliest:
-      | { kind: 'code' | 'link'; match: RegExpMatchArray }
-      | null = null
-    if (codeMatch && (!linkMatch || codeMatch.index! <= linkMatch.index!)) {
-      earliest = { kind: 'code', match: codeMatch }
-    } else if (linkMatch) {
-      earliest = { kind: 'link', match: linkMatch }
+    type Candidate = {
+      kind: 'code' | 'image' | 'link'
+      match: RegExpMatchArray
     }
-    if (!earliest) {
+    const candidates: Candidate[] = []
+    if (codeMatch) candidates.push({ kind: 'code', match: codeMatch })
+    if (imageMatch) candidates.push({ kind: 'image', match: imageMatch })
+    if (linkMatch) candidates.push({ kind: 'link', match: linkMatch })
+    if (candidates.length === 0) {
       tokens.push({ kind: 'text', value: remaining })
       break
     }
+    // 选 index 最小者;并列时按 code > image > link(防止 link 抢走 image)
+    candidates.sort((a, b) => {
+      const ai = a.match.index!
+      const bi = b.match.index!
+      if (ai !== bi) return ai - bi
+      const order: Record<Candidate['kind'], number> = {
+        code: 0,
+        image: 1,
+        link: 2,
+      }
+      return order[a.kind] - order[b.kind]
+    })
+    const earliest = candidates[0]
     const idx = earliest.match.index!
     if (idx > 0) {
       tokens.push({ kind: 'text', value: remaining.slice(0, idx) })
     }
     if (earliest.kind === 'code') {
       tokens.push({ kind: 'code', value: earliest.match[1] })
+      cursor += idx + earliest.match[0].length
+    } else if (earliest.kind === 'image') {
+      const raw = earliest.match[2]
+      const src = raw.startsWith('./') ? raw.slice(2) : raw
+      tokens.push({ kind: 'image', alt: earliest.match[1], src })
       cursor += idx + earliest.match[0].length
     } else {
       tokens.push({
@@ -212,6 +267,7 @@ function renderInline(
   ctx: {
     currentFile: string
     auxFiles: AuxFile[]
+    assets?: AssetMeta[]
     onAuxLinkClick?: (target: AuxFile) => void
   },
 ): ReactNode[] {
@@ -228,6 +284,28 @@ function renderInline(
         >
           {t.value}
         </code>
+      )
+    }
+    if (t.kind === 'image') {
+      // ticket 02 (ADR-0015 D5):inline 图片同样通过 resolveAssetSrc 解析成
+      // agent 路由 url;data-asset-name / data-asset-src / data-resolved-src
+      // 三个 testid 属性与 block image 保持一致,便于 E2E 检索。
+      const resolvedSrc = resolveAssetSrc(t.src, ctx.assets)
+      return (
+        <img
+          key={i}
+          data-testid="md-preview-image"
+          data-asset-inline="true"
+          data-asset-name={
+            t.src.includes('/') ? t.src.slice(t.src.lastIndexOf('/') + 1) : t.src
+          }
+          data-asset-src={t.src}
+          data-resolved-src={resolvedSrc}
+          src={resolvedSrc}
+          alt={t.alt}
+          loading="lazy"
+          className="inline-block max-w-full h-auto rounded-md border border-border my-1 align-baseline"
+        />
       )
     }
     // link
@@ -266,23 +344,48 @@ function renderInline(
 // Public component
 // ---------------------------------------------------------------------------
 
+/**
+ * 把 markdown image 的 src 解析成浏览器可访问的 src:
+ * - 命中 `assets[]` 中的 `name` → 返回 `AssetMeta.url`(agent 路由路径)
+ * - 未命中 → best-effort 返回原 `src`(允许预览渲染未知图片,例如外链 CDN;
+ *   网络策略由父组件的 fetcher 决定)
+ *
+ * 解析规则:
+ * 1. 取出 src 的 basename(`assets/prd-1.png` → `prd-1.png`;`./assets/prd-1.png`
+ *    在 parseBlocks 阶段已剥掉 `./`)
+ * 2. 在 `assets[]` 按 `name` 字段精确比对
+ *
+ * 注:不做 prefix / fuzzy 匹配 —— `landAssets` 的命名是确定的 `prd-<N>.<ext>`,
+ * markdown 由 `replaceDataUriWithAssetPath` 重写后路径也是这个形态,精确匹配
+ * 即可。带 `?query` / `#fragment` 后缀的 src 不在 ticket 02 范围。
+ */
+function resolveAssetSrc(src: string, assets: AssetMeta[] | undefined): string {
+  if (!assets || assets.length === 0) return src
+  // 取出 last segment(basename),允许 src 含 `/`
+  const basename = src.includes('/') ? src.slice(src.lastIndexOf('/') + 1) : src
+  const hit = assets.find((a) => a.name === basename)
+  return hit ? hit.url : src
+}
+
 export function MarkdownPreview({
   markdown,
   currentFile,
   auxFiles,
   onAuxLinkClick,
+  assets,
 }: MarkdownPreviewProps) {
   const blocks = useMemo(() => parseBlocks(markdown), [markdown])
 
   const ctx = useMemo(
-    () => ({ currentFile, auxFiles, onAuxLinkClick }),
-    [currentFile, auxFiles, onAuxLinkClick],
+    () => ({ currentFile, auxFiles, assets, onAuxLinkClick }),
+    [currentFile, auxFiles, assets, onAuxLinkClick],
   )
 
   return (
     <div
       data-testid="markdown-preview"
       data-current-file={currentFile}
+      data-asset-count={String(assets?.length ?? 0)}
       className="flex flex-col gap-3 text-sm leading-relaxed text-text-2"
     >
       {blocks.map((b, idx) => {
@@ -359,6 +462,26 @@ export function MarkdownPreview({
               >
                 <code>{b.body}</code>
               </pre>
+            )
+          }
+          case 'image': {
+            const resolvedSrc = resolveAssetSrc(b.src, assets)
+            return (
+              // Next/Image 不强制:mammoth 解出的 docx 图片尺寸不稳定,
+              // 交给浏览器原生 `<img>` + max-width 自适应即可(markdown 预览场景)。
+              <img
+                key={idx}
+                data-testid="md-preview-image"
+                data-asset-name={
+                  b.src.includes('/') ? b.src.slice(b.src.lastIndexOf('/') + 1) : b.src
+                }
+                data-asset-src={b.src}
+                data-resolved-src={resolvedSrc}
+                src={resolvedSrc}
+                alt={b.alt}
+                loading="lazy"
+                className="max-w-full h-auto rounded-md border border-border my-2"
+              />
             )
           }
         }

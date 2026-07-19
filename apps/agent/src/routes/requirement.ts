@@ -1,3 +1,4 @@
+import { createReadStream } from 'node:fs'
 import type { FastifyInstance } from 'fastify'
 import {
   AttachReposRequestSchema,
@@ -79,7 +80,18 @@ export async function requirementRoutes(
   })
 
   app.get<{ Params: { id: string } }>('/api/requirement/:id', async (req, reply) => {
-    return reply.code(501).send(notImplemented('requirement.detail', '05'))
+    const { requirementService: service } = deps
+    if (!service) {
+      return reply.code(503).send({ error: 'service_not_ready' })
+    }
+    const detail = service.get(req.params.id)
+    if (!detail) {
+      return reply.code(404).send({
+        error: 'E_REQUIREMENT_NOT_FOUND',
+        requirementId: req.params.id,
+      })
+    }
+    return reply.code(200).send(detail)
   })
 
   app.patch<{ Params: { id: string } }>('/api/requirement/:id', async (req, reply) => {
@@ -90,6 +102,37 @@ export async function requirementRoutes(
     '/api/requirement/:id/skill',
     async (req, reply) => {
       return reply.code(501).send(notImplemented('requirement.run_skill', '08'))
+    },
+  )
+
+  // ============================================================================
+  // ticket 02 —— GET /api/requirement/:id/assets/:filename (ADR-0015 D5)
+  // ============================================================================
+
+  app.get<{ Params: { id: string; filename: string } }>(
+    '/api/requirement/:id/assets/:filename',
+    async (req, reply) => {
+      const { requirementService: service } = deps
+      if (!service) {
+        return reply.code(503).send({ error: 'service_not_ready' })
+      }
+      const { id, filename } = req.params
+
+      // 1. 路径安全(也防 NUL / '..' / '\\');resolveAssetFile 已把不合法路径返回 null。
+      const resolved = service.resolveAssetFile(id, filename)
+      if (!resolved) {
+        // 不区分"不存在"与"路径穿越"——防 oracle;统一 404
+        req.log.warn({ reqId: id, filename }, 'asset not found or traversal attempt')
+        return reply.code(404).send({ error: 'E_ASSET_NOT_FOUND' })
+      }
+
+      // 2. 设置 Content-Type(mime 由 extensionToImageMime 派生) + Content-Length
+      reply
+        .header('Content-Type', resolved.mime)
+        .header('Content-Length', String(resolved.size))
+        // 资源是图片,允许任何 web origin 缓存,与决策无关
+        .header('Cache-Control', 'private, max-age=60')
+      return reply.send(createReadStream(resolved.absPath))
     },
   )
 
