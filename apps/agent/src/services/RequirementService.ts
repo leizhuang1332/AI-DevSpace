@@ -18,17 +18,27 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import yaml from 'yaml'
+import mammoth from 'mammoth'
 import {
+  MAX_UPLOAD_BYTES,
+  MAX_UPLOAD_IMAGE_BYTES,
   RepoAttachErrorCode,
   RequirementErrorCode,
   STATUS_PROGRESS_MAP,
+  UPLOAD_VALIDATION_MESSAGES,
   buildRequirementMdTemplate,
+  getUploadExtension,
+  hasDocxMagic,
+  isSupportedUploadExtension,
+  isSupportedUploadMime,
   slugify,
   type AttachRepoResult,
   type RepoAttachErrorCodeT,
   type RequirementMeta,
   type RequirementStatusT,
   type RequirementSummary,
+  type UploadValidationReason,
+  type UploadValidationResult as SharedUploadValidationResult,
 } from '@ai-devspace/shared'
 
 /**
@@ -49,6 +59,40 @@ import {
   type GitExec,
   type WorktreeManager,
 } from '../worktree/WorktreeManager.js'
+
+// mammoth 1.12 运行时仍提供 convertToMarkdown,但类型声明遗漏了该兼容 API。
+const mammothWithMarkdown = mammoth as typeof mammoth & {
+  convertToMarkdown: typeof mammoth.convertToHtml
+}
+
+export interface ParsedUploadImage {
+  name: string
+  base64: string
+  mime: string
+}
+
+export type ParseUploadResult =
+  | { ok: true; markdown: string; images: ParsedUploadImage[] }
+  | { ok: false; reason: 'parse-error'; message: string }
+
+export type ValidateUploadResult = SharedUploadValidationResult<
+  UploadValidationReason | 'parse-error'
+>
+
+function extractDataUriImages(markdown: string): ParsedUploadImage[] {
+  const images: ParsedUploadImage[] = []
+  const dataUriPattern = /data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=]+)/gi
+
+  for (const match of markdown.matchAll(dataUriPattern)) {
+    images.push({
+      name: `prd-${images.length + 1}`,
+      mime: match[1].toLowerCase(),
+      base64: match[2],
+    })
+  }
+
+  return images
+}
 
 export interface RequirementServiceDeps {
   root: string
@@ -122,6 +166,105 @@ export class RequirementService {
     // 默认用统一 git exec 构造 manager;调用方可注入自己的 manager
     this.worktreeMgr =
       deps.worktreeMgr ?? createWorktreeManager({ root: deps.root, git: deps.git })
+  }
+
+  async parseUpload(buffer: Buffer, filename: string): Promise<ParseUploadResult> {
+    const extension = getUploadExtension(filename)
+    if (extension === '.md' || extension === '.txt') {
+      return {
+        ok: true,
+        markdown: buffer.toString('utf8'),
+        images: [],
+      }
+    }
+
+    if (extension === '.docx') {
+      try {
+        const result = await mammothWithMarkdown.convertToMarkdown(
+          { buffer },
+          {
+            convertImage: mammoth.images.imgElement(async (image) => ({
+              src: `data:${image.contentType};base64,${await image.readAsBase64String()}`,
+            })),
+          },
+        )
+        return {
+          ok: true,
+          markdown: result.value,
+          images: extractDataUriImages(result.value),
+        }
+      } catch (error) {
+        return {
+          ok: false,
+          reason: 'parse-error',
+          message: error instanceof Error ? error.message : String(error),
+        }
+      }
+    }
+
+    return {
+      ok: false,
+      reason: 'parse-error',
+      message: `不支持的文件格式: ${extension}`,
+    }
+  }
+
+  async validateUpload(
+    buffer: Buffer,
+    filename: string,
+    declaredMime: string,
+  ): Promise<ValidateUploadResult> {
+    const extension = getUploadExtension(filename)
+    if (!isSupportedUploadExtension(extension)) {
+      return {
+        ok: false,
+        reason: 'ext',
+        message: UPLOAD_VALIDATION_MESSAGES.ext,
+      }
+    }
+
+    if (!isSupportedUploadMime(declaredMime)) {
+      return {
+        ok: false,
+        reason: 'mime',
+        message: UPLOAD_VALIDATION_MESSAGES.mime,
+      }
+    }
+
+    if (extension === '.docx' && !hasDocxMagic(buffer)) {
+      return {
+        ok: false,
+        reason: 'magic',
+        message: UPLOAD_VALIDATION_MESSAGES.magic,
+      }
+    }
+
+    if (buffer.length > MAX_UPLOAD_BYTES) {
+      return {
+        ok: false,
+        reason: 'size',
+        message: UPLOAD_VALIDATION_MESSAGES.size,
+      }
+    }
+
+    if (extension !== '.docx') return { ok: true }
+
+    const parsed = await this.parseUpload(buffer, filename)
+    if (!parsed.ok) return parsed
+
+    if (
+      parsed.images.some(
+        (image) => Buffer.byteLength(image.base64, 'base64') > MAX_UPLOAD_IMAGE_BYTES,
+      )
+    ) {
+      return {
+        ok: false,
+        reason: 'image-too-large',
+        message: UPLOAD_VALIDATION_MESSAGES.imageTooLarge,
+      }
+    }
+
+    return { ok: true }
   }
 
   /** requirement 目录是否存在(`<root>/requirements/<id>`) */
