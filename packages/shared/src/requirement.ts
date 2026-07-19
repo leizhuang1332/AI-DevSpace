@@ -9,7 +9,7 @@
  */
 
 import { z } from 'zod'
-import { ParsedUploadImageSchema } from './requirement-upload.js'
+import { ParsedUploadImageSchema } from './requirement-upload'
 
 // ---------------------------------------------------------------------------
 // 常量:title 长度边界(前后端共用,与 PRD §8.1 对齐)
