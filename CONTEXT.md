@@ -72,6 +72,15 @@ AI 可执行的工作单元（如"设计退款表结构"、"开发 refund-servic
 
 - 包含但不限于：SQL 脚本、OpenAPI/接口定义、Apollo 配置、数据库设计文档、序列图、测试用例文件
 
+### Asset（附件素材）
+
+用户上传附件中的非代码资源（主要为 .docx 解出的图片或其他原始输入）。存放在 `requirements/<req-id>/assets/`。
+
+- 与 artifact 区分：asset 是用户的**原始输入**，artifact 是 AI 的**中间或最终输出**
+- markdown 中通过相对路径引用（例：`![](assets/prd-1.png)`），典型来源：[mammoth](https://github.com/mwilliamson/mammoth.js) 解 .docx 的内嵌图
+- 资源树扫描忽略 `_` 前缀目录（沿用 `_archived/` 约定），但 `assets/` 不带下划线，因此纳入资源树
+- 归属 ADR：[ADR-0015](docs/adr/0015-prd-file-upload-and-editing.md) D5
+
 ### Knowledge（知识）
 
 跨需求复用的领域知识、技术方案、Bug 经验、最佳实践。存放在 `~/.aidevspace/knowledge/`。
