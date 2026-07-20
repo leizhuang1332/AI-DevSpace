@@ -1,62 +1,74 @@
 'use client'
 
-import { useCallback } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { shouldShowRepoSoftWarning, type DraftingRepo } from '@/lib/drafting'
 
 /**
- * DRAFTING 工位的底部仓库条(issue 08 + issue 01 ticket)
+ * DRAFTING 工位的底部仓库条 · 折叠 sticky(issue 09)
  *
- * 视觉对照基线:`docs/design/pages/19-final-drafting.html` 的 `.repo-bar` 区域
+ * 视觉对照基线:`docs/design/pages/repo-bar-redesign-comparison-20260720.html` 方案 B
+ *   + `docs/design/pages/19-final-drafting.html` 的 `.repo-bar` 区域
  *
- * 布局(issue 08 + issue 01 形态 —— PRD 顶置 + 拖拽分割 + 辅助文件网格 + 仓库底部条):
+ * 布局:
  * ┌──────────────────────────────────────────────────────────────────────┐
- * │ 关联仓库  [✓ refund] [✓ order]  [＋ 添加仓库…]  ⚠ 仅 N 个仓库…  ▶   │
- * │  (N=0 态:仅 [＋ 添加仓库…] + hint 「💡 首次添加仓库时会请你填写统一分支名」)│
+ * │ N=0 空态(沿用 issue 01 ticket):                                       │
+ * │  关联仓库  [＋ 添加仓库…]  💡 首次添加仓库时会请你填写统一分支名  ▶  │
+ * │                                                                       │
+ * │ N≥1 折叠态(默认 40px):                                                │
+ * │  关联仓库  [📦 已选 N 个仓库 ▾] [＋ 添加]  [⚠ 仅 N 个仓库 · …]   ▶   │
+ * │                                                                       │
+ * │ N≥1 展开态(用户点击 ▾ 后,内联展开):                                  │
+ * │  ┌──────────────────────────────────────────────────────────────┐    │
+ * │  │ [✓ refund 🟢 feat/foo ✕] [✓ order ✕] [＋ 添加仓库…]          │    │
+ * │  │ ⚠ 仅 N 个仓库 · ANALYZING 可能无法完整关联代码上下文         │    │
+ * │  └──────────────────────────────────────────────────────────────┘    │
  * └──────────────────────────────────────────────────────────────────────┘
  *
- * 设计要点:
- * - **sticky 底部**:position: sticky + bottom: 0;随工作区滚动一直可见
- *   (验收 #3)。使用 sticky 而非 fixed 是因为我们想要"在工作区内滚动时跟随",
- *   而非"漂浮在 viewport 底部";前者与设计稿 `.repo-bar` 一致。
- * - **chips 多选**:点击 chip 切换 on/off 状态;`on` chip 蓝底蓝字,`off` chip
- *   灰底灰字(对应设计稿 `.chip.on` vs `.chip`)
- * - **N=0 空态(issue 01 ticket)**:`selectedRepoIds.length === 0` 时
- *   - 渲染 `＋ 添加仓库…` 主色 chip(brand-50 底 + brand-500 边)
- *   - 显示 hint `💡 首次添加仓库时会请你填写统一分支名`
- *   - 用 `data-testid="repo-bar-empty"` 包住整条空态
- * - **触发关联弹层**:`onRequestAttach` 存在 → 渲染 `＋ 添加仓库…` 按钮;
- *   否则保持 issue 08 形态(无此按钮)
- * - **软警告**(issue 08 验收 #4 #5 #6):`shouldShowRepoSoftWarning(selectedIds)`
- *   为 true 时,渲染 ⚠ 提示。纯函数,不参与 launch validity。
- * - **启动按钮**(验收 #7 #8):`canLaunch` 完全由父组件基于 title + PRD 计算,
- *   本组件只负责呈现 + 点击回调。disabled 时按钮半透明 + cursor: not-allowed。
- * - **不影响 launch**:本组件**不**自行计算 validity、不读取仓库数量来调整
- *   disabled(issue 08 验收 #7 #8 明确要求)。
- * - **不耦合 PRD 状态**:本组件不读取 title / prdMarkdown;如果父组件想显示
- *   "请填写 PRD" 提示,通过 `launchDisabledHint` prop 显式注入(单一职责)。
+ * 设计要点(issue 09 7 个 freeze 决策):
+ * - **默认折叠**(Q2 方案 B):bar 高度锁定 40px,只有"摘要"行可见,不再随 N
+ *   增长换行膨胀(N=8 时从 135px 降到 40px,核心痛点)。
+ * - **内联展开**(Q5 a):bar 自身撑开,展开面板从 bar 内部向下展开,bar
+ *   仍 sticky bottom 不变。展开态不遮工作区(只是 bar 变高)。
+ * - **N=0 沿用现状**(Q9 a):N=0 不走折叠,直接显示 issue 01 ticket 的
+ *   `[＋ 添加仓库…]` + `💡 首次添加仓库时会请你填写统一分支名` hint。
+ * - **× 一键取消关联**(Q1 + Q4 + Q6):点 × 立即从 `selectedRepoIds`
+ *   移除,无 toast 无动画。可逆(重新 attach 即可)。
+ * - **软警告折叠态外层常驻**(Q7 a):N≤1 时 ⚠ 文案在折叠行显示。
+ *   展开态 chip 区下方再保留一份(同一文案,可见性不重复即可)。
+ * - **展开区只显示已选 chip + ×**(Q8 a):不混入"可选但未选"——bar 是
+ *   清理已选的地方,选/追加走 attach 弹层。
+ * - **不耦合 PRD**:本组件不读 prdMarkdown;launch validity 完全由
+ *   父组件(DraftingZone)基于 prdMarkdown 计算,经 props 注入。
+ *
+ * 不影响 launch(issue 08 验收 #7 #8 回归):`canLaunch` 由父组件基于
+ * title + PRD 决定,本组件**不**根据仓库数量调整 disabled。
+ *
+ * 单一职责:本组件不感知 prdMarkdown / title / 草稿内容,只渲染仓库
+ * 选择 + 转发 launch 事件。
  */
 
 export interface RepoBarProps {
-  /** 仓库候选列表(chip 渲染源) */
+  /** 仓库候选列表(过滤掉 "＋" 开头的占位条目) */
   repos: DraftingRepo[]
-  /** 已选中仓库 id 列表(决定哪些 chip 是 "on" 态) */
+  /** 已选中仓库 id 列表 */
   selectedRepoIds: string[]
   /**
-   * 失败的 repo id 列表(ticket 02 验收 #8 ticket 02 partial success)。
+   * 失败的 repo id 列表(ticket 02 验收 #8 partial success)。
    * 失败的 chip 渲染为红色边框 + 错误图标 + 文案。
-   * 由父组件基于最近一次 attachRepos 的 results 派生。
    */
   failedRepoIds?: readonly string[]
-  /** 切换 chip 的回调(id 不存在 → no-op) */
-  onToggleRepo: (repoId: string) => void
   /**
-   * Launch validity:由父组件基于 title + PRD 内容计算(issue 01 验收 #5 + issue 08 验收 #7)
-   * 故意不接受 `repos` / `selectedRepoIds` —— 软警告不参与 launch 决策
+   * 取消关联回调(issue 09 · detach 按钮):点 × 立即从
+   * `selectedRepoIds` 移除。无确认、无动画。
+   */
+  onDetachRepo: (repoId: string) => void
+  /**
+   * Launch validity:由父组件基于 title + PRD 内容计算(issue 08 验收 #7)。
+   * 故意不接受 `repos` / `selectedRepoIds` —— 软警告不参与 launch 决策。
    */
   canLaunch: boolean
   /**
    * 启动按钮 disabled 时显示的辅助提示文案(可选;空表示不显示)。
-   * 例如 "请填写 PRD Markdown" / "请填写标题与 PRD Markdown"。
    * 由父组件(DraftingZone)基于 PRD 字段状态计算并传入,本组件不感知 PRD。
    */
   launchDisabledHint?: string
@@ -64,18 +76,13 @@ export interface RepoBarProps {
   onLaunch: () => void
   /**
    * 触发关联仓库弹层的回调(issue 01 ticket):
-   * - 提供:渲染 `＋ 添加仓库…` 按钮,N=0 时显示 brand 色空态 + hint
-   * - 不提供:维持 issue 08 旧行为(不渲染新按钮;N=0 时显示 `暂无可选仓库`)
-   *
-   * 提供后,Repos 列表里 `name` 以 `＋` 开头的占位条目(issue 08 mock)自动
-   * 跳过 —— 它们的"添加更多"语义已由本按钮接管。
+   * - 提供:折叠态显示 `＋ 添加`,N=0 时显示 brand 色空态 + hint
+   * - 不提供:不渲染 `＋` 入口
    */
   onRequestAttach?: () => void
   /**
    * ticket 02 验收 #9:已关联 repo chip 显示绿色小圆点 🟢 + 分支名。
-   * 由父组件传入 lockedBranchName(首次 attach 后写入),用于在 chip 后追加
-   * "🟢 <repo-name> <branch>" 视觉。lockedBranchName 为空时 chip 仍显示选中态,
-   * 但不追加绿色小圆点(向后兼容:分支名未锁前已存在的 repo)。
+   * lockedBranchName 为空时 chip 仍显示选中态,但不追加绿色小圆点。
    */
   attachedBranchName?: string
 }
@@ -87,11 +94,14 @@ const SOFT_WARNING_SUFFIX = ' 个仓库 · ANALYZING 可能无法完整关联代
 /** 占位条目 name 前缀(issue 08 mock 期的"＋ 更多仓库…"占位) */
 const PLACEHOLDER_PREFIX = '＋'
 
+/** 摘要行固定高度(px)—— 与 issue 09 spec 视野代价 -70% 的承诺一致 */
+const SUMMARY_ROW_HEIGHT_PX = 40
+
 export function RepoBar({
   repos,
   selectedRepoIds,
   failedRepoIds = [],
-  onToggleRepo,
+  onDetachRepo,
   canLaunch,
   launchDisabledHint,
   onLaunch,
@@ -99,17 +109,27 @@ export function RepoBar({
   attachedBranchName,
 }: RepoBarProps) {
   // -------------------------------------------------------------------------
+  // 折叠 / 展开 toggle(issue 09 Q2 方案 B)—— 默认折叠
+  // -------------------------------------------------------------------------
+  const [collapsed, setCollapsed] = useState<boolean>(true)
+
+  // -------------------------------------------------------------------------
+  // N=0 复位:从 N≥1 回到 N=0(全部 detach)时,自动回到 N=0 空态
+  // 这保证下一次 attach 后 bar 默认是折叠的,符合 "N=0 走空态" 不变量
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    if (selectedRepoIds.length === 0) {
+      setCollapsed(true)
+    }
+  }, [selectedRepoIds.length])
+
+  // -------------------------------------------------------------------------
   // 软警告可见性(纯函数;selectedRepoIds 变化时 O(1) 重新计算)
   // -------------------------------------------------------------------------
   const showSoftWarning = shouldShowRepoSoftWarning(selectedRepoIds)
-  const softWarningText =
-    SOFT_WARNING_PREFIX +
-    String(selectedRepoIds.length) +
-    SOFT_WARNING_SUFFIX
 
   // -------------------------------------------------------------------------
-  // 真实可选仓库列表(过滤掉以 "＋" 开头的占位条目 —— onRequestAttach 提供后
-  // 它们的"添加更多"语义已由 `＋ 添加仓库…` 按钮接管)
+  // 真实可选仓库列表(过滤掉以 "＋" 开头的占位条目)
   // -------------------------------------------------------------------------
   const selectableRepos = onRequestAttach
     ? repos.filter((r) => !r.name.startsWith(PLACEHOLDER_PREFIX))
@@ -117,34 +137,49 @@ export function RepoBar({
 
   const isEmptyState = selectedRepoIds.length === 0
 
+  // 已选仓库(用于展开态渲染)
+  const selectedRepos = selectableRepos.filter((r) =>
+    selectedRepoIds.includes(r.id),
+  )
+
+  // 失败但未选中的仓库(ticket 02 验收 #8 partial success)—— 也展示在
+  // 展开区(红边 + ✕),让用户看到"刚才 attach 失败的 repo 还没选中";
+  // 重试走 banner「重试该 repo」按钮,不在 chip 上提供重试入口
+  // (避免和 banner 重试逻辑分裂)。
+  // 用 id Set 做快速去重:同时在 selectedRepoIds 和 failedRepoIds 的
+  // repo 视为"已选"(以 selectedRepos 为准)。
+  const failedOnlyRepos = selectableRepos.filter(
+    (r) =>
+      failedRepoIds.includes(r.id) && !selectedRepoIds.includes(r.id),
+  )
+
   // -------------------------------------------------------------------------
-  // chip 切换(防御性:id 不在 repos 中 → 忽略)
+  // handlers
   // -------------------------------------------------------------------------
-  const handleChipClick = useCallback(
+  const handleToggleCollapse = useCallback(() => {
+    setCollapsed((prev) => !prev)
+  }, [])
+
+  const handleDetach = useCallback(
     (repoId: string) => {
-      if (!repos.some((r) => r.id === repoId)) return
-      onToggleRepo(repoId)
+      if (!selectedRepoIds.includes(repoId)) return
+      onDetachRepo(repoId)
     },
-    [repos, onToggleRepo],
+    [onDetachRepo, selectedRepoIds],
   )
 
-  const handleChipKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLButtonElement>, repoId: string) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault()
-        handleChipClick(repoId)
-      }
-    },
-    [handleChipClick],
-  )
-
-  // -------------------------------------------------------------------------
-  // 启动按钮(disabled 时 userEvent click 会被 silent no-op,但我们仍守一道)
-  // -------------------------------------------------------------------------
   const handleLaunchClick = useCallback(() => {
     if (!canLaunch) return
     onLaunch()
   }, [canLaunch, onLaunch])
+
+  // -------------------------------------------------------------------------
+  // 摘要文案:N 数字由 selectedRepoIds.length 提供
+  // -------------------------------------------------------------------------
+  const summaryLabel =
+    selectedRepoIds.length === 1
+      ? '已选 1 个仓库'
+      : `已选 ${selectedRepoIds.length} 个仓库`
 
   return (
     <div
@@ -154,32 +189,33 @@ export function RepoBar({
       data-can-launch={canLaunch ? 'true' : 'false'}
       data-repo-count={String(repos.length)}
       data-empty-state={isEmptyState ? 'true' : 'false'}
+      data-collapsed={collapsed ? 'true' : 'false'}
       role="region"
       aria-label="仓库选择与启动操作"
       className={[
-        // sticky bottom —— 跟随工作区滚动(验收 #3)
+        // sticky bottom —— 跟随工作区滚动(issue 08 验收 #3)
         'sticky bottom-0 z-10',
-        // 视觉:与设计稿 .repo-bar 一致(浅底 + 上边框 + 内边距 + flex 横向)
+        // 视觉:与设计稿 .repo-bar 一致(浅底 + 上边框)
         'bg-bg-elevated border-t border-border',
-        'px-6 py-3',
-        'flex items-center gap-3 flex-wrap',
         'text-sm',
       ].join(' ')}
     >
-      {/* 标签:"关联仓库" */}
-      <span
-        data-testid="drafting-repo-bar-label"
-        className="text-text-3 text-xs uppercase tracking-wider font-semibold"
-      >
-        关联仓库
-      </span>
-
-      {/* N=0 空态包裹(issue 01 ticket):整条 bar 的右侧统一呈现"加仓库"入口 + hint */}
+      {/* ============================================================== */}
+      {/* N=0 空态(issue 01 ticket)—— 不走折叠,沿用现状                  */}
+      {/* ============================================================== */}
       {isEmptyState ? (
         <div
           data-testid="repo-bar-empty"
-          className="flex-1 flex items-center gap-3 min-w-0 flex-wrap"
+          className="flex items-center gap-3 px-6 py-3 flex-wrap"
         >
+          {/* 标签:"关联仓库" */}
+          <span
+            data-testid="drafting-repo-bar-label"
+            className="text-text-3 text-xs uppercase tracking-wider font-semibold"
+          >
+            关联仓库
+          </span>
+
           {/* 「＋ 添加仓库…」按钮(主色,引导点击) */}
           {onRequestAttach ? (
             <button
@@ -199,7 +235,7 @@ export function RepoBar({
             <span className="text-text-3 text-xs italic">暂无可选仓库</span>
           )}
 
-          {/* 空态 hint(issue 01 ticket):「💡 首次添加仓库时会请你填写统一分支名」 */}
+          {/* 空态 hint(issue 01 ticket) */}
           {onRequestAttach && (
             <span
               data-testid="repo-bar-empty-hint"
@@ -208,129 +244,284 @@ export function RepoBar({
               💡 首次添加仓库时会请你填写统一分支名
             </span>
           )}
-        </div>
-      ) : (
-        // -------------------------------------------------------------------
-        // N≥1:渲染 chips + 「＋」追加按钮
-        // -------------------------------------------------------------------
-        <div
-          data-testid="drafting-repo-bar-chips"
-          className="flex-1 flex items-center gap-2 flex-wrap min-w-0"
-        >
-          {selectableRepos.map((repo) => {
-            const selected = selectedRepoIds.includes(repo.id)
-            const failed = failedRepoIds.includes(repo.id)
-            // ticket 02 验收 #9:已关联 + 锁定分支名 → 显示绿色小圆点 + 分支名
-            const showGreenDot = selected && attachedBranchName
-            return (
-              <button
-                key={repo.id}
-                type="button"
-                role="switch"
-                aria-checked={selected}
-                data-testid="drafting-repo-chip"
-                data-repo-id={repo.id}
-                data-repo-name={repo.name}
-                data-selected={selected ? 'true' : 'false'}
-                data-failed={failed ? 'true' : 'false'}
-                onClick={() => handleChipClick(repo.id)}
-                onKeyDown={(e) => handleChipKeyDown(e, repo.id)}
-                className={[
-                  'inline-flex items-center gap-1',
-                  'h-[30px] px-3 rounded-full text-sm',
-                  'transition-colors duration-100',
-                  'focus:outline-none focus:ring-2 focus:ring-brand-50',
-                  failed
-                    ? // 失败 repo 标红(ticket 02 验收 #8)
-                      'bg-error-50 border border-error text-error'
-                    : selected
-                      ? 'bg-brand-50 border border-brand text-brand-700 font-medium'
-                      : 'bg-bg border border-border-strong text-text-2 hover:border-brand hover:text-brand-700',
-                ].join(' ')}
-              >
-                <span aria-hidden>
-                  {failed ? '✕' : selected ? '✓' : '＋'}
-                </span>
-                <span>
-                  {showGreenDot ? '🟢 ' : ''}
-                  {repo.name}
-                </span>
-                {showGreenDot && (
-                  <span
-                    data-testid="drafting-repo-chip-branch"
-                    className="font-mono text-xs opacity-80"
-                  >
-                    {attachedBranchName}
-                  </span>
-                )}
-              </button>
-            )
-          })}
 
-          {/* 「＋」追加按钮(issue 01 ticket):N≥1 时仍可继续追加仓库,
-              触发同一弹层的 append 模式 */}
-          {onRequestAttach && (
-            <button
-              type="button"
-              data-testid="repo-bar-add-more"
-              onClick={onRequestAttach}
-              aria-label="追加仓库"
+          {/* 软警告在 N=0 也常驻(issue 08 验收 #4)—— 折叠 sticky 形态下保留视觉一致性 */}
+          {showSoftWarning && (
+            <span
+              data-testid="drafting-repo-soft-warning"
+              data-warning-count={String(selectedRepoIds.length)}
+              role="status"
               className={[
                 'inline-flex items-center gap-1',
-                'h-[30px] px-3 rounded-full text-sm',
-                'border border-dashed border-border-strong text-text-3',
-                'hover:border-brand hover:text-brand-700 hover:bg-brand-50',
-                'focus:outline-none focus:ring-2 focus:ring-brand-50',
+                'h-[26px] px-2.5 rounded-md',
+                'text-xs font-medium',
+                'bg-warning-50 text-warning',
+                'flex-shrink-0',
               ].join(' ')}
             >
-              <span aria-hidden>＋</span>
-              <span>添加</span>
-            </button>
+              {SOFT_WARNING_PREFIX +
+                String(selectedRepoIds.length) +
+                SOFT_WARNING_SUFFIX}
+            </span>
           )}
+
+          {/* 启动按钮 disabled hint(issue 04 ticket 收窄) */}
+          {!canLaunch && launchDisabledHint && (
+            <span
+              data-testid="drafting-launch-disabled-hint"
+              className="text-xs text-text-3"
+            >
+              {launchDisabledHint}
+            </span>
+          )}
+
+          {/* 启动按钮 */}
+          <button
+            type="button"
+            data-testid="drafting-action-launch"
+            data-variant="primary"
+            disabled={!canLaunch}
+            onClick={handleLaunchClick}
+            className={[
+              'ml-auto inline-flex items-center gap-1.5 rounded-md text-md font-medium',
+              'h-10 px-5 bg-brand text-white hover:bg-brand-600',
+              'disabled:opacity-50 disabled:cursor-not-allowed',
+              'focus:outline-none focus:ring-2 focus:ring-brand-50',
+            ].join(' ')}
+          >
+            ▶ 进入 ANALYZING
+          </button>
         </div>
-      )}
+      ) : (
+        <>
+          {/* ========================================================== */}
+          {/* N≥1 摘要行(40px,固定高度,issue 09 spec)                   */}
+          {/* ========================================================== */}
+          <div
+            data-testid="drafting-repo-bar-summary-row"
+            style={{ minHeight: `${SUMMARY_ROW_HEIGHT_PX}px` }}
+            className="flex items-center gap-3 px-6"
+          >
+            {/* 标签:"关联仓库" */}
+            <span
+              data-testid="drafting-repo-bar-label"
+              className="text-text-3 text-xs uppercase tracking-wider font-semibold flex-shrink-0"
+            >
+              关联仓库
+            </span>
 
-      {/* 软警告:仅 N 个仓库 · …(验收 #4 #5) */}
-      {showSoftWarning && (
-        <span
-          data-testid="drafting-repo-soft-warning"
-          data-warning-count={String(selectedRepoIds.length)}
-          role="status"
-          className={[
-            'inline-flex items-center gap-1',
-            'h-[26px] px-2.5 rounded-md',
-            'text-xs font-medium',
-            'bg-warning-50 text-warning',
-          ].join(' ')}
-        >
-          {softWarningText}
-        </span>
-      )}
+            {/* 折叠摘要按钮 —— 点击切换 */}
+            <button
+              type="button"
+              data-testid="drafting-repo-bar-summary"
+              data-summary-count={String(selectedRepoIds.length)}
+              onClick={handleToggleCollapse}
+              aria-expanded={!collapsed}
+              aria-controls="drafting-repo-bar-expanded"
+              className={[
+                'inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm',
+                'bg-bg border border-border-strong text-text-1',
+                'hover:border-brand hover:text-brand-700',
+                'focus:outline-none focus:ring-2 focus:ring-brand-50',
+                'flex-shrink-0',
+              ].join(' ')}
+            >
+              <span aria-hidden>📦</span>
+              <span>{summaryLabel}</span>
+              <span
+                aria-hidden
+                className="text-text-3 ml-0.5 text-xs"
+                style={{
+                  transform: collapsed ? 'rotate(0deg)' : 'rotate(180deg)',
+                  transition: 'transform 0.15s',
+                  display: 'inline-block',
+                }}
+              >
+                ▾
+              </span>
+            </button>
 
-      {/* 启动按钮:从 PRD 卡片脚迁入(验收 #7 #8) */}
-      {!canLaunch && launchDisabledHint && (
-        <span
-          data-testid="drafting-launch-disabled-hint"
-          className="text-xs text-text-3"
-        >
-          {launchDisabledHint}
-        </span>
+            {/* 「＋ 添加」按钮(N≥1 也可继续追加,触发 attach 弹层 append 模式) */}
+            {onRequestAttach && (
+              <button
+                type="button"
+                data-testid="repo-bar-add-more"
+                onClick={onRequestAttach}
+                aria-label="追加仓库"
+                className={[
+                  'inline-flex items-center gap-1',
+                  'h-8 px-3 rounded-full text-sm',
+                  'border border-dashed border-border-strong text-text-3',
+                  'hover:border-brand hover:text-brand-700 hover:bg-brand-50',
+                  'focus:outline-none focus:ring-2 focus:ring-brand-50',
+                  'flex-shrink-0',
+                ].join(' ')}
+              >
+                <span aria-hidden>＋</span>
+                <span>添加</span>
+              </button>
+            )}
+
+            {/* 软警告(折叠态外层常驻) */}
+            {showSoftWarning && (
+              <span
+                data-testid="drafting-repo-soft-warning"
+                data-warning-count={String(selectedRepoIds.length)}
+                role="status"
+                className={[
+                  'inline-flex items-center gap-1',
+                  'h-[26px] px-2.5 rounded-md',
+                  'text-xs font-medium',
+                  'bg-warning-50 text-warning',
+                  'flex-shrink-0',
+                ].join(' ')}
+              >
+                {SOFT_WARNING_PREFIX +
+                  String(selectedRepoIds.length) +
+                  SOFT_WARNING_SUFFIX}
+              </span>
+            )}
+
+            {/* 启动按钮 disabled hint */}
+            {!canLaunch && launchDisabledHint && (
+              <span
+                data-testid="drafting-launch-disabled-hint"
+                className="text-xs text-text-3"
+              >
+                {launchDisabledHint}
+              </span>
+            )}
+
+            {/* 启动按钮 */}
+            <button
+              type="button"
+              data-testid="drafting-action-launch"
+              data-variant="primary"
+              disabled={!canLaunch}
+              onClick={handleLaunchClick}
+              className={[
+                'ml-auto inline-flex items-center gap-1.5 rounded-md text-md font-medium',
+                'h-10 px-5 bg-brand text-white hover:bg-brand-600',
+                'disabled:opacity-50 disabled:cursor-not-allowed',
+                'focus:outline-none focus:ring-2 focus:ring-brand-50',
+                'flex-shrink-0',
+              ].join(' ')}
+            >
+              ▶ 进入 ANALYZING
+            </button>
+          </div>
+
+          {/* ========================================================== */}
+          {/* N≥1 展开态(用户主动展开时内联出现)                          */}
+          {/* ========================================================== */}
+          {!collapsed && (
+            <div
+              data-testid="drafting-repo-bar-chips"
+              id="drafting-repo-bar-expanded"
+              className="flex flex-wrap items-center gap-2 px-6 py-3 border-t border-border"
+            >
+              {selectedRepos.length === 0 && failedOnlyRepos.length === 0 ? (
+                <span className="text-xs text-text-3 italic">
+                  暂无已选仓库(异常状态:selectedRepoIds 非空但 repos 中找不到)
+                </span>
+              ) : (
+                <>
+                  {/* 已选 chip:可 × 取消关联 */}
+                  {selectedRepos.map((repo) => {
+                    // ticket 02 验收 #9:已关联 + 锁定分支名 → 显示绿色小圆点 + 分支名
+                    const showGreenDot = !!attachedBranchName
+                    return (
+                      <div
+                        key={repo.id}
+                        data-testid="drafting-repo-chip"
+                        data-repo-id={repo.id}
+                        data-repo-name={repo.name}
+                        data-selected="true"
+                        data-failed="false"
+                        className={[
+                          'inline-flex items-center gap-1',
+                          'h-[30px] pl-3 pr-1 rounded-full text-sm',
+                          'bg-brand-50 border border-brand text-brand-700 font-medium',
+                        ].join(' ')}
+                      >
+                        <span aria-hidden>✓</span>
+                        <span>
+                          {showGreenDot ? '🟢 ' : ''}
+                          {repo.name}
+                        </span>
+                        {showGreenDot && (
+                          <span
+                            data-testid="drafting-repo-chip-branch"
+                            className="font-mono text-xs opacity-80"
+                          >
+                            {attachedBranchName}
+                          </span>
+                        )}
+                        {/* × 取消关联按钮(issue 09)—— 一键生效,即时消失 */}
+                        <button
+                          type="button"
+                          data-testid="drafting-repo-chip-detach"
+                          data-repo-id={repo.id}
+                          onClick={() => handleDetach(repo.id)}
+                          aria-label={`取消关联 ${repo.name}`}
+                          className={[
+                            'inline-flex items-center justify-center',
+                            'w-5 h-5 rounded-full',
+                            'bg-bg-subtle text-text-2',
+                            'hover:bg-error hover:text-white',
+                            'focus:outline-none focus:ring-2 focus:ring-brand-50',
+                            'ml-1 transition-colors',
+                          ].join(' ')}
+                        >
+                          <span aria-hidden style={{ fontSize: '10px' }}>
+                            ✕
+                          </span>
+                        </button>
+                      </div>
+                    )
+                  })}
+
+                  {/* 失败但未选中 chip(ticket 02 验收 #8)—— 仅展示,× 不提供;
+                      重试走 banner「重试该 repo」按钮。data-selected="false"。 */}
+                  {failedOnlyRepos.map((repo) => (
+                    <div
+                      key={`failed-${repo.id}`}
+                      data-testid="drafting-repo-chip"
+                      data-repo-id={repo.id}
+                      data-repo-name={repo.name}
+                      data-selected="false"
+                      data-failed="true"
+                      className={[
+                        'inline-flex items-center gap-1',
+                        'h-[30px] px-3 rounded-full text-sm',
+                        'bg-error-50 border border-error text-error',
+                      ].join(' ')}
+                    >
+                      <span aria-hidden>✕</span>
+                      <span>{repo.name}</span>
+                    </div>
+                  ))}
+                </>
+              )}
+
+              {/* 软警告在展开态也保留(可见性不重复——折叠行已显示,这里
+                  是给展开后 chip 区域下方的二级提示;若折叠行未显示软警告
+                  时,这里也隐藏) */}
+              {showSoftWarning && (
+                <div
+                  data-testid="drafting-repo-expanded-soft-warning"
+                  role="status"
+                  className="w-full mt-1 text-xs text-warning"
+                >
+                  {SOFT_WARNING_PREFIX +
+                    String(selectedRepoIds.length) +
+                    SOFT_WARNING_SUFFIX}
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
-      <button
-        type="button"
-        data-testid="drafting-action-launch"
-        data-variant="primary"
-        disabled={!canLaunch}
-        onClick={handleLaunchClick}
-        className={[
-          'inline-flex items-center gap-1.5 rounded-md text-md font-medium',
-          'h-10 px-5 bg-brand text-white hover:bg-brand-600',
-          'disabled:opacity-50 disabled:cursor-not-allowed',
-          'focus:outline-none focus:ring-2 focus:ring-brand-50',
-        ].join(' ')}
-      >
-        ▶ 进入 ANALYZING
-      </button>
     </div>
   )
 }

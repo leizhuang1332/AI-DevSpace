@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>关联仓库条 · 重设计对比 · 2026-07-20</title>
+<link rel="stylesheet" href="19b-shared.css">
+<style>
+  /* ─── 比较板专用样式(基于 19b-shared.css 的 token) ─── */
+  .cmp-wrap{max-width:1480px;margin:0 auto;padding:var(--space-6);background:var(--bg);min-height:100vh}
+  .cmp-head h1{font-size:var(--text-2xl);font-weight:700;margin-bottom:var(--space-2);color:var(--text-1)}
+  .cmp-head p{font-size:var(--text-sm);color:var(--text-2);line-height:1.6;max-width:920px}
+  .cmp-head .problem{background:var(--warning-50);border-left:3px solid var(--warning);padding:var(--space-3) var(--space-4);border-radius:0 var(--radius-md) var(--radius-md) 0;margin-top:var(--space-4);font-size:var(--text-sm);color:var(--text-1)}
+  .cmp-head .problem code{font-family:var(--mono);background:rgba(0,0,0,.05);padding:1px 5px;border-radius:3px;font-size:var(--text-xs)}
+
+  /* ─── 高度对比表 ─── */
+  .height-table{margin-top:var(--space-5);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;background:var(--bg-elevated)}
+  .height-table table{width:100%;border-collapse:collapse;font-size:var(--text-sm)}
+  .height-table th{background:var(--bg-subtle);padding:var(--space-3);text-align:left;font-weight:600;color:var(--text-2);font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border)}
+  .height-table td{padding:var(--space-3);border-bottom:1px solid var(--border);color:var(--text-1);font-family:var(--mono)}
+  .height-table tr:last-child td{border-bottom:none}
+  .height-table .current{color:var(--text-3)}
+  .height-table .best{color:var(--success);font-weight:600}
+  .height-table .px{color:var(--text-3);font-size:var(--text-xs);margin-left:var(--space-2)}
+  .height-table .badge{display:inline-block;padding:2px 8px;border-radius:var(--radius-md);font-size:var(--text-xs);font-weight:600}
+  .height-table .badge.cur{background:var(--bg-subtle);color:var(--text-3)}
+  .height-table .badge.win{background:var(--success-50);color:var(--success)}
+
+  /* ─── 主对比网格 ─── */
+  .cmp-grid{margin-top:var(--space-5);display:grid;grid-template-columns:160px repeat(3,1fr);gap:1px;background:var(--border);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}
+  .cmp-cell{background:var(--bg-elevated);padding:var(--space-4);display:flex;flex-direction:column;gap:var(--space-2);min-height:140px}
+  .cmp-cell.head{background:var(--bg-subtle);justify-content:center;align-items:flex-start;gap:var(--space-1)}
+  .cmp-cell.label{background:var(--bg-subtle);justify-content:center}
+  .cmp-cell .col-title{font-size:var(--text-md);font-weight:600;color:var(--text-1)}
+  .cmp-cell .col-meta{font-size:var(--text-xs);color:var(--text-3);font-family:var(--mono)}
+  .cmp-cell .state-name{font-size:var(--text-md);font-weight:600;color:var(--text-1)}
+  .cmp-cell .state-desc{font-size:var(--text-xs);color:var(--text-3);margin-top:2px}
+
+  /* ─── 模拟 viewport(每个 bar 渲染在 360px 宽的容器内,模拟实际工作区) ─── */
+  .vp{width:100%;background:#fafbfd;border:1px dashed var(--border-strong);border-radius:var(--radius-md);overflow:hidden;display:flex;flex-direction:column}
+  .vp-top{height:24px;background:var(--bg-subtle);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 8px;gap:6px;font-size:9px;color:var(--text-3)}
+  .vp-mid{flex:1;min-height:80px;padding:8px;display:flex;flex-direction:column;gap:4px}
+  .vp-mid .ph{height:6px;background:var(--bg-subtle);border-radius:3px}
+  .vp-mid .ph.s{width:60%}
+  .vp-mid .ph.m{width:80%}
+  .vp-mid .ph.l{width:100%}
+
+  /* ─── Bar 变体样式 ─── */
+  /* 通用 sticky bar 框架 */
+  .bar{display:flex;align-items:center;gap:var(--space-2);padding:8px 12px;background:var(--bg-elevated);border-top:1px solid var(--border);font-size:var(--text-xs);flex-wrap:wrap}
+  .bar .lbl{color:var(--text-3);font-size:10px;text-transform:uppercase;letter-spacing:.04em;font-weight:600;flex-shrink:0}
+  .bar .warn{display:inline-flex;align-items:center;gap:3px;font-size:10px;color:var(--warning);background:var(--warning-50);padding:3px 7px;border-radius:var(--radius-md);font-weight:500;flex-shrink:0}
+  .bar .btn-launch{display:inline-flex;align-items:center;gap:3px;padding:5px 10px;background:var(--brand);color:#fff;border-radius:var(--radius-md);font-size:11px;font-weight:600;flex-shrink:0;margin-left:auto}
+  .bar .btn-launch.dis{opacity:.4;cursor:not-allowed}
+  .bar .btn-add{display:inline-flex;align-items:center;gap:3px;padding:5px 9px;border:1px solid var(--brand);background:var(--brand-50);color:var(--brand-700);border-radius:var(--radius-md);font-size:11px;font-weight:500;flex-shrink:0}
+  .bar .btn-addmore{display:inline-flex;align-items:center;gap:2px;height:24px;padding:0 9px;border:1px dashed var(--border-strong);color:var(--text-3);border-radius:999px;font-size:11px;flex-shrink:0}
+  .bar .hint{font-size:10px;color:var(--text-3);font-style:italic}
+
+  /* chip 通用 */
+  .chip{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 10px;border-radius:999px;font-size:11px;background:var(--bg);border:1px solid var(--border-strong);color:var(--text-2);flex-shrink:0;max-width:160px}
+  .chip.on{background:var(--brand-50);border-color:var(--brand);color:var(--brand-700);font-weight:500}
+  .chip .x{width:14px;height:14px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(0,0,0,.06);color:var(--text-2);font-size:10px;cursor:pointer;margin-left:2px}
+  .chip .x:hover{background:var(--error-50,#fee);color:var(--error)}
+  .chip .branch{font-family:var(--mono);font-size:9px;opacity:.7;margin-left:2px}
+
+  /* ─── 方案 A · 瘦身 sticky ─── */
+  .bar-a{height:38px;padding:0 12px;flex-wrap:nowrap}
+  .bar-a .avatars{display:flex;align-items:center;gap:-4px;flex:1;min-width:0;overflow:hidden}
+  .bar-a .avatar{width:24px;height:24px;border-radius:50%;background:var(--brand-50);border:2px solid var(--bg-elevated);display:inline-flex;align-items:center;justify-content:center;font-size:9px;color:var(--brand-700);font-weight:600;margin-left:-6px;flex-shrink:0;cursor:pointer;position:relative}
+  .bar-a .avatar:first-child{margin-left:0}
+  .bar-a .avatar.on{background:var(--brand);color:#fff}
+  .bar-a .avatar:hover::after{content:attr(data-name);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:3px 7px;border-radius:4px;font-size:10px;white-space:nowrap;z-index:10;font-weight:400}
+  .bar-a .avatar .x-mini{position:absolute;top:-3px;right:-3px;width:14px;height:14px;border-radius:50%;background:var(--error);color:#fff;font-size:9px;display:none;align-items:center;justify-content:center;border:1.5px solid var(--bg-elevated)}
+  .bar-a .avatar:hover .x-mini{display:flex}
+  .bar-a .avatars .more{font-size:10px;color:var(--text-3);margin-left:8px;flex-shrink:0}
+
+  /* ─── 方案 B · 折叠 sticky ─── */
+  .bar-b{height:40px;padding:0 12px;flex-wrap:nowrap}
+  .bar-b .summary{display:inline-flex;align-items:center;gap:6px;flex:1;min-width:0;padding:5px 10px;border:1px solid var(--border-strong);border-radius:var(--radius-md);background:var(--bg);cursor:pointer;font-size:11px}
+  .bar-b .summary .n{background:var(--brand-50);color:var(--brand-700);font-weight:600;padding:1px 7px;border-radius:999px;font-size:10px}
+  .bar-b .summary .caret{color:var(--text-3);font-size:9px;margin-left:auto;transition:transform .15s}
+  .bar-b .expanded{display:none;padding:8px 12px;background:var(--bg-elevated);border-top:1px solid var(--border);border-bottom:1px solid var(--border);flex-wrap:wrap;gap:6px}
+  .bar-b-cell.expanded-state .bar-b{height:auto}
+  .bar-b-cell.expanded-state .bar-b .expanded{display:flex}
+  .bar-b-cell.expanded-state .bar-b .summary .caret{transform:rotate(180deg)}
+
+  /* ─── 方案 E · 浮动 FAB ─── */
+  .vp-e{position:relative}
+  .fab{position:absolute;bottom:12px;right:12px;width:48px;height:48px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 4px 12px rgba(94,106,210,.4);cursor:pointer;z-index:5}
+  .fab .badge{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;border-radius:9px;background:#fff;color:var(--brand);font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 5px;border:2px solid var(--bg-elevated)}
+  .fab.has-warn{box-shadow:0 0 0 2px var(--warning),0 4px 12px rgba(245,158,11,.3)}
+  .bubble{position:absolute;bottom:68px;right:12px;width:260px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:0 8px 24px rgba(0,0,0,.12);padding:10px;display:none;flex-direction:column;gap:6px;z-index:5;font-size:11px}
+  .bubble.show{display:flex}
+  .bubble .head{font-weight:600;color:var(--text-1);font-size:11px;padding:2px 4px;border-bottom:1px solid var(--border);margin-bottom:4px;display:flex;justify-content:space-between;align-items:center}
+  .bubble .chips{display:flex;flex-wrap:wrap;gap:4px}
+  .bubble .btn-launch{width:100%;justify-content:center;margin-top:4px;margin-left:0}
+
+  /* ─── 高度标签 ─── */
+  .h-tag{font-family:var(--mono);font-size:9px;color:var(--text-3);text-align:right;margin-top:2px}
+  .h-tag b{color:var(--text-1);font-weight:600}
+
+  /* ─── 推荐标注 ─── */
+  .rec{margin-top:var(--space-5);padding:var(--space-4);background:var(--brand-50);border-radius:var(--radius-lg);border:1px solid var(--brand);font-size:var(--text-sm);color:var(--text-1);line-height:1.6}
+  .rec b{color:var(--brand-700)}
+
+  .notes{margin-top:var(--space-5);padding:var(--space-4);background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-lg);font-size:var(--text-sm);color:var(--text-2);line-height:1.7}
+  .notes b{color:var(--text-1)}
+  .notes ul{padding-left:var(--space-5);margin-top:var(--space-2)}
+  .notes li{margin-bottom:4px}
+</style>
+</head>
+<body>
+<div class="cmp-wrap">
+
+<!-- ============ HEADER ============ -->
+<div class="cmp-head">
+  <h1>关联仓库条 · 重设计对比</h1>
+  <p>当前实现(issue 08)的 sticky bar 在 N≥5 时 flex-wrap 换行膨胀,N=8 时高度约 135px,占据 viewport 底部 17% 视野。下面 3 个方案对比视野代价与删除仓库按钮(× 取消关联)的承载方式。</p>
+  <div class="problem">
+    <b>痛点:</b> 底部条 <code>sticky bottom-0</code> + <code>py-3</code> + Launch 按钮 <code>h-10</code>(40px) 决定 baseline,
+    N=5-7 时换行成 2 行 ≈100px,N=10 时 3 行 ≈135px,viewport 高 800px 时占用 12-17%。
+  </div>
+</div>
+
+<!-- ============ 高度对比表 ============ -->
+<div class="height-table">
+  <table>
+    <thead>
+      <tr>
+        <th>场景</th>
+        <th>当前实现</th>
+        <th>A · 瘦身 sticky</th>
+        <th>B · 折叠 sticky</th>
+        <th>E · 浮动 FAB</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>N=0</b> 空态</td>
+        <td class="current">~50px <span class="badge cur">现状</span></td>
+        <td class="best">38px <span class="badge win">-24%</span></td>
+        <td class="best">40px <span class="badge win">-20%</span></td>
+        <td class="best">0px <span class="badge win">-100%</span></td>
+      </tr>
+      <tr>
+        <td><b>N=2</b> 常规</td>
+        <td class="current">~65px <span class="badge cur">现状</span></td>
+        <td class="best">38px <span class="badge win">-42%</span></td>
+        <td>40px <span class="badge win">-38%</span></td>
+        <td class="best">0px <span class="badge win">-100%</span></td>
+      </tr>
+      <tr>
+        <td><b>N=8</b> 拥挤</td>
+        <td class="current">~135px <span class="badge cur">现状</span></td>
+        <td class="best">40px <span class="badge win">-70%</span></td>
+        <td class="best">40px <span class="badge win">-70%</span></td>
+        <td class="best">0px <span class="badge win">-100%</span></td>
+      </tr>
+      <tr>
+        <td><b>N=1</b> 软警告</td>
+        <td class="current">~65px <span class="badge cur">现状</span></td>
+        <td>38px <span class="badge win">-42%</span></td>
+        <td>40px <span class="badge win">-38%</span></td>
+        <td>0px <span class="badge win">-100%</span></td>
+      </tr>
+      <tr>
+        <td><b>× 取消关联按钮</b></td>
+        <td>无</td>
+        <td>hover avatar 右上角 × 浮现</td>
+        <td>展开后 chip 右侧常驻 ×</td>
+        <td>气泡内 chip 右侧常驻 ×</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ============ 主对比网格 ============ -->
+<div class="cmp-grid">
+
+  <!-- ===== Header Row ===== -->
+  <div class="cmp-cell head">
+    <div class="state-name">↓ 状态</div>
+    <div class="state-desc">↓ 方案 →</div>
+  </div>
+  <div class="cmp-cell head">
+    <div class="col-title">A · 瘦身 sticky</div>
+    <div class="col-meta">chip → avatar(24×24)· 单行 lock 38-40px · hover 显全名/×</div>
+  </div>
+  <div class="cmp-cell head">
+    <div class="col-title">B · 折叠 sticky</div>
+    <div class="col-meta">默认 40px 单行 + ▾ 展开 · chip 全展开 · × 常驻</div>
+  </div>
+  <div class="cmp-cell head">
+    <div class="col-title">E · 浮动 FAB</div>
+    <div class="col-meta">常态 0px · 右下 48×48 FAB · badge=N · 点击展气泡</div>
+  </div>
+
+  <!-- ===== Row: N=0 空态 ===== -->
+  <div class="cmp-cell label">
+    <div class="state-name">N=0</div>
+    <div class="state-desc">空态 · 无仓库</div>
+  </div>
+
+  <!-- A · N=0 -->
+  <div class="cmp-cell">
+    <div class="vp">
+      <div class="vp-top">退款功能优化 · 草稿</div>
+      <div class="vp-mid"><div class="ph l"></div><div class="ph m"></div><div class="ph s"></div><div class="ph l"></div></div>
+      <div class="bar bar-a">
+        <span class="lbl">仓库</span>
+        <span class="btn-add">＋ 添加仓库…</span>
+        <span class="hint">💡 首次添加会请你填分支名</span>
+        <button class="btn-launch dis" title="标题/PRD 为空">▶ 进入</button>
+      </div>
+    </div>
+    <div class="h-tag"><b>38px</b> · 始终单行 · avatar 区留空</div>
+  </div>
+
+  <!-- B · N=0 -->
+  <div class="cmp-cell">
+    <div class="vp">
+      <div class="vp-top">退款功能优化 · 草稿</div>
+      <div class="vp-mid"><div class="ph l"></div><div class="ph m"></div><div class="ph s"></div><div class="ph l"></div></div>
+      <div class="bar bar-b">
+        <span class="lbl">仓库</span>
+        <button class="btn-add">＋ 添加仓库…</button>
+        <span class="hint">💡 首次添加会请你填分支名</span>
+        <button class="btn-launch dis">▶ 进入</button>
+      </div>
+    </div>
+    <div class="h-tag"><b>40px</b> · 单行 · 空态直接显示 [＋ 添加] 按钮(无折叠)</div>
+  </div>
+
+  <!-- E · N=0 -->
+  <div class="cmp-cell">
+    <div class="vp vp-e">
+      <div class="vp-top">退款功能优化 · 草稿</div>
+      <div class="vp-mid"><div class="ph l"></div><div class="ph m"></div><div class="ph s"></div><div class="ph l"></div><div class="ph m"></div></div>
+      <div class="fab" title="关联仓库(未选)">📦<span class="badge">0</span></div>
+    </div>
+    <div class="h-tag"><b>0px</b> · FAB 48×48 · 点击展开引导选仓库</div>
+  </div>
+
+  <!-- ===== Row: N=2 常规 ===== -->
+  <div class="cmp-cell label">
+    <div class="state-name">N=2</div>
+    <div class="state-desc">已选 2 仓库</div>
+  </div>
+
+  <!-- A · N=2 -->
+  <div class="cmp-cell">
+    <div class="vp">
+      <div class="vp-top">退款功能优化 · 草稿</div>
+      <div class="vp-mid"><div class="ph l"></div><div class="ph m"></div><div class="ph s"></div></div>
+      <div class="bar bar-a">
+        <span class="lbl">仓库</span>
+        <div class="avatars">
+          <span class="avatar on" data-name="refund-service ×">R<span class="x-mini">×</span></span>
+          <span class="avatar on" data-name="order-service ×">O<span class="x-mini">×</span></span>
+          <span class="btnaddmore" style="height:24px;padding:0 9px;border:1px dashed var(--border-strong);color:var(--text-3);border-radius:999px;font-size:11px;display:inline-flex;align-items:center;cursor:pointer">＋</span>
+        </div>
+        <span class="warn">⚠ 仅 2</span>
+        <button class="btn-launch">▶ 进入</button>
+      </div>
+    </div>
+    <div class="h-tag"><b>38px</b> · avatar 重叠 · hover 显示 tooltip + ×</div>
+  </div>
+
+  <!-- B · N=2 折叠态 -->
+  <div class="cmp-cell">
+    <div class="vp">
+      <div class="vp-top">退款功能优化 · 草稿</div>
+      <div class="vp-mid"><div class="ph l"></div><div class="ph m"></div><div class="ph s"></div></div>
+      <div class="bar bar-b">
+        <span class="lbl">仓库</span>
+        <button class="summary">
+          📦 <span class="n">2</span> 已选仓库
+          <span class="caret">▾</span>
+        </button>
+        <span class="warn">⚠ 仅 2</span>
+        <button class="btn-launch">▶ 进入</button>
+      </div>
+    </div>
+    <div class="h-tag"><b>40px</b> · 默认折叠 · 单行紧凑 · ▾ 可展开看全名</div>
+  </div>
+
+  <!-- E · N=2 -->
+  <div class="cmp-cell">
+    <div class="vp vp-e">
+      <div class="vp-top">退款功能优化 · 草稿</div>
+      <div class="vp-mid"><div class="ph l"></div><div class="ph m"></div><div class="ph s"></div><div class="ph l"></div></div>
+      <div class="fab" title="已选 2 仓库">📦<span class="badge">2</span></div>
+      <div class="bubble">
+        <div class="head">关联仓库<span style="color:var(--text-3);font-weight:400">2 个</span></div>
+        <div class="chips">
+          <span class="chip on">✓ refund<span class="x">×</span></span>
+          <span class="chip on">✓ order<span class="x">×</span></span>
+          <span class="btnaddmore" style="height:22px;padding:0 8px;border:1px dashed var(--border-strong);color:var(--text-3);border-radius:999px;font-size:11px;display:inline-flex;align-items:center;cursor:pointer">＋ 添加</span>
+        </div>
+        <span class="warn" style="align-self:flex-start">⚠ 仅 2 个 · ANALYZING 可能无法完整关联</span>
+        <button class="btn-launch">▶ 进入 ANALYZING</button>
+      </div>
+    </div>
+    <div class="h-tag"><b>0px</b>(关) · FAB badge=2 · 展开气泡约 220px</div>
+  </div>
+
+  <!-- ===== Row: N=8 拥挤 ===== -->
+  <div class="cmp-cell label">
+    <div class="state-name">N=8</div>
+    <div class="state-desc">拥挤 · 触发换行</div>
+  </div>
+
+  <!-- A · N=8 -->
+  <div class="cmp-cell">
+    <div class="vp">
+      <div class="vp-top">退款功能优化 · 草稿</div>
+      <div class="vp-mid"><div class="ph l"></div><div class="ph s"></div></div>
+      <div class="bar bar-a">
+        <span class="lbl">仓库</span>
+        <div class="avatars">
+          <span class="avatar on" data-name="refund-service ×">R</span>
+          <span class="avatar on" data-name="order-service ×">O</span>
+          <span class="avatar on" data-name="coupon-service ×">C</span>
+          <span class="avatar on" data-name="payment-gateway ×">P</span>
+          <span class="avatar on" data-name="user-center ×">U</span>
+          <span class="avatar on" data-name="voucher ×">V</span>
+          <span class="avatar on" data-name="wallet ×">W</span>
+          <span class="avatar on" data-name="notify ×">N</span>
+          <span class="more">hover 见 ×</span>
+        </div>
+        <button class="btn-launch">▶ 进入</button>
+      </div>
+    </div>
+    <div class="h-tag"><b>40px</b> · 8 个 avatar 重叠 · 仍单行 · 个别看不清时 hover tooltip</div>
+  </div>
+
+  <!-- B · N=8 折叠态 -->
+  <div class="cmp-cell">
+    <div class="vp">
+      <div class="vp-top">退款功能优化 · 草稿</div>
+      <div class="vp-mid"><div class="ph l"></div><div class="ph s"></div></div>
+      <div class="bar bar-b">
+        <span class="lbl">仓库</span>
+        <button class="summary">
+          📦 <span class="n">8</span> 已选仓库
+          <span class="caret">▾</span>
+        </button>
+        <button class="btn-launch">▶ 进入</button>
+      </div>
+    </div>
+    <div class="h-tag"><b>40px</b> · 始终 40px · 不管 2 个还是 8 个 · 展开后 chip 网格排列</div>
+  </div>
+
+  <!-- E · N=8 -->
+  <div class="cmp-cell">
+    <div class="vp vp-e">
+      <div class="vp-top">退款功能优化 · 草稿</div>
+      <div class="vp-mid"><div class="ph l"></div><div class="ph s"></div><div class="ph m"></div></div>
+      <div class="fab" title="已选 8 仓库">📦<span class="badge">8</span></div>
+    </div>
+    <div class="h-tag"><b>0px</b> · FAB badge=8 · 展开气泡有滚动 · chip 区域自适应</div>
+  </div>
+
+  <!-- ===== Row: 软警告态 N=1 ===== -->
+  <div class="cmp-cell label">
+    <div class="state-name">N=1</div>
+    <div class="state-desc">软警告</div>
+  </div>
+
+  <!-- A · 软警告 -->
+  <div class="cmp-cell">
+    <div class="vp">
+      <div class="vp-top">退款功能优化 · 草稿</div>
+      <div class="vp-mid"><div class="ph l"></div><div class="ph m"></div></div>
+      <div class="bar bar-a">
+        <span class="lbl">仓库</span>
+        <div class="avatars">
+          <span class="avatar on" data-name="refund-service ×">R<span class="x-mini">×</span></span>
+        </div>
+        <span class="warn">⚠ 仅 1 · ANALYZING 可能无法完整关联代码上下文</span>
+        <button class="btn-launch">▶ 进入</button>
+      </div>
+    </div>
+    <div class="h-tag"><b>38px</b> · 软警告单行 · 长文案截断风险(<code>text-overflow: ellipsis</code>)</div>
+  </div>
+
+  <!-- B · 软警告 -->
+  <div class="cmp-cell">
+    <div class="vp">
+      <div class="vp-top">退款功能优化 · 草稿</div>
+      <div class="vp-mid"><div class="ph l"></div><div class="ph m"></div></div>
+      <div class="bar bar-b">
+        <span class="lbl">仓库</span>
+        <button class="summary">
+          📦 <span class="n">1</span> 已选仓库
+          <span class="caret">▾</span>
+        </button>
+        <span class="warn">⚠ 仅 1</span>
+        <button class="btn-launch">▶ 进入</button>
+      </div>
+    </div>
+    <div class="h-tag"><b>40px</b> · 软警告缩短为 "仅 1" · 不挤压 chip 区</div>
+  </div>
+
+  <!-- E · 软警告 -->
+  <div class="cmp-cell">
+    <div class="vp vp-e">
+      <div class="vp-top">退款功能优化 · 草稿</div>
+      <div class="vp-mid"><div class="ph l"></div><div class="ph m"></div><div class="ph s"></div></div>
+      <div class="fab has-warn" title="仅 1 仓库 · 警告">📦<span class="badge">1</span></div>
+      <div class="bubble show">
+        <div class="head">关联仓库<span style="color:var(--text-3);font-weight:400">1 个 · ⚠</span></div>
+        <div class="chips">
+          <span class="chip on">✓ refund<span class="x">×</span></span>
+          <span class="btnaddmore" style="height:22px;padding:0 8px;border:1px dashed var(--border-strong);color:var(--text-3);border-radius:999px;font-size:11px;display:inline-flex;align-items:center;cursor:pointer">＋ 添加</span>
+        </div>
+        <span class="warn">⚠ 仅 1 个 · ANALYZING 可能无法完整关联</span>
+        <button class="btn-launch">▶ 进入 ANALYZING</button>
+      </div>
+    </div>
+    <div class="h-tag"><b>0px</b>(关) · FAB 黄色 outline 警示 · 展开后气泡内显示完整警告</div>
+  </div>
+
+</div>
+
+<!-- ============ Notes ============ -->
+<div class="notes">
+  <b>× 取消关联按钮的三种承载方式:</b>
+  <ul>
+    <li><b>A:</b> hover avatar 时右上角浮出红色 × 圆点(类 GitHub reviewer 头像)。优点:无视觉噪音;缺点:必须 hover 才能点,移动端不可达(目前桌面优先,可接受)。</li>
+    <li><b>B:</b> 展开后 chip 右侧常驻 ×(对齐现有 chip 形态,改动最小)。优点:可视化、可发现;缺点:占展开空间,但展开本身已经是按需动作,可接受。</li>
+    <li><b>E:</b> 气泡内 chip 右侧 ×(只在打开 FAB 时可见)。优点:展开态空间充裕;缺点:FAB 折叠时无法操作。</li>
+  </ul>
+
+  <b style="display:block;margin-top:var(--space-3)">三个方案各自的代价:</b>
+  <ul>
+    <li><b>A · 瘦身:</b> 需要 chip → avatar 的视觉迁移,改动 .repo-bar + 新增 avatar 组件 + tooltip。repo name 长度信息丢失(只能 tooltip)。</li>
+    <li><b>B · 折叠:</b> 改动 .repo-bar 一个文件 + 新增折叠面板状态。视觉延续性最强,与 issue 08 视觉基线兼容。</li>
+    <li><b>E · FAB:</b> 推翻 issue 08 验收 #3 "sticky bottom · 工作区滚动时跟随可见"。Launch 按钮也需要重新找位置(气泡内 or 顶部 toolbar)。改动最大,但视野代价最小。</li>
+  </ul>
+</div>
+
+<!-- ============ Recommendation ============ -->
+<div class="rec">
+  <b>推荐方案 B(折叠 sticky)。</b>理由:
+  (1) 视野代价稳定 40px,与当前实现相比 -38%~-70%,且不再随 N 增长;
+  (2) 保留 issue 08 验收 #3 的 sticky + Launch 始终可见承诺;
+  (3) × 取消关联按钮承载在展开态 chip 上,与现有视觉基线对齐;
+  (4) 改动范围最小(只动 .repo-bar 一个文件)。
+  若希望视野代价进一步降到 0,可考虑 E(FAB),但需承担 Launch 按钮重定位和 issue 08 验收 #3 调整的代价。
+</div>
+
+</div>
+</body>
+</html>

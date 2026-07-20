@@ -561,6 +561,17 @@ export function DraftingZone({ data }: { data: DraftingData }) {
   )
 
   // -------------------------------------------------------------------------
+  // 取消关联(issue 09 · × 按钮回调)—— RepoBar 触发
+  // - 一键生效:从 selectedRepoIds 移除该 id,chip 即时消失
+  // - 不影响全局 repos(可逆,重新 attach 即可)
+  // - 不影响 lockedBranchName(分支名仍然锁定,只是少一个 repo 走)
+  // -------------------------------------------------------------------------
+  const handleDetachRepo = useCallback((repoId: string) => {
+    if (!repoId) return
+    setSelectedRepoIds((prev) => prev.filter((id) => id !== repoId))
+  }, [])
+
+  // -------------------------------------------------------------------------
   // 关联仓库弹层(issue 01 ticket)—— 入口共两处(banner [+] / RepoBar ＋)
   // 模式由 selectedRepoIds 当前状态决定:
   // - 空 → 'first',首次关联,需填分支名
@@ -849,7 +860,7 @@ export function DraftingZone({ data }: { data: DraftingData }) {
               selectedRepoIds={selectedRepoIds}
               failedRepoIds={failedRepoIds}
               attachedBranchName={lockedBranchName}
-              onToggleRepo={handleToggleRepo}
+              onDetachRepo={handleDetachRepo}
               canLaunch={validity.canLaunch}
               launchDisabledHint={launchDisabledHint}
               onLaunch={handleLaunch}

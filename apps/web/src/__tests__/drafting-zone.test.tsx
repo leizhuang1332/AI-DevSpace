@@ -1193,24 +1193,36 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
   it('验收 #1+#2:repo-bar 渲染于工作区底部,包含 chips / 软警告区 / 启动按钮', async () => {
     const data = await getDraftingData('req-001')
     render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
 
     const bar = screen.getByTestId('drafting-repo-bar')
     expect(bar).toBeInTheDocument()
     // sticky bottom —— 设计稿一致
     expect(bar.className).toContain('sticky')
     expect(bar.className).toContain('bottom-0')
-    // 三段都在
+    // 折叠态(默认):摘要行 + 启动按钮 + 追加按钮 + 标签都在
     expect(within(bar).getByTestId('drafting-repo-bar-label')).toBeInTheDocument()
-    expect(within(bar).getByTestId('drafting-repo-bar-chips')).toBeInTheDocument()
+    expect(within(bar).getByTestId('drafting-repo-bar-summary')).toBeInTheDocument()
+    expect(within(bar).getByTestId('repo-bar-add-more')).toBeInTheDocument()
     expect(within(bar).getByTestId('drafting-action-launch')).toBeInTheDocument()
+    // 折叠态默认无 chip(issue 09 折叠 sticky)
+    expect(bar.getAttribute('data-collapsed')).toBe('true')
+    expect(screen.queryByTestId('drafting-repo-bar-chips')).toBeNull()
 
-    // chip 渲染数量 = 真实仓库数(req-001 mock 有 5 个 repos,但其中
-    // 「＋ 更多仓库…」占位被 issue 01 ticket 过滤,实际渲染 4 个 chips)
+    // 点击 ▾ 摘要 → 展开态
+    await user.click(screen.getByTestId('drafting-repo-bar-summary'))
+    expect(bar.getAttribute('data-collapsed')).toBe('false')
+    const chipsContainer = within(bar).getByTestId('drafting-repo-bar-chips')
+    expect(chipsContainer).toBeInTheDocument()
+
+    // chip 渲染数量 = 已选仓库数(issue 09 Q8 a:展开态只显示已选)
     const chips = within(bar).getAllByTestId('drafting-repo-chip')
     expect(chips.length).toBeGreaterThan(0)
-    expect(chips).toHaveLength(
-      data.repos.filter((r) => !r.name.startsWith('＋')).length,
-    )
+    expect(chips).toHaveLength(data.selectedRepoIds.length)
+    // 占位条目(以 "＋" 开头)不渲染为 chip —— issue 01 ticket 取代
+    expect(
+      chips.find((c) => c.getAttribute('data-repo-name')?.startsWith('＋')),
+    ).toBeUndefined()
     // repo-bar 节点上 data 齐全
     expect(bar.getAttribute('data-repo-count')).toBe(String(data.repos.length))
     expect(bar.getAttribute('data-selected-count')).toBe(
@@ -1309,7 +1321,7 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
   })
 
   // 验收 #7 同一 render 内更新警告可见性
-  it('验收 #7:点击 chip 切换 → 软警告在同一 render 内更新', async () => {
+  it('验收 #7:点 × 取消关联 → 软警告在同一 render 内更新(issue 09 折叠 sticky)', async () => {
     // 起始:2 个仓库 → 警告隐藏
     const data = {
       ...emptyDrafting('req-toggle'),
@@ -1328,24 +1340,28 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
     const bar = screen.getByTestId('drafting-repo-bar')
     expect(bar.getAttribute('data-soft-warning')).toBe('false')
 
-    // 取消勾选 r2 → 仅剩 1 个仓库 → 警告出现
-    const r2 = screen.getAllByTestId('drafting-repo-chip').find(
-      (c) => c.getAttribute('data-repo-id') === 'r2',
-    ) as HTMLElement
-    await user.click(r2)
+    // 展开摘要(issue 09 默认折叠)
+    await user.click(screen.getByTestId('drafting-repo-bar-summary'))
+
+    // 取消关联 r2 → 仅剩 1 个仓库 → 警告出现
+    const r2Detach = screen
+      .getAllByTestId('drafting-repo-chip-detach')
+      .find((b) => b.getAttribute('data-repo-id') === 'r2') as HTMLElement
+    await user.click(r2Detach)
 
     expect(bar.getAttribute('data-soft-warning')).toBe('true')
     expect(bar.getAttribute('data-selected-count')).toBe('1')
     expect(screen.getByTestId('drafting-repo-soft-warning')).toBeInTheDocument()
 
-    // 再取消 r1 → 0 个仓库 → 警告依然显示;此时 RepoBar 进入 N=0 空态
+    // 再取消关联 r1 → 0 个仓库 → 警告依然显示;此时 RepoBar 进入 N=0 空态
     // (issue 01 ticket 扩展:chips 被替换为 add button + hint)
-    const r1 = screen.getAllByTestId('drafting-repo-chip').find(
-      (c) => c.getAttribute('data-repo-id') === 'r1',
-    ) as HTMLElement
-    await user.click(r1)
+    const r1Detach = screen
+      .getAllByTestId('drafting-repo-chip-detach')
+      .find((b) => b.getAttribute('data-repo-id') === 'r1') as HTMLElement
+    await user.click(r1Detach)
     expect(bar.getAttribute('data-soft-warning')).toBe('true')
     expect(bar.getAttribute('data-selected-count')).toBe('0')
+    expect(bar.getAttribute('data-empty-state')).toBe('true')
     // chips 已不在 DOM(被 N=0 空态替换)
     expect(screen.queryByTestId('drafting-repo-chip')).toBeNull()
     expect(screen.getByTestId('repo-bar-empty')).toBeInTheDocument()
@@ -1368,7 +1384,9 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
     expect(bar.getAttribute('data-selected-count')).toBe('0')
   })
 
-  it('验收 #7 同步性:chip data-selected 跟随 selectedRepoIds 切换', async () => {
+  it('验收 #7 同步性:展开态 chip data-selected 反映 selectedRepoIds(issue 09)', async () => {
+    // issue 09:展开态只显示已选 chip,data-selected 均为 "true"
+    // (chip 自身不再可点击切换,× 才是 detach 入口)
     const data = {
       ...emptyDrafting('req-chip-sync'),
       title: '退款',
@@ -1383,21 +1401,22 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
     render(<DraftingZone data={data} />)
     const user = userEvent.setup()
 
+    // 默认折叠 → 展开
+    await user.click(screen.getByTestId('drafting-repo-bar-summary'))
+
+    // 只渲染 r1(r2 未选中,不显示)
     const chips = screen.getAllByTestId('drafting-repo-chip')
-    const r1 = chips.find(
-      (c) => c.getAttribute('data-repo-id') === 'r1',
-    ) as HTMLElement
+    expect(chips).toHaveLength(1)
+    const r1 = chips[0]
+    expect(r1.getAttribute('data-repo-id')).toBe('r1')
     expect(r1.getAttribute('data-selected')).toBe('true')
-    const r2 = chips.find(
-      (c) => c.getAttribute('data-repo-id') === 'r2',
-    ) as HTMLElement
-    expect(r2.getAttribute('data-selected')).toBe('false')
 
-    await user.click(r2)
-    expect(r2.getAttribute('data-selected')).toBe('true')
-
-    await user.click(r1)
-    expect(r1.getAttribute('data-selected')).toBe('false')
+    // 点 × r1 → 0 个仓库,bar 进入空态 + useEffect 自动收起
+    const r1Detach = screen.getByTestId('drafting-repo-chip-detach')
+    await user.click(r1Detach)
+    expect(screen.queryByTestId('drafting-repo-chip')).toBeNull()
+    const bar = screen.getByTestId('drafting-repo-bar')
+    expect(bar.getAttribute('data-empty-state')).toBe('true')
   })
 
   // 验收 #6 警告纯视觉 —— launch validity 与仓库数量无关
@@ -1512,7 +1531,7 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
 
   // issue 01 ticket:旧 issue 08 的「＋ 更多仓库…」占位 chip 已被「＋ 添加仓库…」
   // 实按钮取代;此处验证"以 '＋' 开头的占位条目**不**作为 chip 渲染,防止误判
-  it('以 "＋" 开头的占位条目不渲染为 chip(issue 01 ticket 取代占位)', async () => {
+  it('以 "＋" 开头的占位条目不渲染为 chip(issue 01 ticket 取代占位 · issue 09 折叠 sticky)', async () => {
     // 1 个真仓库 + 1 个 "＋ 更多仓库…" 占位(沿用 issue 08 的 fixture 形态);
     // r1 预选中以让 chips 进入 DOM,否则 N=0 空态会替换整个 chips 容器
     const data = {
@@ -1527,15 +1546,17 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
       selectedRepoIds: ['r1'],
     }
     render(<DraftingZone data={data} />)
+    const user = userEvent.setup()
+
+    // N≥1 状态:追加按钮出现 + 默认折叠 → 展开
+    expect(screen.getByTestId('repo-bar-add-more')).toBeInTheDocument()
+    expect(screen.queryByTestId('repo-bar-empty')).toBeNull()
+    await user.click(screen.getByTestId('drafting-repo-bar-summary'))
 
     // 占位条目不作为 chip 渲染(issue 01 ticket 取代)
     const allChips = screen.queryAllByTestId('drafting-repo-chip')
     expect(allChips.find((c) => c.getAttribute('data-repo-id') === 'r-more')).toBeUndefined()
     expect(allChips).toHaveLength(1)
-    // N≥1 状态:追加按钮出现
-    expect(screen.getByTestId('repo-bar-add-more')).toBeInTheDocument()
-    // 但 N=0 才出现的 testid 「repo-bar-empty」不存在
-    expect(screen.queryByTestId('repo-bar-empty')).toBeNull()
 
     // 真实仓库的初始勾选状态正确
     const r1Chip = screen
@@ -1839,7 +1860,7 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
   })
 
   // ticket 02 验收 #8:部分成功 → 失败 repo 标红(data-failed=true)
-  it('P3:部分成功 → RepoBar 失败 chip 显示 data-failed="true" + ✕ 图标', async () => {
+  it('P3:部分成功 → RepoBar 失败 chip 显示 data-failed="true" + ✕ 图标(issue 09 折叠 sticky)', async () => {
     const data = {
       ...emptyDrafting('req-red'),
       title: '退款',
@@ -1888,6 +1909,9 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
       )
     })
 
+    // 展开摘要(issue 09 默认折叠)
+    await user.click(screen.getByTestId('drafting-repo-bar-summary'))
+
     // r1 (成功) chip: data-failed=false,data-selected=true
     const r1 = screen
       .getAllByTestId('drafting-repo-chip')
@@ -1895,16 +1919,18 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
     expect(r1.getAttribute('data-failed')).toBe('false')
     expect(r1.getAttribute('data-selected')).toBe('true')
 
-    // r2 (失败) chip: data-failed=true,文案含 ✕
+    // r2 (失败) chip: data-failed=true,文案含 ✕ —— 在 issue 09 折叠 sticky 中,
+    // 失败但未选中的 repo 也会在展开态展示(以红色呈现),便于用户感知"刚才 attach 失败"
     const r2 = screen
       .getAllByTestId('drafting-repo-chip')
       .find((c) => c.getAttribute('data-repo-id') === 'r2') as HTMLElement
     expect(r2.getAttribute('data-failed')).toBe('true')
+    expect(r2.getAttribute('data-selected')).toBe('false')
     expect(r2.textContent).toContain('✕')
   })
 
   // ticket 02 验收 #9:已关联 + 锁定分支名 → chip 显示 🟢 + 分支名
-  it('P4:成功关联后 chip 显示绿色小圆点 🟢 + 分支名(attachedBranchName prop)', async () => {
+  it('P4:成功关联后 chip 显示绿色小圆点 🟢 + 分支名(issue 09 折叠 sticky)', async () => {
     const data = {
       ...emptyDrafting('req-green'),
       title: '退款',
@@ -1943,6 +1969,9 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('drafting-banner')).toBeNull()
     })
+
+    // 展开摘要(issue 09 默认折叠)
+    await user.click(screen.getByTestId('drafting-repo-bar-summary'))
 
     const r1 = screen.getByTestId('drafting-repo-chip')
     expect(r1.textContent).toContain('🟢')
