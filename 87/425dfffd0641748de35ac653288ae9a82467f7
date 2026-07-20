@@ -1,0 +1,29 @@
+apps/web/src/components/repo-bar.tsx
+  s_f3351d38157643::t_4de9e5d0521a20 7
+  s_f3351d38157643::t_dfc959e853b5b1 31-35,50-53,55,204-210,279-281,373-375
+apps/web/src/components/__tests__/repo-bar.test.tsx
+  s_f3351d38157643::t_39842fa7d2cb0d 261,264,267,269-272,276,278-281,284-288
+  s_f3351d38157643::t_967a3119428ae0 303
+  s_f3351d38157643::t_7b73ace771b9b8 299,304-308
+  s_f3351d38157643::t_a512b528780ce0 289
+apps/web/src/__tests__/drafting-zone.test.tsx
+  s_f3351d38157643::t_efe68b48ca27a4 297,300-301,305-307,310,314-316,319,326-327,330,334-336,345,366-368,371,379-381,955,957,961,964-966,1124-1125,1132,1134-1135,1139,1354-1355,1369,1371-1372,1375,1377,1390,1392-1394,1397-1398,1404-1408,1411-1413,1418-1421,1425,1427,1432,1437-1439,1443-1446,1487-1491
+apps/web/src/components/drafting-zone.tsx
+  s_f3351d38157643::t_c2e2b12e01904d 62,66,68-69,71-78,809-829,980
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "87425dfffd0641748de35ac653288ae9a82467f7",
+  "prompts": {},
+  "sessions": {
+    "s_f3351d38157643": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "631c14be-b47d-481b-b179-fb0602518608",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
