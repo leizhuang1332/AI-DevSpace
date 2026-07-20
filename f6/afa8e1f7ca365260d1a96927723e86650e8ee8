@@ -1,0 +1,21 @@
+apps/web/src/__tests__/drafting.server.test.ts
+  s_0646a79c075737::t_652017e6a3c40a 160-161,167-192
+apps/web/src/lib/drafting.server.ts
+  s_0646a79c075737::t_a226827736fccc 50,139,142-143,145-148,151,158-161,163-164,169,175,236-262
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "f6afa8e1f7ca365260d1a96927723e86650e8ee8",
+  "prompts": {},
+  "sessions": {
+    "s_0646a79c075737": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0d198476-0197-4b69-ad19-3fdf6639f679",
+        "model": "unknown"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
