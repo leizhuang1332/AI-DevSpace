@@ -1,0 +1,23 @@
+.scratch/new-requirement-modal/issues/06-attach-repos-real-pool.md
+  s_beb91977033fc6::t_03c32370e248b8 1-85
+docs/adr/0016-attach-repos-real-pool.md
+  s_beb91977033fc6::t_d9969a094d430d 1-209
+CONTEXT.md
+  s_beb91977033fc6::t_e811350610960e 62-74,354-369
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "b230fce3c623d993fce7043b47eb73aad284c8ad",
+  "prompts": {},
+  "sessions": {
+    "s_beb91977033fc6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "228c8850-da5d-4add-b7f0-37da76090b24",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
