@@ -1,0 +1,46 @@
+.scratch/drafting-redesign/issues/09-repo-bar-collapsible-sticky-and-detach.md
+  s_ad0ace42d35910::t_797124904ba668 1-164
+apps/web/src/components/__tests__/repo-bar.test.tsx
+  s_ad0ace42d35910::t_0bed4429b5540b 1-178,182-190,193,196-305
+  s_ad0ace42d35910::t_3ed523c2713298 179-181,191-192,194-195
+docs/design/pages/repo-bar-redesign-comparison-20260720.html
+  s_ad0ace42d35910::t_70640c51802cdf 1-454
+apps/web/src/components/repo-bar.tsx
+  s_ad0ace42d35910::t_c982e8f1c0a6f4 3,7,9-10,12,14-24,27-47,51,53,56,61-67,85,97-99,104,111-120,141-142,145-153,157,159-170,176-183,192,196,198,203-205,209,211-218,238,247-276,278-281,340,342-344,348,355,360-361,363,365-377,383,387,393,522
+  s_ad0ace42d35910::t_c0dee18372f363 79-80
+  s_ad0ace42d35910::t_af111189688df5 277,282-293,296-339,341,345,349-350,353-354,357,378,382,390,392,407,414,416,422
+  s_ad0ace42d35910::t_70b55be00e60c4 121-125,132,140
+  s_ad0ace42d35910::t_2edd29bbb61f09 379-381
+  s_ad0ace42d35910::t_efeffadb93aea2 384-386
+  s_ad0ace42d35910::t_e5f13e27f9449a 388-389
+  s_ad0ace42d35910::t_3bda800887bb13 391
+  s_ad0ace42d35910::t_035657eaad4cfe 394-395
+  s_ad0ace42d35910::t_061eec8b4138d2 415
+  s_ad0ace42d35910::t_0164ffb38f4894 417-421
+  s_ad0ace42d35910::t_7d026f3a3d1cd3 423-425
+  s_ad0ace42d35910::t_fd66daa2f240f4 519-521
+  s_ad0ace42d35910::t_c9ecd4c83bebf3 523
+  s_ad0ace42d35910::t_b0d0072eafc0a5 398-401,403-405,410,412,426-482,484-518,527
+apps/web/src/components/drafting-zone.tsx
+  s_ad0ace42d35910::t_46aff347ce85d4 563-573,863
+apps/web/src/__tests__/drafting-zone.test.tsx
+  s_ad0ace42d35910::t_4cfd1ca4681dd2 1196,1203,1205-1206,1208-1216,1218,1221-1225,1324,1343-1350,1356,1358-1361,1364,1387-1389,1404-1407,1409-1411,1414-1419,1534,1549-1554,1863,1912-1914,1922-1923,1928,1933,1973-1975
+apps/web/src/components/__tests__/drafting-zone.test.tsx
+  s_ad0ace42d35910::t_b2a536f7af57f4 732,759,762-767,779-858
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "bcd8b581bd941b60a65fcc9d30af2f463dbff593",
+  "prompts": {},
+  "sessions": {
+    "s_ad0ace42d35910": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1619cbd2-cc62-46b2-80c5-89229d1a1e92",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
