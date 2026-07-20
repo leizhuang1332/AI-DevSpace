@@ -157,14 +157,39 @@ describe('getDraftingDataFromFs · 文件 > 10 字节', () => {
     expect(data.selectedRepoIds).toEqual([])
   })
 
-  it('非空数据 → repos 沿用 emptyDrafting 的 GLOBAL_REPO_POOL', async () => {
+  it('非空数据 + workspace repos/ 空 → repos 为空(issue 06 全新安装)', async () => {
+    // 全新 tmpRoot 没有任何 <tmpRoot>/repos/ 子目录 → repos 为空
     writeRequirement('req-repos', '足够多的内容触发非空判定')
     const data = await getDraftingDataFromFs('req-repos', {
       requirementsRoot: tmpRoot,
     })
     expect(data.empty).toBe(false)
-    // emptyDrafting 注入全局仓库池 → repos 非空
-    expect(data.repos.length).toBeGreaterThan(0)
+    // 不再依赖 GLOBAL_REPO_POOL mock —— 真实 fs 派生的空态
+    expect(data.repos).toEqual([])
+  })
+
+  it('issue 06:repos 派生自 workspace <root>/repos/ 子目录(非 GLOBAL_REPO_POOL mock)', async () => {
+    // 模拟用户在 ~/.aidevspace/repos/ 下真实 clone 了 3 个仓库
+    const reposDir = join(tmpRoot, 'repos')
+    mkdirSync(join(reposDir, 'yl-web-ft-export'), { recursive: true })
+    mkdirSync(join(reposDir, 'refund-service'), { recursive: true })
+    mkdirSync(join(reposDir, 'order-service'), { recursive: true })
+
+    writeRequirement('req-real-repos', '足够多的内容触发非空判定')
+    const data = await getDraftingDataFromFs('req-real-repos', {
+      requirementsRoot: tmpRoot,
+    })
+    expect(data.empty).toBe(false)
+    expect(data.repos.map((r) => r.name)).toEqual([
+      'order-service',
+      'refund-service',
+      'yl-web-ft-export',
+    ])
+    expect(data.repos.map((r) => r.id)).toEqual([
+      'repo-order-service',
+      'repo-refund-service',
+      'repo-yl-web-ft-export',
+    ])
   })
 
   it('issue 06:非空数据 → selectedRepoIds 从 <reqDir>/repos/ 子目录派生(repo- 前缀)', async () => {

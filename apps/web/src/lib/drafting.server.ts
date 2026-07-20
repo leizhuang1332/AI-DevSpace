@@ -47,6 +47,7 @@ import {
   emptyDrafting,
   getDraftingData,
   type DraftingData,
+  type DraftingRepo,
 } from './drafting'
 import { resolveRequirementsRoot } from './requirements-root.server'
 import { parseFlatMap, readYamlFileOrNull } from './yaml.server'
@@ -135,32 +136,43 @@ export async function getDraftingDataFromFs(
     }
   }
 
-  // 3) 字节数 ≤ 阈值 → emptyDrafting(对齐后端 `deriveStatus`)
+// 3) 字节数 ≤ 阈值 → emptyDrafting(对齐后端 `deriveStatus`)
   //    注意:这里**不**读 meta.yaml —— 空态语义不应有 title 字段(对齐
   //    `emptyDrafting` 默认行为)
+  //    但 `repos` 仍要派生成真实仓库池(issue 06 / ADR-0016 D1):空草稿态的
+  //    RepoBar 也要展示用户本机真实仓库,而不是 GLOBAL_REPO_POOL 写死 mock。
   if (content === null || Buffer.byteLength(content, 'utf8') <= PRD_EMPTY_THRESHOLD_BYTES) {
-    return emptyDrafting(requirementId)
+    return {
+      ...emptyDrafting(requirementId),
+      repos: readWorkspaceRepoPool(root),
+    }
   }
 
-  // 4) 构造非空 DraftingData:
+// 4) 构造非空 DraftingData:
   // - prdMarkdown = 文件内容
   // - title = meta.yaml 的 `title` 字段(读不到 → '',向后兼容)
   // - selectedRepoIds = 派生 `<reqDir>/repos/` 子目录列表(issue 06 / ticket 02
   //   落盘的 worktree 目录),对齐 backend `RequirementService.deriveRepos` 的语义。
   //   每个子目录 dirname → `repo-<dirname>` 形式的 id(对齐 issue 06 引入的
   //   `id = 'repo-' + dirname` 契约)。
+  // - repos = workspace 级全局仓库池(issue 06 / ADR-0016 D1-D3):
+  //   派生 `<root>/repos/` 子目录列表(对齐 backend `apps/agent/src/routes/repos.ts`
+  //   的 readRepoPool 逻辑),不走 GLOBAL_REPO_POOL 写死 mock。
+  //   走 fs 直读而非 HTTP `fetchRepoPool` —— SSR 期不绕 HTTP 减少开销 + 不依赖 cookie。
   // - 顶部 toolbar.crumb = 单元素面包屑,反映"我在写这个 req 的草稿"
-  // - 其他字段(auxFiles / repos / skills / statusText / autosaveIntervalMs /
-  //   lastSavedAt)沿用 emptyDrafting 行为(空 auxFiles / 全局仓库池 / 空 statusText)
+  // - 其他字段(auxFiles / skills / statusText / autosaveIntervalMs / lastSavedAt)
+  //   沿用 emptyDrafting 行为(空 auxFiles / 空 statusText)
   const title = readMetaTitle(metaFile)
   const selectedRepoIds = readAttachedRepoIds(
     resolve(root, 'requirements', requirementId),
   )
+  const repos = readWorkspaceRepoPool(root)
   return {
     ...emptyDrafting(requirementId),
     prdMarkdown: content,
     title,
     selectedRepoIds,
+    repos,
     toolbar: {
       crumb: [
         { label: requirementId },
@@ -221,4 +233,31 @@ function readMetaTitle(metaFile: string): string {
   if (!map) return ''
   const title = map.title
   return typeof title === 'string' ? title : ''
+}
+
+/**
+ * 派生 workspace 级全局仓库池(issue 06 / ADR-0016 D1-D3)
+ *
+ * 数据源:`<root>/repos/` 子目录列表 —— 与 backend
+ * `apps/agent/src/routes/repos.ts` 的 `readRepoPool` 逻辑完全一致:
+ * - 走 fs 直读,**不**经 HTTP `fetchRepoPool`(SSR 期节省 cookie / token 复杂度)
+ * - `dirname → 'repo-' + dirname` id 形态(对齐 issue 06 / ADR-0016 D3)
+ * - **不**校验 `.git/` 存在(决策 75 / ADR-0016 D3)
+ * - 字典序排序(展示稳定)
+ *
+ * 容错:
+ * - `<root>/repos/` 不存在(全新安装)→ `[]`(合法空态,前端走"暂无可选仓库")
+ * - readdir 抛错 → `[]`,不阻塞 SSR(决策 30 容错)
+ */
+function readWorkspaceRepoPool(workspaceRoot: string): DraftingRepo[] {
+  const reposDir = resolve(workspaceRoot, 'repos')
+  if (!existsSync(reposDir)) return []
+  try {
+    return readdirSync(reposDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => ({ id: `repo-${d.name}`, name: d.name }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  } catch {
+    return []
+  }
 }
