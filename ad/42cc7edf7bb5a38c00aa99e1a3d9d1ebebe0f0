@@ -1,0 +1,32 @@
+apps/agent/src/__tests__/RequirementService.test.ts
+  s_0646a79c075737::t_af0a2c07ac51cb 23
+  s_0646a79c075737::t_a5f3a5743695ea 537-625
+apps/agent/src/services/RequirementService.ts
+  s_0646a79c075737::t_4c077729d619e0 443-451,462-495
+apps/web/src/__tests__/drafting.server.test.ts
+  s_0646a79c075737::t_e4ad8ac76da993 225-283
+apps/web/src/components/drafting-zone.tsx
+  s_0646a79c075737::t_cbefd8269deaf8 158-163,256-258
+apps/web/src/lib/drafting.server.ts
+  s_0646a79c075737::t_72e444fad1d62d 145-146,150,165-167,176,183,246-266
+apps/web/src/lib/drafting.ts
+  s_0646a79c075737::t_503631d4bde6fb 128-136
+packages/shared/src/requirement.ts
+  s_0646a79c075737::t_e808939aac7b4d 195-205
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "ad42cc7edf7bb5a38c00aa99e1a3d9d1ebebe0f0",
+  "prompts": {},
+  "sessions": {
+    "s_0646a79c075737": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0d198476-0197-4b69-ad19-3fdf6639f679",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
