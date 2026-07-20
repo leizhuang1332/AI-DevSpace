@@ -222,6 +222,65 @@ describe('getDraftingDataFromFs · 文件 > 10 字节', () => {
     expect(data.selectedRepoIds).toEqual([])
   })
 
+  it('issue 06 ticket 06:meta.yaml 含 branchName → lockedBranchName 注入', async () => {
+    // 模拟 ticket 02 关联成功后后端写入的 meta.yaml
+    const id = 'req-locked-branch'
+    writeRequirement(id, '足够多的内容触发非空判定')
+    writeMeta(
+      id,
+      [
+        `id: ${id}`,
+        `title: 退款功能优化`,
+        `createdAt: '2026-07-20T08:30:00.000Z'`,
+        `branchName: feat/refund-optimization`,
+      ].join('\n'),
+    )
+
+    const data = await getDraftingDataFromFs(id, {
+      requirementsRoot: tmpRoot,
+    })
+    expect(data.empty).toBe(false)
+    // SSR 读出 branchName → data.lockedBranchName 注入客户端 state 初值
+    expect(data.lockedBranchName).toBe('feat/refund-optimization')
+  })
+
+  it('issue 06 ticket 06:meta.yaml 不含 branchName → lockedBranchName 为 undefined', async () => {
+    const id = 'req-no-branch'
+    writeRequirement(id, '足够多的内容触发非空判定')
+    writeMeta(
+      id,
+      [`id: ${id}`, `title: 退款功能优化`, `createdAt: '2026-07-20T08:30:00.000Z'`].join(
+        '\n',
+      ),
+    )
+
+    const data = await getDraftingDataFromFs(id, {
+      requirementsRoot: tmpRoot,
+    })
+    expect(data.lockedBranchName).toBeUndefined()
+  })
+
+  it('issue 06 ticket 06:空草稿态 + meta.yaml 含 branchName → 仍注入 lockedBranchName', async () => {
+    // 模拟"用户已经 attach 但 PRD 还没写"的场景
+    const id = 'req-attached-no-prd'
+    writeRequirement(id, '') // 空 PRD
+    writeMeta(
+      id,
+      [
+        `id: ${id}`,
+        `title: 退款功能优化`,
+        `createdAt: '2026-07-20T08:30:00.000Z'`,
+        `branchName: feat/refund-optimization`,
+      ].join('\n'),
+    )
+
+    const data = await getDraftingDataFromFs(id, {
+      requirementsRoot: tmpRoot,
+    })
+    // 空态 + 已 attach → 应保留 lockedBranchName,不是空对象
+    expect(data.lockedBranchName).toBe('feat/refund-optimization')
+  })
+
   it('非空数据 → title 沿用 emptyDrafting 默认("") —— fs loader 不读 meta.yaml', async () => {
     writeRequirement('req-title', '足以触发非空判定的内容')
     const data = await getDraftingDataFromFs('req-title', {

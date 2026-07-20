@@ -192,6 +192,17 @@ export interface RequirementMeta {
   id: string
   title: string
   createdAt: string
+  /**
+   * 统一分支名(issue 02 ticket + issue 06 ticket 06 SSR 持久化):
+   * 首次 attach 时锁定,所有已 attach repo 共享同一个分支。
+   *
+   * 不持久化到 meta.yaml 之前只活在客户端 state,任何重挂载(F5 / 路由切换
+   * / 父组件 unmount)都会让 RepoBar 的 🟢 + 分支名 消失、append 模式分支名
+   * 锁定 banner 失效。落到 meta.yaml 让"统一分支名"成为 req 级持久状态。
+   *
+   * 可选字段:旧需求 / 尚未 attach 任何 repo 的需求 → 字段不存在。
+   */
+  branchName?: string
 }
 
 /**

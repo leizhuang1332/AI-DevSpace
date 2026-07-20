@@ -142,9 +142,12 @@ export async function getDraftingDataFromFs(
   //    但 `repos` 仍要派生成真实仓库池(issue 06 / ADR-0016 D1):空草稿态的
   //    RepoBar 也要展示用户本机真实仓库,而不是 GLOBAL_REPO_POOL 写死 mock。
   if (content === null || Buffer.byteLength(content, 'utf8') <= PRD_EMPTY_THRESHOLD_BYTES) {
+    // 空草稿态仍要派生:repos(避免 mock)+ lockedBranchName(用户可能已经
+    // attach 过,只是 PRD 还在写)—— 不读 title(空态语义不应有 title)
     return {
       ...emptyDrafting(requirementId),
       repos: readWorkspaceRepoPool(root),
+      lockedBranchName: readMetaBranchName(metaFile),
     }
   }
 
@@ -159,6 +162,9 @@ export async function getDraftingDataFromFs(
   //   派生 `<root>/repos/` 子目录列表(对齐 backend `apps/agent/src/routes/repos.ts`
   //   的 readRepoPool 逻辑),不走 GLOBAL_REPO_POOL 写死 mock。
   //   走 fs 直读而非 HTTP `fetchRepoPool` —— SSR 期不绕 HTTP 减少开销 + 不依赖 cookie。
+  // - lockedBranchName = 派生 meta.yaml.branchName(issue 06 ticket 06 SSR 持久化):
+  //   首次 attach 时后端把 branchName 写入 meta.yaml;SSR 读它让客户端任何重挂载
+  //   (F5 / 路由切换 / 父组件 unmount)都能恢复"统一分支名已锁定"语义。
   // - 顶部 toolbar.crumb = 单元素面包屑,反映"我在写这个 req 的草稿"
   // - 其他字段(auxFiles / skills / statusText / autosaveIntervalMs / lastSavedAt)
   //   沿用 emptyDrafting 行为(空 auxFiles / 空 statusText)
@@ -167,12 +173,14 @@ export async function getDraftingDataFromFs(
     resolve(root, 'requirements', requirementId),
   )
   const repos = readWorkspaceRepoPool(root)
+  const lockedBranchName = readMetaBranchName(metaFile)
   return {
     ...emptyDrafting(requirementId),
     prdMarkdown: content,
     title,
     selectedRepoIds,
     repos,
+    lockedBranchName,
     toolbar: {
       crumb: [
         { label: requirementId },
@@ -233,6 +241,27 @@ function readMetaTitle(metaFile: string): string {
   if (!map) return ''
   const title = map.title
   return typeof title === 'string' ? title : ''
+}
+
+/**
+ * 读 `<reqDir>/meta.yaml` 的 `branchName` 字段(issue 06 ticket 06 SSR 持久化)
+ *
+ * - 文件不存在 / 解析失败 / 无 `branchName` 字段 → `undefined`(语义:未锁定)
+ * - branchName 是字符串 → 原样返回(对齐后端 `RequirementService.attachRepos`
+ *   写入的形态)
+ *
+ * 不报错,与 readMetaTitle 同款容错策略 —— meta.yaml 缺失时降级,
+ * 不阻塞 SSR。
+ */
+function readMetaBranchName(metaFile: string): string | undefined {
+  const raw = readYamlFileOrNull(metaFile)
+  if (raw === null) return undefined
+  const map = parseFlatMap(raw, 'branchName')
+  if (!map) return undefined
+  const branchName = map.branchName
+  return typeof branchName === 'string' && branchName.length > 0
+    ? branchName
+    : undefined
 }
 
 /**

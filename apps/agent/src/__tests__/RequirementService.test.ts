@@ -20,7 +20,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { RepoAttachErrorCode, STATUS_PROGRESS_MAP } from '@ai-devspace/shared'
@@ -530,6 +530,95 @@ describe('RequirementService.attachRepos — batch + partial failure', () => {
     expect(out.length).toBe(2)
     expect(out[0].ok).toBe(false)
     expect(out[1].ok).toBe(true)
+  })
+})
+
+// ============================================================================
+// issue 06 ticket 06:attachRepos 成功后把 branchName 写入 meta.yaml
+// (SSR 持久化 — 让任何重挂载都能恢复"统一分支名已锁定"语义)
+// ============================================================================
+
+describe('RequirementService.attachRepos · branchName 持久化到 meta.yaml', () => {
+  // 用文件级 outer beforeEach 共享 realRoot;只在 describe 内准备自己的 fake git
+  let gitForBranch: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    // 默认的 git fake —— main / master 都成功,attach 都走成功路径
+    gitForBranch = vi.fn(async (args: string[]) => {
+      if (args.includes('show-ref') && args.includes('refs/heads/main')) {
+        return { code: 0, stdout: '', stderr: '' }
+      }
+      return { code: 0, stdout: '', stderr: '' }
+    })
+  })
+
+  it('全成功 → meta.yaml.branchName 写入(创建初始 meta + 合并 branchName)', async () => {
+    makePoolRepo('a')
+    const reqId = 'req-branch-success'
+    const svc = new RequirementService({ root: realRoot, git: gitForBranch, sleep: noSleep })
+
+    const out = await svc.attachRepos(reqId, ['a'], 'feat/refund-optimization')
+    expect(out[0].ok).toBe(true)
+
+    // 读 meta.yaml 验证 branchName 写入
+    const metaPath = join(realRoot, 'requirements', reqId, 'meta.yaml')
+    expect(existsSync(metaPath)).toBe(true)
+    const metaContent = readFileSync(metaPath, 'utf8')
+    expect(metaContent).toContain('branchName: feat/refund-optimization')
+  })
+
+  it('全成功 + 已有 meta.yaml → 保留其他字段,只覆盖 branchName', async () => {
+    makePoolRepo('a')
+    const reqId = 'req-branch-merge'
+    const reqDir = join(realRoot, 'requirements', reqId)
+    mkdirSync(reqDir, { recursive: true })
+    // 模拟 ticket 04 创建的初始 meta.yaml(有 id / title / createdAt,无 branchName)
+    writeFileSync(
+      join(reqDir, 'meta.yaml'),
+      `id: ${reqId}\ntitle: 退款功能优化\ncreatedAt: '2026-07-20T08:30:00.000Z'\n`,
+    )
+
+    const svc = new RequirementService({ root: realRoot, git: gitForBranch, sleep: noSleep })
+    const out = await svc.attachRepos(reqId, ['a'], 'feat/refund')
+    expect(out[0].ok).toBe(true)
+
+    // 验证三个原有字段 + branchName(yaml.stringify 重新格式化 createdAt 去掉单引号,
+    // 因为 ISO 时间戳本身是 yaml 合法值;断言只比对其内容标识符而非完整字面量)
+    const metaContent = readFileSync(join(reqDir, 'meta.yaml'), 'utf8')
+    expect(metaContent).toContain(`id: ${reqId}`)
+    expect(metaContent).toContain('title: 退款功能优化')
+    expect(metaContent).toContain('2026-07-20T08:30:00.000Z')
+    expect(metaContent).toContain('branchName: feat/refund')
+  })
+
+  it('全失败 → 不写 meta.yaml(branchName 写入要求至少 1 个成功)', async () => {
+    const reqId = 'req-branch-allfail'
+    // 不创建 pool repo,所有 attach 都会 E_REPO_NOT_FOUND
+    const svc = new RequirementService({ root: realRoot, git: gitForBranch, sleep: noSleep })
+
+    const out = await svc.attachRepos(reqId, ['a', 'b'], 'feat/x')
+    expect(out.every((r) => !r.ok)).toBe(true)
+
+    // meta.yaml 不应被创建
+    const metaPath = join(realRoot, 'requirements', reqId, 'meta.yaml')
+    expect(existsSync(metaPath)).toBe(false)
+  })
+
+  it('部分成功(1 ok + 1 fail)→ 仍写 branchName(任一成功即触发)', async () => {
+    makePoolRepo('a')
+    // 'b' 不存在 → E_REPO_NOT_FOUND
+    const reqId = 'req-branch-partial'
+    const svc = new RequirementService({ root: realRoot, git: gitForBranch, sleep: noSleep })
+
+    const out = await svc.attachRepos(reqId, ['a', 'b'], 'feat/partial')
+    expect(out[0].ok).toBe(true)
+    expect(out[1].ok).toBe(false)
+
+    const metaContent = readFileSync(
+      join(realRoot, 'requirements', reqId, 'meta.yaml'),
+      'utf8',
+    )
+    expect(metaContent).toContain('branchName: feat/partial')
   })
 })
 

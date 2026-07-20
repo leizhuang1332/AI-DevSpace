@@ -440,6 +440,15 @@ export class RequirementService {
   /**
    * 批量 attach:逐个串行处理,任一 repo 失败不影响其他。
    * 错误码映射策略见 `attachRepo`。
+   *
+   * 成功路径副作用:首次(或任意成功)attach 完成后,把 `branchName` 写进
+   * `meta.yaml`(issue 06 ticket 06 SSR 持久化):
+   * - meta.yaml 是 req 级持久状态源,DRAFTING SSR 读它派生 `data.lockedBranchName`
+   * - 客户端 `lockedBranchName` state 原本只在内存,任何重挂载(F5 / 路由切换
+   *   / 父组件 unmount)都会让 RepoBar 的 🟢 + 分支名 消失、append 模式锁定
+   *   banner 失效
+   * - 写盘只覆盖 `branchName` 字段(其他字段保留),用 `readMetaYaml` + 改写 +
+   *   `writeMetaYaml` 模式,避免对 ticket 04 创建时构造的初始 meta 造成破坏
    */
   async attachRepos(
     reqId: string,
@@ -450,6 +459,40 @@ export class RequirementService {
     for (const id of repoIds) {
       out.push(await this.attachRepo(reqId, id, branchName))
     }
+
+    // 至少 1 个成功 → 把 branchName 写入 meta.yaml
+    // - 已存在 meta.yaml(ticket 04 createRequirement 落地)→ 合并 + 只覆盖 branchName
+    // - **不存在** meta.yaml(罕见:attach 前没走 createRequirement)→ 兜底创建
+    //   一个最小 meta.yaml(id / title 暂用 reqId / createdAt now),让后续
+    //   SSR 读得到 branchName。title 后续可由前端 / 自动 migrate 补齐。
+    if (out.some((r) => r.ok)) {
+      try {
+        const reqDir = this.requirementDirPath(reqId)
+        // reqDir 不存在时(测试绕过 createRequirement / 早期 call site):
+        // 兜底 mkdirSync,避免 writeMetaYaml 抛 ENOENT
+        if (!existsSync(reqDir)) {
+          mkdirSync(reqDir, { recursive: true, mode: 0o700 })
+        }
+        const existing = this.readMetaYaml(reqDir)
+        const nextMeta: RequirementMeta = existing
+          ? { ...existing, branchName }
+          : {
+              id: reqId,
+              title: reqId,
+              createdAt: new Date().toISOString(),
+              branchName,
+            }
+        this.writeMetaYaml(reqDir, nextMeta)
+      } catch (err) {
+        // meta.yaml 写盘失败不应回滚 worktree(已落盘)—— 仅日志告警
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[RequirementService] failed to persist branchName to meta.yaml for ${reqId}:`,
+          err,
+        )
+      }
+    }
+
     return out
   }
 

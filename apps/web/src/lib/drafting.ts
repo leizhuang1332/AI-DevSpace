@@ -125,6 +125,15 @@ export interface DraftingData {
    * - **不影响** launch validity(validity 只看 title + PRD,见 `validateLaunch`)
    */
   selectedRepoIds: string[]
+  /**
+   * 已锁定的统一分支名(issue 02 ticket + issue 06 ticket 06 SSR 持久化):
+   * 首次 attach 后由后端写入 `meta.yaml.branchName`,SSR 读取后注入此处,
+   * `DraftingZone` 把它作为 `lockedBranchName` state 的初值。
+   *
+   * 空字符串 / undefined = 未锁定(全新需求 / attach 前的中间态)。
+   * 决定弹层 mode 切换(`first` / `append`)与 RepoBar chip 的 🟢 + 分支名。
+   */
+  lockedBranchName?: string
   /** 自动保存间隔(毫秒);UI 用 setInterval 触发保存 */
   autosaveIntervalMs: number
   /** 最后保存时间(ISO 字符串;空 = 从未保存);UI 显示 "已保存 x 秒前" */

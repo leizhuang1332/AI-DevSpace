@@ -155,7 +155,12 @@ export function DraftingZone({ data }: { data: DraftingData }) {
   const [attachDialogOpen, setAttachDialogOpen] = useState<boolean>(false)
   const [attachDialogMode, setAttachDialogMode] =
     useState<'first' | 'append'>('first')
-  const [lockedBranchName, setLockedBranchName] = useState<string>('')
+  // issue 06 ticket 06:lockedBranchName 初值从 data.lockedBranchName 注入
+  // (后端 attach 时写入 meta.yaml → SSR 读出 → 落到这里)。任何重挂载
+  // (F5 / 路由切换 / 父组件 unmount)都从 SSR 恢复,而不是丢失。
+  const [lockedBranchName, setLockedBranchName] = useState<string>(
+    data.lockedBranchName ?? '',
+  )
   const [pendingAttachTrigger, setPendingAttachTrigger] = useState<
     'banner-plus' | 'repo-bar-add' | null
   >(null)
@@ -248,6 +253,9 @@ export function DraftingZone({ data }: { data: DraftingData }) {
       setAuxFiles(data.auxFiles)
       setPrdMarkdown(data.prdMarkdown)
       setSelectedRepoIds(data.selectedRepoIds)
+      // 切到新 req 时也用 SSR 注入的 lockedBranchName 覆盖(避免"上一个
+      // req 锁的分支名串到当前 req");SSR 读 meta.yaml.branchName
+      setLockedBranchName(data.lockedBranchName ?? '')
       setLastRequirementId(data.requirementId)
     }
     // intentionally only when requirementId changes
