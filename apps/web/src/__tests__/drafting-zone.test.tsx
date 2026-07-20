@@ -1593,10 +1593,17 @@ function makeErrorResponse(status: number, body: Record<string, unknown>): Respo
 
 function mockAttachReposFetch(body: unknown, status = 200): void {
   mockFetch.mockReset()
-  mockFetch.mockResolvedValue(makeSuccessResponse(body as Record<string, unknown>))
-  if (status !== 200) {
-    mockFetch.mockResolvedValue(makeErrorResponse(status, body as Record<string, unknown>))
-  }
+  // 用 mockImplementation(每次返回**新** Response 对象):Response body 只能读一次,
+  // 否则后续 fetch 调用会抛 "Body is unusable: Body has already b..."
+  // —— 这是 issue 06 引入 refetch 后必须修的 mock(原 mockResolvedValue
+  // 共享同一 Response,导致 dialog 打开触发的 GET /api/repos 把 body 读完,
+  // 后面真 POST /api/requirement/:id/repos 拿到空 body)
+  mockFetch.mockImplementation(() => {
+    if (status === 200) {
+      return Promise.resolve(makeSuccessResponse(body as Record<string, unknown>))
+    }
+    return Promise.resolve(makeErrorResponse(status, body as Record<string, unknown>))
+  })
   // @ts-ignore - mock fetch
   globalThis.fetch = mockFetch
 }
@@ -1655,9 +1662,18 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
     const bar = screen.getByTestId('drafting-repo-bar')
     expect(bar.getAttribute('data-selected-count')).toBe('2')
 
-    // fetch 被调一次
-    expect(mockFetch).toHaveBeenCalledTimes(1)
-    const [url, init] = mockFetch.mock.calls[0]
+    // fetch 被调 2 次(issue 06 refetch + POST attach):
+    // 1. attachDialogOpen 翻 true → useEffect 触发 GET /api/repos
+    // 2. submit → POST /api/requirement/:id/repos
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+    const postCall = mockFetch.mock.calls.find(
+      ([url, init]) =>
+        typeof url === 'string' &&
+        url.includes('/api/requirement/req-attach-ok/repos') &&
+        (init as RequestInit).method === 'POST',
+    )
+    expect(postCall).toBeDefined()
+    const [url, init] = postCall as [string, RequestInit]
     expect(url).toContain('/api/requirement/req-attach-ok/repos')
     expect(init.method).toBe('POST')
     const body = JSON.parse(init.body as string)
@@ -1769,8 +1785,9 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
       selectedRepoIds: [],
     }
     mockFetch.mockReset()
-    mockFetch.mockResolvedValue(
-      makeErrorResponse(401, { error: 'unauthorized' }),
+    // 用 mockImplementation 每次返回新 Response(issue 06 useEffect 触发的 GET 也走同一 mock)
+    mockFetch.mockImplementation(() =>
+      Promise.resolve(makeErrorResponse(401, { error: 'unauthorized' })),
     )
     // @ts-ignore - mock fetch
     globalThis.fetch = mockFetch
@@ -1835,17 +1852,20 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
       selectedRepoIds: [],
     }
     mockFetch.mockReset()
-    mockFetch.mockResolvedValue(
-      makeSuccessResponse({
-        requirementId: 'req-red',
-        branchName: 'feat/red',
-        succeeded: 1,
-        failed: 1,
-        results: [
-          { ok: true, repoId: 'r1', branch: 'feat/red', worktreePath: '/x/r1', base: 'main' },
-          { ok: false, repoId: 'r2', code: 'E_DISK_FULL', message: 'No space left' },
-        ],
-      }),
+    // 用 mockImplementation 每次返回新 Response(issue 06 useEffect 触发的 GET 也走同一 mock)
+    mockFetch.mockImplementation(() =>
+      Promise.resolve(
+        makeSuccessResponse({
+          requirementId: 'req-red',
+          branchName: 'feat/red',
+          succeeded: 1,
+          failed: 1,
+          results: [
+            { ok: true, repoId: 'r1', branch: 'feat/red', worktreePath: '/x/r1', base: 'main' },
+            { ok: false, repoId: 'r2', code: 'E_DISK_FULL', message: 'No space left' },
+          ],
+        }),
+      ),
     )
     // @ts-ignore - mock fetch
     globalThis.fetch = mockFetch
@@ -1894,16 +1914,19 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
       selectedRepoIds: [],
     }
     mockFetch.mockReset()
-    mockFetch.mockResolvedValue(
-      makeSuccessResponse({
-        requirementId: 'req-green',
-        branchName: 'feat/green',
-        succeeded: 1,
-        failed: 0,
-        results: [
-          { ok: true, repoId: 'r1', branch: 'feat/green', worktreePath: '/x/r1', base: 'main' },
-        ],
-      }),
+    // 用 mockImplementation 每次返回新 Response(issue 06 useEffect 触发的 GET 也走同一 mock)
+    mockFetch.mockImplementation(() =>
+      Promise.resolve(
+        makeSuccessResponse({
+          requirementId: 'req-green',
+          branchName: 'feat/green',
+          succeeded: 1,
+          failed: 0,
+          results: [
+            { ok: true, repoId: 'r1', branch: 'feat/green', worktreePath: '/x/r1', base: 'main' },
+          ],
+        }),
+      ),
     )
     // @ts-ignore - mock fetch
     globalThis.fetch = mockFetch
@@ -1941,17 +1964,20 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
       selectedRepoIds: [],
     }
     mockFetch.mockReset()
-    mockFetch.mockResolvedValue(
-      makeSuccessResponse({
-        requirementId: 'req-retry-failed',
-        branchName: 'feat/retry',
-        succeeded: 1,
-        failed: 1,
-        results: [
-          { ok: true, repoId: 'r1', branch: 'feat/retry', worktreePath: '/x/r1', base: 'main' },
-          { ok: false, repoId: 'r2', code: 'E_DISK_FULL', message: 'No space left' },
-        ],
-      }),
+    // 用 mockImplementation 每次返回新 Response(issue 06 useEffect 触发的 GET 也走同一 mock)
+    mockFetch.mockImplementation(() =>
+      Promise.resolve(
+        makeSuccessResponse({
+          requirementId: 'req-retry-failed',
+          branchName: 'feat/retry',
+          succeeded: 1,
+          failed: 1,
+          results: [
+            { ok: true, repoId: 'r1', branch: 'feat/retry', worktreePath: '/x/r1', base: 'main' },
+            { ok: false, repoId: 'r2', code: 'E_DISK_FULL', message: 'No space left' },
+          ],
+        }),
+      ),
     )
     // @ts-ignore - mock fetch
     globalThis.fetch = mockFetch

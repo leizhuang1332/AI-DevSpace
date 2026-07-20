@@ -1,7 +1,8 @@
 /**
  * DRAFTING 工位数据层(issue 02 — PRD 顶置 + 骨架 + 进入 ANALYZING;
  * 后续 issue 04 — 辅助文件卡片 + 拖拽分割扩展;
- * issue 08 — 仓库底部条 + 软警告 + 启动按钮迁入底部条)
+ * issue 08 — 仓库底部条 + 软警告 + 启动按钮迁入底部条;
+ * issue 06 — 注入真实仓库池 via GET /api/repos)
  *
  * 工位布局(issue 08 形态):
  * - 主区:上下两块 — PRD 顶置卡片 + 拖拽分割条 + 辅助文件卡片网格
@@ -19,6 +20,17 @@
  *   纯函数集中负责,UI 仅负责把 mouse drag / 键盘事件映射成 ratio delta
  * - 软警告阈值(issue 08)以纯函数 `shouldShowRepoSoftWarning` 暴露;
  *   UI 仅负责在 selectedRepoIds 变化时调一次拿到 boolean
+ *
+ * issue 06 注入(ADR-0016):
+ * - `emptyDrafting(id)` 保留同步形态,repos 用 GLOBAL_REPO_POOL 作 fixture。
+ *   它是单测 / 离线 fallback 的"快照式"工厂 —— 30+ 调用点期望同步返回值,
+ *   改异步会触发全量测试 / 调用方重写,违背"最小破坏"原则。
+ * - `getDraftingData(id)` 改成 async:调用 `fetchRepoPool()` 拿真实仓库池;
+ *   成功 → 用真实数据;失败 → fallback 到 `emptyDrafting(id)`(其内部 repos
+ *   仍是 GLOBAL_REPO_POOL),开发环境断网时仍能演示完整 UI。
+ * - 真实数据流:`getDraftingData` → 注入 DraftingData.repos → 组件 props
+ *   → 弹层打开时由 `drafting-zone` useEffect 再 refetch 一次覆盖,保证
+ *   用户主动开弹层时拿到的是最新池(决策 76 / ADR-0016 D4)。
  */
 
 import {
@@ -28,6 +40,7 @@ import {
   type PrdAnchor,
   type UsageTag,
 } from '@ai-devspace/shared'
+import { fetchRepoPool } from './repo-attach'
 
 // ---------------------------------------------------------------------------
 // 类型定义
@@ -97,8 +110,11 @@ export interface DraftingData {
    */
   auxFiles: AuxFile[]
   /**
-   * 关联仓库选项(issue 08)。所有可选仓库(chips 渲染源);与 `selectedRepoIds`
+   * 关联仓库选项(issue 08 + 06)。所有可选仓库(chips 渲染源);与 `selectedRepoIds`
    * 配合:已选中 = chip "on"(蓝色),未选中 = chip "off"(灰底)。
+   *
+   * 数据流(issue 06):SSR 期由 `getDraftingData` 从 Agent `GET /api/repos`
+   * 拉取;弹层打开时由 `drafting-zone` useEffect refetch 兜底覆盖。
    */
   repos: DraftingRepo[]
   /**
@@ -402,18 +418,35 @@ const REFUND_DRAFTING: Omit<DraftingData, 'requirementId'> = {
 }
 
 /**
- * 拉取 DRAFTING 工位数据(mock 期 —— 后续替换为 `await fetch(...)`)。
+ * 拉取 DRAFTING 工位数据(issue 06 — 注入真实仓库池)。
  *
- * - 已知 id(req-001) → REFUND_DRAFTING 样例数据(空 PRD 字段已存,组件不填充)
- * - 未知 id / 新建需求 → emptyDrafting(id)(组件侧 detect 后调用 generatePrdSkeleton)
+ * 数据流:
+ * 1. 已知 id(req-001)→ REFUND_DRAFTING 样例数据(空 PRD 字段已存,组件不填充)
+ * 2. 未知 id / 新建需求 → `emptyDrafting(id)` 路径
+ * 3. **任意路径**都会尝试 `fetchRepoPool()` 拿真实仓库池:
+ *    - 成功 → 覆盖样例 / 空草稿中的 `repos` 字段(决策 76 / ADR-0016 D4 SSR 初始)
+ *    - 失败(网络错 / Agent 鉴权错 / Zod 校验错 / AbortError)→ 静默 fallback
+ *      到原样例的 `repos` 字段(REFUND_DRAFTING.repos 或 GLOBAL_REPO_POOL);
+ *      **不**抛错 —— 仓库池是次要数据,失败时不应阻塞整个工位渲染
+ *      (符合决策 24:不打扰,但陪伴)
  *
- * 显式标注为 async 是为后续接 agent API 时的接口稳定 —— 调用方可以无差异使用。
+ * 签名仍为 async —— 后续若需再注入其他 server 数据(autosave / lastSavedAt 等)
+ * 调用方不用切换。
  */
 export async function getDraftingData(
   requirementId: string,
 ): Promise<DraftingData> {
-  if (requirementId === 'req-001') {
-    return { ...REFUND_DRAFTING, requirementId }
+  const baseData: DraftingData =
+    requirementId === 'req-001'
+      ? { ...REFUND_DRAFTING, requirementId }
+      : emptyDrafting(requirementId)
+
+  // 注入真实仓库池(issue 06 · 决策 76)
+  try {
+    const pool = await fetchRepoPool()
+    return { ...baseData, repos: pool.repos }
+  } catch {
+    // 静默 fallback —— 保留 baseData.repos(REFUND_DRAFTING.repos 或 GLOBAL_REPO_POOL)
+    return baseData
   }
-  return emptyDrafting(requirementId)
 }

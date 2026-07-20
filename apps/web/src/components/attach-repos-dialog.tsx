@@ -163,7 +163,12 @@ export function AttachReposDialog({
     [mode, branchName],
   )
   const pickedRepoCount = selectedIds.size + (showNewRepo && newRepoUrl.trim() ? 1 : 0)
+  // issue 06 (ADR-0016 D7):"+ 添加新仓库" 入口过渡期处理
+  // - newRepoUrl 非空 → 强制 disabled(后续 ticket 接入 POST /api/repos 后移除)
+  // - 提示文案「📋 粘贴 Git URL · 即将上线」让用户理解按钮被禁用的原因
+  const hasPendingUrl = newRepoUrl.trim() !== ''
   const canSubmit =
+    !hasPendingUrl &&
     pickedRepoCount > 0 &&
     (mode === 'append' || (branchCheck !== null && branchCheck.ok))
 
@@ -182,11 +187,13 @@ export function AttachReposDialog({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!canSubmit) return
+    // 防御性:虽然 canSubmit 已经把 hasPendingUrl 排除,这里再 strip 一次
+    // —— 后续 ticket 接入 POST /api/repos 后,这段判断可以删掉
+    const cleanedUrl = newRepoUrl.trim()
     let finalRepoIds = Array.from(selectedIds)
-    if (showNewRepo && newRepoUrl.trim()) {
+    if (showNewRepo && cleanedUrl) {
       // mock:用 URL 自身作 id(去掉协议 + 路径末尾斜杠,大写统一小写)
-      const slug = newRepoUrl
-        .trim()
+      const slug = cleanedUrl
         .replace(/^https?:\/\//, '')
         .replace(/\.git$/, '')
         .replace(/\/+$/, '')
@@ -341,6 +348,15 @@ export function AttachReposDialog({
                       spellCheck={false}
                       className="w-full px-2 h-8 bg-bg border border-border-strong rounded-md text-xs font-mono focus:outline-none focus:border-brand focus:shadow-[0_0_0_3px_var(--brand-50)]"
                     />
+                    {/* issue 06 (ADR-0016 D7):过渡期 hint
+                        — POST /api/repos(create + clone)端点未实装前禁用提交,
+                          用 hint 文案让用户理解为何按钮被禁用 */}
+                    <div
+                      data-testid="attach-repos-dialog-new-repo-hint"
+                      className="text-xs text-text-3 italic"
+                    >
+                      📋 粘贴 Git URL · 即将上线
+                    </div>
                   </div>
                 )}
               </div>

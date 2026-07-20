@@ -11,6 +11,7 @@ import { HealthService } from './services/HealthService.js'
 import { ZoneRegistry } from './services/ZoneRegistry.js'
 import { workspaceRoutes } from './routes/workspace.js'
 import { requirementRoutes } from './routes/requirement.js'
+import { reposRoutes } from './routes/repos.js'
 import { bootstrapRoutes } from './routes/bootstrap.js'
 import { analysisRoutes } from './routes/analysis.js'
 import { spikeRoutes } from './routes/spike.js'
@@ -228,6 +229,10 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   })
   fastify.get('/api/health', { config: { public: true } }, async () => healthService.collect())
   await fastify.register(workspaceRoutes, { workspace })
+
+  // issue 06 (ADR-0016):GET /api/repos —— 实时 readdir `<root>/repos/`,
+  // 无 service 依赖(纯 IO + 字典序排序 + schema 校验)。
+  await fastify.register(reposRoutes, { workspaceRoot: workspace.root })
 
   // ticket 02:实装 POST /api/requirement/:id/repos(worktree 真实创建)
   // - 默认注入 createDefaultGitExec(生产)

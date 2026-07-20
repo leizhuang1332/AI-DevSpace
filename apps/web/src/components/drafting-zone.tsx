@@ -10,6 +10,7 @@ import {
 } from '@ai-devspace/shared'
 import {
   attachReposToRequirement,
+  fetchRepoPool,
   isAttachReposError,
 } from '@/lib/repo-attach'
 import {
@@ -19,6 +20,7 @@ import {
   clampSplitRatio,
   shouldShowAttachBanner,
   type DraftingData,
+  type DraftingRepo,
 } from '@/lib/drafting'
 import { DraftingPrdPane, type DraftingPrdPaneHandle } from './drafting-prd-pane'
 import { AuxFilesPane } from './aux-files-pane'
@@ -119,6 +121,15 @@ export function DraftingZone({ data }: { data: DraftingData }) {
   )
 
   // -------------------------------------------------------------------------
+  // 实时仓库池(issue 06 · 决策 76 / ADR-0016 D4)
+  // - 初始值 = data.repos(SSR 期由 `getDraftingData` 注入的真实仓库池)
+  // - 弹层打开(`attachDialogOpen` 翻 true)时由 useEffect refetch 一次;
+  //   成功 → 覆盖;失败 → 静默沿用当前列表,符合决策 24"不打扰"
+  // - 用单独的 state 而非直接 mutate data.repos,避免 props 漂移破坏 SSR
+  // -------------------------------------------------------------------------
+  const [liveRepos, setLiveRepos] = useState<DraftingRepo[]>(data.repos)
+
+  // -------------------------------------------------------------------------
   // 关联仓库弹层 + 分支名 + banner(issue 01 ticket · ticket 02 部分成功)
   // - mountSkeletonDone:首挂时 1.5s skeleton,完成后才显示主区
   // - bannerState:hidden / success / partial / error 四态,受 DraftingZone 持有
@@ -177,6 +188,24 @@ export function DraftingZone({ data }: { data: DraftingData }) {
     // 注:用户主动 ✕ 后(bannerDismissed=true)selectedRepoIds 仍为 0 时,
     // 不再恢复 success —— 保持「关后不闪」的语义(ticket 验收 #7)
   }, [selectedRepoIds.length, bannerState])
+
+  // -------------------------------------------------------------------------
+  // 弹层打开时 refetch 仓库池(issue 06 · 决策 76 / ADR-0016 D4)
+  // - 只在 attachDialogOpen 翻 true 时触发(不重复轮询)
+  // - 成功 → setLiveRepos(覆盖),失败 → 静默保留当前列表
+  // - AbortController:组件 unmount 时取消在飞请求,避免 setState on unmounted
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    if (!attachDialogOpen) return
+    const ac = new AbortController()
+    fetchRepoPool({ signal: ac.signal })
+      .then((pool) => setLiveRepos(pool.repos))
+      .catch((err) => {
+        if (err?.name === 'AbortError') return
+        // 静默 fallback —— 保留 liveRepos(决策 24 不打扰)
+      })
+    return () => ac.abort()
+  }, [attachDialogOpen])
 
   // -------------------------------------------------------------------------
   // 命令式句柄:DraftingPrdPane 暴露 saveNow(),用于 launch 前立刻落盘
@@ -502,13 +531,13 @@ export function DraftingZone({ data }: { data: DraftingData }) {
   // -------------------------------------------------------------------------
   const isRealSelectableRepo = useCallback(
     (repoId: string) => {
-      const repo = data.repos.find((r) => r.id === repoId)
+      const repo = liveRepos.find((r) => r.id === repoId)
       if (!repo) return false
       // 防御性:任何 name 以 "＋" 开头的占位条目都不可选中
       if (repo.name.startsWith('＋')) return false
       return true
     },
-    [data.repos],
+    [liveRepos],
   )
 
   const handleToggleRepo = useCallback(
@@ -808,7 +837,7 @@ export function DraftingZone({ data }: { data: DraftingData }) {
               含 chips / 软警告 / 「＋」追加 / 启动 / 失败标红 / 绿色小圆点 */}
           <div className="mt-3 -mx-6 -mb-6">
             <RepoBar
-              repos={data.repos}
+              repos={liveRepos}
               selectedRepoIds={selectedRepoIds}
               failedRepoIds={failedRepoIds}
               attachedBranchName={lockedBranchName}
@@ -852,7 +881,7 @@ export function DraftingZone({ data }: { data: DraftingData }) {
         mode={attachDialogMode}
         titlePrefix={attachDialogMode === 'first' ? '关联仓库' : '追加仓库'}
         requirementTitle={data.title || data.requirementId}
-        availableRepos={data.repos}
+        availableRepos={liveRepos}
         pickedRepoIds={selectedRepoIds}
         lockedBranchName={lockedBranchName}
         onSubmit={submitAttach}
