@@ -230,6 +230,100 @@ describe('POST /api/requirement/:id/repos — worktree attach', () => {
     expect(body.requirementId).toBe('missing-id')
   })
 
+  // ============================================================================
+  // ticket 06 (ADR-0016 D3):repoId 是 'repo-' + dirname(GET /api/repos 契约);
+  // 路由层需剥前缀映射到 dirname 再传给 service,response 再 echo 回带前缀 id。
+  // ============================================================================
+
+  it('issue 06:接收 repoId 带 "repo-" 前缀 → 路由剥前缀传给 service,response echo 回带前缀 id', async () => {
+    // mock service 替换默认实现:记录入参 + 返回带 dirname 的结果
+    ;(service.attachRepos as ReturnType<typeof vi.fn>).mockImplementation(
+      async (reqId, repoIds, branchName) => {
+        serviceCalls.push({ reqId, repoIds: [...repoIds], branchName })
+        return [
+          {
+            ok: true as const,
+            repoId: repoIds[0] ?? 'yl-web-ft-export',
+            branch: 'feat/test',
+            worktreePath: '/a/b/yl-web-ft-export',
+            base: 'main' as const,
+          },
+        ]
+      },
+    )
+
+    const { statusCode, body } = await authed(
+      'POST',
+      '/api/requirement/req-001/repos',
+      { repoIds: ['repo-yl-web-ft-export'], branchName: 'feat/test' },
+    )
+
+    expect(statusCode).toBe(200)
+    // service 收到的是 dirname(剥前缀后)
+    expect(serviceCalls[0]?.repoIds).toEqual(['yl-web-ft-export'])
+    // response 的 repoId 是带前缀 id(契约对齐 GET /api/repos)
+    expect(body.results[0].repoId).toBe('repo-yl-web-ft-export')
+    expect(body.results[0].ok).toBe(true)
+  })
+
+  it('issue 06:混合(repo- 前缀 + 裸 dirname)都正确处理', async () => {
+    ;(service.attachRepos as ReturnType<typeof vi.fn>).mockImplementation(
+      async (reqId, repoIds, branchName) => {
+        serviceCalls.push({ reqId, repoIds: [...repoIds], branchName })
+        return [
+          {
+            ok: true as const,
+            repoId: repoIds[0] ?? 'a',
+            branch: 'feat/test',
+            worktreePath: '/a',
+            base: 'main' as const,
+          },
+          {
+            ok: true as const,
+            repoId: repoIds[1] ?? 'b',
+            branch: 'feat/test',
+            worktreePath: '/b',
+            base: 'main' as const,
+          },
+        ]
+      },
+    )
+
+    const { statusCode, body } = await authed(
+      'POST',
+      '/api/requirement/req-001/repos',
+      { repoIds: ['repo-a', 'b'], branchName: 'feat/test' },
+    )
+
+    expect(statusCode).toBe(200)
+    // service 收到 ['a', 'b'] —— 前缀剥掉,裸 dirname 原样
+    expect(serviceCalls[0]?.repoIds).toEqual(['a', 'b'])
+    // response echo 回原 repoIds 顺序
+    expect(body.results[0].repoId).toBe('repo-a')
+    expect(body.results[1].repoId).toBe('b')
+  })
+
+  it('issue 06:失败结果(repo- 前缀 id)的 repoId 也 echo 回带前缀 id', async () => {
+    ;(service.attachRepos as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        ok: false,
+        repoId: 'missing-repo',
+        code: 'E_REPO_NOT_FOUND',
+        message: 'no .git',
+      },
+    ])
+
+    const { statusCode, body } = await authed(
+      'POST',
+      '/api/requirement/req-001/repos',
+      { repoIds: ['repo-missing-repo'], branchName: 'feat/test' },
+    )
+
+    expect(statusCode).toBe(200)
+    expect(body.results[0].repoId).toBe('repo-missing-repo')
+    expect(body.results[0].code).toBe('E_REPO_NOT_FOUND')
+  })
+
   it('401 无 token', async () => {
     const res = await app.inject({
       method: 'POST',

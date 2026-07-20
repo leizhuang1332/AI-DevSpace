@@ -264,8 +264,19 @@ export async function requirementRoutes(
       })
     }
 
+    // 3b. issue 06 / ADR-0016 D3:`id = 'repo-' + dirname`(GET /api/repos 响应约定)。
+    //     客户端整 id 发过来,后端 fs 查找走 dirname(<root>/repos/<dirname>/.git),
+    //     需要剥前缀映射。失败保持空(无法映射 → 服务层自然抛 E_REPO_NOT_FOUND)
+    //     —— prefix 不匹配视为非法输入,被 service 的目录存在性检查兜底。
+    const repoDirNames = repoIds.map((rid) =>
+      rid.startsWith('repo-') ? rid.slice('repo-'.length) : rid,
+    )
+
     // 4. 逐 repo 创建,收集 results(部分失败不中断)
-    const results = await service.attachRepos(id, repoIds, sanitizedBranch)
+    const rawResults = await service.attachRepos(id, repoDirNames, sanitizedBranch)
+    // response 的 repoId 仍回填**带前缀**的 id(契约对齐 GET /api/repos,
+    // 客户端可继续用 React key / 状态机跟踪具体 repo)
+    const results = rawResults.map((r, idx) => ({ ...r, repoId: repoIds[idx]! }))
     const succeeded = results.filter((r) => r.ok).length
     const failed = results.length - succeeded
 
