@@ -59,6 +59,19 @@ Git 仓库（一般是后端微服务），物理上存放在 `~/.aidevspace/rep
 - 通过 `git worktree` 在每个需求下创建独立工作副本：`requirements/<req-id>/repos/<repo-name>/`
 - 多个需求可并发修改同一仓库的不同分支，互不冲突
 
+### RepoPool（仓库池）
+
+Workspace 级的全局仓库集合——源自 `~/.aidevspace/repos/` 物理目录的**子目录列表**，由 Agent `GET /api/repos` 实时 readdir 暴露给前端。
+
+- **目录即真相**：与决策 4 一致，**不**采用配置清单 / `config.yaml` 字段
+- **每次 GET 实时扫**：无缓存；元数据（默认分支 / 语言 / SSH URL）暂不提供，留给后续 `.aidevspace/repo.yaml` 提案
+- **id = `repo-<dirname>` slug**：与既有 `GLOBAL_REPO_POOL` 命名兼容，避免改 chip id
+- **不校验 `.git/`**：误 `mkdir` 是用户自己的责任
+- **目录不存在 = 合法空态**：返 `{repos: []}` 200，前端走"暂无可选仓库"分支
+- 归属 ADR：[ADR-0016](docs/adr/0016-attach-repos-real-pool.md) D1–D6
+
+_Avoid_: 仓库列表 / 全局仓库集合（模糊概念，不指代具体落点）
+
 ### Task（任务）
 
 AI 可执行的工作单元（如"设计退款表结构"、"开发 refund-service 接口"）。隶属于某个 Requirement，存放在 `requirements/<req-id>/plan/tasks.md`。
@@ -335,6 +348,22 @@ requirements/<req-id>/analysis/
 | 70 | **回答载体** = 预设选项（AI 推测的 2-4 个常见答案）+ 自定义文本输入框；用户点选或填字 | [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md) D13 |
 | 71 | **重扫后产物处理** = 直接覆盖 `modules.yaml` + `technical-brief.md`；不依赖 git，由决策 47 自动 snapshot 机制保留 30 天 | [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md) D14 |
 | 72 | **已裁决项视觉状态** = 双区折叠（待裁决顶部展开 / 已裁决底部折叠可展开）；[应用本次裁决] 与 [🔄 重扫] 按钮并排在待裁决区底部 | [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md) D15 |
+
+---
+
+## v1.0.3 增量决策（9 轮 grilling 沉淀 · 2026-07-20）
+
+> 本节是 v1.0.2 锁定后的迭代记录，不修改上面 v1.0 / v1.0.1 / v1.0.2 决策。所有增量由 [ADR-0016](docs/adr/0016-attach-repos-real-pool.md) 承载完整内容。
+
+| # | 决策 | 关联 ADR |
+| --- | ------ | ---------- |
+| 73 | **关联仓库弹层仓库池数据源 = `~/.aidevspace/repos/` 物理目录**（决策 4 的延伸：目录即真相）；**不**采用配置清单 / `config.yaml` 字段方案（双写漂移 + 决策 24 反对"让用户编辑配置"） | [ADR-0016](docs/adr/0016-attach-repos-real-pool.md) D1 |
+| 74 | **仓库池扫描策略 = 每次 `GET /api/repos` 实时 readdir，无缓存**；本期仓库数 < 100 时 IO < 5ms，缓存收益低；inotify 跨平台复杂度过高 | [ADR-0016](docs/adr/0016-attach-repos-real-pool.md) D2 |
+| 75 | **仓库池字段最小集 = `{id, name}`**；`id = 'repo-<dirname>'` slug；**不**返回默认分支 / 语言 / SSH URL（元数据留给后续 `~/.aidevspace/repos/<name>/.aidevspace/repo.yaml` 提案）；**不**校验 `.git/` 存在（决策 30 接受"非 git 目录污染列表"为显式代价） | [ADR-0016](docs/adr/0016-attach-repos-real-pool.md) D3 |
+| 76 | **拉取策略 = SSR 初始 + 弹层 refetch 兜底**；进入 DRAFTING 时 `getDraftingData()` 调一次 + 弹层打开时 `useEffect` refetch；refetch 失败 → 静默沿用当前列表 | [ADR-0016](docs/adr/0016-attach-repos-real-pool.md) D4 |
+| 77 | **`GET /api/repos` = workspace 顶层资源**，与 `POST /api/requirement/:id/repos`（决策 4 + issue 02）形成"全局池 vs 需求关联"对照；**不**采用 `/api/workspace/repos` 命名空间（workspace 命名空间当前未使用，为时过早） | [ADR-0016](docs/adr/0016-attach-repos-real-pool.md) D5 |
+| 78 | **`~/.aidevspace/repos/` 目录不存在 → 返 `{repos: []}` 200**；全新安装是合法状态不是错误，前端 [`attach-repos-dialog.tsx`](apps/web/src/components/attach-repos-dialog.tsx) 已有 `availableRepos.length === 0` 的"暂无可选仓库"分支零改动；GET 不允许副作用（**不**自动 mkdir） | [ADR-0016](docs/adr/0016-attach-repos-real-pool.md) D6 |
+| 79 | **"+ 添加新仓库（粘贴 Git URL）" 入口过渡期处理 = 保留 + hint "📋 粘贴 Git URL · 即将上线" + submit 按钮在 URL 非空时 disabled**；`POST /api/repos`（create + clone）端点未实装前不真接 URL；后续 ticket 接入后移除禁用即可，**不**采用"直接隐藏入口"（未来加回 UI 二次成本） | [ADR-0016](docs/adr/0016-attach-repos-real-pool.md) D7 |
 
 ---
 
