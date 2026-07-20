@@ -1,0 +1,21 @@
+apps/agent/src/__tests__/requirement.test.ts
+  s_0646a79c075737::t_906af07ae91749 233-326
+apps/agent/src/routes/requirement.ts
+  s_0646a79c075737::t_689391f3b96b18 267-274,276-279
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "9db31ba2e4f36346a93344f58b1788f5e32aa19f",
+  "prompts": {},
+  "sessions": {
+    "s_0646a79c075737": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0d198476-0197-4b69-ad19-3fdf6639f679",
+        "model": "unknown"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
