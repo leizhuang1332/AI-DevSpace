@@ -41,7 +41,7 @@
  *   硬编码 `cwd + ../../requirements`
  */
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
   emptyDrafting,
@@ -145,15 +145,22 @@ export async function getDraftingDataFromFs(
   // 4) 构造非空 DraftingData:
   // - prdMarkdown = 文件内容
   // - title = meta.yaml 的 `title` 字段(读不到 → '',向后兼容)
+  // - selectedRepoIds = 派生 `<reqDir>/repos/` 子目录列表(issue 06 / ticket 02
+  //   落盘的 worktree 目录),对齐 backend `RequirementService.deriveRepos` 的语义。
+  //   每个子目录 dirname → `repo-<dirname>` 形式的 id(对齐 issue 06 引入的
+  //   `id = 'repo-' + dirname` 契约)。
   // - 顶部 toolbar.crumb = 单元素面包屑,反映"我在写这个 req 的草稿"
-  // - 其他字段(auxFiles / repos / selectedRepoIds / skills / statusText /
-  //   autosaveIntervalMs / lastSavedAt)沿用 emptyDrafting 行为(空 auxFiles / 空
-  //   selectedRepoIds / 全局仓库池 / 空 statusText),不引入 fs 的虚假数据
+  // - 其他字段(auxFiles / repos / skills / statusText / autosaveIntervalMs /
+  //   lastSavedAt)沿用 emptyDrafting 行为(空 auxFiles / 全局仓库池 / 空 statusText)
   const title = readMetaTitle(metaFile)
+  const selectedRepoIds = readAttachedRepoIds(
+    resolve(root, 'requirements', requirementId),
+  )
   return {
     ...emptyDrafting(requirementId),
     prdMarkdown: content,
     title,
+    selectedRepoIds,
     toolbar: {
       crumb: [
         { label: requirementId },
@@ -163,6 +170,36 @@ export async function getDraftingDataFromFs(
       statusText: '',
     },
     empty: false,
+  }
+}
+
+/**
+ * 派生 attached repo id 列表(issue 06 / ticket 02 落盘 worktree → SSR 持久化)
+ *
+ * 数据源:`<reqDir>/repos/` 子目录列表 —— ticket 02 attach 成功后真实
+ * worktree 目录位于此(对齐 backend `RequirementService.deriveRepos`)。
+ *
+ * 映射:`dirname → 'repo-' + dirname`(对齐 issue 06 引入的 id 契约,
+ * 也是 POST /api/repos 响应里 `id` 的形态)。
+ *
+ * 容错:
+ * - `<reqDir>/repos/` 不存在(全新需求未关联任何 repo)→ `[]`(合法空态,
+ *   触发 banner + RepoBar N=0 空态)
+ * - readdir 抛错 → `[]`,不阻塞 SSR(决策 30 容错)
+ *
+ * 过滤:`.` 前缀的子目录忽略 —— 与后端 `deriveRepos` 行为完全一致
+ * (`RequirementService.ts:738` 注释"过滤 . 开头")。
+ */
+function readAttachedRepoIds(reqDir: string): string[] {
+  const reposDir = resolve(reqDir, 'repos')
+  if (!existsSync(reposDir)) return []
+  try {
+    return readdirSync(reposDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
+      .map((d) => `repo-${d.name}`)
+      .sort((a, b) => a.localeCompare(b))
+  } catch {
+    return []
   }
 }
 

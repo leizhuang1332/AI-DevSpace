@@ -167,6 +167,36 @@ describe('getDraftingDataFromFs · 文件 > 10 字节', () => {
     expect(data.repos.length).toBeGreaterThan(0)
   })
 
+  it('issue 06:非空数据 → selectedRepoIds 从 <reqDir>/repos/ 子目录派生(repo- 前缀)', async () => {
+    const id = 'req-attached'
+    writeRequirement(id, '足够多的内容触发非空判定')
+    // 模拟 ticket 02 关联成功后落盘的 worktree 目录:
+    //   <root>/requirements/<id>/repos/<dirname>/
+    const reposDir = join(tmpRoot, 'requirements', id, 'repos')
+    mkdirSync(join(reposDir, 'yl-web-ft-export'), { recursive: true })
+    mkdirSync(join(reposDir, 'refund-service'), { recursive: true })
+    // . 开头的目录应被过滤(对齐后端 deriveRepos 行为)
+    mkdirSync(join(reposDir, '.hidden'), { recursive: true })
+
+    const data = await getDraftingDataFromFs(id, {
+      requirementsRoot: tmpRoot,
+    })
+    expect(data.empty).toBe(false)
+    expect(data.selectedRepoIds.sort()).toEqual([
+      'repo-refund-service',
+      'repo-yl-web-ft-export',
+    ])
+  })
+
+  it('issue 06:repos/ 不存在 → selectedRepoIds 为空(全新需求合法空态)', async () => {
+    writeRequirement('req-no-repos', '足够多的内容触发非空判定')
+    const data = await getDraftingDataFromFs('req-no-repos', {
+      requirementsRoot: tmpRoot,
+    })
+    expect(data.empty).toBe(false)
+    expect(data.selectedRepoIds).toEqual([])
+  })
+
   it('非空数据 → title 沿用 emptyDrafting 默认("") —— fs loader 不读 meta.yaml', async () => {
     writeRequirement('req-title', '足以触发非空判定的内容')
     const data = await getDraftingDataFromFs('req-title', {
