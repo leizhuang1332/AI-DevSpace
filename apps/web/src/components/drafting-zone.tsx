@@ -59,20 +59,24 @@ function focusReturnToTrigger(
  *
  * 视觉对照基线:[docs/design/pages/19-final-drafting.html](docs/design/pages/19-final-drafting.html)
  *
- * 布局(issue 08 形态 —— PRD 顶置 + 拖拽分割 + 辅助文件网格 + 仓库底部条):
+ * 布局(issue 08 形态 —— 关联仓库顶置 + PRD + 拖拽分割 + 辅助文件网格):
  * ┌────────────────────────────────────────────────┐
  * │ Toolbar(面包屑 + 自动保存状态)                  │
  * ├────────────────────────────────────────────────┤
- * │ 主区:上下分割的 flex 列                         │
+ * │ 主区:上下排列的 flex 列(仓库条在 PRD 之上)      │
  * │  ┌────────────────────────────────────────┐    │
- * │  │ PRD 卡片(标题 + 编辑器)  [ratio ~60%]   │    │
+ * │  │ 关联仓库条(issue 08)—— sticky top     │    │
+ * │  │ 关联仓库  ✓ …  ✓ …  ＋ …  ⚠ 仅 1 个…  ▶   │
  * │  ├────────────────────────────────────────┤    │
- * │  │ ‖ 拖拽分割条(6px)              ‖      │    │
- * │  ├────────────────────────────────────────┤    │
- * │  │ 辅助文件网格 + 创建/上传 [1-ratio]   │    │
+ * │  │ 主区:上下分割的 flex 列                │    │
+ * │  │  ┌────────────────────────────────┐    │    │
+ * │  │  │ PRD 卡片(标题 + 编辑器)[~60%] │    │    │
+ * │  │  ├────────────────────────────────┤    │    │
+ * │  │  │ ‖ 拖拽分割条(6px)        ‖   │    │    │
+ * │  │  ├────────────────────────────────┤    │    │
+ * │  │  │ 辅助文件网格 + 创建/上传   │    │    │
+ * │  │  └────────────────────────────────┘    │    │
  * │  └────────────────────────────────────────┘    │
- * │ ═══════════════ 仓库底部条(issue 08)═══════════│
- * │ 关联仓库  ✓ …  ✓ …  ＋ …  ⚠ 仅 1 个仓库 …  ▶   │
  * └────────────────────────────────────────────────┘
  * + 右侧 Inline 栏(由 ZoneShell 注入 DraftingSkillRail)
  *
@@ -802,6 +806,27 @@ export function DraftingZone({ data }: { data: DraftingData }) {
         className="flex-1 overflow-auto p-6 bg-bg"
       >
         <div className="max-w-[1080px] mx-auto flex flex-col">
+          {/* 仓库条 —— 移到 PRD 主文档之上(issue 08 + 09),sticky top 贴在
+              工作区顶部;含 chips / 软警告 / 「＋」追加 / 失败标红 /
+              绿色小圆点;启动 ANALYZING 按钮已移除,改由 PRD 主文档 / Toolbar
+              提供入口。mt-0 / mb-3 让 RepoBar 与上方 Banner、下方 PRD 主文档
+              的间距在自家层面保持对称(均 12px);不再用 -mt-6 贴 drafting-main 顶部,
+              也不再用 -mx-6 溢出 —— 这样 RepoBar 与 PRD 主文档在 max-w-[1080px]
+              容器内的实际宽度严格一致。 */}
+          <div className="mt-0 mb-3">
+            <RepoBar
+              repos={liveRepos}
+              selectedRepoIds={selectedRepoIds}
+              failedRepoIds={failedRepoIds}
+              attachedBranchName={lockedBranchName}
+              onDetachRepo={handleDetachRepo}
+              canLaunch={validity.canLaunch}
+              launchDisabledHint={launchDisabledHint}
+              onLaunch={handleLaunch}
+              onRequestAttach={handleRepoBarRequestAttach}
+            />
+          </div>
+
           <div
             ref={splitContainerRef}
             data-testid="drafting-split-row"
@@ -850,22 +875,6 @@ export function DraftingZone({ data }: { data: DraftingData }) {
                 onUpload={handleAuxUpload}
               />
             </div>
-          </div>
-
-          {/* 仓库底部条(issue 08 + 01 ticket + ticket 02 验收 #8 #9)—— sticky bottom,
-              含 chips / 软警告 / 「＋」追加 / 启动 / 失败标红 / 绿色小圆点 */}
-          <div className="mt-3 -mx-6 -mb-6">
-            <RepoBar
-              repos={liveRepos}
-              selectedRepoIds={selectedRepoIds}
-              failedRepoIds={failedRepoIds}
-              attachedBranchName={lockedBranchName}
-              onDetachRepo={handleDetachRepo}
-              canLaunch={validity.canLaunch}
-              launchDisabledHint={launchDisabledHint}
-              onLaunch={handleLaunch}
-              onRequestAttach={handleRepoBarRequestAttach}
-            />
           </div>
         </div>
       </div>

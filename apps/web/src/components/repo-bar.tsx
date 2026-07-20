@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { shouldShowRepoSoftWarning, type DraftingRepo } from '@/lib/drafting'
 
 /**
- * DRAFTING 工位的底部仓库条 · 折叠 sticky(issue 09)
+ * DRAFTING 工位的顶部仓库条 · 折叠 sticky(issue 09;从底部移到顶部)
  *
  * 视觉对照基线:`docs/design/pages/repo-bar-redesign-comparison-20260720.html` 方案 B
  *   + `docs/design/pages/19-final-drafting.html` 的 `.repo-bar` 区域
@@ -28,7 +28,11 @@ import { shouldShowRepoSoftWarning, type DraftingRepo } from '@/lib/drafting'
  * - **默认折叠**(Q2 方案 B):bar 高度锁定 40px,只有"摘要"行可见,不再随 N
  *   增长换行膨胀(N=8 时从 135px 降到 40px,核心痛点)。
  * - **内联展开**(Q5 a):bar 自身撑开,展开面板从 bar 内部向下展开,bar
- *   仍 sticky bottom 不变。展开态不遮工作区(只是 bar 变高)。
+ *   仍 sticky top 不变(放在 PRD 主文档之上)。展开态不遮工作区(只是 bar 变高)。
+ * - **边框与 PRD 同色同粗,但改用虚线**:PRD 主文档卡片的边框是 1px 实线
+ *   `border` + `border-border`,RepoBar 同步使用同样的颜色 + 粗细,但用
+ *   `border-dashed` 虚线样式(因为 RepoBar 是贴顶横条而非独立卡片,
+ *   圆角/阴影仍只属于 PRD)。
  * - **N=0 沿用现状**(Q9 a):N=0 不走折叠,直接显示 issue 01 ticket 的
  *   `[＋ 添加仓库…]` + `💡 首次添加仓库时会请你填写统一分支名` hint。
  * - **× 一键取消关联**(Q1 + Q4 + Q6):点 × 立即从 `selectedRepoIds`
@@ -43,8 +47,12 @@ import { shouldShowRepoSoftWarning, type DraftingRepo } from '@/lib/drafting'
  * 不影响 launch(issue 08 验收 #7 #8 回归):`canLaunch` 由父组件基于
  * title + PRD 决定,本组件**不**根据仓库数量调整 disabled。
  *
+ * 启动按钮已移除(后续 issue 迁移到 PRD 主文档 / Toolbar):本组件 props
+ * 仍保留 `onLaunch` / `canLaunch` / `launchDisabledHint` 三个 launch 相关
+ * 接口契约,供后续补 UI 时复用。本组件当前不渲染该按钮与 disabled hint。
+ *
  * 单一职责:本组件不感知 prdMarkdown / title / 草稿内容,只渲染仓库
- * 选择 + 转发 launch 事件。
+ * 选择 UI(launch 转发按需启用,目前未渲染)。
  */
 
 export interface RepoBarProps {
@@ -193,10 +201,13 @@ export function RepoBar({
       role="region"
       aria-label="仓库选择与启动操作"
       className={[
-        // sticky bottom —— 跟随工作区滚动(issue 08 验收 #3)
-        'sticky bottom-0 z-10',
-        // 视觉:与设计稿 .repo-bar 一致(浅底 + 上边框)
-        'bg-bg-elevated border-t border-border',
+        // sticky top —— 跟随工作区滚动(迁到 PRD 主文档上方后改为贴顶)
+        'sticky top-0 z-10',
+        // 边框:与 PRD 主文档(drafting-prd-pane)保持一致
+        // —— 同粗细 border(1px) + 同色 border-border,
+        // 但改用 dashed 虚线以便与 PRD 实线卡片视觉区分(因为 RepoBar 是 sticky
+        // 横向条而非独立卡片);圆角 / 阴影留给 PRD 卡片
+        'border border-dashed border-border bg-bg-elevated',
         'text-sm',
       ].join(' ')}
     >
@@ -265,32 +276,9 @@ export function RepoBar({
             </span>
           )}
 
-          {/* 启动按钮 disabled hint(issue 04 ticket 收窄) */}
-          {!canLaunch && launchDisabledHint && (
-            <span
-              data-testid="drafting-launch-disabled-hint"
-              className="text-xs text-text-3"
-            >
-              {launchDisabledHint}
-            </span>
-          )}
-
-          {/* 启动按钮 */}
-          <button
-            type="button"
-            data-testid="drafting-action-launch"
-            data-variant="primary"
-            disabled={!canLaunch}
-            onClick={handleLaunchClick}
-            className={[
-              'ml-auto inline-flex items-center gap-1.5 rounded-md text-md font-medium',
-              'h-10 px-5 bg-brand text-white hover:bg-brand-600',
-              'disabled:opacity-50 disabled:cursor-not-allowed',
-              'focus:outline-none focus:ring-2 focus:ring-brand-50',
-            ].join(' ')}
-          >
-            ▶ 进入 ANALYZING
-          </button>
+          {/* 启动 ANALYZING 按钮已移除 —— 入口待后续 issue 补到 PRD 主文档 / Toolbar
+              位置;canLaunch / launchDisabledHint / onLaunch 等 props 保留以供复用。
+              disabled hint 也随之省略(用户不再此处看到 launch disabled 提示)。*/}
         </div>
       ) : (
         <>
@@ -382,33 +370,9 @@ export function RepoBar({
               </span>
             )}
 
-            {/* 启动按钮 disabled hint */}
-            {!canLaunch && launchDisabledHint && (
-              <span
-                data-testid="drafting-launch-disabled-hint"
-                className="text-xs text-text-3"
-              >
-                {launchDisabledHint}
-              </span>
-            )}
-
-            {/* 启动按钮 */}
-            <button
-              type="button"
-              data-testid="drafting-action-launch"
-              data-variant="primary"
-              disabled={!canLaunch}
-              onClick={handleLaunchClick}
-              className={[
-                'ml-auto inline-flex items-center gap-1.5 rounded-md text-md font-medium',
-                'h-10 px-5 bg-brand text-white hover:bg-brand-600',
-                'disabled:opacity-50 disabled:cursor-not-allowed',
-                'focus:outline-none focus:ring-2 focus:ring-brand-50',
-                'flex-shrink-0',
-              ].join(' ')}
-            >
-              ▶ 进入 ANALYZING
-            </button>
+            {/* 启动 ANALYZING 按钮已移除 —— 入口待后续 issue 补到 PRD 主文档
+              / Toolbar;canLaunch / launchDisabledHint / onLaunch 等 props 保留
+              以供复用。disabled hint 也随之省略。*/}
           </div>
 
           {/* ========================================================== */}

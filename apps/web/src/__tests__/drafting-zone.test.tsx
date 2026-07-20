@@ -294,106 +294,46 @@ describe('DraftingZone · 自动保存', () => {
 })
 
 // ============================================================================
-// 启动动作(issue 02 验收 #5 #6 #7 #8)
+// 启动按钮已移除 —— launch 入口待后续 issue 迁移(PRD 主文档 / Toolbar)
 // ============================================================================
 
-describe('DraftingZone · 启动 ANALYZING', () => {
-  it('按钮文案为 "▶ 进入 ANALYZING"', async () => {
+describe('DraftingZone · 启动按钮已移除(后续 issue 接管)', () => {
+  it('启动 ANALYZING 按钮不再于 DraftingZone 子树渲染', async () => {
     const data = await getDraftingData('req-001')
     render(<DraftingZone data={data} />)
 
-    const btn = screen.getByTestId('drafting-action-launch')
-    expect(btn).toBeInTheDocument()
-    expect(btn.textContent).toContain('▶ 进入 ANALYZING')
-    expect(btn.getAttribute('data-variant')).toBe('primary')
+    // RepoBar 中已不渲染该按钮;整个 DraftingZone 子树也没有同名 testid
+    expect(screen.queryByTestId('drafting-action-launch')).toBeNull()
+    expect(screen.queryByTestId('drafting-launch-disabled-hint')).toBeNull()
   })
 
-  it('title + PRD 均有内容 → 按钮 enabled 且点击跳到 /requirements/<id>/analyzing/', async () => {
+  it('data-can-launch 契约仍在 RepoBar 根节点保留(后续 UI 可读)', async () => {
     const data = await getDraftingData('req-001')
     render(<DraftingZone data={data} />)
-    const user = userEvent.setup()
 
-    const btn = screen.getByTestId('drafting-action-launch')
-    expect(btn.getAttribute('disabled')).toBeNull()
-
-    await user.click(btn)
-    expect(routerPush).toHaveBeenCalledWith('/requirements/req-001/analyzing/')
+    const bar = screen.getByTestId('drafting-repo-bar')
+    // 完整 PRD → canLaunch=true
+    expect(bar.getAttribute('data-can-launch')).toBe('true')
   })
 
-  it('PRD 全空白 → 按钮 disabled + launchDisabledHint = "请填写 PRD Markdown"', async () => {
-    // issue 04 ticket:title 不再受控,只 PRD 决定 canLaunch
+  it('PRD 全空白 → data-can-launch=false(供后续入口消费)', async () => {
     const data = await getDraftingData('req-001')
     render(<DraftingZone data={data} />)
     const user = userEvent.setup()
 
     await user.clear(screen.getByTestId('drafting-prd'))
-    const btn = screen.getByTestId('drafting-action-launch')
-    expect(btn.getAttribute('disabled')).not.toBeNull()
 
-    await user.click(btn)
-    expect(routerPush).not.toHaveBeenCalled()
-
-    // ticket 验收 #3:launchDisabledHint === '请填写 PRD Markdown'
-    expect(screen.getByTestId('drafting-launch-disabled-hint').textContent).toBe(
-      '请填写 PRD Markdown',
-    )
+    const bar = screen.getByTestId('drafting-repo-bar')
+    expect(bar.getAttribute('data-can-launch')).toBe('false')
   })
 
-  it('PRD 全空白 → 按钮 disabled', async () => {
+  it('drafting-zone 根节点 data-launch-valid 契约保留', async () => {
     const data = await getDraftingData('req-001')
     render(<DraftingZone data={data} />)
-    const user = userEvent.setup()
 
-    await user.clear(screen.getByTestId('drafting-prd'))
-    const btn = screen.getByTestId('drafting-action-launch')
-    expect(btn.getAttribute('disabled')).not.toBeNull()
-  })
-
-  it('点击启动按钮不触发任何副作用(mockside routerPush 仅一次)', async () => {
-    const data = await getDraftingData('req-001')
-    render(<DraftingZone data={data} />)
-    const user = userEvent.setup()
-
-    await user.click(screen.getByTestId('drafting-action-launch'))
-    // 仅 1 次 push,无其他 API 调用 / 状态变更
-    expect(routerPush).toHaveBeenCalledTimes(1)
-  })
-
-  it('disabled 时点击 → 不跳转(disabled 按钮被 userEvent silent no-op)', async () => {
-    // 用 empty=false + PRD='' 模拟"PRD 真为空"的 disabled 场景
-    // (emptyDrafting + empty=true 会触发骨架填充,会让按钮反而 enabled)
-    render(
-      <DraftingZone
-        data={{
-          ...emptyDrafting('NEW'),
-          prdMarkdown: '',
-          empty: false,
-        }}
-      />,
-    )
-    const user = userEvent.setup()
-
-    const btn = screen.getByTestId('drafting-action-launch')
-    expect(btn.getAttribute('disabled')).not.toBeNull()
-    await user.click(btn)
-    expect(routerPush).not.toHaveBeenCalled()
-  })
-
-  it('不依赖仓库或辅助文件 —— 满数据 + 空仓库/辅助也能 launch', async () => {
-    // 构造一个不带 repos/auxFiles 的数据(issue 02 数据层已无这些字段)
-    const data = {
-      ...emptyDrafting('req-002'),
-      title: '退款',
-      prdMarkdown: generatePrdSkeleton('退款'),
-      empty: false,
-    }
-    render(<DraftingZone data={data} />)
-    const user = userEvent.setup()
-
-    const btn = screen.getByTestId('drafting-action-launch')
-    expect(btn.getAttribute('disabled')).toBeNull()
-    await user.click(btn)
-    expect(routerPush).toHaveBeenCalledWith('/requirements/req-002/analyzing/')
+    const zone = screen.getByTestId('drafting-zone')
+    // 完整 PRD → launch-valid=true
+    expect(zone.getAttribute('data-launch-valid')).toBe('true')
   })
 })
 
@@ -402,7 +342,7 @@ describe('DraftingZone · 启动 ANALYZING', () => {
 // ============================================================================
 
 describe('DraftingZone · 空数据', () => {
-  it('empty=true → launch 按钮 disabled + PRD 字段被骨架填充 + title hero 显示 "未命名需求"', () => {
+  it('empty=true → PRD 字段被骨架填充 + title hero 显示 "未命名需求"', () => {
     // 用 PRD=空白 + empty=false 模拟"PRD 真为空 + 不可被骨架填充"的场景
     // (如果保留 empty=true,DraftingPrdPane 的 mount 副作用会触发骨架填充 →
     // PRD 不空 → launch 反而 enabled,覆盖本用例的 disabled 断言)
@@ -423,17 +363,12 @@ describe('DraftingZone · 空数据', () => {
     expect(within(hero).getByRole('heading', { level: 1 }).textContent).toBe(
       '未命名需求',
     )
-    // PRD 仍是空白 → launch 按钮 disabled
-    expect(
-      screen.getByTestId('drafting-action-launch').getAttribute('disabled'),
-    ).not.toBeNull()
-    // launchDisabledHint 文案统一为「请填写 PRD Markdown」(issue 04 ticket)
-    expect(screen.getByTestId('drafting-launch-disabled-hint').textContent).toBe(
-      '请填写 PRD Markdown',
-    )
+    // PRD 仍是空白 → canLaunch=false(以 data-can-launch 契约供后续入口读取)
+    const bar = screen.getByTestId('drafting-repo-bar')
+    expect(bar.getAttribute('data-can-launch')).toBe('false')
   })
 
-  it('empty=true + PRD 为空 → mount 后骨架填充 + PRD 出现 + launch enabled', () => {
+  it('empty=true + PRD 为空 → mount 后骨架填充 + PRD 出现 + data-can-launch=true', () => {
     // 验证 mount 时骨架仍会触发(issue 02 行为不变)
     render(<DraftingZone data={emptyDrafting('NEW')} />)
 
@@ -441,10 +376,9 @@ describe('DraftingZone · 空数据', () => {
     expect(
       (screen.getByTestId('drafting-prd') as HTMLTextAreaElement).value,
     ).toContain('## 背景')
-    // PRD 有内容 → 按钮 enabled
-    expect(
-      screen.getByTestId('drafting-action-launch').getAttribute('disabled'),
-    ).toBeNull()
+    // PRD 有内容 → canLaunch=true
+    const bar = screen.getByTestId('drafting-repo-bar')
+    expect(bar.getAttribute('data-can-launch')).toBe('true')
   })
 })
 
@@ -1018,20 +952,18 @@ describe('DraftingZone · 辅助文件卡片 + 拖拽分割 (issue 04)', () => {
 
   // -------------------------------------------------------------------------
   // 回归:issue 02/03 的 PRD / 锚点条测试在 issue 04 改造后仍通过
+  // (启动按钮已移除,跳转验证由后续 issue 迁移到 PRD 主文档 / Toolbar 后再做)
   // -------------------------------------------------------------------------
-  it('issue 02 验收仍通过:PRD 卡片 + 锚点条 + ANALYZING 跳转', async () => {
+  it('issue 02 验收仍通过:PRD 卡片 + 锚点条(启动按钮移除后)', async () => {
     const data = await getDraftingData('req-001')
     render(<DraftingZone data={data} />)
-    const user = userEvent.setup()
 
-    // PRD 卡片 + 锚点条 + 启动按钮
+    // PRD 卡片 + 锚点条依旧在
     expect(screen.getByTestId('drafting-prd-card')).toBeInTheDocument()
     expect(screen.getByTestId('prd-anchor-bar')).toBeInTheDocument()
-    const btn = screen.getByTestId('drafting-action-launch')
-    expect(btn.getAttribute('disabled')).toBeNull()
-
-    await user.click(btn)
-    expect(routerPush).toHaveBeenCalledWith('/requirements/req-001/analyzing/')
+    // canLaunch 契约为 true(后续启动入口接管后可读该契约)
+    const bar = screen.getByTestId('drafting-repo-bar')
+    expect(bar.getAttribute('data-can-launch')).toBe('true')
   })
 })
 
@@ -1189,22 +1121,22 @@ describe('DraftingZone · 辅助文件抽屉 (issue 05)', () => {
 // ============================================================================
 
 describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
-  // 验收 #1 #2 sticky 底部条 + 三段式布局(chips / 警告 / 启动按钮)
-  it('验收 #1+#2:repo-bar 渲染于工作区底部,包含 chips / 软警告区 / 启动按钮', async () => {
+  // 验收 #1 #2 sticky 顶部条 + 三段式布局(chips / 警告 / 追加)
+  it('验收 #1+#2:repo-bar 渲染于工作区顶部,包含 chips / 软警告区 / 追加按钮(启动按钮已移除)', async () => {
     const data = await getDraftingData('req-001')
     render(<DraftingZone data={data} />)
     const user = userEvent.setup()
 
     const bar = screen.getByTestId('drafting-repo-bar')
     expect(bar).toBeInTheDocument()
-    // sticky bottom —— 设计稿一致
+    // sticky top —— 迁到 PRD 主文档之上后贴顶
     expect(bar.className).toContain('sticky')
-    expect(bar.className).toContain('bottom-0')
-    // 折叠态(默认):摘要行 + 启动按钮 + 追加按钮 + 标签都在
+    expect(bar.className).toContain('top-0')
+    // 折叠态(默认):摘要行 + 追加按钮 + 标签都在;启动按钮已不在 RepoBar 渲染
     expect(within(bar).getByTestId('drafting-repo-bar-label')).toBeInTheDocument()
     expect(within(bar).getByTestId('drafting-repo-bar-summary')).toBeInTheDocument()
     expect(within(bar).getByTestId('repo-bar-add-more')).toBeInTheDocument()
-    expect(within(bar).getByTestId('drafting-action-launch')).toBeInTheDocument()
+    expect(within(bar).queryByTestId('drafting-action-launch')).toBeNull()
     // 折叠态默认无 chip(issue 09 折叠 sticky)
     expect(bar.getAttribute('data-collapsed')).toBe('true')
     expect(screen.queryByTestId('drafting-repo-bar-chips')).toBeNull()
@@ -1419,8 +1351,8 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
     expect(bar.getAttribute('data-empty-state')).toBe('true')
   })
 
-  // 验收 #6 警告纯视觉 —— launch validity 与仓库数量无关
-  it('验收 #6:0 仓库 + PRD 完整 → launch 按钮 enabled(警告存在但按钮不 disabled)', async () => {
+  // 验收 #6 警告纯视觉 —— canLaunch 契约与仓库数量无关(launch 按钮已移除)
+  it('验收 #6:0 仓库 + PRD 完整 → data-can-launch=true(警告存在但不影响)', async () => {
     const data = {
       ...emptyDrafting('req-empty-launchable'),
       title: '退款',
@@ -1434,15 +1366,15 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
     // 软警告显示
     const bar = screen.getByTestId('drafting-repo-bar')
     expect(bar.getAttribute('data-soft-warning')).toBe('true')
-    // 但 launch 按钮 enabled
-    const btn = screen.getByTestId('drafting-action-launch')
-    expect(btn.getAttribute('disabled')).toBeNull()
+    // 但 canLaunch 仍为 true(警告纯视觉,与 PRD 完整度解耦)
     expect(bar.getAttribute('data-can-launch')).toBe('true')
+    // draft-zone 根节点契约保持一致
+    expect(screen.getByTestId('drafting-zone').getAttribute('data-launch-valid')).toBe('true')
   })
 
-  it('验收 #6:1 仓库 + PRD 不全 → launch 按钮 disabled', async () => {
+  it('验收 #6:1 仓库 + PRD 不全 → data-can-launch=false', async () => {
     // issue 04 ticket:title 不再受控,只 PRD 决定 canLaunch
-    // 用 PRD=空白 + empty=false 阻止骨架填充(否则 PRD 会被填上 → launch 反而 enabled)
+    // 用 PRD=空白 + empty=false 阻止骨架填充(否则 PRD 会被填上 → canLaunch 反而 true)
     const data = {
       ...emptyDrafting('req-one-bad'),
       prdMarkdown: '   ', // 空白 → validateLaunch.trim 非空判断为 false
@@ -1455,78 +1387,63 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
     const bar = screen.getByTestId('drafting-repo-bar')
     // 警告显示(1 个仓库)
     expect(bar.getAttribute('data-soft-warning')).toBe('true')
-    // 但按钮 disabled(PRD 为空白 → canLaunch=false)
-    const btn = screen.getByTestId('drafting-action-launch')
-    expect(btn.getAttribute('disabled')).not.toBeNull()
+    // PRD 为空白 → canLaunch=false
     expect(bar.getAttribute('data-can-launch')).toBe('false')
-    // 提示文案统一(issue 04 ticket:title 不再受控,只剩 PRD 一支)
-    expect(screen.getByTestId('drafting-launch-disabled-hint').textContent).toBe(
-      '请填写 PRD Markdown',
-    )
+    // 启动按钮 + disabled hint 不再渲染(后续 issue 补 UI 时可恢复)
+    expect(screen.queryByTestId('drafting-action-launch')).toBeNull()
+    expect(screen.queryByTestId('drafting-launch-disabled-hint')).toBeNull()
   })
 
-  // 验收 #6 #7 启动按钮从 PRD 卡片脚迁出,位置在 RepoBar 中
-  it('启动按钮在 repo-bar 内部,不在 PRD 卡片内(issue 08 验收 #7)', async () => {
+  // 启动按钮已从 RepoBar 移出 —— 后续 issue 由 PRD 主文档 / Toolbar 接管
+  it('启动 ANALYZING 入口已不在 RepoBar / PRD 卡片内(后续 issue 接管)', async () => {
     const data = await getDraftingData('req-001')
     render(<DraftingZone data={data} />)
 
     const bar = screen.getByTestId('drafting-repo-bar')
-    const btn = screen.getByTestId('drafting-action-launch')
-    // launch 按钮存在于 repo-bar 子树
-    expect(bar.contains(btn)).toBe(true)
-    // PRD 卡片脚不再渲染 launch 按钮
     const prdCard = screen.getByTestId('drafting-prd-card')
-    expect(prdCard.contains(btn)).toBe(false)
+    // 整个 DraftingZone 子树都没有启动按钮(已不在 RepoBar / PRD 卡片内)
+    expect(screen.queryByTestId('drafting-action-launch')).toBeNull()
+    // bar / prdCard 子树也确认不渲染该 testid(防御性)
+    expect(bar.querySelector('[data-testid="drafting-action-launch"]')).toBeNull()
+    expect(prdCard.querySelector('[data-testid="drafting-action-launch"]')).toBeNull()
   })
 
-  // 验收 #8 视觉匹配 —— 关键 class 与 design 一致(sticky / 上边框 / bg-elevated)
-  it('验收 #8:repo-bar 视觉匹配 19-final-drafting.html 的 .repo-bar', async () => {
+  // 验收 #8 视觉匹配 —— 边框与 PRD 卡片样式一致(同色 + 同粗 1px + border),
+  // 但 RepoBar 用虚线(border-dashed)与 PRD 实线卡片区分
+  it('验收 #8:repo-bar 边框与 PRD 主文档一致(虚线)', async () => {
     const data = await getDraftingData('req-001')
     render(<DraftingZone data={data} />)
     const bar = screen.getByTestId('drafting-repo-bar')
     expect(bar.className).toContain('sticky')
-    expect(bar.className).toContain('bottom-0')
-    expect(bar.className).toContain('border-t')
+    expect(bar.className).toContain('top-0')
+    expect(bar.className).toContain('border')
+    expect(bar.className).toContain('border-dashed')
+    expect(bar.className).toContain('border-border')
     expect(bar.className).toContain('bg-bg-elevated')
   })
 
-  // 验收 #3 条在工作区滚动时仍然可见 —— 通过 sticky bottom + flex 父级
+  // 验收 #3 条在工作区滚动时仍然可见 —— 通过 sticky top + flex 父级
   // 实现层 sticky;这里验证关键 CSS 已应用,真实滚动行为交给浏览器
-  it('验收 #3:repo-bar 是 sticky 底部,父容器允许滚动', async () => {
+  it('验收 #3:repo-bar 是 sticky 顶部,父容器允许滚动', async () => {
     const data = await getDraftingData('req-001')
     render(<DraftingZone data={data} />)
     const bar = screen.getByTestId('drafting-repo-bar')
     expect(bar.className).toContain('sticky')
-    expect(bar.className).toContain('bottom-0')
+    expect(bar.className).toContain('top-0')
     // 主区允许滚动
     expect(screen.getByTestId('drafting-main').className).toContain('overflow-auto')
   })
 
-  // 启动按钮跳转(从 RepoBar 触发)—— issue 02 验收 #7 + issue 08 验收 #7
-  it('issue 02/08 验收:launch 按钮点击 → router.push 到 ANALYZING', async () => {
+  // launch 入口已不在 RepoBar —— 后续 issue 迁移到 PRD 主文档 / Toolbar
+  // (issue 02 验收 #7 与 issue 08 验收 #7 由后续接管入口的 issue 重写,这里保留契约可读性测试)
+  it('issue 02/08 入口已移除 · draft-zone 根节点保留 launch-valid 契约供后续 UI 消费', async () => {
     const data = await getDraftingData('req-001')
     render(<DraftingZone data={data} />)
-    const user = userEvent.setup()
 
-    await user.click(screen.getByTestId('drafting-action-launch'))
-    expect(routerPush).toHaveBeenCalledWith('/requirements/req-001/analyzing/')
-  })
-
-  // 旧 UI 不再渲染(issue 08 验收:启动按钮不在 PRD 卡片脚)
-  it('PRD 卡片脚不再渲染 "drafting-launch-disabled-hint"(已迁到 RepoBar)', () => {
-    // 用 PRD=空白 + empty=false 阻止骨架填充,确保 canLaunch=false 触发 hint 渲染
-    const data = {
-      ...emptyDrafting('NEW'),
-      prdMarkdown: '   ', // 空白 → canLaunch=false
-      empty: false,
-    }
-    render(<DraftingZone data={data} />)
-    const prdCard = screen.getByTestId('drafting-prd-card')
-    // hint 在 RepoBar 内,不在 PRD 卡片子树
-    const bar = screen.getByTestId('drafting-repo-bar')
-    const hint = screen.getByTestId('drafting-launch-disabled-hint')
-    expect(bar.contains(hint)).toBe(true)
-    expect(prdCard.contains(hint)).toBe(false)
+    const zone = screen.getByTestId('drafting-zone')
+    expect(zone.getAttribute('data-launch-valid')).toBe('true')
+    // router 在本次 render 期间没有被调用(没有任何点击)
+    expect(routerPush).not.toHaveBeenCalled()
   })
 
   // issue 01 ticket:旧 issue 08 的「＋ 更多仓库…」占位 chip 已被「＋ 添加仓库…」
@@ -1567,23 +1484,11 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
     expect(bar.getAttribute('data-selected-count')).toBe('1')
   })
 
-  // 启动时调用 handle.saveNow()(issue 02/08 兼容,code-review 修复)
-  it('launch 按钮点击 → 触发 DraftingPrdPane.handle.saveNow()(issue 02 行为保留)', async () => {
-    const data = await getDraftingData('req-001')
-    render(<DraftingZone data={data} />)
-    const user = userEvent.setup()
-
-    // 启动前 lastSavedAt=null → 不渲染时间戳
-    expect(screen.queryByTestId('drafting-autosaved')).toBeNull()
-
-    // 启动
-    await user.click(screen.getByTestId('drafting-action-launch'))
-
-    // 启动后 lastSavedAt 应被更新(drafting-autosaved 时间戳渲染出来)
-    expect(screen.getByTestId('drafting-autosaved')).toBeInTheDocument()
-    // 跳转也正常触发
-    expect(routerPush).toHaveBeenCalledWith('/requirements/req-001/analyzing/')
-  })
+  // 注:历史测试 "launch 按钮点击 → 触发 DraftingPrdPane.handle.saveNow()" 已移除
+  // —— 启动按钮不在 RepoBar 渲染后,没有可触发的 UI 入口(后续 issue 由 PRD 主文档 /
+  // Toolbar 接管后,会重新写对应验证)。
+  // 契约层面:`DraftingPrdPaneHandle.saveNow()` 命令式句柄仍然由 DraftingZone 持有,
+  // 后续 UI 通过 ref 调用即可,该 prop 接口稳定不变。
 })
 
 // ============================================================================

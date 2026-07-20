@@ -258,25 +258,34 @@ describe('RepoBar · 失败 chip 兼容(ticket 02 验收 #8 回归)', () => {
 })
 
 // ============================================================================
-// 非耦合(issue 08 验收 #7 #8 · launch 与仓库数无关)
+// 启动按钮已移除(launch 入口迁到 PRD 主文档 / Toolbar)
 // ============================================================================
 
-describe('RepoBar · launch 与仓库数解耦(issue 08 验收 #7 #8)', () => {
+describe('RepoBar · 启动按钮已移除(后续 issue 迁移)', () => {
   afterEach(() => cleanup())
 
-  it('canLaunch=false 但 N=3 → launch 按钮 disabled,软警告隐藏', () => {
+  it('N=3 canLaunch=false → 不渲染启动按钮 + 软警告隐藏', () => {
     renderRepoBar({ selectedRepoIds: ['r1', 'r2', 'r3'], canLaunch: false })
-    const btn = screen.getByTestId('drafting-action-launch')
-    expect(btn).toBeDisabled()
+    // 启动按钮已不在 RepoBar 渲染(接口 canLaunch/onLaunch/launchDisabledHint 仍保留)
+    expect(screen.queryByTestId('drafting-action-launch')).toBeNull()
+    expect(screen.queryByTestId('drafting-launch-disabled-hint')).toBeNull()
+    // 软警告隐藏(N≥2)
     expect(screen.queryByTestId('drafting-repo-soft-warning')).toBeNull()
   })
 
-  it('canLaunch=true 但 N=0 → launch 按钮 enabled(警告存在但不影响)', () => {
+  it('N=0 canLaunch=true → 不渲染启动按钮 + 软警告仍显示', () => {
     renderRepoBar({ selectedRepoIds: [], canLaunch: true })
-    const btn = screen.getByTestId('drafting-action-launch')
-    expect(btn).toBeEnabled()
-    // 软警告显示但 launch 不受影响
+    // 启动按钮不在 RepoBar 渲染
+    expect(screen.queryByTestId('drafting-action-launch')).toBeNull()
+    expect(screen.queryByTestId('drafting-launch-disabled-hint')).toBeNull()
+    // 软警告 N=0 仍显示(issue 08 验收 #4)
     expect(screen.getByTestId('drafting-repo-soft-warning')).toBeInTheDocument()
+  })
+
+  it('data-can-launch 契约仍保留(后续 toolbar / PRD 内可读)', () => {
+    renderRepoBar({ selectedRepoIds: ['r1'], canLaunch: true })
+    const bar = screen.getByTestId('drafting-repo-bar')
+    expect(bar.getAttribute('data-can-launch')).toBe('true')
   })
 })
 
@@ -287,12 +296,16 @@ describe('RepoBar · launch 与仓库数解耦(issue 08 验收 #7 #8)', () => {
 describe('RepoBar · 视觉基线(issue 08 验收 #8)', () => {
   afterEach(() => cleanup())
 
-  it('bar 是 sticky bottom(issue 08 验收 #3)', () => {
+  it('bar 是 sticky top + 边框与 PRD 同色同粗但改虚线(issue 08 验收 #3)', () => {
     renderRepoBar()
     const bar = screen.getByTestId('drafting-repo-bar')
     expect(bar.className).toContain('sticky')
-    expect(bar.className).toContain('bottom-0')
-    expect(bar.className).toContain('border-t')
+    expect(bar.className).toContain('top-0')
+    // 边框与 PRD 卡片(drafting-prd-pane)样式一致:同色 + 同粗(1px border),
+    // 但改用虚线 border-dashed,与 PRD 实线卡片在视觉上区分
+    expect(bar.className).toContain('border')
+    expect(bar.className).toContain('border-dashed')
+    expect(bar.className).toContain('border-border')
     expect(bar.className).toContain('bg-bg-elevated')
   })
 
