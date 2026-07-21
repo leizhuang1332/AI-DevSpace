@@ -15,13 +15,19 @@ import {
 } from '@/lib/analyzing'
 import type { ProductChange } from '@/lib/products'
 import { updateProduct } from '@/lib/products-actions'
+// 注:ThinkingStream 组件本身已不再导入(ADR-0017 D1 · ticket 02):
+// 左栏"思考流"UI 删,phase state machine 内部状态保留(供未来 StatusBar/插话)。
 import { EmptyState } from './empty-state'
 import { AdmissionDashboard } from './admission-dashboard'
 import { SessionTabs } from './session-tabs'
-import { ThinkingStream, type ThinkingPhase } from './thinking-stream'
+import type { ThinkingPhase } from './thinking-stream'
 import { ProductList } from './product-list'
 import { InterjectInput } from './interject-input'
 import { TechBriefPanel } from './tech-brief-panel'
+import {
+  DocumentReaderPane,
+  type DocumentReaderCitationCounts,
+} from './document-reader-pane'
 
 /**
  * ANALYZING 工位组件(ADR-0011 §6 ANALYZING 布局 · issue 19)
@@ -30,7 +36,7 @@ import { TechBriefPanel } from './tech-brief-panel'
  * - [11e-stage-adaptive-analyzing.html](../../../../docs/design/pages/11e-stage-adaptive-analyzing.html)(原"观察屏")
  * - [11h-A-zone-multisession-tabs.html](../../../../docs/design/pages/11h-A-zone-multisession-tabs.html)(多会话 Tab,VS3 基线)
  *
- * 布局(主区全宽,无资源树 / 无 Inline 栏 —— ZoneShell 自动 grid-cols-1):
+ * 布局(ADR-0017 D1 · ticket 02 —— 2:1 左右分栏,删 ThinkingStream):
  * ┌────────────────────────────────────────────────┐
  * │ Stage strip(ANALYZING 徽章 + 进度 + 状态)       │
  * ├────────────────────────────────────────────────┤
@@ -39,24 +45,23 @@ import { TechBriefPanel } from './tech-brief-panel'
  * │ 准入仪表板(19a · ADR-0013 D4 · 全局共享)        │
  * ├────────────────────────────────────────────────┤
  * │ SessionTabs(19c · ADR-0013 D7 · 多会话 Tab)    │
- * ├────────────────────────────────────────────────┤
- * │ 主区(两列,按 activeSessionId 切换):            │
- * │ ┌──────────────┬──────────────────────────────┐│
- * │ │ 思考流       │ Summary(图标+标题+stats)     ││
- * │ │ 打字机 20ms  ├──────────────────────────────┤│
- * │ │  - 跳过      │ 🎯 识别产物(子问题/风险/方案)││
- * │ │  - 暂停/重置 │                              ││
- * │ └──────────────┴──────────────────────────────┘│
- * ├────────────────────────────────────────────────┤
+ * ├──────────────── 2 份 ──────────────┬─── 1 份 ────┤
+ * │ 📑 DocumentReaderPane               │ Summary     │
+ * │ [PRD · 🔗 N][aux.md · 🔗 N]...     ├─────────────┤
+ * │                                    │ ProductList │
+ * │ <MarkdownPreview body>             │ 🎯 识别产物  │
+ * ├────────────────────────────────────┴─────────────┤
  * │ 💬 插话输入条(InterjectInput · 按 active 会话推送新 chunk)│
  * └────────────────────────────────────────────────┘
  *
  * 设计要点:
  * - 'use client':打字机 / 暂停 / 重置 / 完成提示 / SSE 订阅 / Tab 切换都是客户端交互
  * - props.data 由 server 注入(从 getAnalyzingData),组件只关心渲染 + 客户端状态
+ * - **ADR-0017 D1**:主区改为 2:1 左右分栏;左栏 = `<DocumentReaderPane>`,右栏 = Summary + ProductList
+ * - **ADR-0017 D1**:`<ThinkingStream>` 渲染出口删除;phase state machine 内部状态保留
+ *   (pause / reset / skip 仍可点,UI 不再展示思考流)
  * - 打字机 20ms / 字(issue 19 验收 #2);chunk 间 200ms 间隔,模拟"思考停顿"
  * - 点击 ⏸ 暂停 / 继续;点击 ↶ 清空所有进度从 chunk-0 开始
- * - 点击思考流任意位置 → 当前 chunk 立即显示完整文字(issue 19 验收)
  * - SSE 订阅 `/api/requirement/<id>/events` —— 收到 `analysis_chunk` 事件追加到 chunks
  * - InterjectInput 提交 → POST `/api/requirements/<id>/analysis/interject` →
  *   Agent 通过 SseHub 推送新 chunks → 上面 useEffect 订阅自动追加
@@ -95,6 +100,37 @@ function sseUrl(requirementId: string): string {
 /** 插话 REST 端点(issue 19b · 由 apps/agent/src/routes/analysis.ts 处理) */
 function interjectUrl(requirementId: string): string {
   return `/api/requirements/${requirementId}/analysis/interject`
+}
+
+/**
+ * 派生文档引用计数(ADR-0017 D2 Tab 标签) —— 扫描 chunks 聚合每个文档被引用的次数。
+ *
+ * 纯函数,可单测。本期 ticket 02 引用计数语义:
+ * - `prd`:所有 chunk.source_refs 中 kind === 'prd' 的总数(无 source_refs 的 chunk 跳过)
+ * - `aux`:auxId → 引用次数(用空对象初始化,缺省 aux 不出现)
+ * - `asset`:所有 chunk.source_refs 中 kind === 'asset' 的总数
+ *
+ * 注:不做 source_refs 形态校验 —— AnalyzingChunk 已经在 loadSessionChunks
+ * 阶段用 isSourceRef 校验过(narration chunk 强制无 source_refs)。
+ */
+function deriveCitationCounts(
+  chunks: readonly AnalyzingChunk[],
+): DocumentReaderCitationCounts {
+  let prd = 0
+  let asset = 0
+  const aux: Record<string, number> = {}
+  for (const c of chunks) {
+    const refs = c.source_refs
+    if (!refs || refs.length === 0) continue
+    for (const ref of refs) {
+      if (ref.kind === 'prd') prd++
+      else if (ref.kind === 'asset') asset++
+      else if (ref.kind === 'aux') {
+        aux[ref.auxId] = (aux[ref.auxId] ?? 0) + 1
+      }
+    }
+  }
+  return { prd, aux, asset }
 }
 
 export function AnalyzingZone({ data }: AnalyzingZoneProps) {
@@ -555,22 +591,31 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
         ref={mainScrollRef}
         data-testid="analyzing-main"
         data-active-session-id={activeSessionId}
+        data-layout="doc-reader-2-1"
         className="flex-1 overflow-auto px-6 py-6 flex flex-col gap-5"
       >
-        {/* 主区两列 grid + 底部插话条(issue 19b D2 ②) */}
+        {/* 主区 2:1 分栏(ADR-0017 D1 · ticket 02):
+            左栏 = <DocumentReaderPane>(Tab 栏 + Markdown 阅读器)
+            右栏 = Summary + ProductList(产物可编辑,沿用 ADR-0013 D2 ③)
+            窄视口(<lg)→ Tailwind 自动垂直堆叠(左在上 / 右在下) */}
         <div
           data-testid="analyzing-grid"
-          className="grid grid-cols-1 lg:grid-cols-2 gap-5 flex-1 min-h-0"
+          className="grid grid-cols-1 lg:grid-cols-3 gap-5 flex-1 min-h-0"
         >
-          <ThinkingStream
-            chunks={chunks}
-            phase={phase}
-            paused={paused}
-            onSkip={skipTypewriter}
-          />
+          <div
+            data-testid="analyzing-left-col"
+            className="col-span-1 lg:col-span-2 flex flex-col min-h-0"
+          >
+            <DocumentReaderPane
+              prdMarkdown={data.prdMarkdown}
+              auxFiles={data.auxFiles}
+              assetList={data.assetList}
+              citationCounts={deriveCitationCounts(chunks)}
+            />
+          </div>
           <div
             data-testid="analyzing-right-col"
-            className="flex flex-col gap-5 min-h-0"
+            className="col-span-1 flex flex-col gap-5 min-h-0"
           >
             <Summary summary={data.summary} stats={data.stats} />
             <div className="flex-1 min-h-0">

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { render, screen, cleanup, act, within, fireEvent } from '@testing-library/react'
+import { render, screen, cleanup, act, fireEvent } from '@testing-library/react'
 import { AnalyzingZone } from '@/components/analyzing-zone'
 import {
   emptyAnalyzing,
@@ -15,6 +15,10 @@ import { getAnalyzingData } from '@/lib/analyzing.server'
 //   2. 用户动作的最终状态(暂停切换 / 重置清空)
 //   3. 完成提示(done 时弹出)
 // 打字机逐字推进的 20ms 节流由代码 inspection 验证(constant + setTimeout 链)。
+//
+// ticket 02 改动(ADR-0017 D1):左栏 ThinkingStream → DocumentReaderPane;
+// "暂无思考流" 文案与 analyzing-chunk-* testid 不再出现,改测 analyzing-left-col
+// / doc-reader-tabs / doc-reader-body。
 
 afterEach(() => {
   cleanup()
@@ -45,16 +49,19 @@ describe('AnalyzingZone · 直接进入主区', () => {
 
     expect(screen.queryByTestId('analyzing-stage-strip')).toBeNull()
     expect(screen.queryByTestId('analyzing-toolbar')).toBeNull()
+    // ticket 02 · ADR-0017 D1:ThinkingStream 渲染出口删除
     expect(screen.queryByTestId('analyzing-stream')).toBeNull()
+    expect(screen.queryByTestId('document-reader-pane')).toBeNull()
   })
 
-  it('主区空 chunks/sessions → 仍走主区,容错不崩(显示"暂无思考流"等)', () => {
+  it('主区空 chunks/sessions → 仍走主区,容错不崩', () => {
     // 模拟:有 requirement.md(空 false),但 fs 还没启动过 session(sessions/chunks 都空)
     // 这正是 "首次进入 ANALYZING" 的真实状态 —— 主区应当容错渲染
     const data: AnalyzingData = {
       ...emptyAnalyzing('req-003'),
       empty: false,
       phase: 'active',
+      // prdMarkdown 也为空 → DocumentReaderPane 走空态占位
     }
     render(<AnalyzingZone data={data} />)
 
@@ -66,10 +73,10 @@ describe('AnalyzingZone · 直接进入主区', () => {
     // 主区骨架存在
     expect(screen.getByTestId('analyzing-stage-strip')).toBeInTheDocument()
     expect(screen.getByTestId('analyzing-toolbar')).toBeInTheDocument()
-    expect(screen.getByTestId('analyzing-stream')).toBeInTheDocument()
-
-    // 思考流空态文案
-    expect(screen.getByText('暂无思考流')).toBeInTheDocument()
+    // 左栏 = DocumentReaderPane(ticket 02 验收)
+    expect(screen.getByTestId('document-reader-pane')).toBeInTheDocument()
+    // ThinkingStream 不再渲染
+    expect(screen.queryByTestId('analyzing-stream')).toBeNull()
   })
 
   it('回归: req-001 仍走 REFUND_ANALYZING(主区 stage strip 可见)', async () => {
@@ -83,16 +90,16 @@ describe('AnalyzingZone · 直接进入主区', () => {
     // 主区 testid 出现
     expect(screen.getByTestId('analyzing-stage-strip')).toBeInTheDocument()
     expect(screen.getByTestId('analyzing-toolbar')).toBeInTheDocument()
-    expect(screen.getByTestId('analyzing-stream')).toBeInTheDocument()
+    expect(screen.getByTestId('document-reader-pane')).toBeInTheDocument()
   })
 })
 
 // ============================================================================
-// 满数据渲染 — Thinking 大屏 + stats + 思考流骨架
+// 满数据渲染 — 2:1 主区布局 + DocumentReaderPane 左栏 + ProductList 右栏
 // ============================================================================
 
-describe('AnalyzingZone · 满数据渲染', () => {
-  it('根节点 + stage strip + toolbar + summary + 流容器存在', async () => {
+describe('AnalyzingZone · 满数据渲染(ticket 02 · ADR-0017 D1)', () => {
+  it('根节点 + stage strip + toolbar + summary + 2:1 grid + 左/右栏存在', async () => {
     const data = await getAnalyzingData('req-001')
     render(<AnalyzingZone data={data} />)
 
@@ -119,8 +126,24 @@ describe('AnalyzingZone · 满数据渲染', () => {
       screen.getByTestId('analyzing-summary-title').textContent,
     ).toContain('退款功能优化')
 
-    expect(screen.getByTestId('analyzing-stream')).toBeInTheDocument()
-    expect(screen.getByTestId('analyzing-stream-body')).toBeInTheDocument()
+    // ticket 02 · 2:1 主区布局:grid lg:grid-cols-3,左 col-span-2,右 col-span-1
+    expect(screen.getByTestId('analyzing-grid')).toBeInTheDocument()
+    expect(screen.getByTestId('analyzing-left-col')).toBeInTheDocument()
+    expect(screen.getByTestId('analyzing-right-col')).toBeInTheDocument()
+
+    // 左栏 = DocumentReaderPane(本期 Tab 栏 + 阅读器)
+    expect(screen.getByTestId('document-reader-pane')).toBeInTheDocument()
+    expect(screen.getByTestId('doc-reader-tabs')).toBeInTheDocument()
+    expect(screen.getByTestId('doc-reader-body')).toBeInTheDocument()
+
+    // ThinkingStream 渲染出口删除
+    expect(screen.queryByTestId('analyzing-stream')).toBeNull()
+    expect(screen.queryByTestId('analyzing-stream-body')).toBeNull()
+
+    // data-layout 标记 ticket 02 布局版本
+    expect(
+      screen.getByTestId('analyzing-main').getAttribute('data-layout'),
+    ).toBe('doc-reader-2-1')
   })
 
   it('顶部三 stats:子问题 5 / 风险点 3 / 方案方向 2', async () => {
@@ -145,44 +168,39 @@ describe('AnalyzingZone · 满数据渲染', () => {
     expect(screen.getByText('📋 复制思考产物')).toBeInTheDocument()
   })
 
-  it('初始 phase=typing,chunk 0 进入 current 状态显示首字符(打字机起步)', async () => {
+  it('DocumentReaderPane 默认 Tab = PRD(SSR 注入的 prdMarkdown 全文)', async () => {
     const data = await getAnalyzingData('req-001')
     render(<AnalyzingZone data={data} />)
 
-    const currentChunk = screen.getByTestId('analyzing-chunk-current')
-    expect(currentChunk.getAttribute('data-chunk-id')).toBe('c-1')
-    expect(currentChunk.getAttribute('data-tone')).toBe('info')
-    expect(currentChunk.getAttribute('data-typed-len')).toBe('1')
-    expect(currentChunk.getAttribute('data-full-len')).toBe(
-      String(data.chunks[0].text.length),
-    )
-    const future = screen.getAllByTestId('analyzing-chunk-future')
-    expect(future.length).toBe(data.chunks.length - 1)
+    const pane = screen.getByTestId('document-reader-pane')
+    expect(pane.getAttribute('data-active-tab-id')).toBe('prd')
+    // MarkdownPreview 渲染 PRD 全文
+    const preview = screen.getByTestId('markdown-preview')
+    expect(preview.textContent).toContain('退款功能优化')
   })
 })
 
 // ============================================================================
-// 跳过打字机 — 点击流区立即完成当前 chunk(issue 19 验收 #3)
+// 打字机 phase 推进(原点击跳过测试改为 state 验证)
+// ticket 02 改动:ThinkingStream 渲染出口删除;原"点击流区跳过"不再适用,
+// 改为通过 pause / reset 按钮 + data-paused 属性间接验证 phase state machine
+// 内部仍工作(不变)。
 // ============================================================================
 
-describe('AnalyzingZone · 点击跳过打字', () => {
-  it('点击流区跳过当前 chunk 打字(立即显示完整文字)', async () => {
+describe('AnalyzingZone · 打字机 state machine(ticket 02 · 渲染出口删)', () => {
+  it('初始 phase=idle/typing 内部状态不影响 DocumentReaderPane 渲染', async () => {
     const data = await getAnalyzingData('req-001')
     render(<AnalyzingZone data={data} />)
 
-    const stream = screen.getByTestId('analyzing-stream-body')
-    fireEvent.click(stream)
-
-    // click 同步触发后,React commit 让 typedLen = chunk.text.length
-    const current = screen.getByTestId('analyzing-chunk-current')
-    const typedLen = Number(current.getAttribute('data-typed-len'))
-    const fullLen = Number(current.getAttribute('data-full-len'))
-    expect(typedLen).toBe(fullLen)
+    // 根 data-paused 由 phase/paused 派生 → 初始 false
+    expect(screen.getByTestId('analyzing-zone').getAttribute('data-paused')).toBe('false')
+    // DocumentReaderPane 不依赖 phase,内容稳定渲染
+    expect(screen.getByTestId('document-reader-pane')).toBeInTheDocument()
   })
 })
 
 // ============================================================================
-// 暂停 / 重置(issue 19 验收 #3 / #4)
+// 暂停 / 重置(issue 19 验收 #3 / #4 · state 变化不影响 UI 显示)
 // ============================================================================
 
 describe('AnalyzingZone · 暂停 / 重置', () => {
@@ -215,25 +233,20 @@ describe('AnalyzingZone · 暂停 / 重置', () => {
     expect(pauseBtn.textContent).toContain('暂停')
   })
 
-  it('点击 ↶ 重置 → 回到 chunk-0,typed-len=1(打字机起步)', async () => {
+  it('点击 ↶ 重置 → 根 data-paused=false,DocumentReaderPane 仍正常', async () => {
     const data = await getAnalyzingData('req-001')
     render(<AnalyzingZone data={data} />)
 
-    // 先跳过打字(让 typedLen = full,模拟"已打过字"状态)
-    fireEvent.click(screen.getByTestId('analyzing-stream-body'))
-    const beforeLen = Number(
-      screen.getByTestId('analyzing-chunk-current').getAttribute('data-typed-len'),
-    )
-    expect(beforeLen).toBeGreaterThan(1)
+    // 先暂停
+    fireEvent.click(screen.getByTestId('analyzing-toolbar-pause'))
+    expect(screen.getByTestId('analyzing-zone').getAttribute('data-paused')).toBe('true')
 
+    // 再重置
     fireEvent.click(screen.getByTestId('analyzing-toolbar-reset'))
 
-    const current = screen.getByTestId('analyzing-chunk-current')
-    expect(current.getAttribute('data-chunk-id')).toBe('c-1')
-    expect(current.getAttribute('data-typed-len')).toBe('1')
-
-    const future = screen.getAllByTestId('analyzing-chunk-future')
-    expect(future.length).toBe(data.chunks.length - 1)
+    expect(screen.getByTestId('analyzing-zone').getAttribute('data-paused')).toBe('false')
+    // UI 仍稳定渲染(ticket 02 验收 #3:状态变化不影响 UI 显示)
+    expect(screen.getByTestId('document-reader-pane')).toBeInTheDocument()
   })
 })
 
@@ -257,7 +270,7 @@ describe('AnalyzingZone · 空数据', () => {
 
     expect(screen.queryByTestId('analyzing-stage-strip')).toBeNull()
     expect(screen.queryByTestId('analyzing-toolbar')).toBeNull()
-    expect(screen.queryByTestId('analyzing-stream')).toBeNull()
+    expect(screen.queryByTestId('document-reader-pane')).toBeNull()
   })
 })
 
@@ -266,7 +279,7 @@ describe('AnalyzingZone · 空数据', () => {
 // ============================================================================
 
 describe('AnalyzingZone · 错误态(边界)', () => {
-  it('chunks 为空但 empty=false 时,渲染流但显示"暂无思考流"', () => {
+  it('chunks 为空但 empty=false 时,DocumentReaderPane 正常渲染', () => {
     const data: AnalyzingData = {
       ...emptyAnalyzing('EMPTY'),
       empty: false,
@@ -281,7 +294,8 @@ describe('AnalyzingZone · 错误态(边界)', () => {
     }
     render(<AnalyzingZone data={data} />)
     expect(screen.getByTestId('analyzing-zone').getAttribute('data-empty')).toBe('false')
-    expect(screen.getByText('暂无思考流')).toBeInTheDocument()
+    // DocumentReaderPane 接管左栏
+    expect(screen.getByTestId('document-reader-pane')).toBeInTheDocument()
   })
 
   it('toolbar.actions 为空时,toolbar 不崩', () => {
@@ -349,61 +363,47 @@ describe('AnalyzingZone · 完成提示(决策 15 非自动跳转)', () => {
 })
 
 // ============================================================================
-// 打字机 fake-timer 推进(issue 19b 验收 #14 子项)
-// 用 fake timer 推进 20ms / 字,断言 typed-len 增长。
-// React 18 commit 在 fake-timer 下有 MessageChannel 时序漂移,所以本测试
-// 用一个宽松的断言模式:推进 N 倍时间后,typed-len 至少应有所增长(具体值受 React
-// commit batch 影响),不严格等于 N * 1。
+// 打字机 fake-timer 推进(ticket 02 改动:phase useEffect 内部保留,只是渲染出口删)
+// 原 typed-len / chunkIndex 验证依赖 analyzing-chunk-current testid;
+// ticket 02 后该 testid 不再渲染。本测试改为间接验证:phase state machine
+// 内部仍推进(用 fake-timer 推进 N ms → DocumentReaderPane 仍稳定渲染
+// 表示组件未崩,phase 推进不再影响 UI)。
 // ============================================================================
 
-describe('AnalyzingZone · 打字机 fake-timer 推进(20ms/字)', () => {
+describe('AnalyzingZone · 打字机 fake-timer 推进(20ms/字 · ticket 02 验证 phase 不影响 UI)', () => {
   afterEach(() => {
     cleanup()
     vi.useRealTimers()
   })
 
-  it('初始 typed-len=1;fake-timer 推进 ≥ 100ms 后 typed-len ≥ 2(20ms/字)', async () => {
+  it('推进 ≥ fullLen 时间后 DocumentReaderPane 不崩,仍渲染 PRD Tab', async () => {
     vi.useFakeTimers()
     const data = await getAnalyzingData('req-001')
     render(<AnalyzingZone data={data} />)
 
-    // 初始:打字机起步,typed-len=1
-    const initialTypedLen = Number(
-      screen.getByTestId('analyzing-chunk-current').getAttribute('data-typed-len'),
-    )
-    expect(initialTypedLen).toBe(1)
-
-    // 推进 100ms → 至少多打 1 个字(理论 5 个,但 React commit batch 不稳定)
+    // 推 100ms(理论 5 个字,实际 React commit batch 漂移)
     await act(async () => {
       vi.advanceTimersByTime(100)
     })
 
-    const afterTypedLen = Number(
-      screen.getByTestId('analyzing-chunk-current').getAttribute('data-typed-len'),
-    )
-    expect(afterTypedLen).toBeGreaterThan(initialTypedLen)
+    // DocumentReaderPane 始终稳定渲染 → state machine 推进不破坏 UI
+    const pane = screen.getByTestId('document-reader-pane')
+    expect(pane).toBeInTheDocument()
+    expect(pane.getAttribute('data-active-tab-id')).toBe('prd')
   })
 
-  it('推进 ≥ fullLen 时间后,typed-len === fullLen(完成当前 chunk)', async () => {
+  it('推进 1s 后 root data-paused 仍为 false(fake-timer 下无副作用)', async () => {
     vi.useFakeTimers()
     const data = await getAnalyzingData('req-001')
     render(<AnalyzingZone data={data} />)
 
-    const current = screen.getByTestId('analyzing-chunk-current')
-    const fullLen = Number(current.getAttribute('data-full-len'))
-
-    // 分小步推进(每次 20ms)避免 fake-timer 下 React batching 卡死
-    // 每次推进后用 microtask 让 React commit 完成
-    for (let i = 0; i < fullLen; i++) {
+    for (let i = 0; i < 10; i++) {
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(20)
+        await vi.advanceTimersByTimeAsync(100)
       })
     }
-    // 此时 c-1 字符全部打完,phase=typing chunkIndex=0 typedLen=fullLen;
-    // 但还没等完 INTER_CHUNK_PAUSE_MS → 仍是 current row(完整文字)
-    const afterTypedLen = Number(
-      screen.getByTestId('analyzing-chunk-current').getAttribute('data-typed-len'),
-    )
-    expect(afterTypedLen).toBe(fullLen)
+
+    // paused 状态不变;root data-paused 反映 paused state
+    expect(screen.getByTestId('analyzing-zone').getAttribute('data-paused')).toBe('false')
   })
 })
