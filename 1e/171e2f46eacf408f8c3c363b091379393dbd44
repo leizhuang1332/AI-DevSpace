@@ -1,0 +1,62 @@
+apps/agent/src/__tests__/routes-analysis-start.test.ts
+  s_fde75e36267314::t_94493b428760da 301,307,314,328-337
+  s_fde75e36267314::t_330034c024560d 1-300,302-306,308-313,315-327,338-391
+apps/agent/src/routes/analysis.ts
+  s_fde75e36267314::t_111a70b9e13111 159-170,173-255,541,543,549-550,626
+  s_fde75e36267314::t_661720eaef0bb0 171-172
+  s_fde75e36267314::t_a27ea3d86dbeb0 36-54,63-72,516,518,551,554,566,575,577,584-585,593,606,627,629,635-636,713
+  s_fde75e36267314::t_46c0df5693316b 513-515
+  s_fde75e36267314::t_4f5634ae9d3c90 517
+  s_fde75e36267314::t_2872acbf131460 519-521,538-540
+  s_fde75e36267314::t_712ea37b5535d0 542
+  s_fde75e36267314::t_fac66667367bf2 544-548
+  s_fde75e36267314::t_c8b69955b352b2 552-553
+  s_fde75e36267314::t_4e19e7a28bb135 555-557,563-565
+  s_fde75e36267314::t_629d3cd5823433 567-569,572-574
+  s_fde75e36267314::t_f7f273ac98f900 576
+  s_fde75e36267314::t_b38bb7c7918e39 578-583
+  s_fde75e36267314::t_50f8339e5d5c83 586-588,590-592
+  s_fde75e36267314::t_04a9f35bcb8032 594-596,603-605
+  s_fde75e36267314::t_3d9ba743cb13ec 607-609,623-625
+  s_fde75e36267314::t_579bda78be7e1d 628
+  s_fde75e36267314::t_330b26cd6e9f15 630-634
+  s_fde75e36267314::t_24c1f1e3b70169 637-639,710-712
+  s_fde75e36267314::t_235bdfc7a9e271 501-512,522-537,558-562,570-571,589,597-602,610-622,640-709
+apps/web/src/__tests__/analyzing-zone.test.tsx
+  s_fde75e36267314::t_515022a01eb688 14,24-26,51-67,77,79-81,84
+  s_fde75e36267314::t_6ec97dcbb1b517 27-50,73,87
+  s_fde75e36267314::t_ceca9a931ade59 68,85
+  s_51b11a371394a7::t_682d930c644b24 69-72,74-76,78,82-83,86,88-89
+apps/web/src/__tests__/analyzing-designing-fs-loader.test.ts
+  s_fde75e36267314::t_7b6bfba4adbd64 63-77
+apps/web/src/components/analyzing-zone.tsx
+  s_fde75e36267314::t_ea6c13c4bc7dfa 101-107,512
+apps/web/src/lib/analyzing.server.ts
+  s_fde75e36267314::t_b2f8cf5ef7bec3 222-240,312-323,335-356,359-360
+apps/web/src/lib/analyzing.ts
+  s_fde75e36267314::t_edd3978ed39d3f 243-253,303-311,378,622
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "1e171e2f46eacf408f8c3c363b091379393dbd44",
+  "prompts": {},
+  "sessions": {
+    "s_51b11a371394a7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1aa36e71-de90-48ea-b814-cc4384ae2f5c",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    },
+    "s_fde75e36267314": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "844d5a55-bde4-499f-b0f2-fb573362d2ca",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
