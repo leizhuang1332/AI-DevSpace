@@ -98,10 +98,16 @@ function interjectUrl(requirementId: string): string {
 }
 
 export function AnalyzingZone({ data }: AnalyzingZoneProps) {
+  // 二态分支(issue: ANALYZING 工位改造 · 直接进入主区)
+  // - empty:  requirement.md 不存在 → 引导去 DRAFTING(老契约)
+  // - active: requirement.md 存在 → 走主区;fs 上是否有 sessions 都直接进,
+  //           主区组件对 chunks=[] / sessions=[] 已做容错(显示"暂无思考流"等)
+  //
+  // `data.empty === true` 是老契约兜底(老测试 spread emptyAnalyzing() 改
+  // empty: false 但 phase 仍 'empty' 的兼容场景)
   if (data.empty) {
     return <EmptyAnalyzing data={data} />
   }
-
   return <AnalyzingContent data={data} />
 }
 
@@ -503,6 +509,7 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       data-testid="analyzing-zone"
       data-requirement-id={data.requirementId}
       data-empty="false"
+      data-phase={data.phase}
       data-paused={paused ? 'true' : 'false'}
       className="flex flex-col h-full overflow-hidden bg-bg-elevated"
     >

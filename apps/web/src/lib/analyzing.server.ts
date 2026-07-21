@@ -219,6 +219,25 @@ export async function getAnalyzingData(
  *
  * 返回新对象,不动原 options(避免污染调用方)。
  */
+
+/**
+ * 判定 `<requirementsRoot>/requirements/<id>/requirement.md` 是否存在。
+ * SSR 期间决定 phase 是 'empty'(无 requirement.md)还是 'not_started' / 'active'。
+ *
+ * - 不存在 → 'empty'(引导去 DRAFTING)
+ * - 存在 → 进一步看 fs 上是否有 sessions → 'not_started' / 'active'
+ *
+ * 注:拼接路径时使用 `requirementsRoot + requirements + <id>` 对齐后端
+ * `RequirementService.root` 的目录结构(root 之外仍有一层 `requirements/`)。
+ */
+function existsRequirementMd(
+  requirementsRoot: string,
+  requirementId: string,
+): boolean {
+  return existsSync(
+    resolve(requirementsRoot, 'requirements', requirementId, 'requirement.md'),
+  )
+}
 function resolveAnalysisPaths(
   requirementId: string,
   options: GetAnalyzingDataOptions | undefined,
@@ -290,10 +309,18 @@ function defaultRequirementsRoot(): string {
  *
  * 拆分函数而非 inline:让 getAnalyzingData 主线保持直白,装配逻辑单测容易。
  *
- * empty 字段判定:
- * - fs 里有真实 sessions 内容(非 default 单会话兜底)+ 至少 1 个 chunks.jsonl 有内容
- *   → `empty: false`(满足 PRD 验收:"_index.yaml 存在 + 至少 1 个会话 chunks 有内容 → 构造非空")
- * - 否则 → `empty: true`(沿用 emptyAnalyzing 默认)
+ * **二态 phase 判定(顺序敏感)**(issue 重构 · 直接进入主区):
+ * 1. **phase === 'empty'**: `requirement.md` 不存在 → 引导去 DRAFTING。
+ *    (空态 → 旧契约 `empty: true` 仍保持,行为不变)
+ * 2. **phase === 'active'**: requirement.md 存在 → 走主区;fs 上是否有 sessions
+ *    都直接进(主区对 chunks=[] / sessions=[] 已做容错,显示"暂无思考流"等)。
+ *
+ * 字段等价关系:
+ * - `phase === 'empty'` ⟺ `empty === true`
+ * - `phase === 'active'` ⟺ `empty === false`
+ *
+ * admission / sessions / techBrief 等"非空字段"按需装配 —— 即使 phase 是 'empty'
+ * 也走 resolveAdmissionDimensions(渲染时 admission 可能仍展示"待裁决"提示)。
  */
 function emptyAnalyzingWithOptions(
   requirementId: string,
@@ -305,10 +332,32 @@ function emptyAnalyzingWithOptions(
     : 0
   const sessionsBundle = loadSessionsBundle(options?.analysisSessionsDir, options?.lastSessionId)
   const techBrief = options?.analysisDir ? loadTechBriefFromAnalysisDir(options.analysisDir) : null
-  // empty 判定:fs 有真实 sessions(非 fallback)→ 非空
-  const hasFsSessions = hasFsSessionContent(options?.analysisSessionsDir)
+  const requirementsRoot = options?.requirementsRoot ?? defaultRequirementsRoot()
+  const hasRequirementMd = existsRequirementMd(requirementsRoot, requirementId)
+
+  // 二路分支(顺序敏感)
+  // 1. requirement.md 不存在 → 引导去 DRAFTING(老 empty 路径)
+  if (!hasRequirementMd) {
+    return {
+      ...emptyAnalyzing(requirementId),
+      admission: buildAdmissionData({
+        dimensions: dims,
+        pendingAdjudicationCount: pending,
+        verdict: 'pending',
+      }),
+      sessions: sessionsBundle.sessions,
+      activeSessionId: sessionsBundle.activeSessionId,
+      ...techBrief,
+      empty: true,
+      phase: 'empty',
+    }
+  }
+
+  // 2. requirement.md 存在 → 直接进主区(主区容错空 chunks / 空 sessions)
   return {
     ...emptyAnalyzing(requirementId),
+    empty: false,
+    phase: 'active',
     admission: buildAdmissionData({
       dimensions: dims,
       pendingAdjudicationCount: pending,
@@ -317,7 +366,6 @@ function emptyAnalyzingWithOptions(
     sessions: sessionsBundle.sessions,
     activeSessionId: sessionsBundle.activeSessionId,
     ...techBrief,
-    empty: !hasFsSessions,
   }
 }
 

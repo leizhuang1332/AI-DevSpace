@@ -60,6 +60,21 @@ function writeAnalysisBundle(id: string, opts: { skipIndex?: boolean; skipChunks
   const sessionsDir = join(tmpRoot, 'requirements', id, 'analysis', 'sessions')
   mkdirSync(sessionsDir, { recursive: true })
 
+  // 同步写一份 requirement.md —— 让 existsRequirementMd() 在 phase 二态判定中命中
+  // 'active' 分支而不是 'empty'。原 ticket 02 时代 empty 字段只看 analysis/sessions;
+  // 新 plan(直接进入主区)加入 requirement.md 关卡,fs 上有 analysis 但没
+  // requirement.md → emptyAnalyzingWithOptions 走 'empty' 引导去 DRAFTING,
+  // 会冲掉原本想测的 sessions 装配。
+  if (!opts.skipReqMd) {
+    const reqDir = join(tmpRoot, 'requirements', id)
+    mkdirSync(reqDir, { recursive: true })
+    writeFileSync(
+      join(reqDir, 'requirement.md'),
+      '# Fixture requirement\n\nAnalyze me.\n',
+      'utf8',
+    )
+  }
+
   if (!opts.skipIndex) {
     writeFileSync(
       join(sessionsDir, '_index.yaml'),

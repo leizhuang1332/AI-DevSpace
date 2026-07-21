@@ -11,7 +11,7 @@ import { getAnalyzingData } from '@/lib/analyzing.server'
 // 中流畅运行(20ms / 字,200ms chunk 间暂停),但 fake timers + React 18 commit
 // 时机在测试中不稳定(advanceTimersByTimeAsync 推进 timer 但 React commit 由
 // MessageChannel 调度,有时序漂移)。因此测试聚焦于:
-//   1. 渲染结构(满数据 / 空态 / 错误态)
+//   1. 渲染结构(满数据 / 空态 / 错误态 / 主区容错空 chunks)
 //   2. 用户动作的最终状态(暂停切换 / 重置清空)
 //   3. 完成提示(done 时弹出)
 // 打字机逐字推进的 20ms 节流由代码 inspection 验证(constant + setTimeout 链)。
@@ -19,6 +19,72 @@ import { getAnalyzingData } from '@/lib/analyzing.server'
 afterEach(() => {
   cleanup()
   vi.useRealTimers()
+})
+
+// ============================================================================
+// 直接进入主区(issue: ANALYZING 工位改造 · 直接进入主区,删 NotStartedPanel)
+//
+// 用例:
+//   1. emptyAnalyzing() 仍走 EmptyAnalyzing + 'ANALYZING 工位暂无内容'
+//   2. 主区空 chunks/sessions 时仍渲染(主区容错),不显示 NotStartedPanel
+//   3. phase=active (req-001) 走主区,stage strip 可见
+// ============================================================================
+
+describe('AnalyzingZone · 直接进入主区', () => {
+  it('回归: emptyAnalyzing() 仍走 EmptyAnalyzing + 文案 "ANALYZING 工位暂无内容"', () => {
+    const data = emptyAnalyzing('NEW-REQ')
+    render(<AnalyzingZone data={data} />)
+
+    const root = screen.getByTestId('analyzing-zone')
+    expect(root.getAttribute('data-empty')).toBe('true')
+    expect(root.getAttribute('data-requirement-id')).toBe('NEW-REQ')
+
+    expect(screen.getByText('ANALYZING 工位暂无内容')).toBeInTheDocument()
+    const cta = screen.getByText('→ 进入 DRAFTING 工位')
+    expect(cta.getAttribute('href')).toBe('/requirements/NEW-REQ/drafting')
+
+    expect(screen.queryByTestId('analyzing-stage-strip')).toBeNull()
+    expect(screen.queryByTestId('analyzing-toolbar')).toBeNull()
+    expect(screen.queryByTestId('analyzing-stream')).toBeNull()
+  })
+
+  it('主区空 chunks/sessions → 仍走主区,容错不崩(显示"暂无思考流"等)', () => {
+    // 模拟:有 requirement.md(空 false),但 fs 还没启动过 session(sessions/chunks 都空)
+    // 这正是 "首次进入 ANALYZING" 的真实状态 —— 主区应当容错渲染
+    const data: AnalyzingData = {
+      ...emptyAnalyzing('req-003'),
+      empty: false,
+      phase: 'active',
+    }
+    render(<AnalyzingZone data={data} />)
+
+    const root = screen.getByTestId('analyzing-zone')
+    expect(root.getAttribute('data-empty')).toBe('false')
+    expect(root.getAttribute('data-phase')).toBe('active')
+    expect(root.getAttribute('data-requirement-id')).toBe('req-003')
+
+    // 主区骨架存在
+    expect(screen.getByTestId('analyzing-stage-strip')).toBeInTheDocument()
+    expect(screen.getByTestId('analyzing-toolbar')).toBeInTheDocument()
+    expect(screen.getByTestId('analyzing-stream')).toBeInTheDocument()
+
+    // 思考流空态文案
+    expect(screen.getByText('暂无思考流')).toBeInTheDocument()
+  })
+
+  it('回归: req-001 仍走 REFUND_ANALYZING(主区 stage strip 可见)', async () => {
+    const data = await getAnalyzingData('req-001')
+    render(<AnalyzingZone data={data} />)
+
+    const root = screen.getByTestId('analyzing-zone')
+    expect(root.getAttribute('data-empty')).toBe('false')
+    expect(root.getAttribute('data-phase')).toBe('active')
+
+    // 主区 testid 出现
+    expect(screen.getByTestId('analyzing-stage-strip')).toBeInTheDocument()
+    expect(screen.getByTestId('analyzing-toolbar')).toBeInTheDocument()
+    expect(screen.getByTestId('analyzing-stream')).toBeInTheDocument()
+  })
 })
 
 // ============================================================================

@@ -33,12 +33,41 @@ interface InterjectBody {
   session_id?: unknown
 }
 
+/** 与 web 端 `apps/web/src/lib/analyzing.ts` 同形 — 后端 inline,避免反向 import web。 */
+type AnalysisSessionAngle = 'architecture' | 'data' | 'interface' | 'custom'
+interface AnalysisSession {
+  id: string
+  label: string
+  angle: AnalysisSessionAngle
+  detectedCount: number
+  isStreaming: boolean
+}
+
+interface StartBody {
+  angle?: unknown
+  label?: unknown
+  session_id?: unknown
+}
+
+const ANALYSIS_ANGLES: readonly AnalysisSessionAngle[] = ['architecture', 'data', 'interface', 'custom']
+const SESSION_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/
+
 function badRequest(reason: string): { error: 'bad_request'; reason: string } {
   return { error: 'bad_request', reason }
 }
 
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.trim().length > 0
+}
+
+function angleToDefaultLabel(angle: AnalysisSessionAngle): string {
+  const m: Record<AnalysisSessionAngle, string> = {
+    architecture: '架构',
+    data: '数据',
+    interface: '接口',
+    custom: '自定义',
+  }
+  return m[angle]
 }
 
 /** 模拟 admission-check Skill 在收到用户插话后的输出 chunks。
@@ -124,6 +153,103 @@ export const analysisRoutes: FastifyPluginAsync<AnalysisRoutesOptions> = async (
       requirementId: id,
       sessionId,
       chunksQueued: chunks.length,
+    })
+  })
+
+  // ============================================================================
+  // POST /api/requirements/:id/analysis/start
+  // 显式启动首个会话(scalable-coalescing-sky · 决策 3)
+  // - 校验 angle 白名单 + 可选 session_id 格式
+  // - 必须 requirement.md 已存在(否则 409 prd_not_ready,引导用户回 DRAFTING)
+  // - 落盘顺序:sessions/<sid>/ → appendSessionToIndex → appendChunksToJsonl → SSE publish
+  // ============================================================================
+  fastify.post<{
+    Params: { id: string }
+    Body: StartBody
+  }>('/api/requirements/:id/analysis/start', async (req, reply) => {
+    const { id } = req.params
+    const body = req.body ?? {}
+
+    // 1. angle 必填 + 白名单
+    const angle = body.angle
+    if (typeof angle !== 'string' || !ANALYSIS_ANGLES.includes(angle as AnalysisSessionAngle)) {
+      return reply
+        .code(400)
+        .send(badRequest('angle must be one of architecture|data|interface|custom'))
+    }
+    const angleTyped = angle as AnalysisSessionAngle
+
+    // 2. label 可选,非空字符串(trim)
+    let labelText: string = angleToDefaultLabel(angleTyped)
+    if (body.label !== undefined && body.label !== null && body.label !== '') {
+      if (typeof body.label !== 'string' || body.label.trim().length === 0) {
+        return reply.code(400).send(badRequest('label must be non-empty string'))
+      }
+      labelText = body.label.trim()
+    }
+
+    // 3. session_id 可选,正则校验
+    let sessionId: string
+    if (body.session_id !== undefined && body.session_id !== null && body.session_id !== '') {
+      if (typeof body.session_id !== 'string' || !SESSION_ID_RE.test(body.session_id)) {
+        return reply.code(400).send(badRequest('session_id format invalid'))
+      }
+      sessionId = body.session_id
+    } else {
+      sessionId = `sess-${angleTyped}-${Date.now().toString(36)}`
+    }
+
+    // 4. root 解析(沿用 generate-brief 同款)
+    const root = process.env.AIDEVSPACE_ROOT ?? defaultAgentRoot()
+    const requirementMdPath = join(root, 'requirements', id, 'requirement.md')
+    if (!existsSync(requirementMdPath)) {
+      return reply.code(409).send({
+        error: 'prd_not_ready',
+        reason: 'requirement.md does not exist; please finish DRAFTING first',
+      })
+    }
+
+    const analysisDir = join(root, 'requirements', id, 'analysis')
+    const sessionsDir = join(analysisDir, 'sessions')
+    const sessionDir = join(sessionsDir, sessionId)
+    if (existsSync(sessionDir)) {
+      return reply.code(409).send({
+        error: 'session_already_exists',
+        reason: `session ${sessionId} already exists at ${sessionDir}`,
+      })
+    }
+
+    // 5. 落盘顺序
+    mkdirSync(sessionDir, { recursive: true })
+
+    const startedAt = new Date().toISOString()
+    appendSessionToIndex({
+      sessionsDir,
+      sessionId,
+      angle: angleTyped,
+      label: labelText,
+      startedAt,
+    })
+
+    const chunks = simulateStartChunks({
+      requirementId: id,
+      sessionId,
+      angle: angleTyped,
+      label: labelText,
+    })
+
+    appendChunksToJsonl({ sessionDir, chunks })
+
+    // 6. 先 fs 后 SSE(fork 真 fs 真 hub)
+    for (const ev of chunks) hub.publish(id, ev)
+
+    return reply.code(201).send({
+      ok: true,
+      requirementId: id,
+      sessionId,
+      index_path: join(sessionsDir, '_index.yaml'),
+      chunks_path: join(sessionDir, 'chunks.jsonl'),
+      started_at: startedAt,
     })
   })
 
@@ -371,4 +497,217 @@ function defaultAgentRoot(): string {
   } catch {
     return process.cwd()
   }
+}
+
+// ============================================================================
+// start 端点 helpers(issue 19g · 决策 3)
+// ============================================================================
+
+/** 接受 AnalysisSession[],输出 web 端 parseSessionsIndexYaml 能解析的格式(snake_case)。 */
+function serializeSessionsIndexYaml(sessions: AnalysisSession[]): string {
+  if (sessions.length === 0) return 'sessions: []\n'
+  const lines: string[] = ['sessions:']
+  for (const s of sessions) {
+    lines.push(`  - id: ${s.id}`)
+    lines.push(`    label: ${s.label}`)
+    lines.push(`    angle: ${s.angle}`)
+    lines.push(`    detected_count: ${s.detectedCount}`)
+    lines.push(`    is_streaming: ${s.isStreaming ? 'true' : 'false'}`)
+  }
+  return lines.join('\n') + '\n'
+}
+
+/** 极简解析器:从 _index.yaml 读出已有 sessions(id/label/angle 三个字段),
+ *  对齐 web 端 parseSessionsIndexYaml 的 assignField 行为(忽略 detected_count / is_streaming 等)。 */
+function parseSimpleIndexYaml(indexPath: string): AnalysisSession[] {
+  if (!existsSync(indexPath)) return []
+  const text = readFileSync(indexPath, 'utf8')
+  const lines = text.split('\n')
+  const result: AnalysisSession[] = []
+  let current: Partial<AnalysisSession> | null = null
+  for (const line of lines) {
+    const cleaned = line.replace(/#.*$/, '').trim()
+    if (!cleaned) continue
+    const listStart = /^\s*-\s+/.exec(cleaned)
+    if (listStart) {
+      if (current && current.id) result.push(current as AnalysisSession)
+      current = {}
+      const afterDash = cleaned.slice(listStart[0].length).trim()
+      if (afterDash) {
+        const kv = /^([A-Za-z_][\w-]*)\s*:\s*(.*)$/.exec(afterDash)
+        if (kv) {
+          assignField(current, kv[1], kv[2].trim())
+        }
+      }
+      continue
+    }
+    if (current) {
+      // 注:不要求 leading \s+ —— 上面的 line.replace(/#.*$/, '').trim() 已吃掉首尾空白
+      const kv = /^([A-Za-z_][\w-]*)\s*:\s*(.*)$/.exec(cleaned)
+      if (kv) {
+        assignField(current, kv[1], kv[2].trim())
+      }
+    }
+  }
+  if (current && current.id) result.push(current as AnalysisSession)
+  return result
+}
+
+function assignField(
+  current: Partial<AnalysisSession>,
+  key: string,
+  value: string,
+): void {
+  if (key === 'id') current.id = value
+  else if (key === 'label') current.label = value
+  else if (key === 'angle') current.angle = value as AnalysisSessionAngle
+  else if (key === 'detected_count') current.detectedCount = Number(value) || 0
+  else if (key === 'is_streaming') current.isStreaming = value === 'true'
+}
+
+/** 极简辅助:仅解析 `- id: <sid>` 行用于去重检查。 */
+function readExistingSessionIds(indexPath: string): Set<string> {
+  if (!existsSync(indexPath)) return new Set()
+  const ids = new Set<string>()
+  for (const line of readFileSync(indexPath, 'utf8').split('\n')) {
+    const m = /^\s*-\s+id:\s*(\S+)\s*$/.exec(line)
+    if (m) ids.add(m[1])
+  }
+  return ids
+}
+
+/** read-modify-write 模式 append session 到 _index.yaml。
+ *  先去重检查 → 已读旧 sessions → 拼新 list → 整文件覆写。 */
+function appendSessionToIndex(params: {
+  sessionsDir: string
+  sessionId: string
+  angle: AnalysisSessionAngle
+  label: string
+  startedAt: string
+}): void {
+  void params.startedAt
+  const indexPath = join(params.sessionsDir, '_index.yaml')
+  const existing = readExistingSessionIds(indexPath)
+  if (existing.has(params.sessionId)) {
+    throw new Error(`duplicate session_id ${params.sessionId}`)
+  }
+  const existingSessions = parseSimpleIndexYaml(indexPath)
+  const next: AnalysisSession[] = [
+    ...existingSessions,
+    {
+      id: params.sessionId,
+      label: params.label,
+      angle: params.angle,
+      detectedCount: 0,
+      isStreaming: true,
+    },
+  ]
+  writeFileSync(indexPath, serializeSessionsIndexYaml(next), 'utf8')
+}
+
+/** 把首批 analysis_chunk 列表序列化为 jsonl,写入 sessions/<sid>/chunks.jsonl。
+ *  web 端 loadSessionChunks() 的解析契约:每行 JSON 包含 id/ts/label/text/kind/tone/session_id。 */
+function appendChunksToJsonl(params: { sessionDir: string; chunks: any[] }): void {
+  const file = join(params.sessionDir, 'chunks.jsonl')
+  const lines: string[] = []
+  for (const ev of params.chunks) {
+    if (ev.type === 'analysis_chunk') {
+      lines.push(
+        JSON.stringify({
+          id: ev.chunk.id,
+          ts: ev.chunk.ts,
+          label: ev.chunk.label,
+          tone: ev.chunk.tone,
+          text: ev.chunk.text,
+          kind: ev.chunk.kind,
+          session_id: ev.sessionId,
+        }),
+      )
+    }
+  }
+  writeFileSync(file, lines.join('\n') + '\n', 'utf8')
+}
+
+/** 模拟启动会话的首批 5 条 chunks(覆盖 4 种 SSE 协议 kind)。 */
+function simulateStartChunks(params: {
+  requirementId: string
+  sessionId: string
+  angle: AnalysisSessionAngle
+  label: string
+}): { ts: number; type: 'analysis_chunk'; reqId: string; sessionId: string; chunk: { id: string; ts: string; label: string; kind: 'narration' | 'subproblem' | 'risk' | 'option'; tone: 'info' | 'success' | 'warn' | 'err'; text: string } }[] {
+  void params.requirementId
+  const stamp = new Date().toTimeString().slice(0, 8)
+  const base = Date.now()
+  return [
+    {
+      ts: base,
+      type: 'analysis_chunk',
+      reqId: params.requirementId,
+      sessionId: params.sessionId,
+      chunk: {
+        id: `c-start-${base}-1`,
+        ts: stamp,
+        label: 'START',
+        kind: 'narration',
+        tone: 'info',
+        text: `接收需求文档,启动【${params.label}】分析会话`,
+      },
+    },
+    {
+      ts: base + 1,
+      type: 'analysis_chunk',
+      reqId: params.requirementId,
+      sessionId: params.sessionId,
+      chunk: {
+        id: `c-start-${base}-2`,
+        ts: stamp,
+        label: 'READ',
+        kind: 'narration',
+        tone: 'info',
+        text: '解析 requirement.md · 抽取关键约束与业务目标',
+      },
+    },
+    {
+      ts: base + 2,
+      type: 'analysis_chunk',
+      reqId: params.requirementId,
+      sessionId: params.sessionId,
+      chunk: {
+        id: `c-start-${base}-3`,
+        ts: stamp,
+        label: 'DETECT',
+        kind: 'subproblem',
+        tone: 'success',
+        text: `Q1 · 在【${params.label}】维度下,首要不确定性是什么?`,
+      },
+    },
+    {
+      ts: base + 3,
+      type: 'analysis_chunk',
+      reqId: params.requirementId,
+      sessionId: params.sessionId,
+      chunk: {
+        id: `c-start-${base}-4`,
+        ts: stamp,
+        label: 'RISK',
+        kind: 'risk',
+        tone: 'warn',
+        text: `在【${params.label}】维度下识别到 1 个潜在风险`,
+      },
+    },
+    {
+      ts: base + 4,
+      type: 'analysis_chunk',
+      reqId: params.requirementId,
+      sessionId: params.sessionId,
+      chunk: {
+        id: `c-start-${base}-5`,
+        ts: stamp,
+        label: 'OPTION',
+        kind: 'option',
+        tone: 'success',
+        text: 'A · 同步单阶段 · 单事务 · 250ms',
+      },
+    },
+  ]
 }

@@ -241,6 +241,17 @@ export interface SkillAdmissionFrontmatter {
 export type AnalysisSessionAngle = 'architecture' | 'data' | 'interface' | 'custom'
 
 /**
+ * ANALYZING 工位二态阶段(issue 重构 · 直接进入主区)。
+ *
+ * - 'empty':  requirement.md 不存在 → 走 <EmptyAnalyzing> 引导去 DRAFTING
+ * - 'active': requirement.md 存在 → 走主区(SessionTabs + 打字机 / 思考流 / 插话),
+ *             即使 fs 上还没有 sessions 也走主区(主区容错空 chunks / sessions)
+ *
+ * 与 `empty` 字段保持等价关系:`empty === true ⟺ phase === 'empty'`。
+ */
+export type AnalyzingPhase = 'empty' | 'active'
+
+/**
  * ANALYZING 单个会话(对应 SessionTabs 的一个 Tab)
  *
  * - id:会话唯一标识(对应 `analysis/sessions/<id>/chunks.jsonl`)
@@ -289,6 +300,15 @@ export interface AnalyzingData {
   stats: AnalyzingStats
   /** 空数据(无需求 / 新建需求);UI 渲染引导去 DRAFTING */
   empty: boolean
+  /**
+   * 二态阶段(issue 重构 · 直接进入主区):
+   * - 'empty':  requirement.md 不存在 → 走 <EmptyAnalyzing> 引导去 DRAFTING
+   * - 'active': requirement.md 存在 → 走主区;fs 上是否有 sessions 都直接进,
+   *             主区组件对 chunks=[] / sessions=[] 已做容错(显示"暂无思考流"等)
+   *
+   * 与 `empty` 字段保持等价关系:`empty === true ⟺ phase === 'empty'`。
+   */
+  phase: AnalyzingPhase
   /** 准入仪表板(issue 19a VS1 新增) */
   admission: AdmissionData
   /** 多会话列表(issue 19c VS3 新增,Tab 切换的数据源) */
@@ -355,6 +375,7 @@ export function emptyAnalyzing(requirementId: string): AnalyzingData {
     stats: { subproblems: 0, risks: 0, options: 0, total: 0 },
     admission: buildAdmissionData({}),
     empty: true,
+    phase: 'empty',
     sessions: [],
     activeSessionId: '',
     canGenerateBrief: true,
@@ -598,6 +619,7 @@ const REFUND_ANALYZING_CHUNKS: AnalyzingChunk[] = [
 
 export const REFUND_ANALYZING: Omit<AnalyzingData, 'requirementId'> = {
   empty: false,
+  phase: 'active',
   toolbar: {
     crumb: [
       { label: '退款功能优化' },
