@@ -94,6 +94,20 @@ AI 可执行的工作单元（如"设计退款表结构"、"开发 refund-servic
 - 资源树扫描忽略 `_` 前缀目录（沿用 `_archived/` 约定），但 `assets/` 不带下划线，因此纳入资源树
 - 归属 ADR：[ADR-0015](docs/adr/0015-prd-file-upload-and-editing.md) D5
 
+### AuxFile（辅助文件）
+
+Requirement 内的"参考资料文档"，由用户在 DRAFTING 工位上传或新建。物理落点 `requirements/<req-id>/aux/<aux-id>/<file>.md`，作为**独立 markdown 文档**（不是 PRD 的一部分）。
+
+- 6 种受控 `usage_tag`：`api` / `data` / `research` / `sop` / `ui` / `other`（决定 UI 颜色 / 图标 / 排序分组）
+- 3 种 `source_format`：`.md`（直读） / `.docx`（mammoth 转 md） / `.pdf`（pdf-parse 转 md），转换后 `converted_to_md: true`
+- 与 Asset 区分：Asset 是 PRD 内联的图（`![](assets/prd-1.png)`），AuxFile 是**独立文档**（与 PRD 平级，可独立打开）
+- 与 PRD 区分：PRD = 需求正文（`requirement.md`），AuxFile = 需求正文**之外**的参考材料
+- 与 Knowledge 区分：Knowledge = 跨需求全局共享（`~/.aidevspace/knowledge/`），AuxFile = 单需求内私有
+- 数据模型：`packages/shared/src/drafting.ts` 的 `AuxFile { id, filename, body, usage_tag, source_format, converted_to_md }`
+- DRAFTING 工位 `<AuxFilesPane>` 是创建/上传入口；ANALYZING 工位主区左侧"文档阅读器"按 `usage_tag` 排序展示（详见 [ADR-0017](docs/adr/0017-analyzing-main-document-reader.md) D2）
+
+_Avoid_: 辅助材料 / 物料文档 / 附件（都模糊；本术语锁定为 AuxFile）
+
 ### Knowledge（知识）
 
 跨需求复用的领域知识、技术方案、Bug 经验、最佳实践。存放在 `~/.aidevspace/knowledge/`。
@@ -364,6 +378,23 @@ requirements/<req-id>/analysis/
 | 77 | **`GET /api/repos` = workspace 顶层资源**，与 `POST /api/requirement/:id/repos`（决策 4 + issue 02）形成"全局池 vs 需求关联"对照；**不**采用 `/api/workspace/repos` 命名空间（workspace 命名空间当前未使用，为时过早） | [ADR-0016](docs/adr/0016-attach-repos-real-pool.md) D5 |
 | 78 | **`~/.aidevspace/repos/` 目录不存在 → 返 `{repos: []}` 200**；全新安装是合法状态不是错误，前端 [`attach-repos-dialog.tsx`](apps/web/src/components/attach-repos-dialog.tsx) 已有 `availableRepos.length === 0` 的"暂无可选仓库"分支零改动；GET 不允许副作用（**不**自动 mkdir） | [ADR-0016](docs/adr/0016-attach-repos-real-pool.md) D6 |
 | 79 | **"+ 添加新仓库（粘贴 Git URL）" 入口过渡期处理 = 保留 + hint "📋 粘贴 Git URL · 即将上线" + submit 按钮在 URL 非空时 disabled**；`POST /api/repos`（create + clone）端点未实装前不真接 URL；后续 ticket 接入后移除禁用即可，**不**采用"直接隐藏入口"（未来加回 UI 二次成本） | [ADR-0016](docs/adr/0016-attach-repos-real-pool.md) D7 |
+
+---
+
+## v1.0.4 增量决策（11 轮 grilling 沉淀 · 2026-07-21）
+
+> 本节是 v1.0.3 锁定后的迭代记录，不修改上面 v1.0 / v1.0.1 / v1.0.2 / v1.0.3 决策。所有增量由 [ADR-0017](docs/adr/0017-analyzing-main-document-reader.md) 承载完整内容。
+
+| # | 决策 | 关联 ADR |
+| --- | ------ | ---------- |
+| 80 | **ANALYZING 主区布局 v2 = 2:1 左右分栏**（覆盖 ADR-0013 §"工位主区布局"的 1:1 描述）；左栏 2 份 = 文档对照阅读器，右栏 1 份 = 识别产物（可编辑） | [ADR-0017](docs/adr/0017-analyzing-main-document-reader.md) D1 |
+| 81 | **删除 `<ThinkingStream>` 渲染出口**（打字机 phase state machine 内部保留供 StatusBar / 插话使用；用户不再看 AI 思考过程本身） | [ADR-0017](docs/adr/0017-analyzing-main-document-reader.md) D1 |
+| 82 | **左栏 = Tab 栏 + 单文档阅读器**；Tab 顺序 = PRD → AuxFile（按 `usage_tag` 排序）→ Asset 走 PRD 内联渲染（无独立 Tab） | [ADR-0017](docs/adr/0017-analyzing-main-document-reader.md) D2 |
+| 83 | **Tab 标签显示 "🔗 N 处引用"** = 该文档被 `AnalyzingChunk.source_refs` 引用的次数；0 处引用显示中性"·" | [ADR-0017](docs/adr/0017-analyzing-main-document-reader.md) D2 |
+| 84 | **画线关联 = `AnalyzingChunk.source_refs?: SourceRef[]`**（三形态 union:prd 文本段 / aux 文本段 / asset 图片）；narration chunk 不带，仅 subproblem/risk/option chunk 可带 | [ADR-0017](docs/adr/0017-analyzing-main-document-reader.md) D3 |
+| 85 | **点右栏 issue → 联动左栏**（切 Tab + 滚 lineRange + 高亮 pulse 1.5s）；点左栏高亮 → 暂不联动右栏（D4 v2 候选） | [ADR-0017](docs/adr/0017-analyzing-main-document-reader.md) D4 |
+| 86 | **VS4 用户加 product 合成 synthetic chunk**（id 前缀 `user-added-<uuid>` + `synthetic: true` 标记）；`source_refs` 不强制（允许"先记草稿"）；重扫时 AI 不复读 synthetic 标记 | [ADR-0017](docs/adr/0017-analyzing-main-document-reader.md) D6 |
+| 87 | **新术语 `AuxFile`（辅助文件）入术语表**——Requirement 内的参考资料文档（独立 markdown），与 Asset（PRD 内联图）/ Knowledge（全局共享）/ PRD（正文）严格区分；数据模型见 `packages/shared/src/drafting.ts` | [ADR-0017](docs/adr/0017-analyzing-main-document-reader.md) |
 
 ---
 
