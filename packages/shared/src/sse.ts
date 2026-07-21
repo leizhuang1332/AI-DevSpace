@@ -74,6 +74,15 @@ export type SseEvent =
         kind: 'narration' | 'subproblem' | 'risk' | 'option'
         tone: 'info' | 'success' | 'warn' | 'err'
         text: string
+        /**
+         * ADR-0017 D3:可选的源出处引用;仅 subproblem/risk/option 类型
+         * 的 chunk 携带,narration 一律省略。形态契约见 web 端
+         * `apps/web/src/lib/analyzing.ts` 的 `SourceRef` discriminated
+         * union(agent 端内联定义镜像类型);此处只保留
+         * `readonly unknown[]` 弱类型 —— shared 包不应反向依赖
+         * web 端的 brand 标记,具体 narrow 由消费方按 `kind` 分支处理。
+         */
+        source_refs?: readonly unknown[]
       }
     }
   /**

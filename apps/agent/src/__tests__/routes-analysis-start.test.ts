@@ -293,6 +293,34 @@ describe('POST /api/requirements/:id/analysis/start', () => {
     expect(matches.length).toBeGreaterThanOrEqual(5)
     expect(sse.body).toMatch(/"reqId":"req-003"/)
     expect(sse.body).toMatch(/"type":"analysis_chunk"/)
+    // ADR-0017 D3 · ticket 06:解析 data 行,逐 chunk 验证 source_refs 契约。
+    // 不用 regex 粗断言(`source_refs` 字符串可能出现在任何位置),而是 parse 后
+    // 断言 chunk 对象本身带/不带该字段。
+    const dataLines = sse.body
+      .split('\n')
+      .filter((l) => l.startsWith('data: '))
+      .map((l) => l.slice('data: '.length).trim())
+      .filter((l) => l.length > 0)
+    let sseWithRefs = 0
+    let sseNarration = 0
+    for (const dl of dataLines) {
+      try {
+        const obj = JSON.parse(dl) as Record<string, unknown>
+        if (obj.type !== 'analysis_chunk') continue
+        const chunk = obj.chunk as Record<string, unknown>
+        if (chunk.kind === 'narration') {
+          sseNarration++
+          expect('source_refs' in chunk).toBe(false)
+        } else {
+          sseWithRefs++
+          expect(Array.isArray(chunk.source_refs)).toBe(true)
+        }
+      } catch {
+        /* heartbeat 等非 JSON 行,跳过 */
+      }
+    }
+    expect(sseWithRefs).toBe(3)
+    expect(sseNarration).toBe(2)
   })
 
   // ========================================================================
@@ -387,5 +415,50 @@ describe('POST /api/requirements/:id/analysis/start', () => {
     expect(parsed[2].kind).toBe('subproblem')
     expect(parsed[3].kind).toBe('risk')
     expect(parsed[4].kind).toBe('option')
+  })
+
+  // ========================================================================
+  // 12. ADR-0017 D3 · ticket 06:start mock chunks 的 source_refs 字段
+  //     - 3 条 product chunk (subproblem/risk/option) 带 source_refs
+  //     - 2 条 narration chunk 不带
+  // ========================================================================
+  it('start chunks:subproblem/risk/option 含 source_refs;narration 不含', async () => {
+    seedRequirementMd('req-006')
+    const sid = 'sess-source-refs'
+    const res = await authedJson(
+      'POST',
+      '/api/requirements/req-006/analysis/start',
+      { angle: 'architecture', session_id: sid },
+    )
+    expect(res.statusCode).toBe(201)
+
+    const file = join(
+      root,
+      'requirements',
+      'req-006',
+      'analysis',
+      'sessions',
+      sid,
+      'chunks.jsonl',
+    )
+    const text = readFileSync(file, 'utf8')
+    const lines = text.split('\n').filter((l) => l.trim().length > 0)
+    expect(lines.length).toBe(5)
+    const parsed = lines.map((l) => JSON.parse(l) as Record<string, unknown>)
+
+    // 2 条 narration:无 source_refs
+    const narration = parsed.filter((c) => c.kind === 'narration')
+    expect(narration.length).toBe(2)
+    for (const n of narration) {
+      expect('source_refs' in n).toBe(false)
+    }
+
+    // 3 条 product:有 source_refs(数组,至少 1 个)
+    const products = parsed.filter((c) => c.kind !== 'narration')
+    expect(products.length).toBe(3)
+    for (const p of products) {
+      expect(Array.isArray(p.source_refs)).toBe(true)
+      expect((p.source_refs as unknown[]).length).toBeGreaterThanOrEqual(1)
+    }
   })
 })

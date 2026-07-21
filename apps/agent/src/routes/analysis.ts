@@ -33,6 +33,53 @@ interface InterjectBody {
   session_id?: unknown
 }
 
+// ============================================================================
+// SourceRef(ADR-0017 D3 · ticket 06)
+//
+// 与 web 端 `apps/web/src/lib/analyzing.ts` 的 `SourceRef` discriminated
+// union 镜像;**agent 端内联定义** —— 避免反向 import web 端(决策 36 +
+// package 边界)。web/agent 两端类型一致性靠集成测试守护
+// (`apps/web/src/lib/__tests__/analyzing-source-refs.test.ts` +
+// `apps/agent/src/__tests__/analysis-source-refs.test.ts`)。
+//
+// 三种子形态:
+// - `{kind:'prd', lineRange:[start,end], quote?}`  → PRD 文本段
+// - `{kind:'aux', auxId, lineRange:[start,end], quote?}` → AuxFile 文本段
+// - `{kind:'asset', assetId}`  → PRD 解出的图片
+//
+// lineRange 是 0-based 半开区间 [start, end),对齐 `extractPrdAnchors`
+// (packages/shared/src/drafting.ts) 既有约定。
+// ============================================================================
+type SourceRef =
+  | { kind: 'prd'; lineRange: readonly [number, number]; quote?: string }
+  | { kind: 'aux'; auxId: string; lineRange: readonly [number, number]; quote?: string }
+  | { kind: 'asset'; assetId: string }
+
+/** Agent 端内部 SSE chunk 形态:在 shared `SseEvent['analysis_chunk'].chunk`
+ *  基础上扩展 `source_refs` 字段。narration chunk 一律不设该字段;只有
+ *  subproblem / risk / option 类型可能携带。
+ *
+ *  共享事件在调 `hub.publish(id, ev)` 时通过 readonly unknown[] 形态
+ *  (见 shared/sse.ts) 序列化,SSE 订阅侧拿到 chunk 对象即可读到 source_refs。
+ */
+interface AnalysisChunkPayload {
+  id: string
+  ts: string
+  label: string
+  kind: 'narration' | 'subproblem' | 'risk' | 'option'
+  tone: 'info' | 'success' | 'warn' | 'err'
+  text: string
+  source_refs?: readonly SourceRef[]
+}
+
+interface AnalysisChunkEvent {
+  ts: number
+  type: 'analysis_chunk'
+  reqId: string
+  sessionId: string
+  chunk: AnalysisChunkPayload
+}
+
 /** 与 web 端 `apps/web/src/lib/analyzing.ts` 同形 — 后端 inline,避免反向 import web。 */
 type AnalysisSessionAngle = 'architecture' | 'data' | 'interface' | 'custom'
 interface AnalysisSession {
@@ -71,12 +118,18 @@ function angleToDefaultLabel(angle: AnalysisSessionAngle): string {
 }
 
 /** 模拟 admission-check Skill 在收到用户插话后的输出 chunks。
- *  真实 Skill 接通后,此处替换为 Skill runner 调用,返回值不变。 */
+ *  真实 Skill 接通后,此处替换为 Skill runner 调用,返回值不变。
+ *
+ *  返回的 2 条均为 **narration** chunk(INFER + THINK)—— narration 类 chunk
+ *  按 ADR-0017 D3 契约**禁止**带 `source_refs`,所以这里 chunk 不设字段
+ *  (ticket 06 显式约束:`simulateInterjectChunks()` 输出的 2 条 narration
+ *  → **不带** `source_refs`)。JSONL 序列化层也只在 chunk.source_refs 存在
+ *  时才写入字段,narration 行 JSON 体积不受影响。 */
 function simulateInterjectChunks(params: {
   requirementId: string
   sessionId: string
   userText: string
-}): { ts: number; type: 'analysis_chunk'; reqId: string; sessionId: string; chunk: { id: string; ts: string; label: string; kind: 'narration' | 'subproblem' | 'risk' | 'option'; tone: 'info' | 'success' | 'warn' | 'err'; text: string } }[] {
+}): AnalysisChunkEvent[] {
   const now = new Date()
   const tsStr = now.toTimeString().slice(0, 8) // HH:MM:SS
   const minute = now.getMinutes().toString().padStart(2, '0')
@@ -606,35 +659,59 @@ function appendSessionToIndex(params: {
 }
 
 /** 把首批 analysis_chunk 列表序列化为 jsonl,写入 sessions/<sid>/chunks.jsonl。
- *  web 端 loadSessionChunks() 的解析契约:每行 JSON 包含 id/ts/label/text/kind/tone/session_id。 */
-function appendChunksToJsonl(params: { sessionDir: string; chunks: any[] }): void {
+ *  web 端 loadSessionChunks() 的解析契约:每行 JSON 包含 id/ts/label/text/kind/tone/session_id。
+ *
+ *  ADR-0017 D3 · ticket 06:`source_refs` 字段**仅在存在时**追加在末尾(避免
+ *  narration 行 JSON 膨胀,与 web 端 ticket 01 的 JSONL 兼容性约束一致);
+ *  narration chunk 不会进到这条 spread 分支(它们的 `source_refs` 为
+ *  undefined),字段顺序保持 id → ts → label → tone → text → kind →
+ *  session_id → [可选 source_refs]。 */
+function appendChunksToJsonl(params: { sessionDir: string; chunks: AnalysisChunkEvent[] }): void {
   const file = join(params.sessionDir, 'chunks.jsonl')
   const lines: string[] = []
   for (const ev of params.chunks) {
     if (ev.type === 'analysis_chunk') {
-      lines.push(
-        JSON.stringify({
-          id: ev.chunk.id,
-          ts: ev.chunk.ts,
-          label: ev.chunk.label,
-          tone: ev.chunk.tone,
-          text: ev.chunk.text,
-          kind: ev.chunk.kind,
-          session_id: ev.sessionId,
-        }),
-      )
+      const serialized: Record<string, unknown> = {
+        id: ev.chunk.id,
+        ts: ev.chunk.ts,
+        label: ev.chunk.label,
+        tone: ev.chunk.tone,
+        text: ev.chunk.text,
+        kind: ev.chunk.kind,
+        session_id: ev.sessionId,
+      }
+      if (ev.chunk.source_refs !== undefined) {
+        serialized.source_refs = ev.chunk.source_refs
+      }
+      lines.push(JSON.stringify(serialized))
     }
   }
   writeFileSync(file, lines.join('\n') + '\n', 'utf8')
 }
 
-/** 模拟启动会话的首批 5 条 chunks(覆盖 4 种 SSE 协议 kind)。 */
+/** 模拟启动会话的首批 5 条 chunks(覆盖 4 种 SSE 协议 kind)。
+ *
+ *  ADR-0017 D3 · ticket 06 mock 策略:每条 `subproblem / risk / option`
+ *  chunk 硬编码合理的 `source_refs`(让 dev 端到端 demo 跑通 +
+ *  前端 Tab 计数显示);narration(START / READ)按契约**禁止**带 source_refs。
+ *
+ *  lineRange 与 quote 的取值与 ticket 06 验收一致:
+ *  - DETECT (subproblem) → 引用 PRD 第 12-14 行「退款单笔金额上限」
+ *  - RISK (risk) → 同时引用 PRD 第 23 行「幂等」与 aux api 第 45-47 行
+ *    「现有 API 无幂等键」(复合判断的真实场景)
+ *  - OPTION (option) → 引用 aux sop 第 8 行「退款流程规范第 3 条」
+ *
+ *  auxId 当前用 sentinel `mock-aux-api` / `mock-aux-sop` —— ticket 06 显式
+ *  允许"若 fixture 暂未注入 aux → 用 sentinel + web 端 SSR loader 注入
+ *  对应 mock aux"。dev 真实 PRD 落地后,这里应替换为 fixture 实际 aux id;
+ *  本期不动。
+ */
 function simulateStartChunks(params: {
   requirementId: string
   sessionId: string
   angle: AnalysisSessionAngle
   label: string
-}): { ts: number; type: 'analysis_chunk'; reqId: string; sessionId: string; chunk: { id: string; ts: string; label: string; kind: 'narration' | 'subproblem' | 'risk' | 'option'; tone: 'info' | 'success' | 'warn' | 'err'; text: string } }[] {
+}): AnalysisChunkEvent[] {
   void params.requirementId
   const stamp = new Date().toTimeString().slice(0, 8)
   const base = Date.now()
@@ -651,6 +728,7 @@ function simulateStartChunks(params: {
         kind: 'narration',
         tone: 'info',
         text: `接收需求文档,启动【${params.label}】分析会话`,
+        // narration 类不带 source_refs(ADR-0017 D3 契约)
       },
     },
     {
@@ -665,6 +743,7 @@ function simulateStartChunks(params: {
         kind: 'narration',
         tone: 'info',
         text: '解析 requirement.md · 抽取关键约束与业务目标',
+        // narration 类不带 source_refs
       },
     },
     {
@@ -679,6 +758,13 @@ function simulateStartChunks(params: {
         kind: 'subproblem',
         tone: 'success',
         text: `Q1 · 在【${params.label}】维度下,首要不确定性是什么?`,
+        source_refs: [
+          {
+            kind: 'prd',
+            lineRange: [12, 14],
+            quote: '退款单笔金额上限 ≤ 1000 元',
+          },
+        ],
       },
     },
     {
@@ -693,6 +779,19 @@ function simulateStartChunks(params: {
         kind: 'risk',
         tone: 'warn',
         text: `在【${params.label}】维度下识别到 1 个潜在风险`,
+        source_refs: [
+          {
+            kind: 'prd',
+            lineRange: [23, 23],
+            quote: '幂等',
+          },
+          {
+            kind: 'aux',
+            auxId: 'mock-aux-api',
+            lineRange: [45, 47],
+            quote: '现有 API 无幂等键',
+          },
+        ],
       },
     },
     {
@@ -707,6 +806,14 @@ function simulateStartChunks(params: {
         kind: 'option',
         tone: 'success',
         text: 'A · 同步单阶段 · 单事务 · 250ms',
+        source_refs: [
+          {
+            kind: 'aux',
+            auxId: 'mock-aux-sop',
+            lineRange: [8, 8],
+            quote: '退款流程规范第 3 条',
+          },
+        ],
       },
     },
   ]

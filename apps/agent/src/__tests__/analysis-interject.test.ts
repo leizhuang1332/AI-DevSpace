@@ -204,4 +204,46 @@ describe('POST /api/requirements/:id/analysis/interject', () => {
     // B 不应收到 req-A 的 chunk
     expect(b.body).not.toMatch(/"reqId":"req-A"/)
   })
+
+  // ========================================================================
+  // ADR-0017 D3 · ticket 06:narration chunk 一律不带 source_refs
+  // ========================================================================
+
+  it('interject 推的 2 条 narration chunk SSE payload **不**含 source_refs', async () => {
+    const ssePromise = openSse('/api/requirement/req-003/events', 1500)
+    await new Promise((r) => setImmediate(r))
+    await new Promise((r) => setImmediate(r))
+
+    await authedJson('POST', '/api/requirements/req-003/analysis/interject', {
+      text: '补充上下文',
+      session_id: 'sess-narration',
+    })
+
+    const sse = await ssePromise
+    expect(sse.body).toMatch(/event: analysis_chunk/)
+
+    // 解析 data 行,逐条断言 chunk.kind === 'narration' → 无 source_refs 字段
+    const dataLines = sse.body
+      .split('\n')
+      .filter((l) => l.startsWith('data: '))
+      .map((l) => l.slice('data: '.length).trim())
+      .filter((l) => l.length > 0)
+    let narrationCount = 0
+    for (const dataLine of dataLines) {
+      try {
+        const obj = JSON.parse(dataLine) as Record<string, unknown>
+        if (obj.type === 'analysis_chunk') {
+          const chunk = obj.chunk as Record<string, unknown>
+          if (chunk.kind === 'narration') {
+            narrationCount++
+            // 关键契约:narration 类 chunk 在 SSE payload 里**没有** source_refs 字段
+            expect('source_refs' in chunk).toBe(false)
+          }
+        }
+      } catch {
+        /* heartbeat 等非 JSON 行,跳过 */
+      }
+    }
+    expect(narrationCount).toBe(2) // INFER + THINK
+  })
 })
