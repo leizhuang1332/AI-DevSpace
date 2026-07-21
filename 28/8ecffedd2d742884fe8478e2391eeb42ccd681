@@ -1,0 +1,33 @@
+apps/agent/src/__tests__/analysis-source-refs.test.ts
+  s_4f390488c61fa5::t_f7edcc16e80d17 279-280
+  s_4f390488c61fa5::t_4555aa5a37be08 1-278,281-310,317-406
+  s_4f390488c61fa5::t_cf3e2d129b79f1 311-316
+apps/agent/src/routes/analysis.ts
+  s_4f390488c61fa5::t_29dcbc756c4b66 36-82,121-124,663,693,697,703,708
+  s_4f390488c61fa5::t_ad3f5fd75b954d 125-127,132,662,664-669,674-686,692,694-696,698-702,704-707,714,731,746,761-767,782-794,809-816
+apps/agent/src/__tests__/agent-skeleton.e2e.test.ts
+  s_4f390488c61fa5::t_5f048d71520926 2
+  s_4f390488c61fa5::t_ecc78a8d5282ce 132-237
+apps/agent/src/__tests__/analysis-interject.test.ts
+  s_4f390488c61fa5::t_9541f6523c9f42 207-248
+packages/shared/src/sse.ts
+  s_4f390488c61fa5::t_cc3e26e1e44d2f 77-85
+apps/agent/src/__tests__/routes-analysis-start.test.ts
+  s_4f390488c61fa5::t_2822b9f97ba3aa 296-323,419-463
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "288ecffedd2d742884fe8478e2391eeb42ccd681",
+  "prompts": {},
+  "sessions": {
+    "s_4f390488c61fa5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0a448a6f-d216-438a-918e-f195beea9110",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
