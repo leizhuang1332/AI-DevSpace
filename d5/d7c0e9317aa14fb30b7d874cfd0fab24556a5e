@@ -1,0 +1,44 @@
+apps/web/src/components/document-reader-pane.tsx
+  s_c33a8445a86c39::t_3af3d6a4dd2adc 1-241,243,245-285
+  s_c33a8445a86c39::t_7817f8e3d4dbd7 242,244
+apps/web/src/__tests__/analyzing-zone.test.tsx
+  s_4f390488c61fa5::t_29dcbc756c4b66 2,18-21,52,54,57,64,76-79,93,135,140,198,249,273,298
+  s_4f390488c61fa5::t_dd08d7e0edf570 98,101-102,129-134,136-139,141-146,171,175-179,184-187,190-191,195-197,203,236,240-242,244,247-248,282,297,366-370,373,379,384,389-392,395,400,402,405-407
+apps/web/src/components/__tests__/document-reader-pane.test.tsx
+  s_c33a8445a86c39::t_f683d733f6446f 420-421
+  s_c33a8445a86c39::t_d15a482884b999 428-459
+  s_c33a8445a86c39::t_8ac519b358a99a 126-127,137-141
+  s_c33a8445a86c39::t_817df9bbb97f57 253,275,279,295,297
+  s_c33a8445a86c39::t_6d619cb6fee3d4 536
+  s_c33a8445a86c39::t_a8e512c5d05f0e 364
+  s_c33a8445a86c39::t_9ba1c35b87d4f0 38-51
+  s_c33a8445a86c39::t_4d2c003cb59b11 1-37,52-125,128-136,142-252,254-274,276-278,280-294,296,298-363,365-419,422-427,460-535,537-581
+apps/web/src/components/analyzing-zone.tsx
+  s_c33a8445a86c39::t_5680de04e47d9f 48
+  s_4f390488c61fa5::t_29dcbc756c4b66 18-19,23,27-30,39,49-53,60-62
+  s_4f390488c61fa5::t_2912ab2b96a1b8 105-135,594,597-600,603,605-615,618
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "d5d7c0e9317aa14fb30b7d874cfd0fab24556a5e",
+  "prompts": {},
+  "sessions": {
+    "s_4f390488c61fa5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0a448a6f-d216-438a-918e-f195beea9110",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    },
+    "s_c33a8445a86c39": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "75fa1ee5-763a-4b8f-9a03-c84758aadc79",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
