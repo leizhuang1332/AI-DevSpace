@@ -30,6 +30,8 @@ import {
   ADMISSION_DIMENSION_META,
   DEFAULT_ADMISSION_DIMENSIONS,
   type AdmissionDimensionId,
+  type AssetMeta,
+  type AuxFile,
 } from '@ai-devspace/shared'
 
 // ---------------------------------------------------------------------------
@@ -63,6 +65,12 @@ export type AnalyzingChunkTone = 'info' | 'success' | 'warn' | 'err'
  * - ts:    时间戳(形如 "14:23:01")
  * - kind:  决定是否计入顶部 stats(subproblem/risk/option 三类计数)
  * - tone:  决定 label 徽章背景色与左侧 border 颜色
+ * - source_refs: chunk 关联的源出处(ADR-0017 D3);**narration chunk 一律省略**,
+ *   仅 `subproblem` / `risk` / `option` 类型的 chunk 可能携带。SSR / 持久化
+ *   层写入前用 `isSourceRef` 校验,运行时通过 type guard 容错历史数据。
+ * - synthetic:是否为 VS4 "用户手加 product" 合成的 chunk(ADR-0017 D6);落到
+ *   chunks.jsonl 保留用户输入,重扫时 AI prompt 层过滤;本 ticket 01 仅声明
+ *   字段,落地逻辑见 ticket 04
  */
 export interface AnalyzingChunk {
   id: string
@@ -71,6 +79,10 @@ export interface AnalyzingChunk {
   text: string
   kind: AnalyzingChunkKind
   tone: AnalyzingChunkTone
+  /** 可选:仅 kind !== 'narration' 时存在;JSONL 落盘时显式包含或省略,不写 null */
+  source_refs?: SourceRef[]
+  /** 可选:是否为合成的用户添加项(ADR-0017 D6 — 落地逻辑见 ticket 04) */
+  synthetic?: boolean
 }
 
 /** 顶部 stats 三档计数(对应原型 .summary-stat 三块) */
@@ -121,6 +133,176 @@ export interface AnalyzingSummary {
 }
 
 // ---------------------------------------------------------------------------
+// 源出处引用(ADR-0017 D3 · 本 ticket 01 落地)
+// ---------------------------------------------------------------------------
+
+/**
+ * SourceRef 3 种子类型的 **brand 标记**(ADR-0017 D3 · ticket 01 验收)。
+ *
+ * 三种 kind 各自带 nominal brand:`PrdSourceRefBrand` / `AuxSourceRefBrand` /
+ * `AssetSourceRefBrand`。TS 结构化类型默认不能区分三者(都是 `{kind: 'prd'|'aux'|'asset'}`),
+ * 通过 brand 字段让它们在类型层不可互换 —— 调用方必须先经过 `isSourceRef`
+ * narrow 出 kind 才能访问对应字段,杜绝把 `prd` 当 `aux` 之类混淆。
+ *
+ * 实现形式:`unique symbol` 索引签名;brand 字段**可选**,允许外部字面量构造
+ * (literal `{kind:'prd',...}` 不必写 brand;经过 `isSourceRef` 后的对象在 TS 视角
+ * 等同已带 brand)。runtime 校验完全由 `isSourceRef` 按 kind 完成(symbol 在编译
+ * 后被擦除,不影响 JSONL 序列化)。
+ */
+declare const PrdSourceRefBrand: unique symbol
+declare const AuxSourceRefBrand: unique symbol
+declare const AssetSourceRefBrand: unique symbol
+
+/**
+ * PRD 源出处:指名 `requirement.md` 的 `[startLine, endLine)` 行范围
+ * (lineRange 0-based 半开,对齐 `extractPrdAnchors` 的 `line` 约定);
+ * `quote?` 可选存原文片段(SSR 兜底渲染 / lineRange 漂移时 sanity check)。
+ */
+export type PrdSourceRef = {
+  readonly kind: 'prd'
+  readonly lineRange: readonly [number, number]
+  readonly quote?: string
+  readonly [PrdSourceRefBrand]?: 'prd'
+}
+
+/**
+ * AuxFile 源出处:指名某个 AuxFile(`auxId` 严格等于 `AuxFile.id`);
+ * 行范围语义同 prd。
+ */
+export type AuxSourceRef = {
+  readonly kind: 'aux'
+  readonly auxId: string
+  readonly lineRange: readonly [number, number]
+  readonly quote?: string
+  readonly [AuxSourceRefBrand]?: 'aux'
+}
+
+/**
+ * Asset 源出处:指名某张 Asset(`assetId` 等于 `AssetMeta.name`);不带行范围
+ * (资产无行概念)。
+ */
+export type AssetSourceRef = {
+  readonly kind: 'asset'
+  readonly assetId: string
+  readonly [AssetSourceRefBrand]?: 'asset'
+}
+
+/**
+ * `SourceRef` discriminated union(ADR-0017 D3)—— 三种 brand 子类型并集。
+ *
+ * 字段约束:
+ * - kind ∈ {'prd'|'aux'|'asset'} 必填;`quote?` 可选存原文片段
+ * - 仅出现在 `AnalyzingChunk.kind` 为 `subproblem` | `risk` | `option` 的 chunk 上,
+ *   narration chunk 一律省略(由 SSE 推送层 + `loadSessionChunks` 运行时校验双重保证;
+ *   若 narration chunk 在 JSONL 中带 source_refs,loader 会**丢弃** source_refs,
+ *   不让"narration 不引用源"的契约被破坏)
+ * - JSONL 持久化时显式包含数组(即使是空 `[]`)或省略字段;绝**不**写 `null`
+ *   (体积优化,见 `serializeAnalyzingChunk`)
+ */
+export type SourceRef = PrdSourceRef | AuxSourceRef | AssetSourceRef
+
+/**
+ * 类型守卫:校验一个 `unknown` 是否符合 `SourceRef` 形态。
+ *
+ * 设计要点:
+ * - 单一入口:JSONL 解析 / SSE 推送 / 任意来源数据都用此函数做窄化,
+ *   避免每个调用点重复写结构校验
+ * - 校验粒度遵循 **ADR D3 契约**(不私自收紧):
+ *   - `lineRange`:必须是恰好 2 元素的有限数字元组(NaN/Infinity/倒置区间 → 拒绝)
+ *   - `quote`:可选 string,允许空串/纯空白;非 string 拒绝
+ *   - `auxId` / `assetId`:必填**非空** string(downstream 用作 AuxFile.id / AssetMeta.name
+ *     查找;空字符串会破坏匹配,故拒绝)
+ * - 不可信输入(`unknown`)→ `false`,而不是抛错
+ *
+ * @example
+ * isSourceRef({ kind: 'prd', lineRange: [10, 20] }) // → true
+ * isSourceRef({ kind: 'asset', assetId: 'prd-1.png' }) // → true
+ * isSourceRef({ kind: 'prd', lineRange: [10] }) // → false(lineRange 缺位)
+ * isSourceRef(null) // → false
+ */
+export function isSourceRef(value: unknown): value is SourceRef {
+  if (!value || typeof value !== 'object') return false
+  const v = value as Record<string, unknown>
+  const kind = v.kind
+  if (kind === 'prd' || kind === 'aux') {
+    // 校验 lineRange:[number, number] 恰好两元素 + 有限 + 非倒置
+    if (!isLineRangePair(v.lineRange)) return false
+    // aux 必须有非空 auxId(downstream 用作 AuxFile.id 查找)
+    if (
+      kind === 'aux' &&
+      (typeof v.auxId !== 'string' || v.auxId.length === 0)
+    ) {
+      return false
+    }
+    // quote 允许省略或任意 string;非 string 拒绝
+    if (v.quote !== undefined && typeof v.quote !== 'string') return false
+    return true
+  }
+  if (kind === 'asset') {
+    // assetId 是非空 string(downstream 用作 AssetMeta.name 查找)
+    return typeof v.assetId === 'string' && v.assetId.length > 0
+  }
+  return false
+}
+
+/**
+ * 校验 `unknown` 是否为 `[number, number]` 形态(lineRange 半开区间)。
+ *
+ * - 数组长度恰好为 2;两元素必须是有限数字(`Number.isFinite` 拒绝 NaN/Infinity)
+ * - 起点必须 ≤ 终点(若倒置则区间无意义,本期保守拒绝)
+ *
+ * 不导出(预留为 internal helper;若以后要给 SSE 层复用再 `export`)。
+ */
+function isLineRangePair(value: unknown): value is readonly [number, number] {
+  if (!Array.isArray(value) || value.length !== 2) return false
+  const a = value[0]
+  const b = value[1]
+  if (typeof a !== 'number' || !Number.isFinite(a)) return false
+  if (typeof b !== 'number' || !Number.isFinite(b)) return false
+  if (a > b) return false
+  return true
+}
+
+/**
+ * chunk → SSE / JSONL 序列化(ADR-0017 D3 · 体积优化约束):
+ * - `source_refs`:**显式包含数组(即使是空 `[]`)或省略字段**;绝不写 `null`
+ * - narration chunk 与 `source_refs` 不兼容:无论源数据是否含字段,
+ *   输出里 narration chunk 一律不带 `source_refs`(契约的二次保障;`loadSessionChunks`
+ *   在 JSONL 装载侧也做同样处理,防止历史脏数据漏出)
+ * - `synthetic`:显式写 `true` / `false`;缺省时省略 —— `false` 不是"缺省"的别名
+ *
+ * 输出是 plain object,直接 `JSON.stringify(...)` 或经 SSE 编码层送线。
+ *
+ * @example
+ * serializeAnalyzingChunk({id:'c-1', ..., kind:'subproblem', source_refs: []})
+ *   // → {..., kind:'subproblem', source_refs: []}  // 空数组显式保留
+ * serializeAnalyzingChunk({id:'n-1', ..., kind:'narration', source_refs: [...]})
+ *   // → {..., kind:'narration'}  // 强制省略
+ */
+export function serializeAnalyzingChunk(
+  chunk: AnalyzingChunk,
+): Record<string, unknown> {
+  // base 字段:始终写
+  const out: Record<string, unknown> = {
+    id: chunk.id,
+    ts: chunk.ts,
+    label: chunk.label,
+    text: chunk.text,
+    kind: chunk.kind,
+    tone: chunk.tone,
+  }
+  // narration 不写 source_refs(契约二次保障)
+  if (chunk.kind !== 'narration' && chunk.source_refs !== undefined) {
+    out.source_refs = chunk.source_refs
+  }
+  // synthetic:false 也写(显式声明非合成)
+  if (chunk.synthetic !== undefined) {
+    out.synthetic = chunk.synthetic
+  }
+  return out
+}
+
+// ---------------------------------------------------------------------------
 // 识别产物(ADR-0013 D2 ③ · issue 19b VS2 只读视图)
 // ---------------------------------------------------------------------------
 
@@ -130,12 +312,19 @@ export interface AnalyzingSummary {
  * - title:chunk.text 第一行(行首是 Q1· / A · 之类前缀,UI 显示时保留)
  * - description:余下文字(若 text 含多行)
  * - severity:从 chunk.tone 反查
+ * - source_refs:从源 chunk 透传(ADR-0017 D3);UI 据此显示 "🔗 N 处" 与联动高亮
+ * - synthetic:是否为 VS4 "用户手加 product" 合成的 chunk(ADR-0017 D6);
+ *   `true` 时 UI 显示 "⚠️ 无出处" 角标(若 source_refs 缺失)
  */
 export interface AnalyzingProductItem {
   id: string
   title: string
   description?: string
   severity: 'red' | 'orange' | 'yellow' | 'green' | 'blue'
+  /** 可选:从 chunk.source_refs 透传;UI 据此联动左栏阅读器 */
+  source_refs?: SourceRef[]
+  /** 可选:是否为合成的用户添加项(ADR-0017 D6 — 落地逻辑见 ticket 04) */
+  synthetic?: boolean
 }
 
 /** 三类产物的分组(对应原型 .identified-item 三类) */
@@ -163,6 +352,8 @@ const TONE_TO_SEVERITY: Record<AnalyzingChunkTone, AnalyzingProductItem['severit
  * - 纯函数,便于单测
  * - text 第一行作为 title;剩余行(若有)作为 description
  * - severity 从 chunk.tone 反查,保证视觉一致
+ * - **透传 source_refs / synthetic**(ADR-0017 D3 / D6):派生不修改这两个字段,
+ *   由 chunk 落到 product;UI 据此渲染 "🔗 N 处" 角标与联动左栏高亮
  */
 export function deriveProducts(chunks: readonly AnalyzingChunk[]): AnalyzingProductGroup {
   const subproblems: AnalyzingProductItem[] = []
@@ -185,12 +376,21 @@ function chunkToProduct(chunk: AnalyzingChunk): AnalyzingProductItem {
   const lines = chunk.text.split('\n')
   const title = lines[0] ?? chunk.text
   const description = lines.length > 1 ? lines.slice(1).join('\n').trim() : undefined
-  return {
+  const item: AnalyzingProductItem = {
     id: chunk.id,
     title,
     description: description && description.length > 0 ? description : undefined,
     severity: TONE_TO_SEVERITY[chunk.tone],
   }
+  // 透传 source_refs:undefined 不写字段(保持 JSONL 一致性 + UI 简化空值判断)
+  if (chunk.source_refs !== undefined) {
+    item.source_refs = chunk.source_refs
+  }
+  // 透传 synthetic:undefined 不写字段
+  if (chunk.synthetic !== undefined) {
+    item.synthetic = chunk.synthetic
+  }
+  return item
 }
 
 // ---------------------------------------------------------------------------
@@ -287,6 +487,9 @@ export const ANALYSIS_SESSION_ANGLE_META: Record<
  * - sessions / activeSessionId(19c VS3 多会话 Tab)
  * - chunks(当前 active 会话思考流,VS2 打字机)
  *
+ * ADR-0017 D5 落地:prdMarkdown / auxFiles / assetList 由 SSR 一次性读 + 注入,
+ * 客户端切换 Tab 不触发网络。
+ *
  * 不破坏原"观察屏"接口(chunks / stats / summary / toolbar)——下游组件改造
  * 内部实现即可,数据契约向后兼容。
  */
@@ -323,6 +526,35 @@ export interface AnalyzingData {
   modulesPreview: import('./tech-brief').TechBriefModulesFile | null
   /** 最近生成时间 ISO 8601(由 mtime 派生;无产物 → null) */
   briefGeneratedAt: string | null
+  /**
+   * PRD Markdown 全文(ADR-0017 D5)。
+   *
+   * SSR 期由 `getAnalyzingData()` 从 `<requirementsRoot>/requirements/<id>/requirement.md`
+   * 读出;requirement.md 不存在 → 空字符串。客户端左栏阅读器渲染与"🔗 N 处"高亮都据此字段。
+   * 资产内联 `![](assets/<name>)` 由 `<MarkdownPreview>` 自然渲染(不需独立 Tab)。
+   */
+  prdMarkdown: string
+  /**
+   * 辅助文件列表(ADR-0017 D5)。
+   *
+   * SSR 期扫描 `<requirementsRoot>/requirements/<id>/aux/` 子目录(每个子目录 = 一个
+   * AuxFile),按 `usage_tag` 6 类排序;空目录 / 不存在 → `[]`。本 ticket 01 不解析
+   * `meta.yaml`(由 drafting 子系统维护),只读最简字段:`id / filename / body / usage_tag`
+   * (其他字段 usage_detail 等在 ticket 02 + 后续 SSR 注入时再补)。
+   */
+  auxFiles: AuxFile[]
+  /**
+   * PRD 引用的 Asset 列表(ADR-0017 D5)。
+   *
+   * SSR 期两步:
+   * 1) 解析 `requirement.md` 内 `![](assets/<name>)` 引用 → 收集 name 集合
+   * 2) 与磁盘 `requirements/<id>/assets/` readdir 比对 → 仅返回实际存在的 asset
+   * 孤儿 asset(磁盘有但 PRD 未引用)忽略;引用了不存在的 asset 不报错(忽略)。
+   *
+   * 字段对齐 `@ai-devspace/shared` 的 `AssetMeta` —— ADR-0015 D5 落地形态
+   * (`{name, url, path, size, mime}`),`url` 可直接给前端 fetcher 使用。
+   */
+  assetList: AssetMeta[]
 }
 
 // ---------------------------------------------------------------------------
@@ -359,6 +591,9 @@ export function summarizeAnalyzingStats(
 /**
  * 空状态 ANALYZING 工位数据。
  * UI 渲染时若 data.empty === true → 走空态引导(去 DRAFTING 写 PRD)。
+ *
+ * ADR-0017 D5:SSR 注入 `prdMarkdown` / `auxFiles` / `assetList` 三字段,
+ * 空态时给到容错默认值(空字符串 / `[]` / `[]`)。左栏阅读器对空态显示"暂无文档"占位。
  */
 export function emptyAnalyzing(requirementId: string): AnalyzingData {
   return {
@@ -382,6 +617,10 @@ export function emptyAnalyzing(requirementId: string): AnalyzingData {
     techBriefPreview: null,
     modulesPreview: null,
     briefGeneratedAt: null,
+    // ADR-0017 D5 SSR 注入字段 —— 空态默认值
+    prdMarkdown: '',
+    auxFiles: [],
+    assetList: [],
   }
 }
 
@@ -691,6 +930,69 @@ export const REFUND_ANALYZING: Omit<AnalyzingData, 'requirementId'> = {
     },
   ],
   activeSessionId: 'sess-data',
+  // ADR-0017 D5 — SSR 注入 PRD / AuxFile / Asset(mock 样例:退款功能优化的代表性内容)
+  prdMarkdown: [
+    '# 退款功能优化',
+    '',
+    '## 背景',
+    '',
+    '退款业务是电商核心链路之一,当前实现存在幂等问题导致重复退款;此外高并发场景下',
+    '微服务调用链路过长(5 跳),失败时优惠券未回滚会导致资损。',
+    '',
+    '## 目标',
+    '',
+    '- 退款单笔金额 ≤ 1000 元',
+    '- 退款审核流:自动 / 人工阈值 5000 元',
+    '- 幂等键 + 7 天重试窗口',
+    '',
+    '![退款流程图](assets/refund-flow.png)',
+    '',
+    '## 验收标准',
+    '',
+    '- [ ] 高并发退款不重复创建(bug #247 复现)',
+    '- [ ] 退款失败时优惠券回滚',
+    '',
+  ].join('\n'),
+  auxFiles: [
+    {
+      id: 'aux-api-refund',
+      filename: 'api-refund.md',
+      usage_tag: 'api',
+      source_format: 'md',
+      converted_to_md: false,
+      body: [
+        '# 退款 API 文档',
+        '',
+        '## POST /api/refunds',
+        '',
+        '请求参数:`orderId`, `amount`, `reason`。',
+        '幂等键:`Idempotency-Key` 头,7 天窗口。',
+        '',
+      ].join('\n'),
+    },
+    {
+      id: 'aux-data-orders',
+      filename: 'data-orders.md',
+      usage_tag: 'data',
+      source_format: 'md',
+      converted_to_md: false,
+      body: [
+        '# 订单表设计',
+        '',
+        '`orders(id, amount, status, refund_status, created_at)`。',
+        '',
+      ].join('\n'),
+    },
+  ],
+  assetList: [
+    {
+      name: 'refund-flow.png',
+      url: '/api/requirement/req-001/assets/refund-flow.png',
+      path: 'requirements/req-001/assets/refund-flow.png',
+      size: 102400,
+      mime: 'image/png',
+    },
+  ],
 }
 
 // 注:`getAnalyzingData` 与 `GetAnalyzingDataOptions` 已搬到 `analyzing.server.ts`。

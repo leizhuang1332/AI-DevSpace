@@ -27,7 +27,7 @@
  *   不会触发 webpack 模块解析,不会泄露 client 数据
  */
 
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type {
   AnalysisSession,
@@ -35,18 +35,22 @@ import type {
   AnalyzingChunk,
   AnalyzingData,
   SkillAdmissionFrontmatter,
+  SourceRef,
 } from './analyzing'
 import {
   ANALYSIS_SESSION_ANGLE_META,
   REFUND_ANALYZING,
   buildAdmissionData,
   emptyAnalyzing,
+  isSourceRef,
   resolveAdmissionDimensions,
 } from './analyzing'
 import { loadTechBrief, loadModules } from './tech-brief.server'
 import type { TechBriefModulesFile } from './tech-brief'
 import { resolveRequirementsRoot } from './requirements-root.server'
 import { stripQuotes } from './yaml.server'
+import { extensionToImageMime } from '@ai-devspace/shared'
+import type { AssetMeta, AuxFile, UsageTag } from '@ai-devspace/shared'
 
 // ---------------------------------------------------------------------------
 // analysis/sessions/<session-id>/chunks.jsonl 数据源(issue 19b · 验收 #12)
@@ -55,12 +59,17 @@ import { stripQuotes } from './yaml.server'
 /**
  * 从 `analysis/sessions/<session-id>/chunks.jsonl` 加载会话思考流。
  *
- * 文件格式:每行一个 JSON 对象,字段 `{ id, ts, label, tone, text, session_id }`,
- * 按写入顺序追加(新 chunk 写在末尾 → 自然成为打字机下一条)。
+ * 文件格式:每行一个 JSON 对象,字段 `{ id, ts, label, tone, text, session_id,
+ * source_refs?, synthetic? }`,按写入顺序追加(新 chunk 写在末尾 → 自然成为打字机下一条)。
  *
  * 设计要点:
  * - 文件不存在 / 解析失败 → 返回 `[]`(容错)
  * - 单行 JSON 解析失败 → 跳过该行,继续读后续(避免 1 行损坏毁全文件)
+ * - 缺关键字段的 chunk → 跳过该行
+ * - **JSONL 兼容**(ADR-0017 D3 · ticket 01):历史 chunk 无 `source_refs` /
+ *   `synthetic` 字段 → 默认 `undefined`,行为不变;若 `source_refs` 是数组,
+ *   用 `isSourceRef` 逐项校验,无效项丢弃(避免脏数据污染下游)
+ * - `synthetic` 字段类型必须是 boolean;非 boolean → 视为 false(忽略)
  * - 与 `getAnalyzingData` 解耦:`getAnalyzingData` 负责顶层数据契约,本函数专注单文件加载
  */
 export function loadSessionChunks(
@@ -80,7 +89,7 @@ export function loadSessionChunks(
     const trimmed = line.trim()
     if (!trimmed) continue
     try {
-      const obj = JSON.parse(trimmed) as Partial<AnalyzingChunk>
+      const obj = JSON.parse(trimmed) as Record<string, unknown>
       // 校验最小字段集(避免脏行污染下游)
       if (
         typeof obj.id === 'string' &&
@@ -90,7 +99,34 @@ export function loadSessionChunks(
         typeof obj.kind === 'string' &&
         typeof obj.tone === 'string'
       ) {
-        result.push(obj as AnalyzingChunk)
+        const kind = obj.kind as AnalyzingChunk['kind']
+        const chunk: AnalyzingChunk = {
+          id: obj.id,
+          ts: obj.ts,
+          label: obj.label as AnalyzingChunk['label'],
+          text: obj.text,
+          kind,
+          tone: obj.tone as AnalyzingChunk['tone'],
+        }
+        // source_refs 兼容(ADR-0017 D3):
+        // 1. narration chunk 强制不带(契约二次保障,即使磁盘里写了也丢)
+        // 2. 非 narration 才接受 source_refs;空数组 [] 保留以表达 "AI 明确不引用源"
+        // 3. 用 isSourceRef 逐项校验,无效项丢弃
+        if (kind !== 'narration') {
+          const refs = obj.source_refs
+          if (Array.isArray(refs)) {
+            const validated: SourceRef[] = []
+            for (const r of refs) {
+              if (isSourceRef(r)) validated.push(r)
+            }
+            chunk.source_refs = validated
+          }
+        }
+        // synthetic 字段:JSONL 显式写 true/false;类型必须是 boolean;非 boolean → 忽略
+        if (typeof obj.synthetic === 'boolean') {
+          chunk.synthetic = obj.synthetic
+        }
+        result.push(chunk)
       }
     } catch {
       /* 单行损坏,跳过;继续读后续行 */
@@ -168,6 +204,241 @@ export function countUnresolvedItems(text: string): number {
   }
   flush()
   return count
+}
+
+// ---------------------------------------------------------------------------
+// PRD / AuxFiles / Assets SSR 装载(ADR-0017 D5 · issue ticket 01)
+// ---------------------------------------------------------------------------
+
+/**
+ * SSR 一次性装载主区左栏文档阅读器所需的 3 段数据。
+ *
+ * - `prdMarkdown`:`requirement.md` 全文。文件不存在 → 空字符串(SSR 容错)
+ * - `auxFiles`:扫描 `<reqDir>/aux/<aux-id>/` 子目录,每个子目录视为一个
+ *   AuxFile(`<aux-id>/<filename>.md` 作为 body);按 `usage_tag` 6 类排序,
+ *   同 tag 按 `filename` 字典序
+ * - `assetList`:解析 `requirement.md` 内 `![](assets/<name>)` 引用 + 与磁盘
+ *   `<reqDir>/assets/` readdir 比对 → 仅返回实际存在的 asset。孤儿 asset
+ *   (磁盘有但 PRD 未引用)忽略;引用了不存在的 asset 静默忽略(不报错)
+ *
+ * 容错:
+ * - 任何一个环节失败(目录不存在 / 文件不存在 / 读 IO 错)→ 该段返回默认值,
+ *   其它段不受影响;不抛错(让上层走 emptyAnalyzing 容错路径)
+ *
+ * Asset 字段对齐 `@ai-devspace/shared` 的 `AssetMeta`(`{name, url, path, size, mime}`):
+ * - `name`:磁盘文件名(如 `prd-1.png`)
+ * - `url`:`/api/requirement/<id>/assets/<name>`(前端 fetcher 直接用)
+ * - `path`:`requirements/<id>/assets/<name>`(agent 内部消费)
+ * - `size`:`statSync` 拿实际磁盘字节数
+ * - `mime`:从扩展名反查(沿用 `extensionToImageMime` —— 共用契约)
+ */
+export function loadAnalyzingDocs(
+  requirementsRoot: string,
+  requirementId: string,
+): { prdMarkdown: string; auxFiles: AuxFile[]; assetList: AssetMeta[] } {
+  const reqDir = resolve(requirementsRoot, 'requirements', requirementId)
+  return {
+    prdMarkdown: loadPrdMarkdown(reqDir),
+    auxFiles: loadAuxFiles(reqDir),
+    assetList: loadAssetList(reqDir, requirementId),
+  }
+}
+
+/**
+ * 读 `requirement.md` 全文;文件不存在 / 读 IO 错 → 空字符串(SSR 容错)。
+ *
+ * 容错优于抛错:本函数被 `loadAnalyzingDocs` 高频调用,任何 fs 异常不应阻断
+ * SSR(上层 `emptyAnalyzing()` 已经能兜住数据形状)。
+ */
+function loadPrdMarkdown(reqDir: string): string {
+  const file = join(reqDir, 'requirement.md')
+  if (!existsSync(file)) return ''
+  try {
+    return readFileSync(file, 'utf8')
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * 扫描 `<reqDir>/aux/` 子目录,每个子目录视为一个 AuxFile。
+ *
+ * 目录 layout:
+ * ```
+ * requirements/<id>/aux/
+ *   <aux-id>/        ← 子目录名 = auxId(直接当 AuxFile.id)
+ *     任何 .md 文件  ← 首个 .md 作为 body;多文件场景本期取首个
+ *     meta.yaml      ← 可选:含 usage_tag;缺失 → 落到 'other'
+ * ```
+ *
+ * 排序:`usage_tag` 6 类固定顺序(api / data / research / sop / ui / other);
+ * 同 tag 按 `filename` 字典序。
+ *
+ * 容错:
+ * - `aux/` 目录不存在 → `[]`(不抛错)
+ * - 子目录无 .md 文件 → 跳过该子目录
+ * - 子目录无 meta.yaml → usage_tag 落到 'other'(保守)
+ *
+ * 不做的事:
+ * - 不解析 source_format / converted_to_md(本期 SSR 直接给 'md' / false,
+ *   由 drafting 子系统维护);后续 ticket 02 + SSR 注入时再补
+ */
+function loadAuxFiles(reqDir: string): AuxFile[] {
+  const auxDir = join(reqDir, 'aux')
+  if (!existsSync(auxDir)) return []
+  let entries: string[]
+  try {
+    entries = readdirSync(auxDir)
+  } catch {
+    return []
+  }
+  const auxFiles: AuxFile[] = []
+  for (const auxId of entries) {
+    const subDir = join(auxDir, auxId)
+    try {
+      if (!statSync(subDir).isDirectory()) continue
+    } catch {
+      continue
+    }
+    // 收集子目录下的 .md(首个非 YAML 的当作 body)
+    let bodyFile: string | null = null
+    let filename = ''
+    let usageTag: UsageTag = 'other'
+    try {
+      const files = readdirSync(subDir)
+      for (const f of files) {
+        if (f.toLowerCase().endsWith('.md') && bodyFile === null) {
+          bodyFile = f
+        } else if (f === 'meta.yaml') {
+          // 尝试解析 usage_tag
+          usageTag = parseUsageTagFromMeta(join(subDir, f)) ?? 'other'
+        }
+      }
+    } catch {
+      continue
+    }
+    if (bodyFile === null) continue
+    filename = bodyFile
+    let body: string
+    try {
+      body = readFileSync(join(subDir, bodyFile), 'utf8')
+    } catch {
+      continue
+    }
+    auxFiles.push({
+      id: auxId,
+      filename,
+      body,
+      usage_tag: usageTag,
+      source_format: 'md',
+      converted_to_md: false,
+    })
+  }
+  // 排序:usage_tag → filename
+  auxFiles.sort((a, b) => {
+    if (a.usage_tag !== b.usage_tag) {
+      return USAGE_TAG_ORDER.indexOf(a.usage_tag) - USAGE_TAG_ORDER.indexOf(b.usage_tag)
+    }
+    return a.filename.localeCompare(b.filename)
+  })
+  return auxFiles
+}
+
+/** `UsageTag` 的固定展示顺序(对齐 drafting 子系统约定) */
+const USAGE_TAG_ORDER: UsageTag[] = ['api', 'data', 'research', 'sop', 'ui', 'other']
+
+/**
+ * 从 aux 子目录的 `meta.yaml` 里尝试解析 `usage_tag` 字段。
+ * 解析失败(文件不存在 / 格式错 / 字段缺失 / 值不在 union 内)→ 返 null,
+ * 调用方落到 'other'。
+ *
+ * 极简解析:仅匹配 `usage_tag: api` 形式的单行,值经 stripQuotes 去引号。
+ * 与 `_index.yaml` 解析策略保持一致 —— 都是受控极简格式,不引第三方依赖。
+ */
+function parseUsageTagFromMeta(metaPath: string): UsageTag | null {
+  let raw: string
+  try {
+    raw = readFileSync(metaPath, 'utf8')
+  } catch {
+    return null
+  }
+  const m = /^\s*usage_tag\s*:\s*([^\n#]+)/m.exec(raw)
+  if (!m) return null
+  const value = stripQuotes(m[1].trim())
+  const allowed: UsageTag[] = ['api', 'data', 'research', 'sop', 'ui', 'other']
+  return (allowed as string[]).includes(value) ? (value as UsageTag) : null
+}
+
+/**
+ * Asset 列表装载(对齐 ADR-0015 D5):
+ * 1. 解析 prdMarkdown 内 `![](assets/<name>)` 引用 → 收集 name 集合
+ * 2. 与磁盘 `<reqDir>/assets/` readdir 比对 → 仅保留实际命中的
+ * 3. 用 `statSync` 拿 size + 用扩展名反查 mime(extensionToImageMime)
+ *
+ * 孤儿 asset(磁盘有但 PRD 未引用)忽略;
+ * 引用了不存在的 asset 静默忽略(不报错;后者通过 PRD 引用直接说"被引用但没了"
+ * —— UI 给"图片丢失"占位,本期不做)。
+ */
+function loadAssetList(reqDir: string, requirementId: string): AssetMeta[] {
+  const assetsDir = join(reqDir, 'assets')
+  if (!existsSync(assetsDir)) return []
+  const referenced = extractPrdAssetRefs(loadPrdMarkdown(reqDir))
+  if (referenced.size === 0) return []
+  let files: string[]
+  try {
+    files = readdirSync(assetsDir)
+  } catch {
+    return []
+  }
+  // 防御性:命中集合里的扩展名(mime 反查)
+  const out: AssetMeta[] = []
+  for (const name of files) {
+    if (!referenced.has(name)) continue
+    const fullPath = join(assetsDir, name)
+    try {
+      const st = statSync(fullPath)
+      if (!st.isFile()) continue
+      const ext = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1).toLowerCase() : ''
+      const mime = extensionToImageMime(ext)
+      out.push({
+        name,
+        url: `/api/requirement/${encodeURIComponent(requirementId)}/assets/${encodeURIComponent(name)}`,
+        path: `requirements/${requirementId}/assets/${name}`,
+        size: st.size,
+        mime,
+      })
+    } catch {
+      /* 单文件 stat 失败,跳过 */
+    }
+  }
+  return out
+}
+
+/** 匹配 `![](assets/<name>)` 形态:`name` 不含 `)` / 引号 / 空白 / `#`(防 markdown 链接变体) */
+const PRD_ASSET_REF_RE = /!\[[^\]]*\]\(\s*assets\/([^)\s"]+)\s*\)/g
+
+/**
+ * 从 PRD Markdown 文本提取 `![](assets/<name>)` 引用集合。
+ *
+ * 简化 parser(仅做行扫描 + regex,不支持嵌套或转义边缘场景):
+ * - 匹配 `![any](assets/<name>)` 形态
+ * - `name` 不含 `)` / 引号 / 空白 / `#`(防 markdown 链接变体)
+ * - 同一 name 出现多次 → 去重
+ *
+ * 复杂度:O(n) 行数;空输入 → 空集合。
+ *
+ * 注意:regex 在模块顶层 hoisted(避免热路径重复编译)。
+ */
+function extractPrdAssetRefs(prdMarkdown: string): Set<string> {
+  const refs = new Set<string>()
+  if (!prdMarkdown) return refs
+  // `g` flag + exec:利用 lastIndex 自然推进循环
+  PRD_ASSET_REF_RE.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = PRD_ASSET_REF_RE.exec(prdMarkdown))) {
+    refs.add(m[1])
+  }
+  return refs
 }
 
 // ---------------------------------------------------------------------------
@@ -334,6 +605,8 @@ function emptyAnalyzingWithOptions(
   const techBrief = options?.analysisDir ? loadTechBriefFromAnalysisDir(options.analysisDir) : null
   const requirementsRoot = options?.requirementsRoot ?? defaultRequirementsRoot()
   const hasRequirementMd = existsRequirementMd(requirementsRoot, requirementId)
+  // ADR-0017 D5 · SSR 注入 PRD / AuxFile / Asset —— 容错读 fs,任何环节异常返回空
+  const docs = loadAnalyzingDocs(requirementsRoot, requirementId)
 
   // 二路分支(顺序敏感)
   // 1. requirement.md 不存在 → 引导去 DRAFTING(老 empty 路径)
@@ -348,6 +621,10 @@ function emptyAnalyzingWithOptions(
       sessions: sessionsBundle.sessions,
       activeSessionId: sessionsBundle.activeSessionId,
       ...techBrief,
+      // SSR 注入字段(ADR-0017 D5)—— 即使空态也试着读,fs 缺文件时落到空字符串/[]
+      prdMarkdown: docs.prdMarkdown,
+      auxFiles: docs.auxFiles,
+      assetList: docs.assetList,
       empty: true,
       phase: 'empty',
     }
@@ -366,6 +643,10 @@ function emptyAnalyzingWithOptions(
     sessions: sessionsBundle.sessions,
     activeSessionId: sessionsBundle.activeSessionId,
     ...techBrief,
+    // SSR 注入字段(ADR-0017 D5)
+    prdMarkdown: docs.prdMarkdown,
+    auxFiles: docs.auxFiles,
+    assetList: docs.assetList,
   }
 }
 
