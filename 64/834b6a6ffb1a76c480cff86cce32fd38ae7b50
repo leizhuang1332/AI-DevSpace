@@ -1,0 +1,65 @@
+apps/web/src/components/markdown-preview.tsx
+  s_4ee7b7600f3a77::t_a609d56228b4ee 73-89,96,103-109,129,141,149,162,173,193,407,412,417,421,465,472
+  s_4ee7b7600f3a77::t_d603a99fdf5102 3,5
+  s_4ee7b7600f3a77::t_85175d4bbdbd2f 404-406
+  s_4ee7b7600f3a77::t_ffb3a089e062d9 408-411
+  s_4ee7b7600f3a77::t_2607f2a25e121b 413-416
+  s_4ee7b7600f3a77::t_5db1176105a6ce 418-420
+  s_4ee7b7600f3a77::t_7cb96a9f7fcccc 422-424,462-464
+  s_4ee7b7600f3a77::t_6704ffd1799bfd 466-471
+  s_4ee7b7600f3a77::t_d760eec6110c41 473-475
+  s_4ee7b7600f3a77::t_6d6af77e3f789c 396-403,425-461,476-510,517-519,528-652,660-662,664-672
+apps/web/src/components/document-reader-pane.tsx
+  s_4ee7b7600f3a77::t_07f34294b5bd52 114-116,127-132
+  s_4ee7b7600f3a77::t_a9b914e7311e75 60-71,73
+  s_4ee7b7600f3a77::t_0e2c30e1adbaa5 175-233
+  s_4ee7b7600f3a77::t_23fc9efbe91e1a 289-291,301-302,305-315
+  s_4ee7b7600f3a77::t_2da9bdf85ffe8b 29-34
+  s_4ee7b7600f3a77::t_3ffb3f7de8a447 363
+  s_4ee7b7600f3a77::t_102ace65fe8f04 133
+apps/web/src/components/__tests__/document-reader-pane.test.tsx
+  s_4ee7b7600f3a77::t_d4cd438997b93e 586-834
+  s_4ee7b7600f3a77::t_c1c61021bd9c34 1-2,10,39-40
+  s_4ee7b7600f3a77::t_64e0e9ce106d9f 41-42
+apps/web/src/lib/__tests__/analyzing-source-refs.test.ts
+  s_4ee7b7600f3a77::t_629ee7a00ee726 23-26
+  s_4ee7b7600f3a77::t_010c2bebb07785 692-883
+apps/web/src/components/analyzing-zone.tsx
+  s_4ee7b7600f3a77::t_2d0b6ff6444ba7 7
+  s_4ee7b7600f3a77::t_b9763262cb0b5a 18,31-32,35
+  s_4ee7b7600f3a77::t_1bf40da6305c69 8,13
+  s_4ee7b7600f3a77::t_0e17a6779f1975 111-118,120,227-252,300,306-340,662-665,674-678,712-714
+apps/web/src/components/product-list.tsx
+  s_4ee7b7600f3a77::t_5d7c598ca3e5a8 543,557,561-562
+  s_4ee7b7600f3a77::t_977ff40223aef5 380,394,408
+  s_4ee7b7600f3a77::t_4ddf704a376b4b 510
+  s_4ee7b7600f3a77::t_b42f100de10e28 465,480
+  s_4ee7b7600f3a77::t_ee14d26bea03b3 118,129
+  s_4ee7b7600f3a77::t_b4f3f56bc37374 587,596-597
+  s_4ee7b7600f3a77::t_7516ee605ded48 802-806
+  s_4ee7b7600f3a77::t_8b7748ef96135c 51-55
+  s_4ee7b7600f3a77::t_e28d7e8bcfa283 216,220
+apps/web/src/styles/globals.css
+  s_4ee7b7600f3a77::t_bc4f994fe34413 21-40,47-50
+  s_4ee7b7600f3a77::t_2b3f35291cb095 51
+apps/web/src/__tests__/analyzing-zone.test.tsx
+  s_4ee7b7600f3a77::t_ebe69c8123204b 365-465
+apps/web/src/lib/analyzing.ts
+  s_4ee7b7600f3a77::t_479c070ec4079e 305-454
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "64834b6a6ffb1a76c480cff86cce32fd38ae7b50",
+  "prompts": {},
+  "sessions": {
+    "s_4ee7b7600f3a77": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "01f48d2b-fdeb-4bf2-a066-6f4f7088316d",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
