@@ -1,0 +1,33 @@
+docs/adr/0017-analyzing-main-document-reader.md
+  s_4f46309a8ee9b0::t_ccc585d3cac4c9 1-426
+.scratch/analyzing-doc-reader/issues/01-foundation-data-model.md
+  s_4f46309a8ee9b0::t_6b9b41996d4c26 1-97
+.scratch/analyzing-doc-reader/issues/05-narrow-viewport-and-tests.md
+  s_4f46309a8ee9b0::t_05fa3b9bc0b62f 1-116
+.scratch/analyzing-doc-reader/issues/02-document-reader-pane.md
+  s_4f46309a8ee9b0::t_3ddf06e34004f8 1-103
+.scratch/analyzing-doc-reader/issues/06-ai-prompt-emit-source-refs.md
+  s_4f46309a8ee9b0::t_a5bbe146f1eca1 1-175
+.scratch/analyzing-doc-reader/issues/04-synthetic-chunk-handling.md
+  s_4f46309a8ee9b0::t_3434f3962cab75 1-91
+.scratch/analyzing-doc-reader/issues/03-source-citation-rendering.md
+  s_4f46309a8ee9b0::t_1a7251d040cb02 1-87
+CONTEXT.md
+  s_4f46309a8ee9b0::t_5d0ecb6120c7e1 97-110,384-400
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "8e9091bb7e852e1f8952048aa1998ac6b1530cba",
+  "prompts": {},
+  "sessions": {
+    "s_4f46309a8ee9b0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a60a52bc-2cc8-4e6a-9d9a-07c53959f9aa",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
