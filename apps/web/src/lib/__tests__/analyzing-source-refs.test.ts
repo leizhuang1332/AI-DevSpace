@@ -20,6 +20,10 @@ import {
   isSourceRef,
   serializeAnalyzingChunk,
   deriveProducts,
+  countCitationsByDoc,
+  collectCitationRefs,
+  buildCitationSpans,
+  countAssetCitations,
   type AnalyzingChunk,
   type SourceRef,
   type PrdSourceRef,
@@ -683,5 +687,197 @@ describe('deriveProducts · 透传 synthetic(ADR-0017 D6 · ticket 04 落地占�
     const g = deriveProducts([chunk])
     expect(g.risks[0].source_refs).toBe(refs)
     expect(g.risks[0].synthetic).toBe(true)
+  })
+})
+
+// ============================================================================
+// countCitationsByDoc — 引用计数派生(ADR-0017 D2 · ticket 03 验收)
+// ============================================================================
+
+describe('countCitationsByDoc · 引用计数分桶', () => {
+  it('空数组 → 全 0(aux 为空对象)', () => {
+    expect(countCitationsByDoc([])).toEqual({ prd: 0, aux: {}, asset: 0 })
+  })
+
+  it('全 narration(无 source_refs)→ 全 0', () => {
+    const chunks: AnalyzingChunk[] = [
+      { id: 'n-1', ts: 't', label: 'START', kind: 'narration', tone: 'info', text: '开始' },
+      { id: 'n-2', ts: 't', label: 'READ', kind: 'narration', tone: 'info', text: '读' },
+    ]
+    expect(countCitationsByDoc(chunks)).toEqual({ prd: 0, aux: {}, asset: 0 })
+  })
+
+  it('单一 prd source_ref → prd=1', () => {
+    const chunks: AnalyzingChunk[] = [
+      {
+        id: 'q-1',
+        ts: 't',
+        label: 'DETECT',
+        kind: 'subproblem',
+        tone: 'info',
+        text: 'Q1',
+        source_refs: [{ kind: 'prd', lineRange: [0, 3] }],
+      },
+    ]
+    expect(countCitationsByDoc(chunks)).toEqual({ prd: 1, aux: {}, asset: 0 })
+  })
+
+  it('混合多 source_refs → 正确分桶(prd / aux 按 auxId / asset)', () => {
+    const chunks: AnalyzingChunk[] = [
+      {
+        id: 'q-1',
+        ts: 't',
+        label: 'DETECT',
+        kind: 'subproblem',
+        tone: 'info',
+        text: 'Q1',
+        source_refs: [
+          { kind: 'prd', lineRange: [0, 3] },
+          { kind: 'aux', auxId: 'aux-api', lineRange: [1, 2] },
+          { kind: 'asset', assetId: 'flow.png' },
+        ],
+      },
+      {
+        id: 'r-1',
+        ts: 't',
+        label: 'RISK',
+        kind: 'risk',
+        tone: 'warn',
+        text: 'R1',
+        source_refs: [
+          { kind: 'prd', lineRange: [4, 6] },
+          { kind: 'aux', auxId: 'aux-api', lineRange: [3, 4] },
+          { kind: 'aux', auxId: 'aux-data', lineRange: [0, 1] },
+        ],
+      },
+      // 空数组 chunk 不计
+      { id: 'o-1', ts: 't', label: 'OPTION', kind: 'option', tone: 'success', text: 'A', source_refs: [] },
+    ]
+    expect(countCitationsByDoc(chunks)).toEqual({
+      prd: 2,
+      aux: { 'aux-api': 2, 'aux-data': 1 },
+      asset: 1,
+    })
+  })
+})
+
+// ============================================================================
+// collectCitationRefs — 按文档分桶收集原始 ref(ADR-0017 D4)
+// ============================================================================
+
+describe('collectCitationRefs · 分桶原始 ref', () => {
+  it('空 → 空桶', () => {
+    expect(collectCitationRefs([])).toEqual({ prd: [], aux: {}, asset: [] })
+  })
+
+  it('按 kind / auxId 分桶,保留原始对象', () => {
+    const prdRef: PrdSourceRef = { kind: 'prd', lineRange: [0, 3], quote: 'x' }
+    const auxRef: AuxSourceRef = { kind: 'aux', auxId: 'aux-api', lineRange: [1, 2] }
+    const assetRef: AssetSourceRef = { kind: 'asset', assetId: 'flow.png' }
+    const chunks: AnalyzingChunk[] = [
+      {
+        id: 'q-1',
+        ts: 't',
+        label: 'DETECT',
+        kind: 'subproblem',
+        tone: 'info',
+        text: 'Q1',
+        source_refs: [prdRef, auxRef, assetRef],
+      },
+    ]
+    const grouped = collectCitationRefs(chunks)
+    expect(grouped.prd[0]).toBe(prdRef)
+    expect(grouped.aux['aux-api'][0]).toBe(auxRef)
+    expect(grouped.asset[0]).toBe(assetRef)
+  })
+})
+
+// ============================================================================
+// buildCitationSpans — 去重 span + 越界跳过 + quote mismatch
+// ============================================================================
+
+describe('buildCitationSpans · 去重 / 越界 / quote', () => {
+  const doc = ['line0', 'line1', 'line2', 'line3', 'line4'].join('\n') // 5 行
+
+  it('空文档 → []', () => {
+    expect(buildCitationSpans('', [{ lineRange: [0, 1] }])).toEqual([])
+  })
+
+  it('空 refs → []', () => {
+    expect(buildCitationSpans(doc, [])).toEqual([])
+  })
+
+  it('同一 lineRange 被 3 个产物引用 → 一条 span,refsCount=3', () => {
+    const spans = buildCitationSpans(doc, [
+      { lineRange: [1, 2] },
+      { lineRange: [1, 2] },
+      { lineRange: [1, 2] },
+    ])
+    expect(spans).toHaveLength(1)
+    expect(spans[0]).toEqual({ lineRange: [1, 2], refsCount: 3, quoteMismatch: false })
+  })
+
+  it('不同 lineRange → 多条 span,按 start 升序', () => {
+    const spans = buildCitationSpans(doc, [
+      { lineRange: [3, 4] },
+      { lineRange: [0, 1] },
+    ])
+    expect(spans.map((s) => s.lineRange[0])).toEqual([0, 3])
+  })
+
+  it('lineRange 越界(start >= 行数)→ 该 ref 跳过', () => {
+    const spans = buildCitationSpans(doc, [
+      { lineRange: [0, 1] }, // ✓
+      { lineRange: [5, 6] }, // ✗ start=5 >= 5 行
+      { lineRange: [99, 100] }, // ✗
+    ])
+    expect(spans).toHaveLength(1)
+    expect(spans[0].lineRange).toEqual([0, 1])
+  })
+
+  it('start < 0 → 跳过', () => {
+    expect(buildCitationSpans(doc, [{ lineRange: [-1, 1] }])).toEqual([])
+  })
+
+  it('quote 与 lineRange 文本一致 → quoteMismatch=false', () => {
+    const spans = buildCitationSpans(doc, [{ lineRange: [1, 2], quote: 'line1' }])
+    expect(spans[0].quoteMismatch).toBe(false)
+  })
+
+  it('quote 与 lineRange 文本不一致 → quoteMismatch=true(仍按 lineRange 高亮)', () => {
+    const spans = buildCitationSpans(doc, [{ lineRange: [1, 2], quote: '不存在的原文' }])
+    expect(spans).toHaveLength(1)
+    expect(spans[0].lineRange).toEqual([1, 2])
+    expect(spans[0].quoteMismatch).toBe(true)
+  })
+
+  it('空 / 纯空白 quote → 不触发 mismatch', () => {
+    expect(buildCitationSpans(doc, [{ lineRange: [1, 2], quote: '' }])[0].quoteMismatch).toBe(false)
+    expect(buildCitationSpans(doc, [{ lineRange: [1, 2], quote: '   ' }])[0].quoteMismatch).toBe(false)
+  })
+
+  it('end 越界但 start 合法 → 保留(end 渲染时 clamp)', () => {
+    const spans = buildCitationSpans(doc, [{ lineRange: [4, 99] }])
+    expect(spans).toHaveLength(1)
+    expect(spans[0].lineRange).toEqual([4, 99])
+  })
+})
+
+// ============================================================================
+// countAssetCitations — 每张图被引用次数
+// ============================================================================
+
+describe('countAssetCitations · 图片引用计数', () => {
+  it('空 → {}', () => {
+    expect(countAssetCitations([])).toEqual({})
+  })
+
+  it('按 assetId 分桶累加', () => {
+    const refs: AssetSourceRef[] = [
+      { kind: 'asset', assetId: 'a.png' },
+      { kind: 'asset', assetId: 'a.png' },
+      { kind: 'asset', assetId: 'b.png' },
+    ]
+    expect(countAssetCitations(refs)).toEqual({ 'a.png': 2, 'b.png': 1 })
   })
 })

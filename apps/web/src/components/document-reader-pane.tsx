@@ -26,7 +26,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AssetMeta, AuxFile } from '@ai-devspace/shared'
-import type { SourceRef } from '@/lib/analyzing'
+import {
+  buildCitationSpans,
+  countAssetCitations,
+  type CitationRefsByDoc,
+  type SourceRef,
+} from '@/lib/analyzing'
 import { MarkdownPreview } from './markdown-preview'
 
 // ---------------------------------------------------------------------------
@@ -52,9 +57,20 @@ export interface DocumentReaderPaneProps {
   assetList: AssetMeta[]
   /** 引用计数(每个文档被多少产物引用) */
   citationCounts: DocumentReaderCitationCounts
-  /** 当前激活的 source_ref(ticket 03 接入;本期不消费,保留接口位) */
+  /**
+   * 按文档分桶的原始 source_ref(ticket 03):阅读器据此渲染画线高亮 span。
+   * 不传 → 无高亮(与 ticket 02 行为一致)。
+   */
+  citationRefs?: CitationRefsByDoc
+  /**
+   * 联动 pulse(ticket 03 · ADR-0017 D4):点击右栏产物 → 父组件设置
+   * `{ tabId, lineRange }`。DocumentReaderPane 据此:tabId ≠ 当前 → 切 Tab;
+   * 滚到对应行 + 高亮 `animate-pulse-brand` 1.5s 后移除。null → 无 pulse。
+   */
+  pulseRef?: { tabId: string; lineRange: readonly [number, number] } | null
+  /** 当前激活的 source_ref(ticket 03 接入;保留接口位) */
   activeSourceRef?: SourceRef | null
-  /** source_ref 点击回调(ticket 03 接入;本期不消费,保留接口位) */
+  /** source_ref 点击回调(保留接口位,本期高亮点击不联动右栏) */
   onSourceRefClick?: (ref: SourceRef | null) => void
 }
 
@@ -95,7 +111,9 @@ export function DocumentReaderPane({
   auxFiles,
   assetList,
   citationCounts,
-  // 本期不消费(留接口位给 ticket 03);前置下划线 + eslint-disable 标记未用。
+  citationRefs,
+  pulseRef,
+  // 本期高亮点击不联动右栏(ADR-0017 D4);保留接口位。
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   activeSourceRef: _activeSourceRef,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -105,6 +123,13 @@ export function DocumentReaderPane({
   // 内部 state:activeTabId(纯客户端,默认 PRD)
   // -------------------------------------------------------------------------
   const [activeTabId, setActiveTabId] = useState<string>(PRD_TAB_ID)
+
+  // -------------------------------------------------------------------------
+  // pulse 行区间(ticket 03):点击右栏产物触发;1.5s 后清空
+  // -------------------------------------------------------------------------
+  const [pulseLine, setPulseLine] = useState<readonly [number, number] | null>(null)
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const pulseTimerRef = useRef<number | null>(null)
 
   // -------------------------------------------------------------------------
   // Tab 列表派生(顺序:PRD + auxFiles 顺序)
@@ -146,6 +171,65 @@ export function DocumentReaderPane({
     if (activeTabId === PRD_TAB_ID) return null
     return auxFiles.find((a) => a.id === activeTabId) ?? null
   }, [activeTabId, auxFiles])
+
+  // -------------------------------------------------------------------------
+  // 画线高亮 span(ticket 03):当前 Tab 文档全文 + 该文档 refs → 去重 span
+  // - PRD Tab → citationRefs.prd;AuxFile Tab → citationRefs.aux[activeTabId]
+  // - Asset 角标:PRD 内联图片按 citationRefs.asset 计数(aux body 一般无图,传亦无害)
+  // -------------------------------------------------------------------------
+  const activeDocText =
+    activeTabId === PRD_TAB_ID ? prdMarkdown : (activeAux?.body ?? '')
+  const activeRefs = useMemo(() => {
+    if (!citationRefs) return []
+    return activeTabId === PRD_TAB_ID
+      ? citationRefs.prd
+      : (citationRefs.aux[activeTabId] ?? [])
+  }, [citationRefs, activeTabId])
+  const highlights = useMemo(
+    () => buildCitationSpans(activeDocText, activeRefs),
+    [activeDocText, activeRefs],
+  )
+  const assetCitations = useMemo(
+    () => countAssetCitations(citationRefs?.asset ?? []),
+    [citationRefs],
+  )
+
+  // -------------------------------------------------------------------------
+  // pulse 联动(ticket 03 · ADR-0017 D4):
+  // - pulseRef.tabId ≠ 当前 → 切 Tab
+  // - 设 pulseLine → 对应 <mark> 加 animate-pulse-brand
+  // - 滚到该行对应元素(近似:citation-highlight 的 data-line-start 匹配)
+  // - 1.5s 后清 pulseLine
+  // 依赖 pulseRef 对象身份:父组件每次点击生成新对象(即使同 lineRange)→ effect 重跑
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    if (!pulseRef) return
+    if (pulseRef.tabId !== activeTabId) {
+      setActiveTabId(pulseRef.tabId)
+    }
+    setPulseLine(pulseRef.lineRange)
+    // 滚动定位延到 DOM 更新后(切 Tab / 高亮渲染完成)
+    const scrollId = window.setTimeout(() => {
+      const el = bodyRef.current?.querySelector<HTMLElement>(
+        `[data-testid="citation-highlight"][data-line-start="${pulseRef.lineRange[0]}"]`,
+      )
+      if (el && typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    }, 0)
+    if (pulseTimerRef.current !== null) window.clearTimeout(pulseTimerRef.current)
+    pulseTimerRef.current = window.setTimeout(() => setPulseLine(null), 1500)
+    return () => window.clearTimeout(scrollId)
+    // activeTabId 故意不入依赖:切 Tab 由本 effect 触发,不应二次重跑
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pulseRef])
+
+  // 卸载时清 pulse 计时器
+  useEffect(() => {
+    return () => {
+      if (pulseTimerRef.current !== null) window.clearTimeout(pulseTimerRef.current)
+    }
+  }, [])
 
   // -------------------------------------------------------------------------
   // 空态判定
@@ -202,6 +286,9 @@ export function DocumentReaderPane({
           currentFile="requirement.md"
           auxFiles={auxFiles}
           assets={assetList}
+          highlights={highlights}
+          pulseLineRange={pulseLine}
+          assetCitations={assetCitations}
         />
       )
     }
@@ -211,9 +298,21 @@ export function DocumentReaderPane({
         markdown={activeAux.body}
         currentFile={activeAux.filename}
         auxFiles={auxFiles}
+        highlights={highlights}
+        pulseLineRange={pulseLine}
       />
     )
-  }, [isEmpty, activeTabId, prdMarkdown, auxFiles, assetList, activeAux])
+  }, [
+    isEmpty,
+    activeTabId,
+    prdMarkdown,
+    auxFiles,
+    assetList,
+    activeAux,
+    highlights,
+    pulseLine,
+    assetCitations,
+  ])
 
   return (
     <div
@@ -261,6 +360,7 @@ export function DocumentReaderPane({
       {/* 主体阅读区 */}
       <div
         id="doc-reader-body"
+        ref={bodyRef}
         data-testid="doc-reader-body"
         role="tabpanel"
         aria-labelledby={`doc-reader-tab-${activeTabId}`}

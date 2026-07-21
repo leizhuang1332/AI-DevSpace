@@ -48,6 +48,11 @@ export interface ProductListProps {
    * editable=true 时必传;editable=false 时可不传(no-op)。
    */
   onAction?: (change: ProductChange) => void | Promise<void>
+  /**
+   * ticket 03(ADR-0017 D4):点击产物卡片(normal 态标题区)→ 联动左栏阅读器。
+   * 新增可选回调,**不影响** 现有 `onAction`;不传 → 卡片不可点(行为同 ticket 02)。
+   */
+  onItemClick?: (itemId: string) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -110,6 +115,7 @@ export function ProductList({
   products,
   editable = true,
   onAction,
+  onItemClick,
 }: ProductListProps) {
   // 只读视图(等价于 VS2):editable=false 直接渲染旧版
   if (!editable) {
@@ -120,6 +126,7 @@ export function ProductList({
     <InteractiveProductList
       products={products}
       onAction={onAction ?? (() => undefined)}
+      onItemClick={onItemClick}
     />
   )
 }
@@ -206,9 +213,11 @@ function ReadOnlySection({
 function InteractiveProductList({
   products,
   onAction,
+  onItemClick,
 }: {
   products: AnalyzingProductGroup
   onAction: (change: ProductChange) => void | Promise<void>
+  onItemClick?: (itemId: string) => void
 }) {
   // per-card 状态:仅记录当前不在 normal 的卡片 id + state
   // 用 Map<itemId, CardState> 而不是 Set<itemId>:允许 normal / editing / confirm-delete 共存(虽然实际同一时间一卡只有一种)
@@ -368,6 +377,7 @@ function InteractiveProductList({
           onToggleMergeMode={toggleMergeMode}
           onToggleMergeCheckbox={toggleMergeCheckbox}
           onOpenAdd={() => setAddDialog('subproblems')}
+          onItemClick={onItemClick}
         />
         <InteractiveSection
           meta={RISK_META}
@@ -381,6 +391,7 @@ function InteractiveProductList({
           onToggleMergeMode={toggleMergeMode}
           onToggleMergeCheckbox={toggleMergeCheckbox}
           onOpenAdd={() => setAddDialog('risks')}
+          onItemClick={onItemClick}
         />
         <InteractiveSection
           meta={OPTION_META}
@@ -394,6 +405,7 @@ function InteractiveProductList({
           onToggleMergeMode={toggleMergeMode}
           onToggleMergeCheckbox={toggleMergeCheckbox}
           onOpenAdd={() => setAddDialog('options')}
+          onItemClick={onItemClick}
         />
       </div>
 
@@ -450,6 +462,7 @@ interface InteractiveSectionProps {
   onToggleMergeMode: (kind: ProductKind, sourceId: string) => void
   onToggleMergeCheckbox: (id: string) => void
   onOpenAdd: () => void
+  onItemClick?: (itemId: string) => void
 }
 
 function InteractiveSection({
@@ -464,6 +477,7 @@ function InteractiveSection({
   onToggleMergeMode,
   onToggleMergeCheckbox,
   onOpenAdd,
+  onItemClick,
 }: InteractiveSectionProps) {
   return (
     <section data-testid={meta.testId} className="mb-4 last:mb-0">
@@ -493,6 +507,7 @@ function InteractiveSection({
               mergeMode={mergeMode}
               onToggleMergeMode={() => onToggleMergeMode(kind, it.id)}
               onToggleMergeCheckbox={() => onToggleMergeCheckbox(it.id)}
+              onItemClick={onItemClick ? () => onItemClick(it.id) : undefined}
             />
           ))}
         </ul>
@@ -525,6 +540,7 @@ interface InteractiveItemProps {
   mergeMode: { kind: ProductKind; sourceId: string; selected: Set<string> } | null
   onToggleMergeMode: () => void
   onToggleMergeCheckbox: () => void
+  onItemClick?: () => void
 }
 
 function InteractiveItem({
@@ -538,9 +554,12 @@ function InteractiveItem({
   mergeMode,
   onToggleMergeMode,
   onToggleMergeCheckbox,
+  onItemClick,
 }: InteractiveItemProps) {
   const isMergeModeForThisKind = mergeMode?.kind === kind
   const checked = isMergeModeForThisKind && mergeMode?.selected.has(item.id)
+  // 卡片可点(ADR-0017 D4):仅 normal 态 + 非合并模式 + 父传了 onItemClick 时联动左栏
+  const clickable = state === 'normal' && !isMergeModeForThisKind && !!onItemClick
 
   // 编辑态:本地临时 title;提交时回传 patch
   const [editTitle, setEditTitle] = useState(item.title)
@@ -565,6 +584,7 @@ function InteractiveItem({
   } else {
     cardCls += ` ${SEVERITY_BORDER[item.severity]}`
   }
+  if (clickable) cardCls += ' cursor-pointer hover:border-brand-100 hover:bg-brand-50/20'
 
   return (
     <li
@@ -573,6 +593,8 @@ function InteractiveItem({
       data-severity={item.severity}
       data-state={state}
       data-kind={kind}
+      data-clickable={clickable ? 'true' : 'false'}
+      onClick={clickable ? onItemClick : undefined}
       className={cardCls}
     >
       {/* 合并模式:checkbox 在卡片左侧 */}
@@ -777,7 +799,11 @@ function IconButton({
       type="button"
       data-testid={testId}
       title={title}
-      onClick={onClick}
+      onClick={(e) => {
+        // 阻止冒泡到卡片 <li>(避免触发 onItemClick 联动左栏)
+        e.stopPropagation()
+        onClick()
+      }}
       className="inline-flex items-center justify-center w-7 h-7 rounded-md text-sm hover:bg-bg-elevated text-text-2 hover:text-text-1 transition-colors"
     >
       {label}

@@ -363,6 +363,107 @@ describe('AnalyzingZone · 完成提示(决策 15 非自动跳转)', () => {
 })
 
 // ============================================================================
+// 画线联动(ticket 03 · ADR-0017 D4):点右栏卡片 → 左栏切 Tab / toast
+// ============================================================================
+
+describe('AnalyzingZone · 画线联动(ticket 03)', () => {
+  afterEach(() => {
+    cleanup()
+    vi.useRealTimers()
+  })
+
+  /** 构造带 source_refs 的 active 数据:1 个 aux 关联的 subproblem + 1 个无出处的 risk */
+  function makeLinkedData(): AnalyzingData {
+    return {
+      ...emptyAnalyzing('req-link'),
+      empty: false,
+      phase: 'active',
+      prdMarkdown: ['# 退款', '', '正文段落', '', '结尾'].join('\n'),
+      auxFiles: [
+        {
+          id: 'aux-api',
+          filename: 'api.md',
+          usage_tag: 'api',
+          source_format: 'md',
+          converted_to_md: false,
+          body: 'aux 行0\n\naux 行2',
+        },
+      ],
+      chunks: [
+        {
+          id: 'q-1',
+          ts: '14:23:01',
+          label: 'DETECT',
+          text: 'Q1 · 关联 aux',
+          kind: 'subproblem',
+          tone: 'success',
+          source_refs: [{ kind: 'aux', auxId: 'aux-api', lineRange: [0, 1] }],
+        },
+        {
+          id: 'r-1',
+          ts: '14:23:02',
+          label: 'RISK',
+          text: 'R1 · 无出处',
+          kind: 'risk',
+          tone: 'warn',
+          // 无 source_refs
+        },
+      ],
+      streamMeta: {
+        totalChunks: 2,
+        isStreaming: false,
+        startedAt: '2026-07-12T00:00:00.000Z',
+        endedAt: '2026-07-12T00:00:30.000Z',
+      },
+      stats: { subproblems: 1, risks: 1, options: 0, total: 2 },
+    }
+  }
+
+  it('点击含 source_refs 的产物卡片 → 左栏切到对应 AuxFile Tab', () => {
+    render(<AnalyzingZone data={makeLinkedData()} />)
+
+    const pane = screen.getByTestId('document-reader-pane')
+    expect(pane.getAttribute('data-active-tab-id')).toBe('prd')
+
+    const card = document.querySelector<HTMLElement>('[data-item-id="q-1"]')!
+    expect(card).toBeTruthy()
+    fireEvent.click(card)
+
+    expect(
+      screen.getByTestId('document-reader-pane').getAttribute('data-active-tab-id'),
+    ).toBe('aux-api')
+  })
+
+  it('点击无 source_refs 的产物卡片 → 弹 toast "未关联原文出处",不切 Tab', () => {
+    render(<AnalyzingZone data={makeLinkedData()} />)
+
+    const riskCard = document.querySelector<HTMLElement>('[data-item-id="r-1"]')!
+    fireEvent.click(riskCard)
+
+    expect(screen.getByText(/未关联原文出处/)).toBeInTheDocument()
+    // Tab 不变
+    expect(
+      screen.getByTestId('document-reader-pane').getAttribute('data-active-tab-id'),
+    ).toBe('prd')
+  })
+
+  it('产物卡片编辑按钮点击 → 不触发左栏联动(stopPropagation)', () => {
+    render(<AnalyzingZone data={makeLinkedData()} />)
+
+    const card = document.querySelector<HTMLElement>('[data-item-id="q-1"]')!
+    // 点编辑按钮(在卡片内)→ 进入编辑态,但不切 Tab
+    const editBtn = card.querySelector<HTMLButtonElement>(
+      '[data-testid="product-card-edit"]',
+    )!
+    fireEvent.click(editBtn)
+
+    expect(
+      screen.getByTestId('document-reader-pane').getAttribute('data-active-tab-id'),
+    ).toBe('prd')
+  })
+})
+
+// ============================================================================
 // 打字机 fake-timer 推进(ticket 02 改动:phase useEffect 内部保留,只是渲染出口删)
 // 原 typed-len / chunkIndex 验证依赖 analyzing-chunk-current testid;
 // ticket 02 后该 testid 不再渲染。本测试改为间接验证:phase state machine

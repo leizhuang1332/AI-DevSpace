@@ -4,14 +4,18 @@ import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   deriveProducts,
+  countCitationsByDoc,
+  collectCitationRefs,
   type AnalysisSession,
   type AnalysisSessionAngle,
   type AnalyzingChunk,
   type AnalyzingData,
+  type AnalyzingProductGroup,
   type AnalyzingStats,
   type AnalyzingToolbar,
   type AnalyzingToolbarAction,
   type AdmissionVerdict,
+  type SourceRef,
 } from '@/lib/analyzing'
 import type { ProductChange } from '@/lib/products'
 import { updateProduct } from '@/lib/products-actions'
@@ -24,9 +28,11 @@ import type { ThinkingPhase } from './thinking-stream'
 import { ProductList } from './product-list'
 import { InterjectInput } from './interject-input'
 import { TechBriefPanel } from './tech-brief-panel'
+import { ToastHost } from './toast-host'
+import type { ToastItem } from './toast'
 import {
   DocumentReaderPane,
-  type DocumentReaderCitationCounts,
+  PRD_TAB_ID,
 } from './document-reader-pane'
 
 /**
@@ -102,35 +108,16 @@ function interjectUrl(requirementId: string): string {
   return `/api/requirements/${requirementId}/analysis/interject`
 }
 
-/**
- * 派生文档引用计数(ADR-0017 D2 Tab 标签) —— 扫描 chunks 聚合每个文档被引用的次数。
- *
- * 纯函数,可单测。本期 ticket 02 引用计数语义:
- * - `prd`:所有 chunk.source_refs 中 kind === 'prd' 的总数(无 source_refs 的 chunk 跳过)
- * - `aux`:auxId → 引用次数(用空对象初始化,缺省 aux 不出现)
- * - `asset`:所有 chunk.source_refs 中 kind === 'asset' 的总数
- *
- * 注:不做 source_refs 形态校验 —— AnalyzingChunk 已经在 loadSessionChunks
- * 阶段用 isSourceRef 校验过(narration chunk 强制无 source_refs)。
- */
-function deriveCitationCounts(
-  chunks: readonly AnalyzingChunk[],
-): DocumentReaderCitationCounts {
-  let prd = 0
-  let asset = 0
-  const aux: Record<string, number> = {}
-  for (const c of chunks) {
-    const refs = c.source_refs
-    if (!refs || refs.length === 0) continue
-    for (const ref of refs) {
-      if (ref.kind === 'prd') prd++
-      else if (ref.kind === 'asset') asset++
-      else if (ref.kind === 'aux') {
-        aux[ref.auxId] = (aux[ref.auxId] ?? 0) + 1
-      }
-    }
+/** 在派生产物三桶中按 id 查找单条产物(点击卡片联动左栏用) */
+function findProductById(
+  products: AnalyzingProductGroup,
+  id: string,
+): AnalyzingProductGroup['subproblems'][number] | null {
+  for (const group of [products.subproblems, products.risks, products.options]) {
+    const hit = group.find((it) => it.id === id)
+    if (hit) return hit
   }
-  return { prd, aux, asset }
+  return null
 }
 
 export function AnalyzingZone({ data }: AnalyzingZoneProps) {
@@ -237,6 +224,32 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   const [interjectSubmitting, setInterjectSubmitting] = useState(false)
   const [interjectError, setInterjectError] = useState<string | null>(null)
 
+  // -------------------------------------------------------------------------
+  // 画线联动状态(ticket 03 · ADR-0017 D4)
+  // - activeSourceRef:当前联动的 source_ref(点右栏卡片设置)
+  // - pulseRef:传给左栏阅读器触发切 Tab + 滚 + pulse;1.5s 后清空
+  // - toasts:无出处等提示
+  // -------------------------------------------------------------------------
+  const [activeSourceRef, setActiveSourceRef] = useState<SourceRef | null>(null)
+  const [pulseRef, setPulseRef] = useState<{
+    tabId: string
+    lineRange: readonly [number, number]
+  } | null>(null)
+  const [toasts, setToasts] = useState<ToastItem[]>([])
+  const pulseTimerRef = useRef<number | null>(null)
+  const toastSeqRef = useRef(0)
+
+  const pushToast = useCallback(
+    (message: string, tone: ToastItem['tone']) => {
+      const id = `toast-${toastSeqRef.current++}`
+      setToasts((prev) => [...prev, { id, message, tone, durationMs: 3000 }])
+    },
+    [],
+  )
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id))
+  }, [])
+
   // 主区滚动容器 ref(用于滚动位置持久化,issue 19c 验收 #5)
   const mainScrollRef = useRef<HTMLDivElement>(null)
 
@@ -284,10 +297,46 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
 
   const totalChunks = chunks.length
   const products = deriveProducts(chunks)
+  const citationRefs = collectCitationRefs(chunks)
   const currentAdmission = {
     ...data.admission,
     verdict: verdictOverride ?? data.admission.verdict,
   }
+
+  // -------------------------------------------------------------------------
+  // 点击右栏产物卡片 → 联动左栏(ticket 03 · ADR-0017 D4)
+  // - 取首个 source_ref;无 → toast "未关联原文出处"
+  // - prd → tabId='prd';aux → tabId=auxId;asset(无 lineRange)→ 仅记 activeSourceRef
+  // - 设 pulseRef 触发左栏切 Tab + 滚 + pulse;1.5s 后清 pulseRef
+  // -------------------------------------------------------------------------
+  const handleItemClick = useCallback(
+    (itemId: string) => {
+      const item = findProductById(products, itemId)
+      const ref = item?.source_refs?.[0]
+      if (!ref) {
+        pushToast('⚠️ 该产物未关联原文出处', 'warn')
+        return
+      }
+      setActiveSourceRef(ref)
+      if (ref.kind === 'asset') {
+        // asset 无行范围:切到 PRD(资产内联在 PRD)但不做行级 pulse
+        return
+      }
+      const tabId = ref.kind === 'aux' ? ref.auxId : PRD_TAB_ID
+      // 用新对象触发左栏 effect(即使 lineRange 相同也重跑)
+      setPulseRef({ tabId, lineRange: ref.lineRange })
+      if (pulseTimerRef.current !== null) window.clearTimeout(pulseTimerRef.current)
+      pulseTimerRef.current = window.setTimeout(() => setPulseRef(null), 1500)
+    },
+    [products, pushToast],
+  )
+
+  // 卸载清 pulse 计时器
+  useEffect(() => {
+    return () => {
+      if (pulseTimerRef.current !== null) window.clearTimeout(pulseTimerRef.current)
+    }
+  }, [])
 
   // -------------------------------------------------------------------------
   // 打字机推进(state machine,useEffect 唯一驱动)
@@ -610,7 +659,10 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
               prdMarkdown={data.prdMarkdown}
               auxFiles={data.auxFiles}
               assetList={data.assetList}
-              citationCounts={deriveCitationCounts(chunks)}
+              citationCounts={countCitationsByDoc(chunks)}
+              citationRefs={citationRefs}
+              activeSourceRef={activeSourceRef}
+              pulseRef={pulseRef}
             />
           </div>
           <div
@@ -619,7 +671,11 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
           >
             <Summary summary={data.summary} stats={data.stats} />
             <div className="flex-1 min-h-0">
-              <ProductList products={products} onAction={handleProductAction} />
+              <ProductList
+                products={products}
+                onAction={handleProductAction}
+                onItemClick={handleItemClick}
+              />
             </div>
           </div>
         </div>
@@ -653,6 +709,9 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
           onDismiss={dismissComplete}
         />
       )}
+
+      {/* 画线联动提示(ticket 03):无出处产物点击 → "未关联原文出处" toast */}
+      <ToastHost items={toasts} onDismiss={dismissToast} />
     </main>
   )
 }

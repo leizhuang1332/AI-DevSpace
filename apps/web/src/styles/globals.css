@@ -18,10 +18,35 @@
   }
 }
 
+/* ============================================================
+   ANALYZING 画线联动 pulse 动画 (ADR-0017 D4 · ticket 03)
+   点右栏产物 → 左栏对应高亮 <mark> 加 .animate-pulse-brand,1.5s scale + shadow
+   与打字机 phase 动画无 UI 冲突(ThinkingStream 渲染出口已删)
+   ============================================================ */
+@keyframes pulse-brand {
+  0% {
+    box-shadow: 0 0 0 0 hsl(var(--brand) / 0.5);
+    transform: scale(1);
+  }
+  40% {
+    box-shadow: 0 0 0 6px hsl(var(--brand) / 0.18);
+    transform: scale(1.015);
+  }
+  100% {
+    box-shadow: 0 0 0 0 hsl(var(--brand) / 0);
+    transform: scale(1);
+  }
+}
+
 @layer components {
   /* PRD 锚点条高亮动画 (issue 03) — 与 keyframes prd-anchor-hl 配对 */
   .anchor-hl {
     animation: prd-anchor-hl 1500ms ease forwards;
+  }
+
+  /* 画线联动 pulse (ticket 03) — 与 keyframes pulse-brand 配对 */
+  .animate-pulse-brand {
+    animation: pulse-brand 1500ms ease-out;
   }
 
   /* Light-surface kbd (used in CommandPalette on bg-elevated) */

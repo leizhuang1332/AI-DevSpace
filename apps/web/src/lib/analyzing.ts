@@ -303,6 +303,156 @@ export function serializeAnalyzingChunk(
 }
 
 // ---------------------------------------------------------------------------
+// 画线关联(ADR-0017 D3 / D4 · ticket 03)
+//
+// 三个纯函数把 chunks 的 `source_refs` 派生为左栏阅读器需要的形态:
+// - `countCitationsByDoc`:每个文档被引用的**总次数**(Tab 标签 "🔗 N")
+// - `collectCitationRefs`:按文档分桶的 **原始 source_ref 列表**(供高亮渲染)
+// - `buildCitationSpans`:某文档全文 + 该文档 refs → **去重后的高亮 span**
+// - `countAssetCitations`:asset refs → 每张图被引用次数(图片角标 "🔗 N")
+// ---------------------------------------------------------------------------
+
+/**
+ * 引用计数(ADR-0017 D2 Tab 标签)—— 遍历所有 chunk 的 `source_refs`,按 kind 分桶计数。
+ *
+ * - `prd`:kind === 'prd' 的总数
+ * - `aux`:auxId → 次数(缺省 aux 不出现在 map 中)
+ * - `asset`:kind === 'asset' 的总数
+ *
+ * 纯函数,便于单测。narration chunk 不带 source_refs(loader 侧已保证),无需二次校验。
+ */
+export function countCitationsByDoc(chunks: readonly AnalyzingChunk[]): {
+  prd: number
+  aux: Record<string, number>
+  asset: number
+} {
+  // 复用 collectCitationRefs 的分桶结果 → 计数(避免重复 ref.kind 三分支遍历)
+  const grouped = collectCitationRefs(chunks)
+  const aux: Record<string, number> = {}
+  for (const auxId of Object.keys(grouped.aux)) {
+    aux[auxId] = grouped.aux[auxId].length
+  }
+  return { prd: grouped.prd.length, aux, asset: grouped.asset.length }
+}
+
+/** 高亮 span(去重后)—— 同一 lineRange 被 N 个产物引用 → 一条 span,refsCount=N */
+export interface CitationSpan {
+  /** 0-based 半开行区间 [start, end),对齐 SourceRef.lineRange */
+  readonly lineRange: readonly [number, number]
+  /** 引用此 span 的产物数(≥ 1) */
+  readonly refsCount: number
+  /** quote 与 lineRange 处文本不一致(tooltip 显示 ⚠️,留 v2 修复)*/
+  readonly quoteMismatch: boolean
+}
+
+/** 按文档分桶的原始 source_ref(供 `buildCitationSpans` / asset 角标使用) */
+export interface CitationRefsByDoc {
+  prd: PrdSourceRef[]
+  aux: Record<string, AuxSourceRef[]>
+  asset: AssetSourceRef[]
+}
+
+/**
+ * 按文档分桶收集 source_refs(ADR-0017 D4)。
+ *
+ * 与 `countCitationsByDoc` 的区别:此函数保留**原始 ref 对象**(含 lineRange / quote),
+ * 供阅读器渲染高亮 span;计数函数只保留数字。narration chunk 无 source_refs。
+ */
+export function collectCitationRefs(
+  chunks: readonly AnalyzingChunk[],
+): CitationRefsByDoc {
+  const prd: PrdSourceRef[] = []
+  const aux: Record<string, AuxSourceRef[]> = {}
+  const asset: AssetSourceRef[] = []
+  for (const c of chunks) {
+    const refs = c.source_refs
+    if (!refs || refs.length === 0) continue
+    for (const ref of refs) {
+      if (ref.kind === 'prd') prd.push(ref)
+      else if (ref.kind === 'asset') asset.push(ref)
+      else if (ref.kind === 'aux') {
+        ;(aux[ref.auxId] ??= []).push(ref)
+      }
+    }
+  }
+  return { prd, aux, asset }
+}
+
+/**
+ * 从文档全文 + 该文档的 source_refs 派生**去重后的高亮 span**(ADR-0017 D4)。
+ *
+ * 规则:
+ * - 同一 `lineRange`(start:end 相同)的多个 ref → 合并成一条 span,`refsCount` 累加
+ *   (对应"多产物引用同一 span → 同一高亮,不堆叠颜色")
+ * - `lineRange` 越界(`start >= 文档行数` 或 `start < 0`)→ **跳过该 ref**(不报错;
+ *   ADR-0017 风险缓解 "lineRange 漂移")
+ * - `quote` 存在且非空,但与 `[start, end)` 处文本不含该 quote → `quoteMismatch = true`
+ *   (tooltip 显示 ⚠️;本期不做 quote 兜底重定位,留 v2)
+ * - 返回按 `start` 升序排序
+ *
+ * 纯函数,便于单测。空文档 / 空 refs → `[]`。
+ */
+export function buildCitationSpans(
+  docText: string,
+  refs: ReadonlyArray<{
+    readonly lineRange: readonly [number, number]
+    readonly quote?: string
+  }>,
+): CitationSpan[] {
+  if (docText.length === 0) return []
+  const lines = docText.split(/\r?\n/)
+  const lineCount = lines.length
+  const map = new Map<
+    string,
+    { start: number; end: number; count: number; quoteMismatch: boolean }
+  >()
+  const order: string[] = []
+  for (const ref of refs) {
+    const [start, end] = ref.lineRange
+    // 越界:start 超出文档行数(或负数)→ 跳过该 ref
+    if (start < 0 || start >= lineCount) continue
+    const key = `${start}:${end}`
+    let entry = map.get(key)
+    if (!entry) {
+      entry = { start, end, count: 0, quoteMismatch: false }
+      map.set(key, entry)
+      order.push(key)
+    }
+    entry.count += 1
+    const quote = ref.quote?.trim()
+    if (quote && quote.length > 0) {
+      const clampedEnd = Math.min(end, lineCount)
+      const slice = lines.slice(start, clampedEnd).join('\n')
+      if (!slice.includes(quote)) entry.quoteMismatch = true
+    }
+  }
+  return order
+    .map((k) => {
+      const e = map.get(k)!
+      return {
+        lineRange: [e.start, e.end] as const,
+        refsCount: e.count,
+        quoteMismatch: e.quoteMismatch,
+      }
+    })
+    .sort((a, b) => a.lineRange[0] - b.lineRange[0])
+}
+
+/**
+ * 统计每张 asset 被引用的次数(ADR-0017 D2 图片角标 "🔗 N")。
+ * 键为 `assetId`(= `AssetMeta.name`);空数组 → `{}`。
+ */
+export function countAssetCitations(
+  refs: readonly AssetSourceRef[],
+): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const ref of refs) {
+    out[ref.assetId] = (out[ref.assetId] ?? 0) + 1
+  }
+  return out
+}
+
+// ---------------------------------------------------------------------------
 // 识别产物(ADR-0013 D2 ③ · issue 19b VS2 只读视图)
 // ---------------------------------------------------------------------------
 

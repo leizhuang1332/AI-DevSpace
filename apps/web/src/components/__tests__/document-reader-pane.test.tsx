@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent } from '@testing-library/react'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
+import { render, screen, cleanup, fireEvent, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { AssetMeta, AuxFile } from '@ai-devspace/shared'
 import {
@@ -7,6 +7,7 @@ import {
   PRD_TAB_ID,
   type DocumentReaderCitationCounts,
 } from '../document-reader-pane'
+import type { CitationRefsByDoc } from '@/lib/analyzing'
 
 // ============================================================================
 // Fixture factory
@@ -33,6 +34,10 @@ function makeCounts(
     asset: 0,
     ...overrides,
   }
+}
+
+function makeRefs(overrides: Partial<CitationRefsByDoc> = {}): CitationRefsByDoc {
+  return { prd: [], aux: {}, asset: [], ...overrides }
 }
 
 /**
@@ -577,5 +582,254 @@ describe('DocumentReaderPane · Asset 内联', () => {
     )
     const img = screen.getByTestId('md-preview-image')
     expect(img.getAttribute('src')).toBe('/api/requirement/req-1/assets/foo.png')
+  })
+})
+
+// ============================================================================
+// 画线高亮渲染(ticket 03 · ADR-0017 D4)
+// ============================================================================
+
+// 5 行 PRD:heading[0,1) / 段落A[2,3) / 段落B[4,5)
+const PRD_5LINE = ['# 标题', '', '段落A', '', '段落B'].join('\n')
+
+describe('DocumentReaderPane · 画线高亮渲染', () => {
+  it('citation-highlight 数量与去重后的 source_ref span 一致(2 条不同 span → 2 个 mark)', () => {
+    render(
+      <DocumentReaderPane
+        prdMarkdown={PRD_5LINE}
+        auxFiles={[]}
+        assetList={[]}
+        citationCounts={makeCounts({ prd: 2 })}
+        citationRefs={makeRefs({
+          prd: [
+            { kind: 'prd', lineRange: [2, 3] },
+            { kind: 'prd', lineRange: [4, 5] },
+          ],
+        })}
+      />,
+    )
+    expect(screen.getAllByTestId('citation-highlight')).toHaveLength(2)
+  })
+
+  it('多产物引用同一 span → 一个 mark,data-refs-count 显示总数', () => {
+    render(
+      <DocumentReaderPane
+        prdMarkdown={PRD_5LINE}
+        auxFiles={[]}
+        assetList={[]}
+        citationCounts={makeCounts({ prd: 3 })}
+        citationRefs={makeRefs({
+          prd: [
+            { kind: 'prd', lineRange: [2, 3] },
+            { kind: 'prd', lineRange: [2, 3] },
+            { kind: 'prd', lineRange: [2, 3] },
+          ],
+        })}
+      />,
+    )
+    const marks = screen.getAllByTestId('citation-highlight')
+    expect(marks).toHaveLength(1)
+    expect(marks[0].getAttribute('data-refs-count')).toBe('3')
+  })
+
+  it('lineRange 越界 → 该 source_ref 不渲染(不报错)', () => {
+    render(
+      <DocumentReaderPane
+        prdMarkdown={PRD_5LINE}
+        auxFiles={[]}
+        assetList={[]}
+        citationCounts={makeCounts({ prd: 1 })}
+        citationRefs={makeRefs({
+          prd: [{ kind: 'prd', lineRange: [99, 100] }],
+        })}
+      />,
+    )
+    expect(screen.queryAllByTestId('citation-highlight')).toHaveLength(0)
+  })
+
+  it('无 citationRefs → 无高亮(与 ticket 02 行为一致)', () => {
+    render(
+      <DocumentReaderPane
+        prdMarkdown={PRD_5LINE}
+        auxFiles={[]}
+        assetList={[]}
+        citationCounts={makeCounts()}
+      />,
+    )
+    expect(screen.queryAllByTestId('citation-highlight')).toHaveLength(0)
+  })
+
+  it('hover 高亮 → 浮 tooltip 出现;移出 → tooltip 消失', () => {
+    render(
+      <DocumentReaderPane
+        prdMarkdown={PRD_5LINE}
+        auxFiles={[]}
+        assetList={[]}
+        citationCounts={makeCounts({ prd: 2 })}
+        citationRefs={makeRefs({
+          prd: [
+            { kind: 'prd', lineRange: [2, 3] },
+            { kind: 'prd', lineRange: [2, 3] },
+          ],
+        })}
+      />,
+    )
+    const mark = screen.getByTestId('citation-highlight')
+    expect(screen.queryByTestId('citation-tooltip')).toBeNull()
+    fireEvent.mouseEnter(mark)
+    const tip = screen.getByTestId('citation-tooltip')
+    expect(tip.getAttribute('role')).toBe('tooltip')
+    expect(tip.textContent).toContain('被 2 个产物引用')
+    fireEvent.mouseLeave(mark)
+    expect(screen.queryByTestId('citation-tooltip')).toBeNull()
+  })
+
+  it('quote 与 lineRange 文本不一致 → data-quote-mismatch=true,tooltip 带 ⚠️', () => {
+    render(
+      <DocumentReaderPane
+        prdMarkdown={PRD_5LINE}
+        auxFiles={[]}
+        assetList={[]}
+        citationCounts={makeCounts({ prd: 1 })}
+        citationRefs={makeRefs({
+          prd: [{ kind: 'prd', lineRange: [2, 3], quote: '对不上的原文' }],
+        })}
+      />,
+    )
+    const mark = screen.getByTestId('citation-highlight')
+    expect(mark.getAttribute('data-quote-mismatch')).toBe('true')
+    fireEvent.mouseEnter(mark)
+    expect(screen.getByTestId('citation-tooltip').textContent).toContain('⚠️')
+  })
+
+  it('Asset 被引用 → 图片加 ring + "🔗 N" 角标', () => {
+    const assets: AssetMeta[] = [
+      {
+        name: 'flow.png',
+        url: '/api/requirement/req-1/assets/flow.png',
+        path: 'requirements/req-1/assets/flow.png',
+        size: 100,
+        mime: 'image/png',
+      },
+    ]
+    render(
+      <DocumentReaderPane
+        prdMarkdown="![流程](assets/flow.png)"
+        auxFiles={[]}
+        assetList={assets}
+        citationCounts={makeCounts({ asset: 2 })}
+        citationRefs={makeRefs({
+          asset: [
+            { kind: 'asset', assetId: 'flow.png' },
+            { kind: 'asset', assetId: 'flow.png' },
+          ],
+        })}
+      />,
+    )
+    expect(screen.getByTestId('asset-citation').getAttribute('data-asset-refs-count')).toBe('2')
+    expect(screen.getByTestId('asset-citation-badge').textContent).toContain('🔗 2')
+    expect(screen.getByTestId('md-preview-image').className).toContain('ring-brand-300')
+  })
+
+  it('AuxFile Tab 的高亮按 citationRefs.aux[activeTabId] 过滤', async () => {
+    const user = userEvent.setup()
+    const aux = makeAux({ id: 'aux-api', filename: 'api.md', body: 'aux行0\n\naux行2' })
+    render(
+      <DocumentReaderPane
+        prdMarkdown={PRD_5LINE}
+        auxFiles={[aux]}
+        assetList={[]}
+        citationCounts={makeCounts({ prd: 1, aux: { 'aux-api': 1 } })}
+        citationRefs={makeRefs({
+          prd: [{ kind: 'prd', lineRange: [2, 3] }],
+          aux: { 'aux-api': [{ kind: 'aux', auxId: 'aux-api', lineRange: [0, 1] }] },
+        })}
+      />,
+    )
+    // PRD tab:1 个高亮(prd span)
+    expect(screen.getAllByTestId('citation-highlight')).toHaveLength(1)
+    // 切到 aux → aux 的高亮(1 个)
+    await user.click(
+      document.querySelector<HTMLButtonElement>(
+        'button[data-testid="doc-reader-tab"][data-tab-id="aux-api"]',
+      )!,
+    )
+    expect(screen.getAllByTestId('citation-highlight')).toHaveLength(1)
+    expect(screen.getByTestId('citation-highlight').getAttribute('data-line-start')).toBe('0')
+  })
+})
+
+// ============================================================================
+// pulseRef 联动:切 Tab + 滚 + pulse class(ticket 03 · ADR-0017 D4)
+// ============================================================================
+
+describe('DocumentReaderPane · pulseRef 联动', () => {
+  beforeEach(() => {
+    // jsdom 未实现 scrollIntoView;桩掉以便断言"滚"被调用
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(window.HTMLElement.prototype as any).scrollIntoView = vi.fn()
+  })
+
+  it('pulseRef.tabId ≠ 当前 → 切 Tab + 滚 + 命中 mark 加 animate-pulse-brand;1.5s 后移除', () => {
+    vi.useFakeTimers()
+    const scrollSpy = vi.fn()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(window.HTMLElement.prototype as any).scrollIntoView = scrollSpy
+
+    const aux = makeAux({ id: 'aux-api', filename: 'api.md', body: 'aux行0\n\naux行2' })
+    const refs = makeRefs({
+      aux: { 'aux-api': [{ kind: 'aux', auxId: 'aux-api', lineRange: [0, 1] }] },
+    })
+    const { rerender } = render(
+      <DocumentReaderPane
+        prdMarkdown={PRD_5LINE}
+        auxFiles={[aux]}
+        assetList={[]}
+        citationCounts={makeCounts({ aux: { 'aux-api': 1 } })}
+        citationRefs={refs}
+        pulseRef={null}
+      />,
+    )
+    // 初始 active = PRD
+    expect(
+      screen.getByTestId('document-reader-pane').getAttribute('data-active-tab-id'),
+    ).toBe(PRD_TAB_ID)
+
+    // 触发 pulseRef → 切到 aux-api tab
+    act(() => {
+      rerender(
+        <DocumentReaderPane
+          prdMarkdown={PRD_5LINE}
+          auxFiles={[aux]}
+          assetList={[]}
+          citationCounts={makeCounts({ aux: { 'aux-api': 1 } })}
+          citationRefs={refs}
+          pulseRef={{ tabId: 'aux-api', lineRange: [0, 1] }}
+        />,
+      )
+    })
+    // 切 Tab
+    expect(
+      screen.getByTestId('document-reader-pane').getAttribute('data-active-tab-id'),
+    ).toBe('aux-api')
+    // 命中 mark 加 pulse class
+    const mark = screen.getByTestId('citation-highlight')
+    expect(mark.className).toContain('animate-pulse-brand')
+
+    // 滚(setTimeout 0)
+    act(() => {
+      vi.advanceTimersByTime(0)
+    })
+    expect(scrollSpy).toHaveBeenCalled()
+
+    // 1.5s 后 pulse class 移除
+    act(() => {
+      vi.advanceTimersByTime(1500)
+    })
+    expect(
+      screen.getByTestId('citation-highlight').className,
+    ).not.toContain('animate-pulse-brand')
+
+    vi.useRealTimers()
   })
 })
