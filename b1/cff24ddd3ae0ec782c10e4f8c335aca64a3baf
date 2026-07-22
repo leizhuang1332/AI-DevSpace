@@ -1,0 +1,19 @@
+apps/web/src/components/analyzing-zone.tsx
+  s_1b05809e5c168b::t_36177ef8f597ae 688-692,699
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "b1cff24ddd3ae0ec782c10e4f8c335aca64a3baf",
+  "prompts": {},
+  "sessions": {
+    "s_1b05809e5c168b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "62928fe5-78ad-4859-9e18-ccc3a455a1d1",
+        "model": "unknown"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
