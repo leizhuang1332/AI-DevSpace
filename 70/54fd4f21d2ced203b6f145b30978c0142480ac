@@ -1,0 +1,50 @@
+apps/web/src/__tests__/analyzing-zone-narrow.test.tsx
+  s_bdcfcbbe00fc5e::t_339c9aa9fc4718 1-301
+apps/web/src/lib/use-media-query.ts
+  s_bdcfcbbe00fc5e::t_6d4ee06a8bfdfe 1-6,9-15,20-55
+  s_bdcfcbbe00fc5e::t_ef6d121762f17c 7-8,16-19
+apps/web/src/__tests__/__fixtures__/analyzing-doc-reader-e2e.md
+  s_bdcfcbbe00fc5e::t_04f9a86cfa86d9 1-179
+apps/web/src/components/analyzing-zone.tsx
+  s_fde75e36267314::t_12ea3cabc5a868 66
+  s_bdcfcbbe00fc5e::t_ed34c6318f3ca7 71
+  s_bdcfcbbe00fc5e::t_803df651cd2da3 22
+  s_bdcfcbbe00fc5e::t_58bdc5fadbcd05 46,64-65,67-70,72-75,82
+  s_bdcfcbbe00fc5e::t_dc4e367f204492 241-253,362-363,371-372,374,704,707-708,710-712,714-725,728-742,744-759,797-937
+apps/web/src/components/document-reader-pane.tsx
+  s_bdcfcbbe00fc5e::t_ebd73484714908 5,9,22-29,32-44
+docs/adr/0017-analyzing-main-document-reader.md
+  s_bdcfcbbe00fc5e::t_34b57e437c6a17 426-432
+apps/web/vitest.setup.ts
+  s_bdcfcbbe00fc5e::t_278211e3896d2a 2-82
+.scratch/ai-devspace-mvp/issues/19b-analyzing-thinking-stream-interject.md
+  s_bdcfcbbe00fc5e::t_2b41f8f5502238 116-134
+apps/web/src/__tests__/analyzing-zone.test.tsx
+  s_bdcfcbbe00fc5e::t_a773946733c0ef 277-333
+apps/web/src/lib/__tests__/use-media-query.test.tsx
+  s_bdcfcbbe00fc5e::t_5bfdcb8115b5c6 1-49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "7054fd4f21d2ced203b6f145b30978c0142480ac",
+  "prompts": {},
+  "sessions": {
+    "s_bdcfcbbe00fc5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "964c0d27-7b54-42e4-9be8-6df044ff75e1",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    },
+    "s_fde75e36267314": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "844d5a55-bde4-499f-b0f2-fb573362d2ca",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
