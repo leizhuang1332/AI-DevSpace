@@ -1,0 +1,25 @@
+apps/web/src/__tests__/analyzing-zone-narrow.test.tsx
+  s_1b05809e5c168b::t_37d7ad058f3362 302-326
+apps/web/src/__tests__/analyzing-zone.test.tsx
+  s_1b05809e5c168b::t_c0c059b720c525 567-601
+apps/web/src/components/analyzing-zone.tsx
+  s_1b05809e5c168b::t_f6599392e6822d 308-309,608-610,659,738,745,749,765,901,949
+apps/web/src/components/citation-overlay.tsx
+  s_1b05809e5c168b::t_14f2fc07798cf7 325-326
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "6917e8f26cf9ced3da3b6210a195883e052dbe55",
+  "prompts": {},
+  "sessions": {
+    "s_1b05809e5c168b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "62928fe5-78ad-4859-9e18-ccc3a455a1d1",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
