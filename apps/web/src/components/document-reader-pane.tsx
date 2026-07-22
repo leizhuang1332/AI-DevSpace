@@ -44,7 +44,7 @@
  *   刷新页面后丢失;UI 卡片已挂 ⚠️ 角标提示(详见 ticket 04 + ADR-0017 D6)
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type Ref } from 'react'
 import type { AssetMeta, AuxFile } from '@ai-devspace/shared'
 import {
   buildCitationSpans,
@@ -86,12 +86,27 @@ export interface DocumentReaderPaneProps {
    * 联动 pulse(ticket 03 · ADR-0017 D4):点击右栏产物 → 父组件设置
    * `{ tabId, lineRange }`。DocumentReaderPane 据此:tabId ≠ 当前 → 切 Tab;
    * 滚到对应行 + 高亮 `animate-pulse-brand` 1.5s 后移除。null → 无 pulse。
+   *
+   * ticket 07 扩展(ADR-0018 D3):反向联动"点左栏 span → 滚右栏 product 卡片 +
+   * pulse" 在 AnalyzingZone 复用同一 `pulseRef` 状态机;DocumentReaderPane 只
+   * 消费 `{ tabId, lineRange }` 分支,`{ productId }` 分支由 ProductList 消费
+   * (用 `if ('tabId' in pulseRef)` 守卫过滤)。
    */
-  pulseRef?: { tabId: string; lineRange: readonly [number, number] } | null
+  pulseRef?:
+    | { tabId: string; lineRange: readonly [number, number] }
+    | { productId: string }
+    | null
   /** 当前激活的 source_ref(ticket 03 接入;保留接口位) */
   activeSourceRef?: SourceRef | null
   /** source_ref 点击回调(保留接口位,本期高亮点击不联动右栏) */
   onSourceRefClick?: (ref: SourceRef | null) => void
+  /**
+   * ticket 07(ADR-0018 D1/D2):父组件透传一个 ref,DocumentReaderPane 把它绑到
+   * 根容器 div 上。CitationOverlay 据此拿到左栏容器,内部 querySelector 找
+   * `[data-testid="doc-reader-body"]`(SVG 端点定位的 mark 容器)。
+   * 不传 → 不绑 ref(向后兼容旧用法;旧测试不会传)。
+   */
+  containerRef?: Ref<HTMLDivElement>
 }
 
 // ---------------------------------------------------------------------------
@@ -133,11 +148,9 @@ export function DocumentReaderPane({
   citationCounts,
   citationRefs,
   pulseRef,
-  // 本期高亮点击不联动右栏(ADR-0017 D4);保留接口位。
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   activeSourceRef: _activeSourceRef,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  onSourceRefClick: _onSourceRefClick,
+  onSourceRefClick,
+  containerRef,
 }: DocumentReaderPaneProps) {
   // -------------------------------------------------------------------------
   // 内部 state:activeTabId(纯客户端,默认 PRD)
@@ -220,10 +233,15 @@ export function DocumentReaderPane({
   // - 设 pulseLine → 对应 <mark> 加 animate-pulse-brand
   // - 滚到该行对应元素(近似:citation-highlight 的 data-line-start 匹配)
   // - 1.5s 后清 pulseLine
+  // - ticket 07 扩展:pulseRef 类型扩展为 `{ productId } | { tabId, lineRange }`;
+  //   本组件只消费 `{ tabId, lineRange }` 分支(`{ productId }` 由 ProductList 处理)
   // 依赖 pulseRef 对象身份:父组件每次点击生成新对象(即使同 lineRange)→ effect 重跑
   // -------------------------------------------------------------------------
   useEffect(() => {
     if (!pulseRef) return
+    // 类型守卫:ticket 07 新增的 `{ productId }` 分支由 ProductList 消费,
+    // DocumentReaderPane 只处理 `{ tabId, lineRange }`(行级联动)
+    if (!('tabId' in pulseRef)) return
     if (pulseRef.tabId !== activeTabId) {
       setActiveTabId(pulseRef.tabId)
     }
@@ -255,6 +273,39 @@ export function DocumentReaderPane({
   // 空态判定
   // -------------------------------------------------------------------------
   const isEmpty = prdMarkdown === '' && auxFiles.length === 0
+
+  // -------------------------------------------------------------------------
+  // 反向联动(ticket 07 · ADR-0018 D3 · ADR-0017 D4 v2 补齐):
+  // - 点 <mark> → 找到对应的 SourceRef(在当前 activeRefs 中 lineRange 匹配的第一条)
+  //   → 调 onSourceRefClick(ref)
+  // - 多个 ref 共享同一 lineRange(多产物引用同一段)→ 取第一条(ADR-0018 D3
+  //   "1:1 映射"的简化:多引用场景下第一条即代表该 span)
+  // - 用事件委托挂在 bodyRef 上,避免改 MarkdownPreview 内部结构
+  // - 不阻止默认行为:mark 自身是 `<mark>`,无 href,无副作用
+  // -------------------------------------------------------------------------
+  const handleBodyClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!onSourceRefClick) return
+      const target = e.target as HTMLElement | null
+      const mark = target?.closest<HTMLElement>(
+        '[data-testid="citation-highlight"]',
+      )
+      if (!mark) return
+      const start = mark.dataset.lineStart
+      const end = mark.dataset.lineEnd
+      if (start === undefined || end === undefined) return
+      const startNum = Number(start)
+      const endNum = Number(end)
+      if (!Number.isFinite(startNum) || !Number.isFinite(endNum)) return
+      const ref = activeRefs.find(
+        (r) =>
+          r.lineRange[0] === startNum &&
+          r.lineRange[1] === endNum,
+      )
+      if (ref) onSourceRefClick(ref)
+    },
+    [onSourceRefClick, activeRefs],
+  )
 
   // -------------------------------------------------------------------------
   // 键盘 ← → 切换 Tab(在 tablist 容器上捕获 keydown)
@@ -338,6 +389,7 @@ export function DocumentReaderPane({
     <div
       data-testid="document-reader-pane"
       data-active-tab-id={activeTabId}
+      ref={containerRef}
       className="bg-bg-elevated border border-border rounded-lg overflow-hidden h-full flex flex-col"
     >
       {/* 顶部 Tab 栏 */}
@@ -384,6 +436,7 @@ export function DocumentReaderPane({
         data-testid="doc-reader-body"
         role="tabpanel"
         aria-labelledby={`doc-reader-tab-${activeTabId}`}
+        onClick={handleBodyClick}
         className="flex-1 overflow-auto px-5 py-4 min-h-0"
       >
         {isEmpty ? (

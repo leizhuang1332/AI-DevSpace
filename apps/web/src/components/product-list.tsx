@@ -20,7 +20,7 @@
  *   server action / 乐观更新 / 重新拉取
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type Ref } from 'react'
 import {
   buildSyntheticChunk,
   type AnalyzingChunk,
@@ -84,6 +84,22 @@ export interface ProductListProps {
    * 不传或空数组 → AddDialog 不展示出处选择器(新增的 product 无 source_refs → UI 角标 ⚠️)。
    */
   citationSources?: CitationSourceOption[]
+  /**
+   * ticket 07(ADR-0018 D3):反向联动"点左栏 span → 滚右栏 product 卡片 + pulse"。
+   * 父组件 AnalyzingZone 收到左栏 `<mark>` click 后设置 `{ productId }`;对应卡片
+   * 加 `animate-pulse-brand` 1.5s 后由父组件清空。ProductList **不**自行管理 timer,
+   * 避免子组件与父组件双计时器冲突(同 ticket 03 行级 pulse 的受控模式)。
+   *
+   * 不传 → 无 product pulse(向后兼容旧测试)。
+   */
+  pulseRef?: { productId: string } | null
+  /**
+   * ticket 07(ADR-0018 D1/D2):父组件透传一个 ref,ProductList 把它绑到根容器
+   * div 上。CitationOverlay 据此拿到 product 卡片容器,内部 querySelector 找
+   * `[data-product-id]`(SVG 源点定位)。
+   * 不传 → 不绑 ref(向后兼容旧用法)。
+   */
+  containerRef?: React.Ref<HTMLDivElement>
 }
 
 // ---------------------------------------------------------------------------
@@ -149,10 +165,12 @@ export function ProductList({
   onItemClick,
   onAddSyntheticChunk,
   citationSources,
+  pulseRef,
+  containerRef,
 }: ProductListProps) {
   // 只读视图(等价于 VS2):editable=false 直接渲染旧版
   if (!editable) {
-    return <ReadOnlyProductList products={products} />
+    return <ReadOnlyProductList products={products} containerRef={containerRef} />
   }
 
   return (
@@ -162,6 +180,8 @@ export function ProductList({
       onItemClick={onItemClick}
       onAddSyntheticChunk={onAddSyntheticChunk}
       citationSources={citationSources}
+      pulseRef={pulseRef}
+      containerRef={containerRef}
     />
   )
 }
@@ -170,10 +190,17 @@ export function ProductList({
 // 只读视图(等价 VS2,editable=false 走此分支;不依赖 React state)
 // ===========================================================================
 
-function ReadOnlyProductList({ products }: { products: AnalyzingProductGroup }) {
+function ReadOnlyProductList({
+  products,
+  containerRef,
+}: {
+  products: AnalyzingProductGroup
+  containerRef?: Ref<HTMLDivElement>
+}) {
   return (
     <div
       data-testid="product-list"
+      ref={containerRef}
       className="bg-bg-elevated border border-border rounded-lg overflow-hidden h-full flex flex-col"
     >
       <div className="px-4 py-3 border-b border-border bg-bg-subtle flex items-center justify-between flex-shrink-0">
@@ -224,6 +251,7 @@ function ReadOnlySection({
               key={it.id}
               data-testid={`${meta.testId}-item`}
               data-item-id={it.id}
+              data-product-id={it.id}
               data-severity={it.severity}
               className={`bg-bg-subtle border border-border rounded-md border-l-[3px] ${SEVERITY_BORDER[it.severity]} px-3 py-2`}
             >
@@ -251,12 +279,16 @@ function InteractiveProductList({
   onItemClick,
   onAddSyntheticChunk,
   citationSources,
+  pulseRef,
+  containerRef,
 }: {
   products: AnalyzingProductGroup
   onAction: (change: ProductChange) => void | Promise<void>
   onItemClick?: (itemId: string) => void
   onAddSyntheticChunk?: (chunk: AnalyzingChunk) => void
   citationSources?: CitationSourceOption[]
+  pulseRef?: { productId: string } | null
+  containerRef?: Ref<HTMLDivElement>
 }) {
   // per-card 状态:仅记录当前不在 normal 的卡片 id + state
   // 用 Map<itemId, CardState> 而不是 Set<itemId>:允许 normal / editing / confirm-delete 共存(虽然实际同一时间一卡只有一种)
@@ -406,6 +438,7 @@ function InteractiveProductList({
   return (
     <div
       data-testid="product-list"
+      ref={containerRef}
       className="bg-bg-elevated border border-border rounded-lg overflow-hidden h-full flex flex-col"
     >
       <div className="px-4 py-3 border-b border-border bg-bg-subtle flex items-center justify-between flex-shrink-0">
@@ -431,6 +464,7 @@ function InteractiveProductList({
           onToggleMergeCheckbox={toggleMergeCheckbox}
           onOpenAdd={() => setAddDialog('subproblems')}
           onItemClick={onItemClick}
+          pulseRef={pulseRef}
         />
         <InteractiveSection
           meta={RISK_META}
@@ -445,6 +479,7 @@ function InteractiveProductList({
           onToggleMergeCheckbox={toggleMergeCheckbox}
           onOpenAdd={() => setAddDialog('risks')}
           onItemClick={onItemClick}
+          pulseRef={pulseRef}
         />
         <InteractiveSection
           meta={OPTION_META}
@@ -459,6 +494,7 @@ function InteractiveProductList({
           onToggleMergeCheckbox={toggleMergeCheckbox}
           onOpenAdd={() => setAddDialog('options')}
           onItemClick={onItemClick}
+          pulseRef={pulseRef}
         />
       </div>
 
@@ -517,6 +553,7 @@ interface InteractiveSectionProps {
   onToggleMergeCheckbox: (id: string) => void
   onOpenAdd: () => void
   onItemClick?: (itemId: string) => void
+  pulseRef?: { productId: string } | null
 }
 
 function InteractiveSection({
@@ -532,6 +569,7 @@ function InteractiveSection({
   onToggleMergeCheckbox,
   onOpenAdd,
   onItemClick,
+  pulseRef,
 }: InteractiveSectionProps) {
   return (
     <section data-testid={meta.testId} className="mb-4 last:mb-0">
@@ -562,6 +600,7 @@ function InteractiveSection({
               onToggleMergeMode={() => onToggleMergeMode(kind, it.id)}
               onToggleMergeCheckbox={() => onToggleMergeCheckbox(it.id)}
               onItemClick={onItemClick ? () => onItemClick(it.id) : undefined}
+              pulseRef={pulseRef}
             />
           ))}
         </ul>
@@ -595,6 +634,12 @@ interface InteractiveItemProps {
   onToggleMergeMode: () => void
   onToggleMergeCheckbox: () => void
   onItemClick?: () => void
+  /**
+   * ticket 07(ADR-0018 D3):反向联动"点左栏 span → 滚右栏 product 卡片 + pulse"。
+   * `pulseRef.productId === item.id` → 该卡片加 `animate-pulse-brand`;1.5s 后由
+   * 父组件清空 pulseRef(ProductList 不自管 timer,避免双计时器)。
+   */
+  pulseRef?: { productId: string } | null
 }
 
 function InteractiveItem({
@@ -609,6 +654,7 @@ function InteractiveItem({
   onToggleMergeMode,
   onToggleMergeCheckbox,
   onItemClick,
+  pulseRef,
 }: InteractiveItemProps) {
   const isMergeModeForThisKind = mergeMode?.kind === kind
   const checked = isMergeModeForThisKind && mergeMode?.selected.has(item.id)
@@ -618,6 +664,8 @@ function InteractiveItem({
   const citationMissing =
     item.synthetic === true &&
     (!item.source_refs || item.source_refs.length === 0)
+  // ticket 07:左栏反向联动 → 当前 product id 命中 pulseRef → 加 pulse class
+  const pulsing = pulseRef?.productId === item.id
 
   // 编辑态:本地临时 title;提交时回传 patch
   const [editTitle, setEditTitle] = useState(item.title)
@@ -643,16 +691,20 @@ function InteractiveItem({
     cardCls += ` ${SEVERITY_BORDER[item.severity]}`
   }
   if (clickable) cardCls += ' cursor-pointer hover:border-brand-100 hover:bg-brand-50/20'
+  // ticket 07:反向联动命中 → 加 pulse class(animation 在 globals.css · ticket 03)
+  if (pulsing) cardCls += ' animate-pulse-brand'
 
   return (
     <li
       data-testid={testIdPrefix}
       data-item-id={item.id}
+      data-product-id={item.id}
       data-severity={item.severity}
       data-state={state}
       data-kind={kind}
       data-clickable={clickable ? 'true' : 'false'}
       data-synthetic={item.synthetic ? 'true' : 'false'}
+      data-pulsing={pulsing ? 'true' : 'false'}
       onClick={clickable ? onItemClick : undefined}
       className={cardCls}
     >

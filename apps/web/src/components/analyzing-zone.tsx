@@ -35,6 +35,7 @@ import {
   DocumentReaderPane,
   PRD_TAB_ID,
 } from './document-reader-pane'
+import { CitationOverlay } from './citation-overlay'
 
 /**
  * ANALYZING 工位组件(ADR-0011 §6 ANALYZING 布局 · issue 19)
@@ -132,6 +133,33 @@ function findProductById(
     if (hit) return hit
   }
   return null
+}
+
+/**
+ * 比较两个 SourceRef 是否指向同一出处(用于反向联动反查 productId)。
+ *
+ * 规则:
+ * - kind 必须相同
+ * - prd / aux:lineRange 起止完全相等
+ * - aux:auxId 必须相等(同名 aux 不一定有相同行)
+ * - asset:assetId 必须相等
+ */
+function isSameSourceRef(a: SourceRef, b: SourceRef): boolean {
+  if (a.kind !== b.kind) return false
+  if (a.kind === 'asset' && b.kind === 'asset') {
+    return a.assetId === b.assetId
+  }
+  if (a.kind === 'aux' && b.kind === 'aux') {
+    return (
+      a.auxId === b.auxId &&
+      a.lineRange[0] === b.lineRange[0] &&
+      a.lineRange[1] === b.lineRange[1]
+    )
+  }
+  if (a.kind === 'prd' && b.kind === 'prd') {
+    return a.lineRange[0] === b.lineRange[0] && a.lineRange[1] === b.lineRange[1]
+  }
+  return false
 }
 
 export function AnalyzingZone({ data }: AnalyzingZoneProps) {
@@ -256,12 +284,18 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   // - activeSourceRef:当前联动的 source_ref(点右栏卡片设置)
   // - pulseRef:传给左栏阅读器触发切 Tab + 滚 + pulse;1.5s 后清空
   // - toasts:无出处等提示
+  //
+  // ticket 07 扩展(ADR-0018 D3):pulseRef 类型 union 化,新增 `{ productId }` 分支
+  // 用于反向联动"点左栏 span → 滚右栏 product 卡片 + pulse"。DocumentReaderPane
+  // 用 `if ('tabId' in pulseRef)` 守卫过滤 `{ productId }`(行级联动由 DocumentReaderPane
+  // 消费;产品卡片 pulse 由 ProductList 消费)。
   // -------------------------------------------------------------------------
+  type PulseRefState =
+    | { tabId: string; lineRange: readonly [number, number] }
+    | { productId: string }
+    | null
   const [activeSourceRef, setActiveSourceRef] = useState<SourceRef | null>(null)
-  const [pulseRef, setPulseRef] = useState<{
-    tabId: string
-    lineRange: readonly [number, number]
-  } | null>(null)
+  const [pulseRef, setPulseRef] = useState<PulseRefState>(null)
   const [toasts, setToasts] = useState<ToastItem[]>([])
   const pulseTimerRef = useRef<number | null>(null)
   const toastSeqRef = useRef(0)
@@ -279,6 +313,10 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
 
   // 主区滚动容器 ref(用于滚动位置持久化,issue 19c 验收 #5)
   const mainScrollRef = useRef<HTMLDivElement>(null)
+  // ticket 07:DocumentReaderPane / ProductList 容器 ref,传给 CitationOverlay 用于
+  // SVG 端点定位(`[data-product-id]` / `[data-testid="citation-highlight"]`)。
+  const docPaneRef = useRef<HTMLDivElement>(null)
+  const productListRef = useRef<HTMLDivElement>(null)
 
   // 当 props.data.chunks 变化(SSR re-render / 路由切换)时,重新同步 active 会话 chunks
   const lastSyncedDataRef = useRef(data.chunks)
@@ -372,6 +410,44 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       if (!isDesktop) setNarrowTab('doc')
     },
     [products, pushToast, isDesktop],
+  )
+
+  // -------------------------------------------------------------------------
+  // 反向联动(ticket 07 · ADR-0018 D3 · ADR-0017 D4 v2 补齐)
+  // - DocumentReaderPane 通过 onSourceRefClick(ref) 通知父组件
+  // - 父组件通过 source_refs 反查 productId(每条 source_ref 来自唯一 chunk,见
+  //   ADR-0017 D3 lineRange 指向唯一性)
+  // - 设 pulseRef = { productId },触发右栏产品卡片 pulse 1.5s
+  // - 同时 scrollIntoView 把对应产品卡片滚到视野中央(避免卡片在视口外 pulse
+  //   用户看不到)
+  // - asset ref 不画线(SVG 端点跳过);本路径只走 prd / aux 的反向联动
+  // - onSourceRefClick 签名含 `SourceRef | null`(组件接口位保留);null 走 no-op
+  // -------------------------------------------------------------------------
+  const handleSourceRefClick = useCallback(
+    (ref: SourceRef | null) => {
+      if (!ref) return
+      // 反查 productId:遍历当前 chunks,找到第一个 source_ref 与 ref 匹配的 chunk
+      const hit = chunks.find((c) =>
+        c.source_refs?.some((r) => isSameSourceRef(r, ref)),
+      )
+      if (!hit) return
+      // 设 pulseRef 触发 ProductList 卡片 pulse
+      setPulseRef({ productId: hit.id })
+      if (pulseTimerRef.current !== null) window.clearTimeout(pulseTimerRef.current)
+      pulseTimerRef.current = window.setTimeout(() => setPulseRef(null), 1500)
+      // 滚对应 product 卡片到视野中央
+      // (跨 microtask 等 React commit 完成,DOM 已挂载新 product 时再查)
+      if (typeof window === 'undefined') return
+      window.requestAnimationFrame(() => {
+        const card = productListRef.current?.querySelector<HTMLElement>(
+          `[data-product-id="${CSS.escape(hit.id)}"]`,
+        )
+        if (card && typeof card.scrollIntoView === 'function') {
+          card.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }
+      })
+    },
+    [chunks],
   )
 
   // 卸载清 pulse 计时器
@@ -709,11 +785,11 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
           <div
             data-testid="analyzing-grid"
             data-viewport="desktop"
-            className="grid grid-cols-1 lg:grid-cols-3 gap-5 flex-1 min-h-0"
+            className="relative grid grid-cols-1 lg:grid-cols-3 gap-5 flex-1 min-h-0"
           >
             <div
               data-testid="analyzing-left-col"
-              className="col-span-1 lg:col-span-2 flex flex-col min-h-0"
+              className="col-span-1 lg:col-span-2 flex flex-col min-h-0 relative"
             >
               <DocumentReaderPane
                 prdMarkdown={data.prdMarkdown}
@@ -723,6 +799,8 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
                 citationRefs={citationRefs}
                 activeSourceRef={activeSourceRef}
                 pulseRef={pulseRef}
+                containerRef={docPaneRef}
+                onSourceRefClick={handleSourceRefClick}
               />
             </div>
             <div
@@ -737,9 +815,22 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
                   onItemClick={handleItemClick}
                   onAddSyntheticChunk={handleAddSyntheticChunk}
                   citationSources={citationSources}
+                  pulseRef={
+                    pulseRef && 'productId' in pulseRef ? pulseRef : null
+                  }
+                  containerRef={productListRef}
                 />
               </div>
             </div>
+            {/* ticket 07 · ADR-0018 D1:CitationOverlay 作为兄弟节点覆盖在主区
+                (absolute inset-0 + z-10),SVG 端点 = 左栏 mark / 右栏 product 卡片 */}
+            <CitationOverlay
+              chunks={chunks}
+              productListRef={productListRef}
+              documentBodyRef={docPaneRef}
+              mainScrollRef={mainScrollRef}
+              isDesktop={isDesktop}
+            />
           </div>
         ) : (
           <NarrowLayout
@@ -818,7 +909,14 @@ interface NarrowLayoutProps {
   citationSources: CitationSourceOption[]
   citationRefs: ReturnType<typeof collectCitationRefs>
   activeSourceRef: SourceRef | null
-  pulseRef: { tabId: string; lineRange: readonly [number, number] } | null
+  /**
+   * ticket 07(ADR-0018 D3):pulseRef 类型 union 化;DocumentReaderPane 与 ProductList
+   * 各自按 `'tabId' in pulseRef` / `'productId' in pulseRef` 守卫过滤自己关心的分支。
+   */
+  pulseRef:
+    | { tabId: string; lineRange: readonly [number, number] }
+    | { productId: string }
+    | null
   onItemClick: (itemId: string) => void
   onProductAction: (change: ProductChange) => Promise<void>
   onAddSyntheticChunk: (chunk: AnalyzingChunk) => void
