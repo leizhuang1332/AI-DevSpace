@@ -1,0 +1,43 @@
+apps/web/src/__tests__/analyzing-product-synthetic.test.tsx
+  s_a68bd9b3849618::t_2630d3d5961c81 1-229
+apps/web/src/__tests__/analyzing-zone-synthetic.test.tsx
+  s_a68bd9b3849618::t_51570af07d291a 1-79
+apps/web/src/components/analyzing-zone.tsx
+  s_a68bd9b3849618::t_c1d8e6ea206e4d 28
+  s_a68bd9b3849618::t_c2bb555fa978ee 301-312,485-502,708-709
+apps/web/src/lib/__tests__/analyzing-synthetic-chunk.test.ts
+  s_a68bd9b3849618::t_b6281d68e27e6a 1-133
+apps/web/src/components/product-list.tsx
+  s_a68bd9b3849618::t_50d61e92b4aa09 24-29
+  s_a68bd9b3849618::t_8b27a6d3d9c0d8 729
+  s_a68bd9b3849618::t_37ea027c7ade49 252-253,258-259
+  s_a68bd9b3849618::t_33f6281a0e7928 617-620
+  s_a68bd9b3849618::t_1b0a33c532694c 655
+  s_a68bd9b3849618::t_4bcdd20d8be634 682
+  s_a68bd9b3849618::t_6c9feefb5b6465 378-380,383,392-400,403
+  s_a68bd9b3849618::t_a673b3a2d05979 712-718,721-728,730-734
+  s_a68bd9b3849618::t_770a36bd43b85a 385,391
+  s_a68bd9b3849618::t_a7497c7234de00 150-151,163-164
+  s_a68bd9b3849618::t_8581cd3d6e914c 485-486
+  s_a68bd9b3849618::t_d1395645f62781 1005,1011-1012,1016-1022,1025-1042,1067-1123,1136
+  s_a68bd9b3849618::t_36a5fd6ef6b6e2 1161-1170
+  s_a68bd9b3849618::t_b408f3d1fe27a0 42-56,74-86
+apps/web/src/lib/analyzing.ts
+  s_a68bd9b3849618::t_70f09fa79e6b96 547-634
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "856ade194e0ffe94d656820a1cdc63ec64ad75ff",
+  "prompts": {},
+  "sessions": {
+    "s_a68bd9b3849618": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9f4d0264-5325-46cd-955d-4f751520b6c6",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
