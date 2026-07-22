@@ -1,0 +1,33 @@
+.scratch/analyzing-doc-reader/issues/07-svg-cross-column-citation-lines.md
+  s_0bfec09f8a9c79::t_1545178ee52d84 1-135
+docs/adr/0019-analyzing-grid-locked-height-independent-scroll.md
+  s_a7e57ccf90e054::t_267044544881e5 1-154
+.scratch/analyzing-doc-reader/issues/08-analyzing-grid-locked-height-and-independent-scroll.md
+  s_a7e57ccf90e054::t_d72d4fdf37b90c 1-87
+docs/adr/0018-analyzing-svg-cross-column-lines.md
+  s_0bfec09f8a9c79::t_ff4c2564483139 1-310
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "01d00679f4ef32460a8ce92f423e18eb3bd8cb74",
+  "prompts": {},
+  "sessions": {
+    "s_0bfec09f8a9c79": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2cb5bbaa-0648-45a0-8594-cb4babcd4a0b",
+        "model": "MiniMax-M3"
+      },
+      "human_author": null
+    },
+    "s_a7e57ccf90e054": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "49c05ec9-075a-459d-a5b4-382ad035dac8",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
