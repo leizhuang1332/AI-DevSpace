@@ -114,3 +114,21 @@ Slice: 2/6
 - **summary + stats** 数据可从 `chunks.jsonl` 派生(解析最后几条 meta chunk),不强制独立字段
 - **HTML 原型对照**:`docs/design/pages/11h-A-zone-multisession-tabs.html` 中部"思考流 + 识别产物"两列 + 底部"插话输入条"
 - **完成提示"切到 CLARIFYING 吗?"**:本 slice 沿用原行为;VS6 改写决策 25 后去除
+
+---
+
+## v2 增量(已由 ADR-0017 承载 · 2026-07-22)
+
+> ticket 05(`.scratch/analyzing-doc-reader/issues/05-narrow-viewport-and-tests.md`)
+> 落地后,该 slice 的"主区左侧思考流"输出形态由 ADR-0017 改写 —
+> `<ThinkingStream>` 渲染出口被删,**phase state machine 内部状态保留**(`pause` /
+> `reset` / `skip` 仍可点,UI 不再展示思考流)。左栏改为 `<DocumentReaderPane>`
+> 文档对照阅读器(ADR-0017 D1 / D2)。
+>
+> - `InterjectInput` **保留**(D2 ② 沿用)
+> - SSE 推送 + chunks.jsonl 单一真相源**保留**(D5 / D6 沿用)
+> - synthetic chunk 合成(用户手加 product)**新增**(ADR-0017 D6 · ticket 04)
+>
+> 本 issue 视为**保留底座 + 上层被替换**;前端 markdown 注释
+> `apps/web/src/components/analyzing-zone.tsx:22-23` 留有 ADR-0017 D1 · ticket 02
+> 的删除说明。

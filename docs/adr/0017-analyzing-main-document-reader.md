@@ -424,3 +424,9 @@ ANALYZING 工位主区(顶到底):
 | 日期 | 变更 | 作者 |
 |---|---|---|
 | 2026-07-21 | 初稿:基于 11 轮 grilling 会话,沉淀 D1-D6,新增主区文档阅读器与画线关联机制 | Grilling 会话 |
+| 2026-07-22 | ticket 01(数据契约 + SSR 装载)落地,新增 `prdMarkdown` / `auxFiles` / `assetList` 字段 | AI agent / ticket 01 |
+| 2026-07-22 | ticket 02(主区文档阅读器面板)落地,新增 `<DocumentReaderPane>`,删 `<ThinkingStream>` 渲染出口 | AI agent / ticket 02 |
+| 2026-07-22 | ticket 03(source 画线渲染 + 联动)落地,新增 `citation-highlight` / `pulseRef` | AI agent / ticket 03 |
+| 2026-07-22 | ticket 04(synthetic chunk 合成 + 无出处角标)落地 | AI agent / ticket 04 |
+| 2026-07-22 | ticket 06(agent emit `source_refs`)落地 | AI agent / ticket 06 |
+| 2026-07-22 | ticket 05(窄视口折叠 + 全量回归 + E2E 验收)落地 — 锁定 D1 窄视口形态为**候选 A:垂直堆叠 + 顶部 Tab 切换**(默认 active=产物);联动行为:点右栏产物卡片 → 窄视口自动切"文档" Tab + 左栏 aux / PRD 切 Tab + pulse 1.5s;新增 `useMediaQuery` SSR-safe hook + vitest `matchMedia` 桩 + 10 条 narrow viewport 验收测试 | AI agent / ticket 05 |

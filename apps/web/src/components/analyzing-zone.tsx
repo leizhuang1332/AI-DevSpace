@@ -19,6 +19,7 @@ import {
 } from '@/lib/analyzing'
 import type { ProductChange } from '@/lib/products'
 import { updateProduct } from '@/lib/products-actions'
+import { useMediaQuery } from '@/lib/use-media-query'
 // 注:ThinkingStream 组件本身已不再导入(ADR-0017 D1 · ticket 02):
 // 左栏"思考流"UI 删,phase state machine 内部状态保留(供未来 StatusBar/插话)。
 import { EmptyState } from './empty-state'
@@ -42,7 +43,7 @@ import {
  * - [11e-stage-adaptive-analyzing.html](../../../../docs/design/pages/11e-stage-adaptive-analyzing.html)(原"观察屏")
  * - [11h-A-zone-multisession-tabs.html](../../../../docs/design/pages/11h-A-zone-multisession-tabs.html)(多会话 Tab,VS3 基线)
  *
- * 布局(ADR-0017 D1 · ticket 02 —— 2:1 左右分栏,删 ThinkingStream):
+ * 桌面布局(ADR-0017 D1 · ticket 02 —— 2:1 左右分栏,删 ThinkingStream;min-width ≥ 1024px):
  * ┌────────────────────────────────────────────────┐
  * │ Stage strip(ANALYZING 徽章 + 进度 + 状态)       │
  * ├────────────────────────────────────────────────┤
@@ -60,12 +61,25 @@ import {
  * │ 💬 插话输入条(InterjectInput · 按 active 会话推送新 chunk)│
  * └────────────────────────────────────────────────┘
  *
+ * 窄视口布局(ticket 05 · max-width < 1024px —— 候选 A):
+ * - 检测 `useMediaQuery('(min-width: 1024px)')` → false 时切到窄视口形态
+ * - 主区顶部加 `<div role="tablist" data-testid="analyzing-narrow-tabs">` 两个 Tab:
+ *   📑 文档 / 🎯 产物(默认 active = "产物",产物是用户主要看的)
+ * - 选中"产物" → 隐藏 DocumentReaderPane,只渲染 Summary + ProductList(全宽)
+ * - 选中"文档" → 渲染 DocumentReaderPane 全宽;Summary + ProductList 隐藏
+ * - Tab 切换无动画(避免窄屏滚动性能问题)
+ *
+ * 联动行为(ticket 03 · 跨窄/桌面形态一致):
+ * - 点右栏产物卡片:窄视口下自动切到"文档" Tab + 左栏切 AuxFile Tab + pulse 1.5s;
+ *   桌面形态下不变(直接切左栏 Tab + pulse,窄 Tab 不动)
+ *
  * 设计要点:
  * - 'use client':打字机 / 暂停 / 重置 / 完成提示 / SSE 订阅 / Tab 切换都是客户端交互
  * - props.data 由 server 注入(从 getAnalyzingData),组件只关心渲染 + 客户端状态
  * - **ADR-0017 D1**:主区改为 2:1 左右分栏;左栏 = `<DocumentReaderPane>`,右栏 = Summary + ProductList
  * - **ADR-0017 D1**:`<ThinkingStream>` 渲染出口删除;phase state machine 内部状态保留
  *   (pause / reset / skip 仍可点,UI 不再展示思考流)
+ * - **ticket 05 窄视口**:见上方"窄视口布局"段;响应式断点统一走 CSS `min-width: 1024px`
  * - 打字机 20ms / 字(issue 19 验收 #2);chunk 间 200ms 间隔,模拟"思考停顿"
  * - 点击 ⏸ 暂停 / 继续;点击 ↶ 清空所有进度从 chunk-0 开始
  * - SSE 订阅 `/api/requirement/<id>/events` —— 收到 `analysis_chunk` 事件追加到 chunks
@@ -225,6 +239,19 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   const [interjectError, setInterjectError] = useState<string | null>(null)
 
   // -------------------------------------------------------------------------
+  // 窄视口断点 + 窄视口 Tab(ticket 05 · ADR-0017 窄视口 UX · 候选 A)
+  // - isDesktop = true ⇒ 主区仍走 2:1(走下面 <div data-testid="analyzing-grid">)
+  // - isDesktop = false ⇒ 主区走窄视口 Tab:
+  //     * narrowTab='products'(默认) ⇒ 只渲染 Summary + ProductList
+  //     * narrowTab='doc'             ⇒ 只渲染 DocumentReaderPane 全宽
+  //   顶部两个 Tab(📑 文档 / 🎯 产物)用于切换
+  // - 联动行为:点右栏产物卡片 → 窄视口下自动 narrowTab='doc' + DocumentReader
+  //   切 Tab + pulse(联动本身在 handleItemClick 已设 pulseRef;此处仅切 narrowTab)
+  // -------------------------------------------------------------------------
+  const isDesktop = useMediaQuery('(min-width: 1024px)')
+  const [narrowTab, setNarrowTab] = useState<'doc' | 'products'>('products')
+
+  // -------------------------------------------------------------------------
   // 画线联动状态(ticket 03 · ADR-0017 D4)
   // - activeSourceRef:当前联动的 source_ref(点右栏卡片设置)
   // - pulseRef:传给左栏阅读器触发切 Tab + 滚 + pulse;1.5s 后清空
@@ -332,6 +359,8 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       setActiveSourceRef(ref)
       if (ref.kind === 'asset') {
         // asset 无行范围:切到 PRD(资产内联在 PRD)但不做行级 pulse
+        // 窄视口下也切到文档阅读器(让用户看到 asset 高亮)
+        if (!isDesktop) setNarrowTab('doc')
         return
       }
       const tabId = ref.kind === 'aux' ? ref.auxId : PRD_TAB_ID
@@ -339,8 +368,10 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       setPulseRef({ tabId, lineRange: ref.lineRange })
       if (pulseTimerRef.current !== null) window.clearTimeout(pulseTimerRef.current)
       pulseTimerRef.current = window.setTimeout(() => setPulseRef(null), 1500)
+      // ticket 05 · 联动在窄视口下自动切到"文档" Tab(让用户看到 pulse 高亮)
+      if (!isDesktop) setNarrowTab('doc')
     },
-    [products, pushToast],
+    [products, pushToast, isDesktop],
   )
 
   // 卸载清 pulse 计时器
@@ -670,47 +701,62 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
         ref={mainScrollRef}
         data-testid="analyzing-main"
         data-active-session-id={activeSessionId}
-        data-layout="doc-reader-2-1"
+        data-layout={isDesktop ? 'doc-reader-2-1' : 'narrow-tabs'}
         className="flex-1 overflow-auto px-6 py-6 flex flex-col gap-5"
       >
-        {/* 主区 2:1 分栏(ADR-0017 D1 · ticket 02):
-            左栏 = <DocumentReaderPane>(Tab 栏 + Markdown 阅读器)
-            右栏 = Summary + ProductList(产物可编辑,沿用 ADR-0013 D2 ③)
-            窄视口(<lg)→ Tailwind 自动垂直堆叠(左在上 / 右在下) */}
-        <div
-          data-testid="analyzing-grid"
-          className="grid grid-cols-1 lg:grid-cols-3 gap-5 flex-1 min-h-0"
-        >
+        {/* 主区内容 — 桌面 = 2:1 分栏;窄视口 = 顶部 Tab + 单栏切换(ticket 05) */}
+        {isDesktop ? (
           <div
-            data-testid="analyzing-left-col"
-            className="col-span-1 lg:col-span-2 flex flex-col min-h-0"
+            data-testid="analyzing-grid"
+            data-viewport="desktop"
+            className="grid grid-cols-1 lg:grid-cols-3 gap-5 flex-1 min-h-0"
           >
-            <DocumentReaderPane
-              prdMarkdown={data.prdMarkdown}
-              auxFiles={data.auxFiles}
-              assetList={data.assetList}
-              citationCounts={countCitationsByDoc(chunks)}
-              citationRefs={citationRefs}
-              activeSourceRef={activeSourceRef}
-              pulseRef={pulseRef}
-            />
-          </div>
-          <div
-            data-testid="analyzing-right-col"
-            className="col-span-1 flex flex-col gap-5 min-h-0"
-          >
-            <Summary summary={data.summary} stats={data.stats} />
-            <div className="flex-1 min-h-0">
-              <ProductList
-                products={products}
-                onAction={handleProductAction}
-                onItemClick={handleItemClick}
-                onAddSyntheticChunk={handleAddSyntheticChunk}
-                citationSources={citationSources}
+            <div
+              data-testid="analyzing-left-col"
+              className="col-span-1 lg:col-span-2 flex flex-col min-h-0"
+            >
+              <DocumentReaderPane
+                prdMarkdown={data.prdMarkdown}
+                auxFiles={data.auxFiles}
+                assetList={data.assetList}
+                citationCounts={countCitationsByDoc(chunks)}
+                citationRefs={citationRefs}
+                activeSourceRef={activeSourceRef}
+                pulseRef={pulseRef}
               />
             </div>
+            <div
+              data-testid="analyzing-right-col"
+              className="col-span-1 flex flex-col gap-5 min-h-0"
+            >
+              <Summary summary={data.summary} stats={data.stats} />
+              <div className="flex-1 min-h-0">
+                <ProductList
+                  products={products}
+                  onAction={handleProductAction}
+                  onItemClick={handleItemClick}
+                  onAddSyntheticChunk={handleAddSyntheticChunk}
+                  citationSources={citationSources}
+                />
+              </div>
+            </div>
           </div>
-        </div>
+        ) : (
+          <NarrowLayout
+            data={data}
+            products={products}
+            chunks={chunks}
+            citationSources={citationSources}
+            citationRefs={citationRefs}
+            activeSourceRef={activeSourceRef}
+            pulseRef={pulseRef}
+            onItemClick={handleItemClick}
+            onProductAction={handleProductAction}
+            onAddSyntheticChunk={handleAddSyntheticChunk}
+            narrowTab={narrowTab}
+            onNarrowTabChange={setNarrowTab}
+          />
+        )}
         {interjectError && (
           <div
             data-testid="interject-error"
@@ -745,6 +791,147 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       {/* 画线联动提示(ticket 03):无出处产物点击 → "未关联原文出处" toast */}
       <ToastHost items={toasts} onDismiss={dismissToast} />
     </main>
+  )
+}
+
+// ============================================================================
+// NarrowLayout(窄视口 · ticket 05 · ADR-0017 窄视口 UX · 候选 A)
+//
+// 形态:
+// ┌─────────────────────────────────────────────────────────────┐
+// │ [📑 文档] [🎯 产物]    ← role="tablist"                   │
+// ├─────────────────────────────────────────────────────────────┤
+// │ narrowTab='doc'    → DocumentReaderPane(全宽)              │
+// │ narrowTab='products' → Summary + ProductList(全宽)         │
+// └─────────────────────────────────────────────────────────────┘
+// - 默认 active = 'products'(让用户一打开就看到产物)
+// - Tab 切换无动画(避免窄屏滚动性能问题,见 ADR-0017 ticket 05)
+// - 联动:handleItemClick 在父组件检测 !isDesktop → setNarrowTab('doc'),
+//   此处只是被动渲染态
+// ============================================================================
+
+interface NarrowLayoutProps {
+  data: AnalyzingData
+  products: AnalyzingProductGroup
+  /** 当前 active 会话的 chunks(ticket 01 数据契约变化,SSR 已注入 + 客户端 SSE 追加) */
+  chunks: AnalyzingChunk[]
+  citationSources: CitationSourceOption[]
+  citationRefs: ReturnType<typeof collectCitationRefs>
+  activeSourceRef: SourceRef | null
+  pulseRef: { tabId: string; lineRange: readonly [number, number] } | null
+  onItemClick: (itemId: string) => void
+  onProductAction: (change: ProductChange) => Promise<void>
+  onAddSyntheticChunk: (chunk: AnalyzingChunk) => void
+  narrowTab: 'doc' | 'products'
+  onNarrowTabChange: (tab: 'doc' | 'products') => void
+}
+
+function NarrowLayout({
+  data,
+  products,
+  chunks,
+  citationSources,
+  citationRefs,
+  activeSourceRef,
+  pulseRef,
+  onItemClick,
+  onProductAction,
+  onAddSyntheticChunk,
+  narrowTab,
+  onNarrowTabChange,
+}: NarrowLayoutProps) {
+  return (
+    <div
+      data-testid="analyzing-narrow"
+      data-narrow-tab={narrowTab}
+      className="flex flex-col gap-3 flex-1 min-h-0"
+    >
+      {/* 顶部 Tab 切换("📑 文档" / "🎯 产物") */}
+      <div
+        role="tablist"
+        aria-label="ANALYZING 窄视口切换"
+        data-testid="analyzing-narrow-tabs"
+        className="flex items-center gap-1 px-1 py-1 border border-border rounded-lg bg-bg-subtle"
+      >
+        <button
+          type="button"
+          role="tab"
+          data-testid="analyzing-narrow-tab-doc"
+          data-tab-id="doc"
+          data-active={narrowTab === 'doc' ? 'true' : 'false'}
+          aria-selected={narrowTab === 'doc' ? 'true' : 'false'}
+          onClick={() => onNarrowTabChange('doc')}
+          className={
+            narrowTab === 'doc'
+              ? 'flex-1 h-9 rounded-md text-sm font-medium bg-bg-elevated text-text-1 border border-border flex items-center justify-center gap-1.5'
+              : 'flex-1 h-9 rounded-md text-sm font-medium bg-transparent text-text-2 hover:text-text-1 flex items-center justify-center gap-1.5 border border-transparent'
+          }
+        >
+          <span>📑</span>
+          <span>文档</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          data-testid="analyzing-narrow-tab-products"
+          data-tab-id="products"
+          data-active={narrowTab === 'products' ? 'true' : 'false'}
+          aria-selected={narrowTab === 'products' ? 'true' : 'false'}
+          onClick={() => onNarrowTabChange('products')}
+          className={
+            narrowTab === 'products'
+              ? 'flex-1 h-9 rounded-md text-sm font-medium bg-bg-elevated text-text-1 border border-border flex items-center justify-center gap-1.5'
+              : 'flex-1 h-9 rounded-md text-sm font-medium bg-transparent text-text-2 hover:text-text-1 flex items-center justify-center gap-1.5 border border-transparent'
+          }
+        >
+          <span>🎯</span>
+          <span>产物</span>
+        </button>
+      </div>
+
+      {/* 主区:根据 narrowTab 单条件渲染 */}
+      <div
+        data-testid="analyzing-narrow-body"
+        className="flex-1 min-h-0"
+      >
+        {narrowTab === 'doc' ? (
+          <div
+            data-testid="analyzing-narrow-pane-doc"
+            role="tabpanel"
+            aria-labelledby="analyzing-narrow-tab-doc"
+            className="h-full"
+          >
+            <DocumentReaderPane
+              prdMarkdown={data.prdMarkdown}
+              auxFiles={data.auxFiles}
+              assetList={data.assetList}
+              citationCounts={countCitationsByDoc(chunks)}
+              citationRefs={citationRefs}
+              activeSourceRef={activeSourceRef}
+              pulseRef={pulseRef}
+            />
+          </div>
+        ) : (
+          <div
+            data-testid="analyzing-narrow-pane-products"
+            role="tabpanel"
+            aria-labelledby="analyzing-narrow-tab-products"
+            className="flex flex-col gap-5 h-full min-h-0"
+          >
+            <Summary summary={data.summary} stats={data.stats} />
+            <div className="flex-1 min-h-0">
+              <ProductList
+                products={products}
+                onAction={onProductAction}
+                onItemClick={onItemClick}
+                onAddSyntheticChunk={onAddSyntheticChunk}
+                citationSources={citationSources}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 

@@ -2,11 +2,11 @@
 
 /**
  * DocumentReaderPane 组件 — ANALYZING 工位主区左侧文档对照阅读器
- *   (ADR-0017 D1 / D2 · ticket 02)
+ *   (ADR-0017 D2 · ticket 02 / 05)
  *
  * 视觉对照基线:docs/adr/0017-analyzing-main-document-reader.md §"D2 · 左栏"
  *
- * 职责:
+ * 职责(ADR-0017 D2):
  * - 顶部 Tab 栏:PRD + 每个 AuxFile 一个 Tab;每个 Tab 显示"🔗 N 处引用"
  *   (0 处引用显示中性"·"不带数字)
  * - 主体阅读区:当前 Tab 的 Markdown 全文渲染(沿用 <MarkdownPreview>)
@@ -19,9 +19,29 @@
  * 设计要点:
  * - 客户端组件:维护 `activeTabId` state(纯前端,不触发网络)
  * - 复用 <MarkdownPreview>:与 DRAFTING 阅读器一致渲染
+ * - **Tab 顺序** = [PRD, aux1, aux2 ...](aux 在 SSR loader 已按 usage_tag 6 类 + filename
+ *   字典序排序,见 `analyzing.server.ts`;此处不再二次排序)
+ * - **引用计数** `citationCounts` 由父组件从 chunks.source_refs 派生(见
+ *   `countCitationsByDoc`),Tab 标签直接显示;无 source_ref 的产物不算入
+ * - **Tab 切换不发网络** —— 所有文档已在 SSR 注入 props(`prdMarkdown` /
+ *   `auxFiles` body / `assetList`),`useState` 切 `activeTabId` 即可,
+ *   即便窄视口形态(ticket 05)也保持零网络
+ * - 联动 pulse(ticket 03):`pulseRef` 由父组件设置 → 自动切 Tab + 滚 + 1.5s 高亮
  * - `activeSourceRef` / `onSourceRefClick` 字段本期不消费(ticket 03 接入);
  *   保留接口位以避免后续 ticket 改动签名
- * - Tab 切换保持 SSR 注入数据不变,只换 active state
+ *
+ * Known limitations(ADR-0017 §"风险缓解" · 落地于 ticket 05 JSDoc):
+ * - **lineRange 漂移**:AI 输出的 source_ref.lineRange 与最新 PRD 行号不一致时
+ *   (用户在 DRAFTING 改完 PRD 后未重扫)→ UI 高亮会错位。`quote?` 字段虽存原文
+ *   片段做 sanity check(见 `data-quote-mismatch`),但 UI 不重排版;留 v2 修
+ * - **Asset 高亮基于 assetId 名匹配**:`citationRefs.asset[]` 按 assetId
+ *   (`assetId === AssetMeta.name`)比对;若 user 在 DRAFTING rename Asset
+ *   文件,高亮会失效(留 v2 接入 Asset 重命名监听)
+ * - **反向联动未实装**:点左栏高亮 span → 不滚动右栏卡片(本期 D4 v2 候选);
+ *   见 ADR-0017 D4 "本期不实现"
+ * - **Synthetic chunk 不持久化**:用户在 ProductList "+ 新增" 路径合成的
+ *   synthetic chunk 仅落到客户端 chunksBySessionId(本期不写 chunks.jsonl),
+ *   刷新页面后丢失;UI 卡片已挂 ⚠️ 角标提示(详见 ticket 04 + ADR-0017 D6)
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'

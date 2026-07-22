@@ -275,6 +275,63 @@ describe('AnalyzingZone · 空数据', () => {
 })
 
 // ============================================================================
+// ticket 05 · 关键场景补全:空 PRD + 空 aux · 单 PRD + 多 aux 排序 ·
+//   这些场景不依赖桌面 / 窄视口形态,在 ticket 02 已实装但 ticket 05 显式要求
+//   补齐回归覆盖(见 .scratch/analyzing-doc-reader/issues/05-narrow-viewport-and-tests.md
+//   §"全量回归测试")
+// ============================================================================
+
+describe('AnalyzingZone · 关键场景补全(ticket 05)', () => {
+  it('空 PRD + 空 aux → DocumentReaderPane 显示空态占位文案', async () => {
+    const data: AnalyzingData = {
+      ...emptyAnalyzing('EMPTY-BOTH'),
+      empty: false,
+      phase: 'active',
+      prdMarkdown: '',
+      auxFiles: [],
+    }
+    render(<AnalyzingZone data={data} />)
+    expect(screen.getByTestId('document-reader-pane')).toBeInTheDocument()
+    expect(screen.getByTestId('doc-reader-empty')).toBeInTheDocument()
+    expect(screen.getByText(/暂无需求文档与辅助材料/)).toBeInTheDocument()
+  })
+
+  it('单 PRD + 多 aux 时 DocumentReaderPane Tab 顺序保持 [PRD, aux1, aux2](auxFiles 入参顺序)', () => {
+    const data: AnalyzingData = {
+      ...emptyAnalyzing('PRD-PLUS-AUX'),
+      empty: false,
+      phase: 'active',
+      prdMarkdown: '# PRD',
+      auxFiles: [
+        {
+          id: 'aux-data',
+          filename: 'data-model.md',
+          usage_tag: 'data',
+          source_format: 'md',
+          converted_to_md: false,
+          body: 'data body',
+        },
+        {
+          id: 'aux-research',
+          filename: 'research.md',
+          usage_tag: 'research',
+          source_format: 'md',
+          converted_to_md: false,
+          body: 'research body',
+        },
+      ],
+    }
+    render(<AnalyzingZone data={data} />)
+    const tabs = screen.getAllByTestId('doc-reader-tab')
+    expect(tabs.map((t) => t.getAttribute('data-tab-id'))).toEqual([
+      'prd',
+      'aux-data',
+      'aux-research',
+    ])
+  })
+})
+
+// ============================================================================
 // 错误态 — 极端输入不应崩
 // ============================================================================
 
