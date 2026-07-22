@@ -44,6 +44,7 @@ import {
   emptyAnalyzing,
   isSourceRef,
   resolveAdmissionDimensions,
+  summarizeAnalyzingStats,
 } from './analyzing'
 import { loadTechBrief, loadModules } from './tech-brief.server'
 import type { TechBriefModulesFile } from './tech-brief'
@@ -602,6 +603,15 @@ function emptyAnalyzingWithOptions(
     ? countPendingAdjudications(options.analysisDir)
     : 0
   const sessionsBundle = loadSessionsBundle(options?.analysisSessionsDir, options?.lastSessionId)
+  // SSR 装载 active session 的 chunks(zone-data-fidelity-fixes/04 — 修复 ticket 阶段
+  // 遗漏的 wiring:fs 路径下 ANALYZING 工位 chunks 永远是 [],真 AI 重启后查看历史 /
+  // mock 数据都无法进入 UI。本函数之前未调 `loadSessionChunks`,active session 的
+  // chunks 完全丢失,UI 渲染"暂无思考流"。补这一行后,active session 的 chunks
+  // 走 fs 真实装载;切到非 active Tab 仍由 SSR 简化版决定(ticket 后续补 client
+  // 切 Tab 重发请求,本期不修)。
+  const activeChunks = options?.analysisSessionsDir
+    ? loadSessionChunks(options.analysisSessionsDir, sessionsBundle.activeSessionId)
+    : []
   const techBrief = options?.analysisDir ? loadTechBriefFromAnalysisDir(options.analysisDir) : null
   const requirementsRoot = options?.requirementsRoot ?? defaultRequirementsRoot()
   const hasRequirementMd = existsRequirementMd(requirementsRoot, requirementId)
@@ -642,6 +652,16 @@ function emptyAnalyzingWithOptions(
     }),
     sessions: sessionsBundle.sessions,
     activeSessionId: sessionsBundle.activeSessionId,
+    // active session 的 chunks(zone-data-fidelity-fixes/04 修复;ticket 阶段
+    // 遗漏的 wiring,fs 路径下 chunks 永远是 [] → 真 AI 历史回看 / mock 数据
+    // 无法进入 UI)。empty 分支不显式注入,沿用 emptyAnalyzing() 默认 [],
+    // 符合"主区引导去 DRAFTING,不渲染思考流"的语义。
+    chunks: activeChunks,
+    // stats 联动(zone-data-fidelity-fixes/04 修复):顶部 stats 卡片读 data.stats,
+    // 之前 spread emptyAnalyzing() 默认 {0,0,0,0} → 即使 chunks 有产物,顶部
+    // stats 也显示 0,与右栏 deriveProducts(chunks) 派生列表不一致(列表算对,
+    // stats 卡片算错)。用 summarizeAnalyzingStats(activeChunks) 派生。
+    stats: summarizeAnalyzingStats(activeChunks),
     ...techBrief,
     // SSR 注入字段(ADR-0017 D5)
     prdMarkdown: docs.prdMarkdown,

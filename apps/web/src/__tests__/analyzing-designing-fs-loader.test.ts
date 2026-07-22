@@ -54,7 +54,7 @@ afterEach(() => {
  *
  * 所以需求目录直接在 tmpRoot 下(不再嵌 `requirements/`)。两个工位的 fs
  * loader 都遵循同一约定:`<requirementsRoot>/<reqId>/<subDir>`。 */
-function writeAnalysisBundle(id: string, opts: { skipIndex?: boolean; skipChunks?: boolean } = {}): void {
+function writeAnalysisBundle(id: string, opts: { skipIndex?: boolean; skipChunks?: boolean; skipReqMd?: boolean } = {}): void {
   // ticket 05 / D-6 后,requirementsRoot 语义 = workspace 根,需求目录嵌 `requirements/`
   // 中间层(对齐 ADR-0002)。fixture 跟随调整。
   const sessionsDir = join(tmpRoot, 'requirements', id, 'analysis', 'sessions')
