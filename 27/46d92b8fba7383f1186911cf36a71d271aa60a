@@ -1,0 +1,53 @@
+apps/web/src/components/citation-overlay.tsx
+  s_b847b04372fc79::t_ef82d4df9efe38 336,345-347
+  s_b847b04372fc79::t_cfcde1ae023739 395-397
+  s_b847b04372fc79::t_e06c6159bcc377 54-55
+  s_b847b04372fc79::t_cf8e686d723db2 68-72
+  s_b847b04372fc79::t_2e5c76e2e64125 186
+  s_b847b04372fc79::t_fda66f1484ace0 279
+  s_b847b04372fc79::t_5fdd1281f38c9e 65-66
+  s_b847b04372fc79::t_1d2ba9168b2ff1 453
+  s_b847b04372fc79::t_177fa9f95b595e 353-367,374-379,383-384
+  s_b847b04372fc79::t_2f5bd842851d1c 206-223
+  s_b847b04372fc79::t_edd6b4c01d64a5 1-51,53,56-64,67,73-185,187-205,224-278,280-335,337-344,348-352,368-373,380-382,385-394,398-452,454-461
+  s_b847b04372fc79::t_80accdb48d81f1 52
+apps/web/src/components/__tests__/citation-overlay.test.tsx
+  s_b847b04372fc79::t_6f26ee71b7ae6a 1,3-20,33-34,40-125,127-130,132-142,144-147,153-163,165-184,186-213,215-233,235-254,256-279,281-302,304-329,331-355,357-375,396,403,407,409-434,436-443,445-451
+  s_b847b04372fc79::t_0014222d4175a4 131,143,164,185,214,234,255,280,303,330,356,408,435,444
+  s_b847b04372fc79::t_fc2c74c3adc464 21-32,35-39
+  s_b847b04372fc79::t_16ad28898a687a 2
+  s_b847b04372fc79::t_1ea2deee211fee 126
+  s_b847b04372fc79::t_3f7cfc2fa08cea 148-152
+  s_b847b04372fc79::t_6c0eb705294549 376-395,397-402,404-406
+apps/web/src/components/analyzing-zone.tsx
+  s_b847b04372fc79::t_c4604f5c83ab2b 38
+  s_b847b04372fc79::t_d2ad3e9b2fdc29 138-164,287-291,293-296,298,316-319,415-452,788,792,802-803,818-821,825-833,912-919
+apps/web/src/components/document-reader-pane.tsx
+  s_b847b04372fc79::t_1bed10a8048952 47
+  s_b847b04372fc79::t_f30b8b01e2d9fd 89-93,95-98,103-109,152-153,236-237,242-244,277-309,392,439
+apps/web/src/components/product-list.tsx
+  s_b847b04372fc79::t_1bed10a8048952 23
+  s_b847b04372fc79::t_3338c7d5d24650 87-102,168-169,173,183-184,193-199,203,254,282-283,290-291,441,467,482,497,556,572,603,637-642,657,667-668,694-695,701,707
+apps/web/src/components/__tests__/document-reader-pane.test.tsx
+  s_b847b04372fc79::t_aa70787b5ae25d 376-378,381,410-479
+apps/web/src/styles/tokens.css
+  s_b847b04372fc79::t_d18c015ece15bb 87,127
+apps/web/vitest.setup.ts
+  s_b847b04372fc79::t_7ba9bcef9406b6 83-119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "2746d92b8fba7383f1186911cf36a71d271aa60a",
+  "prompts": {},
+  "sessions": {
+    "s_b847b04372fc79": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2190b53b-0630-455d-8d51-626b0878fb40",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
