@@ -25,7 +25,7 @@ import { EmptyState } from './empty-state'
 import { AdmissionDashboard } from './admission-dashboard'
 import { SessionTabs } from './session-tabs'
 import type { ThinkingPhase } from './thinking-stream'
-import { ProductList } from './product-list'
+import { ProductList, type CitationSourceOption } from './product-list'
 import { InterjectInput } from './interject-input'
 import { TechBriefPanel } from './tech-brief-panel'
 import { ToastHost } from './toast-host'
@@ -298,6 +298,18 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   const totalChunks = chunks.length
   const products = deriveProducts(chunks)
   const citationRefs = collectCitationRefs(chunks)
+  // AddDialog "关联出处" 下拉的候选文档(ADR-0017 D6):PRD(非空时)+ 全部 AuxFile
+  const citationSources: CitationSourceOption[] = [
+    ...(data.prdMarkdown.trim().length > 0
+      ? [{ value: 'prd', label: 'PRD 需求文档', kind: 'prd' as const }]
+      : []),
+    ...data.auxFiles.map((aux) => ({
+      value: aux.id,
+      label: aux.filename,
+      kind: 'aux' as const,
+      auxId: aux.id,
+    })),
+  ]
   const currentAdmission = {
     ...data.admission,
     verdict: verdictOverride ?? data.admission.verdict,
@@ -468,6 +480,24 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       }
     },
     [data.requirementId, activeSessionId],
+  )
+
+  // -------------------------------------------------------------------------
+  // Synthetic chunk 合成(ADR-0017 D6 · ticket 04):用户在 ProductList 加 product 时,
+  // ProductList 合成一条 synthetic chunk 通知这里 → 落到当前 active 会话的
+  // chunksBySessionId(chunks.jsonl 单一真相源)。
+  //
+  // 本期仅客户端 memory:不推 SSE(本地合成),也不落盘(server action 留 v2);
+  // 刷新页面后 synthetic 卡片丢失是已知代价(UI 角标说明)。
+  // -------------------------------------------------------------------------
+  const handleAddSyntheticChunk = useCallback(
+    (chunk: AnalyzingChunk) => {
+      setChunksBySessionId((prev) => ({
+        ...prev,
+        [activeSessionId]: [...(prev[activeSessionId] ?? []), chunk],
+      }))
+    },
+    [activeSessionId],
   )
 
   // -------------------------------------------------------------------------
@@ -675,6 +705,8 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
                 products={products}
                 onAction={handleProductAction}
                 onItemClick={handleItemClick}
+                onAddSyntheticChunk={handleAddSyntheticChunk}
+                citationSources={citationSources}
               />
             </div>
           </div>

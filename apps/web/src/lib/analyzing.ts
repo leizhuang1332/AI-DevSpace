@@ -544,6 +544,94 @@ function chunkToProduct(chunk: AnalyzingChunk): AnalyzingProductItem {
 }
 
 // ---------------------------------------------------------------------------
+// Synthetic chunk 合成(ADR-0017 D6 · ticket 04 落地)
+// ---------------------------------------------------------------------------
+
+/**
+ * ProductList kind(用户在右栏加 product 时的分类)。
+ *
+ * 结构上等同 `products.ts` 的 `ProductKind`(= `keyof AnalyzingProductGroup`),
+ * 但此处直接用 `keyof AnalyzingProductGroup` 避免 `analyzing.ts ↔ products.ts`
+ * 循环 import(products.ts 反向依赖本文件)。
+ */
+type SyntheticProductKind = keyof AnalyzingProductGroup
+
+/** SyntheticProductKind → chunk.label 映射 */
+const SYNTHETIC_KIND_TO_LABEL: Record<SyntheticProductKind, AnalyzingChunkLabel> = {
+  subproblems: 'DETECT',
+  risks: 'RISK',
+  options: 'OPTION',
+}
+
+/** SyntheticProductKind → chunk.kind 映射 */
+const SYNTHETIC_KIND_TO_CHUNK_KIND: Record<SyntheticProductKind, AnalyzingChunkKind> = {
+  subproblems: 'subproblem',
+  risks: 'risk',
+  options: 'option',
+}
+
+/**
+ * 合成一个 "用户手动添加 product" 的 synthetic chunk(ADR-0017 D6)。
+ *
+ * 用户在右栏 ProductList 点 "+ 新增子问题 / 风险 / 方案" 提交时,除了走既有
+ * `onAction({action:'add'})` 落 products.yaml 外,**同步**合成一条 `synthetic: true`
+ * 的占位 chunk,保证 chunks.jsonl 作为单一真相源(重扫时 AI prompt 层过滤 —— 见
+ * 独立 ticket)。
+ *
+ * 设计要点:
+ * - 纯函数(除 id 生成外无副作用),便于单测
+ * - id 前缀 `user-added-` + UUID,保证与 AI 产出的 chunk id 不冲突且互相唯一
+ * - `tone: 'info'`(用户输入无严重度语义,统一蓝色)
+ * - `source_refs`:传入则透传(可为空数组);**未传则省略字段**(保持 JSONL 一致性,
+ *   下游 UI 据 "synthetic && 无 source_refs" 显示 "⚠️ 无出处" 角标)
+ * - `synthetic: true` 必带
+ *
+ * 派生 `AnalyzingProductItem`:此 chunk 经 `deriveProducts()` 会透传
+ * id / title / source_refs / synthetic 到 product,无需额外转换。
+ *
+ * @example
+ * buildSyntheticChunk({ kind: 'risks', title: '用户加的风险', ts: '14:30:00' })
+ *   // → { id:'user-added-...', label:'RISK', kind:'risk', tone:'info', synthetic:true, text:'用户加的风险' }
+ */
+export function buildSyntheticChunk(params: {
+  kind: SyntheticProductKind
+  title: string
+  sourceRefs?: SourceRef[]
+  ts: string
+}): AnalyzingChunk {
+  const chunk: AnalyzingChunk = {
+    id: `user-added-${generateSyntheticId()}`,
+    ts: params.ts,
+    label: SYNTHETIC_KIND_TO_LABEL[params.kind],
+    text: params.title,
+    kind: SYNTHETIC_KIND_TO_CHUNK_KIND[params.kind],
+    tone: 'info',
+    synthetic: true,
+  }
+  // source_refs:传入则透传(含空数组);未传省略字段(JSONL 一致性 + UI 角标判断)
+  if (params.sourceRefs !== undefined) {
+    chunk.source_refs = params.sourceRefs
+  }
+  return chunk
+}
+
+/**
+ * 生成 synthetic chunk id 的随机后缀。
+ *
+ * 优先 `crypto.randomUUID`(浏览器 + Node 19+);缺失时回退到 timestamp + random
+ * (SSR / 极旧运行时兜底,仍保证足够唯一)。
+ */
+function generateSyntheticId(): string {
+  if (
+    typeof globalThis.crypto !== 'undefined' &&
+    typeof globalThis.crypto.randomUUID === 'function'
+  ) {
+    return globalThis.crypto.randomUUID()
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+// ---------------------------------------------------------------------------
 // 准入仪表板(ADR-0013 D4 / D10 · issue 19a VS1)
 // ---------------------------------------------------------------------------
 

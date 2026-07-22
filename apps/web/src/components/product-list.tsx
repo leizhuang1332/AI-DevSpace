@@ -21,9 +21,12 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type {
-  AnalyzingProductGroup,
-  AnalyzingProductItem,
+import {
+  buildSyntheticChunk,
+  type AnalyzingChunk,
+  type AnalyzingProductGroup,
+  type AnalyzingProductItem,
+  type SourceRef,
 } from '@/lib/analyzing'
 import type {
   ProductChange,
@@ -35,6 +38,21 @@ import type {
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
+
+/**
+ * 出处下拉选项(ADR-0017 D6 · AddDialog "关联出处" 用)。
+ *
+ * - `value`:下拉唯一值(prd → 'prd';aux → auxId)
+ * - `label`:用户可见文案(PRD 标题 / aux 文件名)
+ * - `kind`:决定合成的 SourceRef 类型
+ * - `auxId`:kind==='aux' 时必填(= AuxFile.id)
+ */
+export interface CitationSourceOption {
+  value: string
+  label: string
+  kind: 'prd' | 'aux'
+  auxId?: string
+}
 
 export interface ProductListProps {
   products: AnalyzingProductGroup
@@ -53,6 +71,19 @@ export interface ProductListProps {
    * 新增可选回调,**不影响** 现有 `onAction`;不传 → 卡片不可点(行为同 ticket 02)。
    */
   onItemClick?: (itemId: string) => void
+  /**
+   * ticket 04(ADR-0017 D6):用户在 AddDialog 提交新增 product 时,除走 `onAction`
+   * 落 products.yaml 外,**同步**合成一条 `synthetic: true` 的 chunk 通知父组件
+   * (父组件落到 chunksBySessionId,保证 chunks.jsonl 单一真相源)。
+   *
+   * 可选;不传 → 不合成 synthetic chunk(向后兼容旧测试)。
+   */
+  onAddSyntheticChunk?: (chunk: AnalyzingChunk) => void
+  /**
+   * ticket 04(ADR-0017 D6):AddDialog "关联出处" 下拉可选的文档列表(PRD + AuxFile)。
+   * 不传或空数组 → AddDialog 不展示出处选择器(新增的 product 无 source_refs → UI 角标 ⚠️)。
+   */
+  citationSources?: CitationSourceOption[]
 }
 
 // ---------------------------------------------------------------------------
@@ -116,6 +147,8 @@ export function ProductList({
   editable = true,
   onAction,
   onItemClick,
+  onAddSyntheticChunk,
+  citationSources,
 }: ProductListProps) {
   // 只读视图(等价于 VS2):editable=false 直接渲染旧版
   if (!editable) {
@@ -127,6 +160,8 @@ export function ProductList({
       products={products}
       onAction={onAction ?? (() => undefined)}
       onItemClick={onItemClick}
+      onAddSyntheticChunk={onAddSyntheticChunk}
+      citationSources={citationSources}
     />
   )
 }
@@ -214,10 +249,14 @@ function InteractiveProductList({
   products,
   onAction,
   onItemClick,
+  onAddSyntheticChunk,
+  citationSources,
 }: {
   products: AnalyzingProductGroup
   onAction: (change: ProductChange) => void | Promise<void>
   onItemClick?: (itemId: string) => void
+  onAddSyntheticChunk?: (chunk: AnalyzingChunk) => void
+  citationSources?: CitationSourceOption[]
 }) {
   // per-card 状态:仅记录当前不在 normal 的卡片 id + state
   // 用 Map<itemId, CardState> 而不是 Set<itemId>:允许 normal / editing / confirm-delete 共存(虽然实际同一时间一卡只有一种)
@@ -336,18 +375,32 @@ function InteractiveProductList({
 
   // ---------------------------------------------------------------------
   // 新增
+  // - onAction:落 products.yaml(既有 VS4 路径)
+  // - onAddSyntheticChunk(ADR-0017 D6):**同步**合成 synthetic chunk 通知父组件,
+  //   保证 chunks.jsonl 单一真相源;不传 → 不合成(向后兼容)
   // ---------------------------------------------------------------------
   const submitAdd = useCallback(
-    async (kind: ProductKind, title: string) => {
+    async (kind: ProductKind, title: string, sourceRefs?: SourceRef[]) => {
       const newId = generateUuid()
+      // 既有 VS4 路径不变:落 products.yaml 的 item 仍是 {id, title, severity}
       await onAction({
         kind,
         action: 'add',
         item: { id: newId, title, severity: 'blue' },
       })
+      // 同步合成 synthetic chunk(落到父组件 chunksBySessionId,chunks.jsonl 单一真相源)
+      if (onAddSyntheticChunk) {
+        const chunk = buildSyntheticChunk({
+          kind,
+          title,
+          ts: nowTimestamp(),
+          ...(sourceRefs !== undefined ? { sourceRefs } : {}),
+        })
+        onAddSyntheticChunk(chunk)
+      }
       setAddDialog(null)
     },
-    [onAction],
+    [onAction, onAddSyntheticChunk],
   )
 
   return (
@@ -429,7 +482,8 @@ function InteractiveProductList({
                 ? RISK_META
                 : OPTION_META
           }
-          onConfirm={(title) => submitAdd(addDialog, title)}
+          citationSources={citationSources}
+          onConfirm={(title, sourceRefs) => submitAdd(addDialog, title, sourceRefs)}
           onCancel={() => setAddDialog(null)}
         />
       )}
@@ -560,6 +614,10 @@ function InteractiveItem({
   const checked = isMergeModeForThisKind && mergeMode?.selected.has(item.id)
   // 卡片可点(ADR-0017 D4):仅 normal 态 + 非合并模式 + 父传了 onItemClick 时联动左栏
   const clickable = state === 'normal' && !isMergeModeForThisKind && !!onItemClick
+  // 无出处角标(ADR-0017 D6):synthetic 产物且无 source_refs → 显示 "⚠️ 无出处"
+  const citationMissing =
+    item.synthetic === true &&
+    (!item.source_refs || item.source_refs.length === 0)
 
   // 编辑态:本地临时 title;提交时回传 patch
   const [editTitle, setEditTitle] = useState(item.title)
@@ -594,6 +652,7 @@ function InteractiveItem({
       data-state={state}
       data-kind={kind}
       data-clickable={clickable ? 'true' : 'false'}
+      data-synthetic={item.synthetic ? 'true' : 'false'}
       onClick={clickable ? onItemClick : undefined}
       className={cardCls}
     >
@@ -620,7 +679,7 @@ function InteractiveItem({
           onCancel={() => setState(null)}
         />
       ) : (
-        <NormalRow item={item} />
+        <NormalRow item={item} citationMissing={citationMissing} />
       )}
 
       {/* 右上角操作按钮(非编辑 / 非删除 / 非合并模式下显示) */}
@@ -650,10 +709,29 @@ function InteractiveItem({
   )
 }
 
-function NormalRow({ item }: { item: AnalyzingProductItem }) {
+function NormalRow({
+  item,
+  citationMissing,
+}: {
+  item: AnalyzingProductItem
+  citationMissing?: boolean
+}) {
   return (
     <>
-      <div className="text-sm font-medium text-text-1">{item.title}</div>
+      <div className="flex items-start gap-2">
+        <div className="text-sm font-medium text-text-1 flex-1 min-w-0">
+          {item.title}
+        </div>
+        {citationMissing && (
+          <span
+            data-testid="citation-missing"
+            title="该产物未关联原文出处"
+            className="flex-shrink-0 inline-flex items-center rounded border border-yellow-500/60 text-[11px] leading-none text-text-3 px-1.5 py-1"
+          >
+            ⚠️ 无出处
+          </span>
+        )}
+      </div>
       {item.description && (
         <div className="text-xs text-text-2 mt-1 whitespace-pre-wrap">
           {item.description}
@@ -924,17 +1002,44 @@ function MergeDialog({
 function AddDialog({
   kind,
   meta,
+  citationSources,
   onConfirm,
   onCancel,
 }: {
   kind: ProductKind
   meta: SectionMeta
-  onConfirm: (title: string) => Promise<void>
+  citationSources?: CitationSourceOption[]
+  onConfirm: (title: string, sourceRefs?: SourceRef[]) => Promise<void>
   onCancel: () => void
 }) {
   const [title, setTitle] = useState('')
+  // 出处(可关闭):默认关闭 → 不合成 source_refs → UI 角标 ⚠️
+  const hasSources = !!citationSources && citationSources.length > 0
+  const [citeEnabled, setCiteEnabled] = useState(false)
+  const [citeValue, setCiteValue] = useState('')
+  const [citeStart, setCiteStart] = useState('0')
+  const [citeEnd, setCiteEnd] = useState('1')
+
   const trimmed = title.trim()
   const canConfirm = trimmed.length > 0
+
+  // 由当前出处选择派生 SourceRef[](未启用 / 未选文档 / 行范围非法 → undefined)
+  const buildSourceRefs = (): SourceRef[] | undefined => {
+    if (!citeEnabled || !hasSources) return undefined
+    const opt = citationSources!.find((s) => s.value === citeValue)
+    if (!opt) return undefined
+    const start = Number(citeStart)
+    const end = Number(citeEnd)
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return undefined
+    if (start < 0 || start > end) return undefined
+    const lineRange: [number, number] = [start, end]
+    if (opt.kind === 'aux') {
+      if (!opt.auxId) return undefined
+      return [{ kind: 'aux', auxId: opt.auxId, lineRange }]
+    }
+    return [{ kind: 'prd', lineRange }]
+  }
+
   return (
     <div
       data-testid="product-add-dialog"
@@ -959,6 +1064,63 @@ function AddDialog({
           autoFocus
           className="w-full text-sm text-text-1 bg-bg-subtle border border-border rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand"
         />
+
+        {/* 出处(可关闭)——仅当父组件提供了可选文档时展示 */}
+        {hasSources && (
+          <div className="mt-4">
+            <label className="flex items-center gap-2 text-xs text-text-2 cursor-pointer">
+              <input
+                type="checkbox"
+                data-testid="product-add-citation-toggle"
+                checked={citeEnabled}
+                onChange={(e) => setCiteEnabled(e.target.checked)}
+                className="w-4 h-4 accent-brand"
+              />
+              关联原文出处(可选)
+            </label>
+            {citeEnabled && (
+              <div className="mt-2 flex flex-col gap-2 rounded-md border border-dashed border-border p-3">
+                <select
+                  data-testid="product-add-citation-doc"
+                  value={citeValue}
+                  onChange={(e) => setCiteValue(e.target.value)}
+                  aria-label="选择出处文档"
+                  className="text-sm text-text-1 bg-bg-subtle border border-border rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand"
+                >
+                  <option value="">— 选择文档 —</option>
+                  {citationSources!.map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+                <div className="flex items-center gap-2 text-xs text-text-3">
+                  <span>行范围</span>
+                  <input
+                    type="number"
+                    data-testid="product-add-citation-start"
+                    value={citeStart}
+                    min={0}
+                    onChange={(e) => setCiteStart(e.target.value)}
+                    aria-label="起始行"
+                    className="w-20 text-sm text-text-1 bg-bg-subtle border border-border rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand"
+                  />
+                  <span>→</span>
+                  <input
+                    type="number"
+                    data-testid="product-add-citation-end"
+                    value={citeEnd}
+                    min={0}
+                    onChange={(e) => setCiteEnd(e.target.value)}
+                    aria-label="结束行(不含)"
+                    className="w-20 text-sm text-text-1 bg-bg-subtle border border-border rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex items-center justify-end gap-2 mt-4">
           <button
             type="button"
@@ -971,7 +1133,7 @@ function AddDialog({
           <button
             type="button"
             data-testid="product-add-dialog-confirm"
-            onClick={() => onConfirm(trimmed)}
+            onClick={() => onConfirm(trimmed, buildSourceRefs())}
             disabled={!canConfirm}
             className="h-9 px-4 rounded-md text-sm font-medium bg-brand text-white hover:bg-brand-600 disabled:bg-bg-subtle disabled:text-text-3 disabled:cursor-not-allowed"
           >
@@ -996,4 +1158,14 @@ function generateUuid(): string {
   }
   // Fallback(SSR / 极旧浏览器):timestamp + random
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+// ---------------------------------------------------------------------------
+// 时间戳(synthetic chunk 的 ts;'HH:MM:SS' 与 AI 产出对齐)
+// ---------------------------------------------------------------------------
+
+function nowTimestamp(): string {
+  const d = new Date()
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
