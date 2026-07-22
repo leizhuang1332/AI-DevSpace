@@ -1,6 +1,5 @@
 'use client'
 
-import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   deriveProducts,
@@ -12,8 +11,6 @@ import {
   type AnalyzingData,
   type AnalyzingProductGroup,
   type AnalyzingStats,
-  type AnalyzingToolbar,
-  type AnalyzingToolbarAction,
   type AdmissionVerdict,
   type SourceRef,
 } from '@/lib/analyzing'
@@ -48,8 +45,6 @@ import { CitationOverlay } from './citation-overlay'
  * ┌────────────────────────────────────────────────┐
  * │ Stage strip(ANALYZING 徽章 + 进度 + 状态)       │
  * ├────────────────────────────────────────────────┤
- * │ Toolbar(面包屑 + 复制/暂停/重置)                  │
- * ├────────────────────────────────────────────────┤
  * │ 准入仪表板(19a · ADR-0013 D4 · 全局共享)        │
  * ├────────────────────────────────────────────────┤
  * │ SessionTabs(19c · ADR-0013 D7 · 多会话 Tab)    │
@@ -75,27 +70,25 @@ import { CitationOverlay } from './citation-overlay'
  *   桌面形态下不变(直接切左栏 Tab + pulse,窄 Tab 不动)
  *
  * 设计要点:
- * - 'use client':打字机 / 暂停 / 重置 / 完成提示 / SSE 订阅 / Tab 切换都是客户端交互
+ * - 'use client':打字机 / SSE 订阅 / Tab 切换都是客户端交互
  * - props.data 由 server 注入(从 getAnalyzingData),组件只关心渲染 + 客户端状态
  * - **ADR-0017 D1**:主区改为 2:1 左右分栏;左栏 = `<DocumentReaderPane>`,右栏 = Summary + ProductList
  * - **ADR-0017 D1**:`<ThinkingStream>` 渲染出口删除;phase state machine 内部状态保留
- *   (pause / reset / skip 仍可点,UI 不再展示思考流)
  * - **ticket 05 窄视口**:见上方"窄视口布局"段;响应式断点统一走 CSS `min-width: 1024px`
  * - 打字机 20ms / 字(issue 19 验收 #2);chunk 间 200ms 间隔,模拟"思考停顿"
- * - 点击 ⏸ 暂停 / 继续;点击 ↶ 清空所有进度从 chunk-0 开始
  * - SSE 订阅 `/api/requirement/<id>/events` —— 收到 `analysis_chunk` 事件追加到 chunks
  * - InterjectInput 提交 → POST `/api/requirements/<id>/analysis/interject` →
  *   Agent 通过 SseHub 推送新 chunks → 上面 useEffect 订阅自动追加
  * - VS3 新增:
  *   - 渲染 SessionTabs(sessions / activeId / onSwitch / onCreate / onClose)
- *   - 切换 Tab 时主区 chunks 按 activeSessionId 重新加载;打字机 / 暂停独立工作
+ *   - 切换 Tab 时主区 chunks 按 activeSessionId 重新加载;打字机独立工作
  *   - activeId 默认 = props.data.activeSessionId(cookie `last_session_id` 决定,见 server)
  *
  * 状态机(single source of truth,避免 batching 双状态同步问题):
  *   idle     — 还没开始打字
  *   typing   — 正在打 chunkIndex 这条(已显示 typedLen 个字符)
  *   pausing  — 当前 chunk 完成,等 200ms 后推进到下一条
- *   done     — 所有 chunks 都完成,弹"切到 CLARIFYING"提示
+ *   done     — 所有 chunks 都完成(phase 内部态;不再有 UI 弹窗)
  */
 export interface AnalyzingZoneProps {
   data: AnalyzingData
@@ -198,13 +191,11 @@ function EmptyAnalyzing({ data }: { data: AnalyzingData }) {
 }
 
 // ============================================================================
-// 主内容:Stage + Toolbar + Summary + 打字机思考流
+// 主内容:Stage + 准入仪表板 + SessionTabs + Summary + 打字机
 // ============================================================================
 
 function AnalyzingContent({ data }: { data: AnalyzingData }) {
-  const [paused, setPaused] = useState(false)
   const [phase, setPhase] = useState<ThinkingPhase>({ kind: 'idle' })
-  const [showCompletePrompt, setShowCompletePrompt] = useState(false)
   // 客户端 verdict 覆盖(issue 19a VS1:[接受风险] 按钮 → fail → pending)
   // TODO VS6:接入 server action(POST /analysis/adjudicate)
   const [verdictOverride, setVerdictOverride] = useState<AdmissionVerdict | null>(null)
@@ -457,8 +448,6 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   // 切换会话时 chunks 数组引用变化 → 重置 phase 从 idle 开始,打字机独立工作
   // -------------------------------------------------------------------------
   useEffect(() => {
-    if (paused) return
-
     if (phase.kind === 'idle') {
       const first = chunks[0]
       if (!first) {
@@ -504,28 +493,13 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       }, INTER_CHUNK_PAUSE_MS)
       return () => window.clearTimeout(id)
     }
-  }, [paused, phase, chunks])
-
-  // -------------------------------------------------------------------------
-  // 完成 → 弹提示
-  // -------------------------------------------------------------------------
-  useEffect(() => {
-    if (phase.kind === 'done') {
-      setShowCompletePrompt(true)
-    }
-  }, [phase])
+  }, [phase, chunks])
 
   // -------------------------------------------------------------------------
   // 操作
   // -------------------------------------------------------------------------
   const reset = useCallback(() => {
-    setShowCompletePrompt(false)
-    setPaused(false)
     setPhase({ kind: 'idle' })
-  }, [])
-
-  const dismissComplete = useCallback(() => {
-    setShowCompletePrompt(false)
   }, [])
 
   const skipTypewriter = useCallback(() => {
@@ -695,19 +669,12 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       data-requirement-id={data.requirementId}
       data-empty="false"
       data-phase={data.phase}
-      data-paused={paused ? 'true' : 'false'}
       className="flex flex-col h-[calc(100vh-84px)] overflow-hidden bg-bg-elevated"
     >
       <StageStrip
         totalChunks={totalChunks}
         revealedCount={revealedCount}
         isStreaming={data.streamMeta.isStreaming}
-      />
-      <Toolbar
-        toolbar={data.toolbar}
-        paused={paused}
-        onTogglePause={() => setPaused((p) => !p)}
-        onReset={reset}
       />
       {/* issue 19a VS1 — 准入仪表板(顶部 5 维度卡 + verdict 徽章 + 待裁决 N · 全局共享) */}
       <div className="px-6 pt-4">
@@ -832,13 +799,6 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
           isSubmitting={interjectSubmitting}
         />
       </div>
-
-      {showCompletePrompt && (
-        <CompletePrompt
-          requirementId={data.requirementId}
-          onDismiss={dismissComplete}
-        />
-      )}
 
       {/* 画线联动提示(ticket 03):无出处产物点击 → "未关联原文出处" toast */}
       <ToastHost items={toasts} onDismiss={dismissToast} />
@@ -1051,125 +1011,6 @@ function StageStrip({
 }
 
 // ============================================================================
-// Toolbar
-// ============================================================================
-
-function ToolbarActionButton({
-  action,
-  paused,
-  onTogglePause,
-  onReset,
-}: {
-  action: AnalyzingToolbarAction
-  paused: boolean
-  onTogglePause: () => void
-  onReset: () => void
-}) {
-  // 识别 ANALYZING 工位专有动作:暂停 / 重置(由 label 启发式判断;
-  // 数据层不绑 ID 是因为 Toolbar 是通用 UI 协议,与 EXECUTING 样板对齐)。
-  const isPause = /⏸|▶|暂停|继续/.test(action.label)
-  const isReset = /↶|重置/.test(action.label)
-
-  const cls =
-    action.variant === 'primary'
-      ? 'bg-brand text-white hover:bg-brand-600'
-      : action.variant === 'secondary'
-        ? 'bg-bg-elevated text-text-1 border border-border-strong hover:bg-bg-subtle'
-        : action.variant === 'danger'
-          ? 'bg-bg-elevated text-error border border-border hover:bg-[#fef2f2]'
-          : 'bg-transparent text-text-2 hover:text-text-1 hover:bg-bg-subtle'
-
-  if (isPause) {
-    return (
-      <button
-        type="button"
-        data-testid="analyzing-toolbar-pause"
-        data-paused={paused ? 'true' : 'false'}
-        onClick={onTogglePause}
-        className={`inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-sm font-medium ${cls}`}
-      >
-        {paused ? '▶ 继续' : action.label}
-      </button>
-    )
-  }
-  if (isReset) {
-    return (
-      <button
-        type="button"
-        data-testid="analyzing-toolbar-reset"
-        onClick={onReset}
-        className={`inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-sm font-medium ${cls}`}
-      >
-        {action.label}
-      </button>
-    )
-  }
-  return (
-    <button
-      type="button"
-      data-testid="analyzing-toolbar-action"
-      data-variant={action.variant}
-      className={`inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-sm font-medium ${cls}`}
-    >
-      {action.label}
-    </button>
-  )
-}
-
-function Toolbar({
-  toolbar,
-  paused,
-  onTogglePause,
-  onReset,
-}: {
-  toolbar: AnalyzingToolbar
-  paused: boolean
-  onTogglePause: () => void
-  onReset: () => void
-}) {
-  return (
-    <div
-      data-testid="analyzing-toolbar"
-      className="flex items-center justify-between px-6 py-2 border-b border-border bg-bg-elevated gap-3 h-11"
-    >
-      <nav
-        data-testid="analyzing-toolbar-crumb"
-        aria-label="面包屑"
-        className="flex items-center gap-1.5 text-sm text-text-3"
-      >
-        {toolbar.crumb.map((c, i) => (
-          <span
-            key={`${c.label}-${i}`}
-            data-testid={c.current ? 'analyzing-crumb-current' : 'analyzing-crumb-item'}
-            data-current={c.current ? 'true' : 'false'}
-            className={
-              c.current
-                ? 'text-text-1 font-medium'
-                : i % 2 === 1
-                  ? 'text-text-3'
-                  : 'text-text-2'
-            }
-          >
-            {c.label}
-          </span>
-        ))}
-      </nav>
-      <div className="flex items-center gap-2">
-        {toolbar.actions.map((a, i) => (
-          <ToolbarActionButton
-            key={`${a.label}-${i}`}
-            action={a}
-            paused={paused}
-            onTogglePause={onTogglePause}
-            onReset={onReset}
-          />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-// ============================================================================
 // Summary(图标 + 标题 + 描述 + 三 stats)
 // ============================================================================
 
@@ -1183,26 +1024,26 @@ function Summary({
   return (
     <div
       data-testid="analyzing-summary"
-      className="bg-gradient-to-br from-brand-50 to-brand-50/40 border border-brand-50 rounded-xl px-6 py-5 flex items-center gap-6"
+      className="bg-gradient-to-br from-brand-50 to-brand-50/40 border border-brand-50 rounded-xl px-4 py-2 flex items-center gap-3"
     >
       <div
         data-testid="analyzing-summary-icon"
-        className="w-16 h-16 rounded-full bg-bg-elevated flex items-center justify-center text-3xl flex-shrink-0 ring-2 ring-brand-50"
+        className="w-10 h-10 rounded-full bg-bg-elevated flex items-center justify-center text-xl flex-shrink-0 ring-2 ring-brand-50"
       >
         {summary.icon}
       </div>
       <div className="flex-1 min-w-0">
         <div
           data-testid="analyzing-summary-title"
-          className="text-lg font-semibold text-brand-700 mb-1"
+          className="text-sm font-semibold text-brand-700 mb-0"
         >
           {summary.title}
         </div>
-        <div className="text-text-2 text-sm leading-relaxed">
+        <div className="text-text-2 text-[11px] leading-relaxed">
           {summary.description}
         </div>
       </div>
-      <div data-testid="analyzing-stats" className="flex gap-4 flex-shrink-0">
+      <div data-testid="analyzing-stats" className="flex gap-2 flex-shrink-0">
         <StatCell n={stats.subproblems} label="子问题" testId="analyzing-stat-subproblems" />
         <StatCell n={stats.risks} label="风险点" testId="analyzing-stat-risks" />
         <StatCell n={stats.options} label="方案方向" testId="analyzing-stat-options" />
@@ -1224,57 +1065,11 @@ function StatCell({
     <div
       data-testid={testId}
       data-n={n}
-      className="text-center px-4 py-2 bg-bg-elevated border border-border rounded-md min-w-[84px]"
+      className="text-center px-2.5 py-1 bg-bg-elevated border border-border rounded-md min-w-[52px]"
     >
-      <div className="text-xl font-semibold font-mono text-brand-700">{n}</div>
-      <div className="text-xs text-text-3 uppercase tracking-wider mt-1">
+      <div className="text-base font-semibold font-mono text-brand-700">{n}</div>
+      <div className="text-[10px] text-text-3 uppercase tracking-wider mt-0">
         {label}
-      </div>
-    </div>
-  )
-}
-
-// ============================================================================
-// 完成提示(AI 分析完成 → 切 CLARIFYING 吗?非自动跳转,决策 15)
-// ============================================================================
-
-function CompletePrompt({
-  requirementId,
-  onDismiss,
-}: {
-  requirementId: string
-  onDismiss: () => void
-}) {
-  return (
-    <div
-      data-testid="analyzing-complete-prompt"
-      role="dialog"
-      aria-label="AI 分析完成"
-      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-30 bg-bg-elevated border-2 border-brand rounded-xl shadow-lg px-5 py-4 flex items-center gap-4 max-w-[520px]"
-    >
-      <div className="text-2xl">✅</div>
-      <div className="flex-1">
-        <div className="font-semibold text-text-1">AI 分析完成</div>
-        <div className="text-sm text-text-2">
-          切到 CLARIFYING 工位回答 AI 的提问吗?(默认留在 ANALYZING)
-        </div>
-      </div>
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          data-testid="analyzing-complete-stay"
-          onClick={onDismiss}
-          className="h-8 px-3 rounded-md text-sm font-medium bg-bg-elevated text-text-1 border border-border-strong hover:bg-bg-subtle"
-        >
-          留在此处
-        </button>
-        <Link
-          href={`/requirements/${requirementId}/clarifying`}
-          data-testid="analyzing-complete-switch"
-          className="inline-flex items-center h-8 px-3 rounded-md text-sm font-medium bg-brand text-white hover:bg-brand-600"
-        >
-          切到 CLARIFYING →
-        </Link>
       </div>
     </div>
   )

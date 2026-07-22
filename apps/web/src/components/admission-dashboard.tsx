@@ -59,12 +59,12 @@ export function AdmissionDashboard({
     <section
       data-testid="admission-dashboard"
       data-verdict={admission.verdict}
-      className="bg-bg-elevated border border-border rounded-lg px-5 py-4 flex items-center gap-4"
+      className="bg-bg-elevated border border-border rounded-lg px-4 py-1.5 flex items-center gap-2"
     >
       {/* 左:N 张维度卡 */}
       <div
         data-testid="admission-dimensions"
-        className="flex-1 flex items-center gap-2 overflow-x-auto"
+        className="flex-1 flex items-center gap-1 overflow-x-auto"
       >
         {admission.dimensions.map((dim) => (
           <DimensionCard
@@ -76,12 +76,12 @@ export function AdmissionDashboard({
       </div>
 
       {/* 右:徽章 + 按钮 */}
-      <div className="flex items-center gap-2 flex-shrink-0">
+      <div className="flex items-center gap-1.5 flex-shrink-0">
         {admission.pendingAdjudicationCount > 0 && (
           <span
             data-testid="admission-pending-badge"
             data-count={admission.pendingAdjudicationCount}
-            className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-md bg-warning/10 text-warning border border-warning"
+            className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-warning/10 text-warning border border-warning"
           >
             待裁决 {admission.pendingAdjudicationCount}
           </span>
@@ -89,7 +89,7 @@ export function AdmissionDashboard({
         <span
           data-testid="admission-verdict-badge"
           data-verdict={admission.verdict}
-          className={`inline-flex items-center text-sm font-semibold px-3 py-1.5 rounded-md border ${
+          className={`inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-md border ${
             VERDICT_TEXT[admission.verdict].class
           }`}
         >
@@ -100,7 +100,7 @@ export function AdmissionDashboard({
             type="button"
             data-testid="admission-accept-risk-btn"
             onClick={onAcceptRisk}
-            className="inline-flex items-center h-8 px-3 rounded-md text-sm font-medium bg-bg-elevated text-text-1 border border-border-strong hover:bg-bg-subtle"
+            className="inline-flex items-center h-6 px-2 rounded-md text-[11px] font-medium bg-bg-elevated text-text-1 border border-border-strong hover:bg-bg-subtle"
           >
             接受风险
           </button>
@@ -129,17 +129,17 @@ function DimensionCard({
       data-severity={dim.severity}
       data-count={dim.count}
       onClick={onClick}
-      className={`flex flex-col items-center justify-center min-w-[96px] px-3 py-2 bg-bg-subtle border border-border rounded-md border-l-[4px] ${SEVERITY_STYLES[dim.severity].border} hover:bg-brand-50/40 transition-colors text-left`}
+      className={`flex flex-col items-center justify-center min-w-[64px] px-2 py-1 bg-bg-subtle border border-border rounded-md border-l-[3px] ${SEVERITY_STYLES[dim.severity].border} hover:bg-brand-50/40 transition-colors text-left`}
     >
-      <span className="text-xl leading-none" aria-hidden>
+      <span className="text-base leading-none" aria-hidden>
         {dim.icon}
       </span>
       <span
-        className={`text-lg font-semibold font-mono mt-1 ${SEVERITY_STYLES[dim.severity].countText}`}
+        className={`text-sm font-semibold font-mono mt-0.5 ${SEVERITY_STYLES[dim.severity].countText}`}
       >
         {dim.count}
       </span>
-      <span className="text-xs text-text-3 mt-0.5 whitespace-nowrap">{dim.label}</span>
+      <span className="text-[10px] text-text-3 mt-0 whitespace-nowrap">{dim.label}</span>
     </button>
   )
 }

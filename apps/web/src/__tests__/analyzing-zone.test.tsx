@@ -12,13 +12,15 @@ import { getAnalyzingData } from '@/lib/analyzing.server'
 // 时机在测试中不稳定(advanceTimersByTimeAsync 推进 timer 但 React commit 由
 // MessageChannel 调度,有时序漂移)。因此测试聚焦于:
 //   1. 渲染结构(满数据 / 空态 / 错误态 / 主区容错空 chunks)
-//   2. 用户动作的最终状态(暂停切换 / 重置清空)
-//   3. 完成提示(done 时弹出)
+//   2. phase state machine 推进的副效(typing/pausing 切换不影响 UI)
 // 打字机逐字推进的 20ms 节流由代码 inspection 验证(constant + setTimeout 链)。
 //
 // ticket 02 改动(ADR-0017 D1):左栏 ThinkingStream → DocumentReaderPane;
 // "暂无思考流" 文案与 analyzing-chunk-* testid 不再出现,改测 analyzing-left-col
 // / doc-reader-tabs / doc-reader-body。
+//
+// ticket 09 改动:删 analyzing-toolbar 组件(暂停/重置/复制按钮)与 paused state machine;
+//   data-paused 属性删除;相关渲染断言随 it 整体移除。
 
 afterEach(() => {
   cleanup()
@@ -72,7 +74,6 @@ describe('AnalyzingZone · 直接进入主区', () => {
 
     // 主区骨架存在
     expect(screen.getByTestId('analyzing-stage-strip')).toBeInTheDocument()
-    expect(screen.getByTestId('analyzing-toolbar')).toBeInTheDocument()
     // 左栏 = DocumentReaderPane(ticket 02 验收)
     expect(screen.getByTestId('document-reader-pane')).toBeInTheDocument()
     // ThinkingStream 不再渲染
@@ -89,7 +90,6 @@ describe('AnalyzingZone · 直接进入主区', () => {
 
     // 主区 testid 出现
     expect(screen.getByTestId('analyzing-stage-strip')).toBeInTheDocument()
-    expect(screen.getByTestId('analyzing-toolbar')).toBeInTheDocument()
     expect(screen.getByTestId('document-reader-pane')).toBeInTheDocument()
   })
 })
@@ -99,26 +99,18 @@ describe('AnalyzingZone · 直接进入主区', () => {
 // ============================================================================
 
 describe('AnalyzingZone · 满数据渲染(ticket 02 · ADR-0017 D1)', () => {
-  it('根节点 + stage strip + toolbar + summary + 2:1 grid + 左/右栏存在', async () => {
+  it('根节点 + stage strip + summary + 2:1 grid + 左/右栏存在', async () => {
     const data = await getAnalyzingData('req-001')
     render(<AnalyzingZone data={data} />)
 
     const root = screen.getByTestId('analyzing-zone')
     expect(root.getAttribute('data-empty')).toBe('false')
     expect(root.getAttribute('data-requirement-id')).toBe('req-001')
-    expect(root.getAttribute('data-paused')).toBe('false')
 
     expect(screen.getByTestId('analyzing-stage-strip')).toBeInTheDocument()
     expect(screen.getByTestId('analyzing-stage-badge').textContent).toBe('② 分析')
     expect(screen.getByTestId('analyzing-stage-title').textContent).toContain('ANALYZING')
     expect(screen.getByTestId('analyzing-stage-title').textContent).toContain('Thinking')
-
-    expect(screen.getByTestId('analyzing-toolbar')).toBeInTheDocument()
-    const crumbs = screen.getAllByTestId(/^analyzing-crumb-/)
-    expect(crumbs.length).toBe(5)
-    const current = screen.getByTestId('analyzing-crumb-current')
-    expect(current.textContent).toBe('AI 思考过程')
-    expect(current.getAttribute('data-current')).toBe('true')
 
     expect(screen.getByTestId('analyzing-summary')).toBeInTheDocument()
     expect(screen.getByTestId('analyzing-summary-icon').textContent).toBe('🧠')
@@ -159,15 +151,6 @@ describe('AnalyzingZone · 满数据渲染(ticket 02 · ADR-0017 D1)', () => {
     ).toBe('2')
   })
 
-  it('toolbar 3 个动作:pause / reset / copy(原顺序)', async () => {
-    const data = await getAnalyzingData('req-001')
-    render(<AnalyzingZone data={data} />)
-
-    expect(screen.getByTestId('analyzing-toolbar-pause')).toBeInTheDocument()
-    expect(screen.getByTestId('analyzing-toolbar-reset')).toBeInTheDocument()
-    expect(screen.getByText('📋 复制思考产物')).toBeInTheDocument()
-  })
-
   it('DocumentReaderPane 默认 Tab = PRD(SSR 注入的 prdMarkdown 全文)', async () => {
     const data = await getAnalyzingData('req-001')
     render(<AnalyzingZone data={data} />)
@@ -183,8 +166,8 @@ describe('AnalyzingZone · 满数据渲染(ticket 02 · ADR-0017 D1)', () => {
 // ============================================================================
 // 打字机 phase 推进(原点击跳过测试改为 state 验证)
 // ticket 02 改动:ThinkingStream 渲染出口删除;原"点击流区跳过"不再适用,
-// 改为通过 pause / reset 按钮 + data-paused 属性间接验证 phase state machine
-// 内部仍工作(不变)。
+// 改为通过 DocumentReaderPane 在 phase 推进中仍稳定渲染来间接验证 phase state machine
+// 内部工作(不变)。
 // ============================================================================
 
 describe('AnalyzingZone · 打字机 state machine(ticket 02 · 渲染出口删)', () => {
@@ -192,63 +175,11 @@ describe('AnalyzingZone · 打字机 state machine(ticket 02 · 渲染出口删)
     const data = await getAnalyzingData('req-001')
     render(<AnalyzingZone data={data} />)
 
-    // 根 data-paused 由 phase/paused 派生 → 初始 false
-    expect(screen.getByTestId('analyzing-zone').getAttribute('data-paused')).toBe('false')
     // DocumentReaderPane 不依赖 phase,内容稳定渲染
     expect(screen.getByTestId('document-reader-pane')).toBeInTheDocument()
   })
 })
 
-// ============================================================================
-// 暂停 / 重置(issue 19 验收 #3 / #4 · state 变化不影响 UI 显示)
-// ============================================================================
-
-describe('AnalyzingZone · 暂停 / 重置', () => {
-  it('点击 ⏸ 暂停 → 按钮文案变"▶ 继续",data-paused=true', async () => {
-    const data = await getAnalyzingData('req-001')
-    render(<AnalyzingZone data={data} />)
-
-    const pauseBtn = screen.getByTestId('analyzing-toolbar-pause')
-    expect(pauseBtn.getAttribute('data-paused')).toBe('false')
-    expect(pauseBtn.textContent).toContain('暂停')
-
-    fireEvent.click(pauseBtn)
-
-    const root = screen.getByTestId('analyzing-zone')
-    expect(root.getAttribute('data-paused')).toBe('true')
-    expect(pauseBtn.getAttribute('data-paused')).toBe('true')
-    expect(pauseBtn.textContent).toContain('继续')
-  })
-
-  it('点击 ▶ 继续 → 按钮文案变回"⏸ 暂停",data-paused=false', async () => {
-    const data = await getAnalyzingData('req-001')
-    render(<AnalyzingZone data={data} />)
-
-    const pauseBtn = screen.getByTestId('analyzing-toolbar-pause')
-    fireEvent.click(pauseBtn)
-    expect(pauseBtn.getAttribute('data-paused')).toBe('true')
-
-    fireEvent.click(pauseBtn)
-    expect(pauseBtn.getAttribute('data-paused')).toBe('false')
-    expect(pauseBtn.textContent).toContain('暂停')
-  })
-
-  it('点击 ↶ 重置 → 根 data-paused=false,DocumentReaderPane 仍正常', async () => {
-    const data = await getAnalyzingData('req-001')
-    render(<AnalyzingZone data={data} />)
-
-    // 先暂停
-    fireEvent.click(screen.getByTestId('analyzing-toolbar-pause'))
-    expect(screen.getByTestId('analyzing-zone').getAttribute('data-paused')).toBe('true')
-
-    // 再重置
-    fireEvent.click(screen.getByTestId('analyzing-toolbar-reset'))
-
-    expect(screen.getByTestId('analyzing-zone').getAttribute('data-paused')).toBe('false')
-    // UI 仍稳定渲染(ticket 02 验收 #3:状态变化不影响 UI 显示)
-    expect(screen.getByTestId('document-reader-pane')).toBeInTheDocument()
-  })
-})
 
 // ============================================================================
 // 空态 — 引导去 DRAFTING(issue 19 验收:empty=true)
@@ -353,34 +284,6 @@ describe('AnalyzingZone · 错误态(边界)', () => {
     expect(screen.getByTestId('analyzing-zone').getAttribute('data-empty')).toBe('false')
     // DocumentReaderPane 接管左栏
     expect(screen.getByTestId('document-reader-pane')).toBeInTheDocument()
-  })
-
-  it('toolbar.actions 为空时,toolbar 不崩', () => {
-    const data: AnalyzingData = {
-      ...emptyAnalyzing('NO-ACTIONS'),
-      empty: false,
-      chunks: [
-        {
-          id: 'c-1',
-          ts: '14:23:01',
-          label: 'START',
-          text: '单 chunk',
-          kind: 'narration',
-          tone: 'info',
-        },
-      ],
-      streamMeta: {
-        totalChunks: 1,
-        isStreaming: true,
-        startedAt: '2026-07-12T00:00:00.000Z',
-        endedAt: null,
-      },
-      toolbar: { crumb: [{ label: 'A', current: true }], actions: [] },
-      stats: { subproblems: 0, risks: 0, options: 0, total: 0 },
-    }
-    render(<AnalyzingZone data={data} />)
-    expect(screen.getByTestId('analyzing-toolbar')).toBeInTheDocument()
-    expect(screen.queryByTestId('analyzing-toolbar-pause')).toBeNull()
   })
 
   it('顶层不崩(空 / 异常数据 mount 即返回)', () => {
@@ -548,21 +451,6 @@ describe('AnalyzingZone · 打字机 fake-timer 推进(20ms/字 · ticket 02 验
     const pane = screen.getByTestId('document-reader-pane')
     expect(pane).toBeInTheDocument()
     expect(pane.getAttribute('data-active-tab-id')).toBe('prd')
-  })
-
-  it('推进 1s 后 root data-paused 仍为 false(fake-timer 下无副作用)', async () => {
-    vi.useFakeTimers()
-    const data = await getAnalyzingData('req-001')
-    render(<AnalyzingZone data={data} />)
-
-    for (let i = 0; i < 10; i++) {
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(100)
-      })
-    }
-
-    // paused 状态不变;root data-paused 反映 paused state
-    expect(screen.getByTestId('analyzing-zone').getAttribute('data-paused')).toBe('false')
   })
 })
 
