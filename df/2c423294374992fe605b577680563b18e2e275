@@ -1,0 +1,21 @@
+apps/web/src/__tests__/analyzing-designing-fs-loader.test.ts
+  s_0bfec09f8a9c79::t_483ec34cc8cac7 57
+apps/web/src/lib/analyzing.server.ts
+  s_0bfec09f8a9c79::t_79cfb1d401a394 47,606-614,655-664
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "df2c423294374992fe605b577680563b18e2e275",
+  "prompts": {},
+  "sessions": {
+    "s_0bfec09f8a9c79": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2cb5bbaa-0648-45a0-8594-cb4babcd4a0b",
+        "model": "unknown"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
