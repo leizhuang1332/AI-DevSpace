@@ -685,13 +685,18 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
         : phase.chunkIndex + 1
 
   return (
+    // ADR-0019 D1/D2 真实生效前提:主区必须有**确定高度**,内部列 body 的
+    // overflow-auto 才会触发(祖先 ZoneShell 用 min-h-[calc(100vh-84px)] 不是
+    // 确定高度 → h-full 在 grid 里退化成内容高度 → 整页外滚)。这里直接取
+    // "视口高 - 上方固定条(StatusBar h-10 + ZoneBar h-11 = 84px,见
+    // ZoneShell.WORKSPACE_SHELL_OFFSET_PX)" 作为主区确定高度,打破循环依赖。
     <main
       data-testid="analyzing-zone"
       data-requirement-id={data.requirementId}
       data-empty="false"
       data-phase={data.phase}
       data-paused={paused ? 'true' : 'false'}
-      className="flex flex-col h-full overflow-hidden bg-bg-elevated"
+      className="flex flex-col h-[calc(100vh-84px)] overflow-hidden bg-bg-elevated"
     >
       <StageStrip
         totalChunks={totalChunks}
