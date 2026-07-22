@@ -565,3 +565,38 @@ describe('AnalyzingZone · 打字机 fake-timer 推进(20ms/字 · ticket 02 验
     expect(screen.getByTestId('analyzing-zone').getAttribute('data-paused')).toBe('false')
   })
 })
+
+// ============================================================================
+// 主区锁高度契约(ADR-0019 D1/D2)
+//
+// jsdom 测不了真滚动(scrollHeight/clientHeight 恒 0),只锁 className 契约:
+//   - analyzing-main:overflow-hidden 且不含 overflow-auto(外层不再是滚动容器)
+//   - analyzing-grid / left-col / right-col:各自 overflow-hidden(滚动下沉列内 body)
+// ============================================================================
+
+describe('AnalyzingZone · 主区锁高度契约(ADR-0019 D1/D2)', () => {
+  afterEach(() => {
+    cleanup()
+    globalThis.resetMatchMedia()
+  })
+
+  it('analyzing-main 含 overflow-hidden 且不含 overflow-auto(外层不再滚动)', async () => {
+    globalThis.setMatchMedia('(min-width: 1024px)', true)
+    const data = await getAnalyzingData('req-001')
+    render(<AnalyzingZone data={data} />)
+
+    const analyzingMain = screen.getByTestId('analyzing-main')
+    expect(analyzingMain.className).toContain('overflow-hidden')
+    expect(analyzingMain.className).not.toContain('overflow-auto')
+  })
+
+  it('analyzing-grid / left-col / right-col 各自含 overflow-hidden(桌面 2:1)', async () => {
+    globalThis.setMatchMedia('(min-width: 1024px)', true)
+    const data = await getAnalyzingData('req-001')
+    render(<AnalyzingZone data={data} />)
+
+    expect(screen.getByTestId('analyzing-grid').className).toContain('overflow-hidden')
+    expect(screen.getByTestId('analyzing-left-col').className).toContain('overflow-hidden')
+    expect(screen.getByTestId('analyzing-right-col').className).toContain('overflow-hidden')
+  })
+})

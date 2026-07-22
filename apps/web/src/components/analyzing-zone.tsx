@@ -89,7 +89,6 @@ import { CitationOverlay } from './citation-overlay'
  * - VS3 新增:
  *   - 渲染 SessionTabs(sessions / activeId / onSwitch / onCreate / onClose)
  *   - 切换 Tab 时主区 chunks 按 activeSessionId 重新加载;打字机 / 暂停独立工作
- *   - 主区滚动位置按 sessionStorage `analysis-scroll-<sid>` 持久化
  *   - activeId 默认 = props.data.activeSessionId(cookie `last_session_id` 决定,见 server)
  *
  * 状态机(single source of truth,避免 batching 双状态同步问题):
@@ -104,11 +103,6 @@ export interface AnalyzingZoneProps {
 
 const TYPEWRITER_INTERVAL_MS = 20
 const INTER_CHUNK_PAUSE_MS = 200
-
-/** sessionStorage key 模板:每会话独立滚动位置(issue 19c 验收 #5) */
-function scrollStorageKey(sessionId: string): string {
-  return `analysis-scroll-${sessionId}`
-}
 
 /** 客户端 cookie 名:上次 active session id(SSR 通过 cookies() 注入 lastSessionId) */
 const LAST_SESSION_COOKIE = 'last_session_id'
@@ -311,8 +305,8 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
     setToasts((prev) => prev.filter((t) => t.id !== id))
   }, [])
 
-  // 主区滚动容器 ref(用于滚动位置持久化,issue 19c 验收 #5)
-  const mainScrollRef = useRef<HTMLDivElement>(null)
+  // 主区滚动位置持久化已删(ADR-0019 D4):analyzing-main 改为 overflow-hidden 后
+  // 外层不再滚动,mainScrollRef / scrollStorageKey / sessionStorage 全部为死代码。
   // ticket 07:DocumentReaderPane / ProductList 容器 ref,传给 CitationOverlay 用于
   // SVG 端点定位(`[data-product-id]` / `[data-testid="citation-highlight"]`)。
   const docPaneRef = useRef<HTMLDivElement>(null)
@@ -611,24 +605,12 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   // SessionTabs 回调(issue 19c VS3)
   // -------------------------------------------------------------------------
 
-  /** 切换会话:保存当前会话滚动位置 → 切换 activeSessionId → 恢复新会话滚动位置
-   * 打字机 phase 与 paused 状态**保留**(per-session 切换不应让 UI 跳变,但 chunks
-   * 引用已变 → phase.chunkIndex 会越界 → 自然落到 'idle' 重启,符合"独立工作"语义) */
+  /** 切换会话:切换 activeSessionId + 重置打字机 phase + 写 last_session_id cookie。
+   * 打字机 phase 必须重置(切换后会话的 chunks 长度/内容不同)。
+   * 滚动位置持久化已删(ADR-0019 D4:主区 overflow-hidden 后外层不再滚动)。 */
   const handleSwitchSession = useCallback(
     (sessionId: string) => {
       if (sessionId === activeSessionId) return
-      // 保存当前会话的滚动位置到 sessionStorage
-      const el = mainScrollRef.current
-      if (el && typeof window !== 'undefined') {
-        try {
-          window.sessionStorage.setItem(
-            scrollStorageKey(activeSessionId),
-            String(el.scrollTop),
-          )
-        } catch {
-          /* sessionStorage may be unavailable; ignore */
-        }
-      }
       setActiveSessionId(sessionId)
       // 重置打字机 phase(切换后会话的 chunks 长度/内容不同,phase 必须重置)
       setPhase({ kind: 'idle' })
@@ -636,23 +618,6 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       if (typeof document !== 'undefined') {
         document.cookie = `${LAST_SESSION_COOKIE}=${encodeURIComponent(sessionId)}; path=/; max-age=31536000; samesite=lax`
       }
-      // 恢复新会话的滚动位置(下一次渲染后,从 mainScrollRef 读取并设置)
-      // 通过微任务延迟到 DOM 更新后再写 scrollTop
-      queueMicrotask(() => {
-        const nextEl = mainScrollRef.current
-        if (!nextEl || typeof window === 'undefined') return
-        try {
-          const saved = window.sessionStorage.getItem(scrollStorageKey(sessionId))
-          if (saved !== null) {
-            const n = Number(saved)
-            if (Number.isFinite(n)) nextEl.scrollTop = n
-          } else {
-            nextEl.scrollTop = 0
-          }
-        } catch {
-          /* ignore */
-        }
-      })
     },
     [activeSessionId],
   )
@@ -691,19 +656,12 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       if (idx < 0) return
       const nextSessions = sessions.filter((s) => s.id !== sessionId)
       setSessions(nextSessions)
-      // 清理 chunks map + sessionStorage
+      // 清理 chunks map(滚动位置持久化已删 · ADR-0019 D4)
       setChunksBySessionId((prev) => {
         const next = { ...prev }
         delete next[sessionId]
         return next
       })
-      if (typeof window !== 'undefined') {
-        try {
-          window.sessionStorage.removeItem(scrollStorageKey(sessionId))
-        } catch {
-          /* ignore */
-        }
-      }
       // 如果关闭的就是 active → 切到邻居(关闭非首项用左邻居,关闭首项用新首项)
       if (activeSessionId === sessionId) {
         const neighborIdx = idx === 0 ? 0 : idx - 1
@@ -774,22 +732,21 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
         />
       </div>
       <div
-        ref={mainScrollRef}
         data-testid="analyzing-main"
         data-active-session-id={activeSessionId}
         data-layout={isDesktop ? 'doc-reader-2-1' : 'narrow-tabs'}
-        className="flex-1 overflow-auto px-6 py-6 flex flex-col gap-5"
+        className="flex-1 min-h-0 overflow-hidden px-6 py-6 flex flex-col gap-5"
       >
         {/* 主区内容 — 桌面 = 2:1 分栏;窄视口 = 顶部 Tab + 单栏切换(ticket 05) */}
         {isDesktop ? (
           <div
             data-testid="analyzing-grid"
             data-viewport="desktop"
-            className="relative grid grid-cols-1 lg:grid-cols-3 gap-5 flex-1 min-h-0"
+            className="relative grid grid-cols-1 lg:grid-cols-3 gap-5 flex-1 min-h-0 overflow-hidden"
           >
             <div
               data-testid="analyzing-left-col"
-              className="col-span-1 lg:col-span-2 flex flex-col min-h-0 relative"
+              className="col-span-1 lg:col-span-2 flex flex-col min-h-0 relative overflow-hidden"
             >
               <DocumentReaderPane
                 prdMarkdown={data.prdMarkdown}
@@ -805,7 +762,7 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
             </div>
             <div
               data-testid="analyzing-right-col"
-              className="col-span-1 flex flex-col gap-5 min-h-0"
+              className="col-span-1 flex flex-col gap-5 min-h-0 overflow-hidden"
             >
               <Summary summary={data.summary} stats={data.stats} />
               <div className="flex-1 min-h-0">
@@ -828,7 +785,6 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
               chunks={chunks}
               productListRef={productListRef}
               documentBodyRef={docPaneRef}
-              mainScrollRef={mainScrollRef}
               isDesktop={isDesktop}
             />
           </div>
@@ -942,7 +898,7 @@ function NarrowLayout({
     <div
       data-testid="analyzing-narrow"
       data-narrow-tab={narrowTab}
-      className="flex flex-col gap-3 flex-1 min-h-0"
+      className="flex flex-col gap-3 flex-1 min-h-0 overflow-hidden"
     >
       {/* 顶部 Tab 切换("📑 文档" / "🎯 产物") */}
       <div
@@ -990,7 +946,7 @@ function NarrowLayout({
       {/* 主区:根据 narrowTab 单条件渲染 */}
       <div
         data-testid="analyzing-narrow-body"
-        className="flex-1 min-h-0"
+        className="flex-1 min-h-0 overflow-hidden"
       >
         {narrowTab === 'doc' ? (
           <div

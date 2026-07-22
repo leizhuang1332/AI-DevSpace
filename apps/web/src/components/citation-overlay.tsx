@@ -65,11 +65,6 @@ export interface CitationOverlayProps {
   /** 左栏 DocumentReaderPane 容器 ref(内部 querySelector 找 doc-reader-body;
    *  也读 `data-active-tab-id` 决定 source_ref 端点上下文) */
   documentBodyRef: RefObject<HTMLElement | null>
-  /** 主区滚动容器 ref(ADR-0018 D2 "重算触发"清单第 ② 项:
-   *  主区整体滚动 → 端点坐标随之改变 → 触发重算)。
-   *  可选;不传 → 仅监听 product list / doc body 各自滚动(主区大滚动事件
-   *  通常会冒泡到子容器,但窄屏下的 `overflow-auto` 主区独立滚动不会被监听) */
-  mainScrollRef?: RefObject<HTMLElement | null>
   /** 是否桌面视口;窄视口下不渲染(ticket 05 + ADR-0018 D4) */
   isDesktop?: boolean
 }
@@ -183,7 +178,6 @@ export function CitationOverlay({
   chunks,
   productListRef,
   documentBodyRef,
-  mainScrollRef,
   isDesktop,
 }: CitationOverlayProps) {
   // -------------------------------------------------------------------------
@@ -328,12 +322,10 @@ export function CitationOverlay({
     }
     window.addEventListener('resize', handleResize, { passive: true })
 
-    // 主区视口滚动(由 AnalyzingZone 提供的 mainScrollRef 自身滚动会触发)
-    // 为稳妥起见,直接监听 documentBodyRef(productListRef 容器)自身滚动;
-    // 主区大滚动一般会触发所有容器 scroll,这里覆盖核心场景。
+    // 左栏阅读区 body + 右栏产品列表 body 各自滚动独立监听(ADR-0018 D2)。
+    // 主区外层已 overflow-hidden(ADR-0019 D1),不再是滚动容器 → 无需监听。
     const productListEl = productListRef.current
     const docBodyEl = documentBodyRef.current
-    const mainScrollEl = mainScrollRef?.current ?? null
     const handleScroll = (): void => {
       scheduleRecompute()
     }
@@ -342,9 +334,6 @@ export function CitationOverlay({
     }
     if (docBodyEl) {
       docBodyEl.addEventListener('scroll', handleScroll, { passive: true })
-    }
-    if (mainScrollEl) {
-      mainScrollEl.addEventListener('scroll', handleScroll, { passive: true })
     }
 
     // MutationObserver:监听 product 卡片 / mark span 增删 + Tab 切换重渲染
@@ -391,9 +380,6 @@ export function CitationOverlay({
       }
       if (docBodyEl) {
         docBodyEl.removeEventListener('scroll', handleScroll)
-      }
-      if (mainScrollEl) {
-        mainScrollEl.removeEventListener('scroll', handleScroll)
       }
       observers.forEach((mo) => mo.disconnect())
     }

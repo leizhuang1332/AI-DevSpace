@@ -299,3 +299,28 @@ describe('AnalyzingZone · 窄视口联动(候选 A · ticket 05)', () => {
     ).toBe('aux-api')
   })
 })
+
+// ============================================================================
+// 主区锁高度契约(ADR-0019 D3)—— 窄视口同契约
+//
+// jsdom 测不了真滚动,只锁 className 契约:窄视口外层 + body 均 overflow-hidden,
+// 滚动由内部 DocumentReader / ProductList body 处理。
+// ============================================================================
+
+describe('NarrowLayout · 主区锁高度契约(ADR-0019 D3)', () => {
+  it('analyzing-narrow 含 overflow-hidden', () => {
+    globalThis.setMatchMedia('(min-width: 1024px)', false)
+    render(<AnalyzingZone data={makeNarrowData()} />)
+
+    expect(screen.getByTestId('analyzing-narrow').className).toContain('overflow-hidden')
+  })
+
+  it('analyzing-narrow-body 含 overflow-hidden', () => {
+    globalThis.setMatchMedia('(min-width: 1024px)', false)
+    render(<AnalyzingZone data={makeNarrowData()} />)
+
+    expect(
+      screen.getByTestId('analyzing-narrow-body').className,
+    ).toContain('overflow-hidden')
+  })
+})
