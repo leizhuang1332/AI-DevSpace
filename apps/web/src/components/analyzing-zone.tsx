@@ -24,7 +24,6 @@ import { AdmissionDashboard } from './admission-dashboard'
 import { SessionTabs } from './session-tabs'
 import type { ThinkingPhase } from './thinking-stream'
 import { ProductList, type CitationSourceOption } from './product-list'
-import { InterjectInput } from './interject-input'
 import { TechBriefPanel } from './tech-brief-panel'
 import { ToastHost } from './toast-host'
 import type { ToastItem } from './toast'
@@ -54,7 +53,6 @@ import { CitationOverlay } from './citation-overlay'
  * │                                    │ ProductList │
  * │ <MarkdownPreview body>             │ 🎯 识别产物  │
  * ├────────────────────────────────────┴─────────────┤
- * │ 💬 插话输入条(InterjectInput · 按 active 会话推送新 chunk)│
  * └────────────────────────────────────────────────┘
  *
  * 窄视口布局(ticket 05 · max-width < 1024px —— 候选 A):
@@ -77,8 +75,6 @@ import { CitationOverlay } from './citation-overlay'
  * - **ticket 05 窄视口**:见上方"窄视口布局"段;响应式断点统一走 CSS `min-width: 1024px`
  * - 打字机 20ms / 字(issue 19 验收 #2);chunk 间 200ms 间隔,模拟"思考停顿"
  * - SSE 订阅 `/api/requirement/<id>/events` —— 收到 `analysis_chunk` 事件追加到 chunks
- * - InterjectInput 提交 → POST `/api/requirements/<id>/analysis/interject` →
- *   Agent 通过 SseHub 推送新 chunks → 上面 useEffect 订阅自动追加
  * - VS3 新增:
  *   - 渲染 SessionTabs(sessions / activeId / onSwitch / onCreate / onClose)
  *   - 切换 Tab 时主区 chunks 按 activeSessionId 重新加载;打字机独立工作
@@ -103,11 +99,6 @@ const LAST_SESSION_COOKIE = 'last_session_id'
 /** SSE 端点路径(同 apps/agent/src/sse/requirementEventsRoute.ts) */
 function sseUrl(requirementId: string): string {
   return `/api/requirement/${requirementId}/events`
-}
-
-/** 插话 REST 端点(issue 19b · 由 apps/agent/src/routes/analysis.ts 处理) */
-function interjectUrl(requirementId: string): string {
-  return `/api/requirements/${requirementId}/analysis/interject`
 }
 
 /** 在派生产物三桶中按 id 查找单条产物(点击卡片联动左栏用) */
@@ -248,8 +239,6 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
     },
     [activeSessionId],
   )
-  const [interjectSubmitting, setInterjectSubmitting] = useState(false)
-  const [interjectError, setInterjectError] = useState<string | null>(null)
 
   // -------------------------------------------------------------------------
   // 窄视口断点 + 窄视口 Tab(ticket 05 · ADR-0017 窄视口 UX · 候选 A)
@@ -513,35 +502,6 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   }, [chunks])
 
   // -------------------------------------------------------------------------
-  // 插话提交(issue 19b D2 ②):POST /analysis/interject → SSE 推 chunk → useEffect 追加
-  // VS3:session_id 用当前 activeSessionId
-  // -------------------------------------------------------------------------
-  const handleInterject = useCallback(
-    async (text: string) => {
-      setInterjectSubmitting(true)
-      setInterjectError(null)
-      try {
-        const res = await fetch(interjectUrl(data.requirementId), {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ text, session_id: activeSessionId }),
-        })
-        if (!res.ok && res.status !== 202) {
-          const errBody = (await res.json().catch(() => ({}))) as { reason?: string }
-          throw new Error(errBody.reason ?? `HTTP ${res.status}`)
-        }
-        // chunks 由 SSE listener 异步追加;无需 setState 这里
-      } catch (err) {
-        setInterjectError(err instanceof Error ? err.message : '提交失败')
-      } finally {
-        setInterjectSubmitting(false)
-      }
-    },
-    [data.requirementId, activeSessionId],
-  )
-
-  // -------------------------------------------------------------------------
   // 产物变更(issue 19d VS4):Server Action updateProduct → 写 products.yaml →
   // revalidatePath 触发 admission / products 刷新
   // -------------------------------------------------------------------------
@@ -776,15 +736,6 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
             onNarrowTabChange={setNarrowTab}
           />
         )}
-        {interjectError && (
-          <div
-            data-testid="interject-error"
-            role="alert"
-            className="text-sm text-error bg-error/10 border border-error rounded-md px-3 py-2"
-          >
-            插话失败:{interjectError}
-          </div>
-        )}
         {productError && (
           <div
             data-testid="product-error"
@@ -794,10 +745,6 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
             产物编辑失败:{productError}
           </div>
         )}
-        <InterjectInput
-          onSubmit={handleInterject}
-          isSubmitting={interjectSubmitting}
-        />
       </div>
 
       {/* 画线联动提示(ticket 03):无出处产物点击 → "未关联原文出处" toast */}
