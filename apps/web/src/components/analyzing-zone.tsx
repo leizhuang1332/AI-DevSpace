@@ -31,7 +31,6 @@ import {
   DocumentReaderPane,
   PRD_TAB_ID,
 } from './document-reader-pane'
-import { CitationOverlay } from './citation-overlay'
 
 /**
  * ANALYZING 工位组件(ADR-0011 §6 ANALYZING 布局 · issue 19)
@@ -287,8 +286,11 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
 
   // 主区滚动位置持久化已删(ADR-0019 D4):analyzing-main 改为 overflow-hidden 后
   // 外层不再滚动,mainScrollRef / scrollStorageKey / sessionStorage 全部为死代码。
-  // ticket 07:DocumentReaderPane / ProductList 容器 ref,传给 CitationOverlay 用于
-  // SVG 端点定位(`[data-product-id]` / `[data-testid="citation-highlight"]`)。
+  // ticket 09 撤回 CitationOverlay 后:
+  //   docPaneRef / productListRef 仍保留,服务反向联动 handleSourceRefClick
+  //   (点左栏 <mark> → 滚右栏 product 卡片 + pulse)。productListRef 还绑到
+  //   ProductList 根容器,ProductList 内部 `<div data-testid="product-list"
+  //   ref={containerRef}>` 用于 querySelector 找 `[data-product-id]` 滚到视野中央。
   const docPaneRef = useRef<HTMLDivElement>(null)
   const productListRef = useRef<HTMLDivElement>(null)
 
@@ -711,14 +713,6 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
                 />
               </div>
             </div>
-            {/* ticket 07 · ADR-0018 D1:CitationOverlay 作为兄弟节点覆盖在主区
-                (absolute inset-0 + z-10),SVG 端点 = 左栏 mark / 右栏 product 卡片 */}
-            <CitationOverlay
-              chunks={chunks}
-              productListRef={productListRef}
-              documentBodyRef={docPaneRef}
-              isDesktop={isDesktop}
-            />
           </div>
         ) : (
           <NarrowLayout

@@ -1,9 +1,10 @@
 ---
-Status: ready-for-agent
+Status: wontfix
 Type: ticket
 Parent: ../../ai-devspace-mvp/issues/19-zone-analyzing.md
 Related-ADRs: [ADR-0017, ADR-0018]
-Implements: ADR-0018 D1, D2, D3
+Superseded-By: ../analyzing-doc-reader/issues/09-withdraw-svg-rendering.md
+Implements: ADR-0018 D1, D2, D3(部分撤回 · 详见末尾"撤回说明")
 Slice: 7/7
 Priority: P1
 ---
@@ -133,3 +134,15 @@ Priority: P1
   - 滚动监听 passive + rAF throttle
   - pulseRef 类型守卫不漏分支
   - 单元测试覆盖 SSR/窄视口/无 source_ref/narration 4 个边界
+
+## 撤回说明(2026-07-24)
+
+本 ticket 在 [ticket 09](../analyzing-doc-reader/issues/09-withdraw-svg-rendering.md) 中部分撤回:
+
+- **D1 / D2 / D4(部分)实现**:撤回(整文件删 `apps/web/src/components/citation-overlay.tsx` + `apps/web/src/components/__tests__/citation-overlay.test.tsx` + `apps/web/vitest.setup.ts` 中 ResizeObserver / rAF stub)
+- **D3 反向联动**(ADR-0018 D3,补齐 ADR-0017 D4 v2):**从 `analyzing-zone.tsx` 继承保留** —— `handleSourceRefClick` + `pulseRef.productId` 分支 + `data-product-id` 锚点 + `ProductList.containerRef` 全部不动
+- **本 ticket 状态**:`Status: wontfix`(从 `ready-for-agent` 撤回);保留 issue 文档作为历史决策记录
+
+**撤回原因**:SVG 跨列画线落地后视觉密度过载 —— 10 产物 × 平均 1.5 source_ref ≈ 15 条曲线在 2:1 视口里交织,与行级 `<mark>` 底色 + product 卡片 🔗 角标叠加形成三重视觉锚点,反而分散用户注意力。
+
+**v2 重启路径**:若未来用户复测认为"持续可见的视觉锚点"是必要 UX,新建 ticket 10 引用本 ticket + [ADR-0018 Deprecated](../../docs/adr/0018-analyzing-svg-cross-column-lines.md),讨论视觉密度阈值(< N 条线条变细 + 透明度↓)或换画线方案(canvas / leader-line)。

@@ -54,11 +54,12 @@ Priority: P0
 - [ ] 删 JSDoc 第 92 行 `"- 主区滚动位置按 sessionStorage \`analysis-scroll-<sid>\` 持久化"`
 - [ ] 删除 caller 处传给 `<CitationOverlay>` 的 `mainScrollRef={mainScrollRef}`(行 831)
 
-### 6. 删 `CitationOverlay.mainScrollRef?` props
+### 6. 删 `CitationOverlay.mainScrollRef?` props — **由 ticket 09 合并完成**
 
-- [ ] `apps/web/src/components/citation-overlay.tsx` 删 `CitationOverlayProps.mainScrollRef?` 字段(行 68-72)
-- [ ] 删除对应 useEffect 里 `mainScrollRef?.current?.addEventListener('scroll', ...)` 一段(用 RefObject 推不出 mainScrollRef 后自然变 unreachable)
-- [ ] 删除 JSDoc 第 68-72 段(`可选;不传 → 仅监听 ...`)
+- [x] `apps/web/src/components/citation-overlay.tsx` 整文件删除(由 [ticket 09](../analyzing-doc-reader/issues/09-withdraw-svg-rendering.md) §1 完成,本 ticket 子任务合并实现)
+- [x] `mainScrollRef?.current?.addEventListener('scroll', ...)` 段随组件删除而消失
+- [x] JSDoc 段随组件删除而消失
+- [x] ticket 08 §5 line 55 "删除 caller 处传给 `<CitationOverlay>` 的 `mainScrollRef={mainScrollRef}`(行 831)" 由 ticket 09 合并完成
 
 ### 7. 测试(className 契约断言)
 

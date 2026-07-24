@@ -41,7 +41,7 @@ ADR-0017 D1 落地后(2026-07, ticket 02),ANALYZING 工位桌面形态采用 **2
 | 外层滚动 | `analyzing-main` 的 `overflow-auto` 在 `flex-col flex-1` 组合下 **事实上从不触发**(sibling InterjectInput/alerts 为 auto 高度,总高 = 父容器高度) | 看起来是"外层会滚",**实际几乎无意义**;将来若有人塞大 sibling(例如 alerts 堆到 5 条)外层会突现滚动,破坏"两栏独立"心智 |
 | 两栏内部滚动 | DocumentReader.body / ProductList.body 各自 `overflow-auto`,**确实两栏独立** | 列容器本身 `overflow-visible`,**未显式 `overflow-hidden` 兜底** —— 风险是:哪天有人把 DocumentReaderPane 改成不带内部 overflow,左栏内容会溢出列、撞右栏 |
 | 死代码 | `mainScrollRef` + `scrollStorageKey` + `handleSwitchSession` 内两条 try 块在跑,scrollTop 始终 0 | **死代码 + 在 JSDoc 撒谎**:第 92 行写"主区滚动位置按 sessionStorage 持久化",实际读不到非零值 |
-| 接口漂移 | `<CitationOverlay mainScrollRef={mainScrollRef}>` 在传一个永远不滚的 ref | 接口承诺了一个不会再被消费的能力 |
+| ~~接口漂移~~ | ~~`<CitationOverlay mainScrollRef={mainScrollRef}>` 在传一个永远不滚的 ref~~ | **由 ticket 09(2026-07-24)合并完成** —— 整组件删除,接口漂移自然消失 |
 
 ### 真实场景(决定性输入)
 
@@ -134,7 +134,7 @@ ADR-0017 D1 落地后(2026-07, ticket 02),ANALYZING 工位桌面形态采用 **2
 
 **理由**:D1 路径下 `el.scrollTop === 0` 恒成立 —— **这段代码是死代码**,留着会在将来误导接手人以为主区会滚、值得持久化。
 
-### D5 · `<CitationOverlay>` 删 `mainScrollRef?` 字段
+### D5 · `<CitationOverlay>` 删 `mainScrollRef?` 字段 — **Deprecated · 由 ticket 09 合并完成**
 
 **原文**:`CitationOverlayProps.mainScrollRef?: RefObject<HTMLElement | null>` 字段、对应 useEffect 里 `addEventListener('scroll', ...)` 监听块、JSDoc 描述段一并删除。
 
@@ -145,6 +145,8 @@ ADR-0017 D1 落地后(2026-07, ticket 02),ANALYZING 工位桌面形态采用 **2
 
 **保留**:resize 监听、左右 body 各自 scroll 监听、MutationObserver、rAF throttle —— 全部不动,因为 SVG 跨列画线在 D1/D2 路径下仍需重算端点。
 
+**2026-07-24 撤回说明**:[ticket 09](../../.scratch/analyzing-doc-reader/issues/09-withdraw-svg-rendering.md) 撤回 ticket 07 / ADR-0018 D1/D2 全部实现,**整文件删除 `citation-overlay.tsx`**。D5 全部子项随之消失(无 `mainScrollRef` 字段、无 scroll 监听块、无 JSDoc);"保留 resize 监听"也不再适用。本 D5 标记为 Deprecated,仅作为历史决策记录保留。
+
 ---
 
 ## 视觉契约验收
@@ -152,3 +154,14 @@ ADR-0017 D1 落地后(2026-07, ticket 02),ANALYZING 工位桌面形态采用 **2
 - 桌面形态(≥1024px):手工 Chromium + 设计稿截图对比,**主区两根列级滚动条独立、Tab 栏 / Summary 顶部吸顶、外层主区不滚** —— 2026-07-22 完成
 - 窄视口(<1024px):手工 Chromium devtools 切到 800×600,**NarrowLayout 锁高度 + 切 Tab 时内部 body 自滚** —— 2026-07-22 完成
 - jsdom 单元测试仅断言 className 契约(见 ticket 08 §7),**不**覆盖真滚动行为(避免 jsdom layout 漂移);e2e 留 ticket 09 后续基建
+
+---
+
+## ticket 09 撤回影响(2026-07-24)
+
+[ticket 09](../../.scratch/analyzing-doc-reader/issues/09-withdraw-svg-rendering.md) 撤回 ADR-0018 D1/D2 全部实现,**整文件删除 `apps/web/src/components/citation-overlay.tsx`**。对本 ADR 的影响:
+
+- **D5 全部子项随组件删除而消失**:无 `mainScrollRef` 字段、无 scroll 监听块、无 JSDoc(详见 D5 段撤回说明)
+- **D4 段(caller 处 `mainScrollRef` 传递)**:line 133 子项由 ticket 09 合并完成
+- **本 ADR 状态不变**:仍 Accepted,主区锁高度 + 两栏独立滚动契约完整保留并经视觉契约验收
+- **"保留 resize 监听 / MutationObserver / rAF throttle"** 这部分当时服务 SVG 跨列画线 —— ticket 09 后随之消失(都跟着 CitationOverlay 一起删了)

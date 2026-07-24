@@ -95,9 +95,11 @@ export interface ProductListProps {
   pulseRef?: { productId: string } | null
   /**
    * ticket 07(ADR-0018 D1/D2):父组件透传一个 ref,ProductList 把它绑到根容器
-   * div 上。CitationOverlay 据此拿到 product 卡片容器,内部 querySelector 找
-   * `[data-product-id]`(SVG 源点定位)。
-   * 不传 → 不绑 ref(向后兼容旧用法)。
+   * div 上。ticket 09 撤回 CitationOverlay 后,本 ref **仍有外部消费者**:
+   * 反向联动 `handleSourceRefClick`(analyzing-zone.tsx)在 rAF 内调用
+   * `productListRef.current?.querySelector('[data-product-id]').scrollIntoView()`
+   * 把对应 product 卡片滚到视野中央。
+   * 不传 → 不绑 ref(向后兼容旧用法;反向联动会拿到 null,降级为 no-op)。
    */
   containerRef?: React.Ref<HTMLDivElement>
 }

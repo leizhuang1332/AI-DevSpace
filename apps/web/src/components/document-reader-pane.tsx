@@ -102,9 +102,13 @@ export interface DocumentReaderPaneProps {
   onSourceRefClick?: (ref: SourceRef | null) => void
   /**
    * ticket 07(ADR-0018 D1/D2):父组件透传一个 ref,DocumentReaderPane 把它绑到
-   * 根容器 div 上。CitationOverlay 据此拿到左栏容器,内部 querySelector 找
-   * `[data-testid="doc-reader-body"]`(SVG 端点定位的 mark 容器)。
-   * 不传 → 不绑 ref(向后兼容旧用法;旧测试不会传)。
+   * 根容器 div 上。ticket 09 撤回 CitationOverlay 后,本 ref **当前无外部消费者**
+   * —— 反向联动 handleSourceRefClick 只消费 productListRef(ticket 09 §3)。
+   * 接口位保留:不传 → 不绑 ref(向后兼容旧用法);后续 v2 若重启 SVG / 引入
+   * 其他需要左栏 DOM 的特性,可重新消费此 ref。
+   *
+   * TODO(follow-up ticket):`docPaneRef` 在 ticket 09 后已是死代码,可一并清理
+   * (声明 + 此 prop + DocumentReaderPane 内 `<div ref={containerRef}>`)。
    */
   containerRef?: Ref<HTMLDivElement>
 }
