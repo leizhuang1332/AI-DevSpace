@@ -26,6 +26,12 @@ import type { SseHub } from '../sse/SseHub.js'
 
 export interface AnalysisRoutesOptions {
   hub: SseHub
+  /**
+   * 与 reposRoutes / workspaceRoutes 对齐:分析路由操作 `<root>/requirements/<id>/{requirement.md,analysis/}`。
+   * buildServer 注入;未设时退化到 `process.env.AIDEVSPACE_ROOT ?? defaultAgentRoot()`,
+   * 保留历史 fallback 兼容 dev 终端直接跑脚本的场景(ticket 00 baseline 校正)。
+   */
+  workspaceRoot?: string
 }
 
 interface InterjectBody {
@@ -173,6 +179,9 @@ export const analysisRoutes: FastifyPluginAsync<AnalysisRoutesOptions> = async (
   opts,
 ) => {
   const { hub } = opts
+  // 优先用 server 注入的 workspaceRoot(test/dev 通过 buildServer({ workspaceRoot }) 覆盖);
+  // 未设时退化到 env / 默认 ~/.aidevspace,保留旧行为。
+  const resolveRoot = (): string => opts.workspaceRoot ?? process.env.AIDEVSPACE_ROOT ?? defaultAgentRoot()
 
   fastify.post<{
     Params: { id: string }
@@ -252,8 +261,8 @@ export const analysisRoutes: FastifyPluginAsync<AnalysisRoutesOptions> = async (
       sessionId = `sess-${angleTyped}-${Date.now().toString(36)}`
     }
 
-    // 4. root 解析(沿用 generate-brief 同款)
-    const root = process.env.AIDEVSPACE_ROOT ?? defaultAgentRoot()
+    // 4. root 解析(沿用 generate-brief 同款):优先 server 注入,fallback env / ~/.aidevspace
+    const root = resolveRoot()
     const requirementMdPath = join(root, 'requirements', id, 'requirement.md')
     if (!existsSync(requirementMdPath)) {
       return reply.code(409).send({
@@ -326,8 +335,8 @@ export const analysisRoutes: FastifyPluginAsync<AnalysisRoutesOptions> = async (
     }
     const sessionId = body.session_id
 
-    // 1. 计算 analysis 目录:AIDEVSPACE_ROOT/requirements/<id>/analysis
-    const root = process.env.AIDEVSPACE_ROOT ?? defaultAgentRoot()
+    // 1. 计算 analysis 目录:优先 server 注入的 workspaceRoot,fallback env / ~/.aidevspace
+    const root = resolveRoot()
     const analysisDir = join(root, 'requirements', id, 'analysis')
     if (!existsSync(analysisDir)) {
       mkdirSync(analysisDir, { recursive: true })

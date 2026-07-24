@@ -248,7 +248,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   // `requirement_created` 事件到新建 id 通道,Web 端 DRAFTING 据此切正常态 / 红色 banner
   await fastify.register(requirementRoutes, { requirementService, sseHub: hub })
 
-  await fastify.register(analysisRoutes, { hub })
+  await fastify.register(analysisRoutes, { hub, workspaceRoot })
   await fastify.register(spikeRoutes, { hub, provider, ccSwitch, store: sessionStore, mirror: messagesMirror, registry: sessionStateRegistry })
   await fastify.register(bootstrapRoutes, { tokenManager, apiBase: 'http://localhost:7777' })
   // P4 · Task 4:retry route —— UI 点重试时调;GET/sessions/:sid 是 GET,POST /retry 是 action

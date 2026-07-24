@@ -146,7 +146,31 @@ describe.skipIf(process.platform === 'win32')('agent skeleton e2e', () => {
     mkdirSync(reqDir, { recursive: true })
     writeFileSync(join(reqDir, 'requirement.md'), '# e2e PRD\n', 'utf8')
 
-    // 2. POST /api/requirements/:id/analysis/start → 201
+    // 2. SSE 抢先订阅 /events(ticket 00 baseline 校正:原 ticket 06 在此步骤
+    //    顺位 POST → SSE,因 POST 期间即 publish 5 events,订阅时已错过;
+    //    调 ticket 06 既有步骤顺序:订阅 + 等 hello → POST → 读流)
+    const controller = new AbortController()
+    const sse = await fetch(`${url}/api/requirement/${reqId}/events`, {
+      method: 'GET',
+      headers: { 'x-aidevspace-token': token },
+      signal: controller.signal,
+    })
+    expect(sse.status).toBe(200)
+    expect(sse.headers.get('content-type')).toMatch(/^text\/event-stream/)
+
+    const reader = sse.body!.getReader()
+    const decoder = new TextDecoder()
+    let acc = ''
+    // drain 到 hello 事件,确保 SseHub.subscribe(reqId) 已注册
+    const helloDeadline = Date.now() + 2000
+    while (!acc.includes('event: hello') && Date.now() < helloDeadline) {
+      const { done, value } = await reader.read()
+      if (done) break
+      acc += decoder.decode(value)
+    }
+    expect(acc).toMatch(/event: hello/)
+
+    // 3. POST /api/requirements/:id/analysis/start → 201
     const post = await fetch(
       `${url}/api/requirements/${reqId}/analysis/start`,
       {
@@ -162,7 +186,7 @@ describe.skipIf(process.platform === 'win32')('agent skeleton e2e', () => {
     const postBody = (await post.json()) as { sessionId: string; chunks_path: string }
     expect(postBody.sessionId).toBe('sess-e2e-sr')
 
-    // 3. 读 chunks.jsonl → 5 行,3 行含 source_refs / 2 行不含
+    // 4. 读 chunks.jsonl → 5 行,3 行含 source_refs / 2 行不含
     const text = readFileSync(postBody.chunks_path, 'utf8')
     const lines = text.split('\n').filter((l) => l.trim().length > 0)
     expect(lines.length).toBe(5)
@@ -178,19 +202,7 @@ describe.skipIf(process.platform === 'win32')('agent skeleton e2e', () => {
       expect('source_refs' in c).toBe(false)
     }
 
-    // 4. SSE 订阅 /events,验证 source_refs 也走 SSE 推送
-    const controller = new AbortController()
-    const sse = await fetch(`${url}/api/requirement/${reqId}/events`, {
-      method: 'GET',
-      headers: { 'x-aidevspace-token': token },
-      signal: controller.signal,
-    })
-    expect(sse.status).toBe(200)
-    expect(sse.headers.get('content-type')).toMatch(/^text\/event-stream/)
-
-    const reader = sse.body!.getReader()
-    const decoder = new TextDecoder()
-    let acc = ''
+    // 5. 接读 SSE 流(订阅窗口已建,即可收到 5 个 analysis_chunk)
     const startedAt = Date.now()
     const timeout = setTimeout(() => controller.abort(), 2500)
     try {
