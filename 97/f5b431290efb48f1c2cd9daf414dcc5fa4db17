@@ -1,0 +1,39 @@
+apps/web/src/components/analyzing-zone.tsx
+  s_5e333c6cd4e17d::t_d735f95de3b392 289-293
+docs/adr/0018-analyzing-svg-cross-column-lines.md
+  s_5e333c6cd4e17d::t_7aa80f54d1e1b2 313-314
+  s_5e333c6cd4e17d::t_f2b83c6b233408 3,5
+  s_5e333c6cd4e17d::t_5115e5dc06eb5e 66,70-72,77
+.scratch/analyzing-doc-reader/issues/09-withdraw-svg-rendering.md
+  s_5e333c6cd4e17d::t_bcb0d0e1d7c0ff 1-212
+.scratch/analyzing-doc-reader/issues/08-analyzing-grid-locked-height-and-independent-scroll.md
+  s_5e333c6cd4e17d::t_4d4844499c451b 57,59-62
+docs/adr/0019-analyzing-grid-locked-height-independent-scroll.md
+  s_5e333c6cd4e17d::t_68471d1c31d9d1 157-167
+  s_5e333c6cd4e17d::t_9c32d448dfda36 44
+  s_5e333c6cd4e17d::t_c1b7e4f5d5b43e 137,148
+  s_5e333c6cd4e17d::t_1df82b5ecee0c9 149
+.scratch/analyzing-doc-reader/issues/07-svg-cross-column-citation-lines.md
+  s_5e333c6cd4e17d::t_ac41aaa6079f65 2,6-7
+  s_5e333c6cd4e17d::t_0514565da77293 136-148
+apps/web/src/components/document-reader-pane.tsx
+  s_5e333c6cd4e17d::t_213a9a86d48e13 105-111
+apps/web/src/components/product-list.tsx
+  s_5e333c6cd4e17d::t_636981ed7dce0d 98-102
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "97f5b431290efb48f1c2cd9daf414dcc5fa4db17",
+  "prompts": {},
+  "sessions": {
+    "s_5e333c6cd4e17d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cd417cf2-3a4b-4fb0-aee8-143d6fbcd7da",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
