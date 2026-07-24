@@ -9,7 +9,7 @@ import { authPlugin } from '../auth/authPlugin.js'
 import { createSseHub, type SseHub } from '../sse/SseHub.js'
 import { sseRoutes } from '../sse/requirementEventsRoute.js'
 import { analysisRoutes } from '../routes/analysis.js'
-import type { AIProvider } from '../providers/AIProvider.js'
+import { STUB_PROVIDER } from './__helpers__/fakeAnalysisProvider.js'
 
 let app: FastifyInstance
 let hub: SseHub
@@ -17,13 +17,8 @@ let token: string
 let root: string
 let port: number
 
-// ticket 01:interject 自身仍走 mock simulator,但 AnalysisRoutesOptions 现在
-// 强制 provider 字段;给个不会触发的 stub。
-const STUB_PROVIDER: AIProvider = {
-  name: 'stub',
-  async createSession() { throw new Error('stub: not used in interject') },
-  async shutdown() {},
-}
+// ticket 01:interject 自身仍走 mock simulator,AnalysisRoutesOptions 强制
+// provider 字段;用共享 STUB_PROVIDER(handler 不调,仅占位)。
 
 interface CapturedResponse {
   statusCode: number

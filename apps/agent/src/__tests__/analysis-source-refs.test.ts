@@ -29,117 +29,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createSseHub, type SseHub } from '../sse/SseHub.js'
 import { analysisRoutes } from '../routes/analysis.js'
-import type { AIProvider, AISession } from '../providers/AIProvider.js'
-import type { AIEvent } from '../providers/AIEvent.js'
+import { createRecordingProvider } from './__helpers__/fakeAnalysisProvider.js'
 
 let root: string
 let fastify: FastifyInstance
 let hub: SseHub
-
-interface CapturedSendCall {
-  text: string
-  index: number  // 第几次 send
-}
-
-interface CapturedCreateSessionCall {
-  localSid: string
-  topic: string
-  assemblerKind: 'injected' | 'default'
-}
-
-interface WiringCaptures {
-  createSessionCalls: CapturedCreateSessionCall[]
-  sendCalls: CapturedSendCall[]
-}
-
-function makeRecordingProvider(eventsByTurn: AIEvent[][]): { provider: AIProvider; captures: WiringCaptures } {
-  const captures: WiringCaptures = {
-    createSessionCalls: [],
-    sendCalls: [],
-  }
-  let turnIndex = 0
-  let inflightSubs: Array<{
-    queue: AIEvent[]
-    pending: Array<(v: IteratorResult<AIEvent>) => void>
-    closed: boolean
-  }> = []
-
-  const provider: AIProvider = {
-    name: 'recording',
-    async createSession(reqId, opts): Promise<AISession> {
-      const localSid = opts.localSid ?? `auto-${captures.createSessionCalls.length}`
-      captures.createSessionCalls.push({
-        localSid,
-        topic: opts.topic,
-        assemblerKind: opts.assembler ? 'injected' : 'default',
-      })
-      const subs = new Set<typeof inflightSubs[number]>()
-      // 注意:每次 events() 必须创建新 sub —— 双 turn 各开一个独立订阅,
-      // 否则 turn-1 close 后 sub.closed=true,turn-2 的 events() 复用 sub 会立刻返回 done。
-      return {
-        id: localSid,
-        reqId,
-        kind: opts.kind,
-        topic: opts.topic,
-        state: 'idle',
-        sdkSessionId: 'rec-sdk',
-        model: undefined,
-        events: () => {
-          const sub = { queue: [] as AIEvent[], pending: [] as Array<(v: IteratorResult<AIEvent>) => void>, closed: false }
-          subs.add(sub)
-          return {
-            [Symbol.asyncIterator]: () => ({
-              next: () => new Promise<IteratorResult<AIEvent>>((resolve) => {
-                const head = sub.queue.shift()
-                if (head !== undefined) resolve({ value: head, done: false })
-                else if (sub.closed) resolve({ value: undefined, done: true })
-                else sub.pending.push(resolve)
-              }),
-              return: async () => {
-                sub.closed = true
-                return { value: undefined, done: true }
-              },
-            }),
-          }
-        },
-        async send(text: string) {
-          captures.sendCalls.push({ text, index: turnIndex })
-          // 用 eventsByTurn[turnIndex] 推流,然后关闭
-          const events = eventsByTurn[turnIndex] ?? [
-            { type: 'done', reason: 'end_turn' as const, sessionId: 'rec-sdk' },
-          ]
-          turnIndex++
-          for (const ev of events) {
-            for (const s of subs) {
-              if (s.closed) continue
-              const r = s.pending.shift()
-              if (r) r({ value: ev, done: false })
-              else s.queue.push(ev)
-            }
-          }
-          for (const s of subs) {
-            s.closed = true
-            while (s.pending.length) s.pending.shift()!({ value: undefined, done: true })
-          }
-        },
-        async cancel() {
-          for (const s of subs) {
-            s.closed = true
-            while (s.pending.length) s.pending.shift()!({ value: undefined, done: true })
-          }
-        },
-        async close() {
-          for (const s of subs) {
-            s.closed = true
-            while (s.pending.length) s.pending.shift()!({ value: undefined, done: true })
-          }
-        },
-      }
-    },
-    async shutdown() {},
-  }
-  return { provider, captures }
-}
 
 beforeEach(async () => {
   root = mkdtempSync(join(tmpdir(), 'aidevsp-wiring-'))
@@ -170,19 +64,21 @@ afterEach(async () => {
 describe('start handler dual-turn wiring (ADR-0020 D8)', () => {
   it('createSession 1 次 + send 2 次(turn-1 admission / turn-2 brainstorm)', async () => {
     // 注册 route(走 Fastify 完整链路)
-    const { provider, captures } = makeRecordingProvider([
-      // turn-1 events
-      [
-        { type: 'text', text: 'admission-check 第一段', delta: false },
-        { type: 'text', text: 'admission-check 第二段', delta: false },
-        { type: 'done', reason: 'end_turn' as const, sessionId: 'rec-sdk-1' },
+    const { provider, captures } = createRecordingProvider({
+      eventsByTurn: [
+        // turn-1 events
+        [
+          { type: 'text', text: 'admission-check 第一段', delta: false },
+          { type: 'text', text: 'admission-check 第二段', delta: false },
+          { type: 'done', reason: 'end_turn' as const, sessionId: 'rec-sdk-1' },
+        ],
+        // turn-2 events
+        [
+          { type: 'text', text: 'brainstorm 第一段', delta: false },
+          { type: 'done', reason: 'end_turn' as const, sessionId: 'rec-sdk-2' },
+        ],
       ],
-      // turn-2 events
-      [
-        { type: 'text', text: 'brainstorm 第一段', delta: false },
-        { type: 'done', reason: 'end_turn' as const, sessionId: 'rec-sdk-2' },
-      ],
-    ])
+    })
     await fastify.register(analysisRoutes, { hub, workspaceRoot: root, provider })
 
     // seed requirement.md
@@ -234,15 +130,17 @@ describe('start handler dual-turn wiring (ADR-0020 D8)', () => {
   })
 
   it('turn-1 失败时 turn-2 仍跑,jsonl 保留 turn-2 产物(半成品状态)', async () => {
-    const { provider, captures } = makeRecordingProvider([
-      // turn-1:无 text 直接 done(captures.sendCalls 仍记到)
-      [{ type: 'done', reason: 'end_turn' as const, sessionId: 'rec-sdk-1' }],
-      // turn-2:正常 text
-      [
-        { type: 'text', text: 'turn-2 内容', delta: false },
-        { type: 'done', reason: 'end_turn' as const, sessionId: 'rec-sdk-2' },
+    const { provider, captures } = createRecordingProvider({
+      eventsByTurn: [
+        // turn-1:无 text 直接 done(captures.sendCalls 仍记到)
+        [{ type: 'done', reason: 'end_turn' as const, sessionId: 'rec-sdk-1' }],
+        // turn-2:正常 text
+        [
+          { type: 'text', text: 'turn-2 内容', delta: false },
+          { type: 'done', reason: 'end_turn' as const, sessionId: 'rec-sdk-2' },
+        ],
       ],
-    ])
+    })
     await fastify.register(analysisRoutes, { hub, workspaceRoot: root, provider })
 
     const reqId = 'req-wiring-2'

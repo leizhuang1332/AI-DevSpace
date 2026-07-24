@@ -752,128 +752,6 @@ function appendChunksToJsonl(params: { sessionDir: string; chunks: AnalysisChunk
   writeFileSync(file, lines.join('\n') + '\n', 'utf8')
 }
 
-/** 模拟启动会话的首批 5 条 chunks(覆盖 4 种 SSE 协议 kind)。
- *
- *  ADR-0017 D3 · ticket 06 mock 策略:每条 `subproblem / risk / option`
- *  chunk 硬编码合理的 `source_refs`(让 dev 端到端 demo 跑通 +
- *  前端 Tab 计数显示);narration(START / READ)按契约**禁止**带 source_refs。
- *
- *  ticket 01 (ADR-0020 D8):start handler 已切换到真 SDK,此函数保留为
- *  `__tests__/legacy-simulation.test.ts` 等历史引用兼容入口;若 start handler
- *  后续不再引用,可整体移除。
- */
-function simulateStartChunks(params: {
-  requirementId: string
-  sessionId: string
-  angle: AnalysisSessionAngle
-  label: string
-}): AnalysisChunkEvent[] {
-  void params.requirementId
-  const stamp = new Date().toTimeString().slice(0, 8)
-  const base = Date.now()
-  return [
-    {
-      ts: base,
-      type: 'analysis_chunk',
-      reqId: params.requirementId,
-      sessionId: params.sessionId,
-      chunk: {
-        id: `c-start-${base}-1`,
-        ts: stamp,
-        label: 'START',
-        kind: 'narration',
-        tone: 'info',
-        text: `接收需求文档,启动【${params.label}】分析会话`,
-        // narration 类不带 source_refs(ADR-0017 D3 契约)
-      },
-    },
-    {
-      ts: base + 1,
-      type: 'analysis_chunk',
-      reqId: params.requirementId,
-      sessionId: params.sessionId,
-      chunk: {
-        id: `c-start-${base}-2`,
-        ts: stamp,
-        label: 'READ',
-        kind: 'narration',
-        tone: 'info',
-        text: '解析 requirement.md · 抽取关键约束与业务目标',
-        // narration 类不带 source_refs
-      },
-    },
-    {
-      ts: base + 2,
-      type: 'analysis_chunk',
-      reqId: params.requirementId,
-      sessionId: params.sessionId,
-      chunk: {
-        id: `c-start-${base}-3`,
-        ts: stamp,
-        label: 'DETECT',
-        kind: 'subproblem',
-        tone: 'success',
-        text: `Q1 · 在【${params.label}】维度下,首要不确定性是什么?`,
-        source_refs: [
-          {
-            kind: 'prd',
-            lineRange: [12, 14],
-            quote: '退款单笔金额上限 ≤ 1000 元',
-          },
-        ],
-      },
-    },
-    {
-      ts: base + 3,
-      type: 'analysis_chunk',
-      reqId: params.requirementId,
-      sessionId: params.sessionId,
-      chunk: {
-        id: `c-start-${base}-4`,
-        ts: stamp,
-        label: 'RISK',
-        kind: 'risk',
-        tone: 'warn',
-        text: `在【${params.label}】维度下识别到 1 个潜在风险`,
-        source_refs: [
-          {
-            kind: 'prd',
-            lineRange: [23, 23],
-            quote: '幂等',
-          },
-          {
-            kind: 'aux',
-            auxId: 'mock-aux-api',
-            lineRange: [45, 47],
-            quote: '现有 API 无幂等键',
-          },
-        ],
-      },
-    },
-    {
-      ts: base + 4,
-      type: 'analysis_chunk',
-      reqId: params.requirementId,
-      sessionId: params.sessionId,
-      chunk: {
-        id: `c-start-${base}-5`,
-        ts: stamp,
-        label: 'OPTION',
-        kind: 'option',
-        tone: 'success',
-        text: 'A · 同步单阶段 · 单事务 · 250ms',
-        source_refs: [
-          {
-            kind: 'aux',
-            auxId: 'mock-aux-sop',
-            lineRange: [8, 8],
-            quote: '退款流程规范第 3 条',
-          },
-        ],
-      },
-    },
-  ]
-}
 
 // ============================================================================
 // ticket 01 (ADR-0020 D8):start handler 真接 SDK —— 双 turn 编排 helpers
@@ -1009,40 +887,28 @@ function buildTurn2UserMessage(): string {
 }
 
 /** Append-only 流式写 chunks.jsonl —— SDK 每个 text 事件 → 1 行。
- *  设计:openSync('a') 拿到 fd → 后续 writeFileSync(fd, ...) 复用同一 fd,
- *  不再走 fs path 解析。close 时 fd 释放。
+ *
+ *  直接 `appendFileSync` —— handler 单实例独占文件,无并发;每次重新
+ *  open('a') 反而保证新写入可见(fs 上 fsync 即时)。
  *  文件不存在 → 由 caller 预创建(handler 步骤 6 写空文件头)。
  *
  *  ADR-0017 D3:`source_refs` 仅在存在时写入 —— narration chunk 无该字段,
  *  JSON 体积不受影响。 */
-class ChunkJsonlWriter {
-  readonly #filePath: string
-  #closed = false
-  constructor(filePath: string) {
-    this.#filePath = filePath
+function appendChunkToJsonl(filePath: string, ev: AnalysisChunkEvent): void {
+  if (ev.type !== 'analysis_chunk') return
+  const serialized: Record<string, unknown> = {
+    id: ev.chunk.id,
+    ts: ev.chunk.ts,
+    label: ev.chunk.label,
+    tone: ev.chunk.tone,
+    text: ev.chunk.text,
+    kind: ev.chunk.kind,
+    session_id: ev.sessionId,
   }
-  /** 写一条 analysis_chunk 事件。落 jsonl + 后续 caller 负责 SSE publish。 */
-  writeChunk(ev: AnalysisChunkEvent): void {
-    if (this.#closed || ev.type !== 'analysis_chunk') return
-    const serialized: Record<string, unknown> = {
-      id: ev.chunk.id,
-      ts: ev.chunk.ts,
-      label: ev.chunk.label,
-      tone: ev.chunk.tone,
-      text: ev.chunk.text,
-      kind: ev.chunk.kind,
-      session_id: ev.sessionId,
-    }
-    if (ev.chunk.source_refs !== undefined) {
-      serialized.source_refs = ev.chunk.source_refs
-    }
-    // appendFileSync 每次都重新 open('a') —— 简化模式:文件可能被并发写
-    // 但本 handler 单实例独占一个 writer,无并发。
-    appendFileSync(this.#filePath, JSON.stringify(serialized) + '\n', 'utf8')
+  if (ev.chunk.source_refs !== undefined) {
+    serialized.source_refs = ev.chunk.source_refs
   }
-  close(): void {
-    this.#closed = true
-  }
+  appendFileSync(filePath, JSON.stringify(serialized) + '\n', 'utf8')
 }
 
 /** runDualTurnAnalysis —— ADR-0020 D8 单 session 双 turn 编排主体。
@@ -1077,41 +943,48 @@ async function runDualTurnAnalysis(params: {
   } = params
 
   const chunksPath = join(sessionDir, 'chunks.jsonl')
-  const writer = new ChunkJsonlWriter(chunksPath)
-  let chunkCounter = 0
+  const counter: { value: number } = { value: 0 }
   // SseHub publish 幂等保护:每个 reqId + sessionId 的 publish 都走同一个 hub,
   // 无重复风险;但 sessionSdkId 仍记下供观测
   let sdkSessionIdLogged: string | undefined
 
-  let session
-  try {
-    session = await provider.createSession(reqId, {
-      localSid: sessionId,
-      topic: params.label,
-      kind: 'task',
-      cwd: params.analysisDir, // SDK 在 analysis dir 下启动,读 requirement.md 用相对 path 兜底
-      assembler: dualTurnAssembler,
-    })
-  } catch (err) {
-    writer.close()
-    throw err
-  }
+  const session = await provider.createSession(reqId, {
+    localSid: sessionId,
+    topic: params.label,
+    kind: 'task',
+    cwd: params.analysisDir, // SDK 在 analysis dir 下启动,读 requirement.md 用相对 path 兜底
+    assembler: dualTurnAssembler,
+  })
 
-  /** 订阅 session.events() → 把每个 text 事件转 chunk 并落 jsonl + 推 SSE。
-   *  返回订阅结束的 promise(见到 done 事件 resolve)。 */
-  const subscribeOnce = (turnLabel: 'INFER' | 'BRAINSTORM'): { done: Promise<void>; cancel: () => void } => {
+  /**
+   * streamTurnEvents —— 订阅 `session.events()` 直到流关闭(=SDK sendMessage
+   * 流关闭 = turn-done,ADR-0020 D8 字面契约)。每条 `text` 事件 → 1 行
+   * analysis_chunk(jsonl + SseHub)。`done` AIEvent 关闭订阅;`error` 仅 log
+   * 不阻断(后续 `done` 仍会到达 —— SDK native retry / 业务错误都是 deterministic
+   * 终态,不再走 retry loop)。
+   *
+   * 之前的 `Promise.race([done, 1500ms])` 兜底被 review 标记为 Spec 违反
+   * (handler 不该自行决定 turn 何时算完);ticket 01 follow-up 已删,这里
+   * 纯 await `eventsDrained` 让 SDK 流自然关闭即收。
+   *
+   * 返回 `{ eventsDrained, cancel }` —— cancel 仅作异常退出救场,正常路径
+   * `done` AIEvent → 循环 break → eventsDrained resolve。
+   */
+  const streamTurnEvents = (
+    turnLabel: 'INFER' | 'BRAINSTORM',
+  ): { eventsDrained: Promise<void>; cancel: () => void } => {
     const iterable = session.events()
     const iterator = iterable[Symbol.asyncIterator]()
     let stopped = false
-    const done = (async () => {
+    const eventsDrained = (async () => {
       try {
         while (!stopped) {
           const r = await iterator.next()
           if (r.done) break
           const ev = r.value
           if (ev.type === 'text') {
-            chunkCounter++
-            const id = `c-${turnLabel.toLowerCase()}-${sessionId}-${chunkCounter}`
+            counter.value++
+            const id = `c-${turnLabel.toLowerCase()}-${sessionId}-${counter.value}`
             const ts = new Date().toISOString().slice(11, 19) // HH:MM:SS
             const chunkEv: AnalysisChunkEvent = {
               ts: Date.now(),
@@ -1128,7 +1001,7 @@ async function runDualTurnAnalysis(params: {
                 // narration 契约:无 source_refs
               },
             }
-            writer.writeChunk(chunkEv)
+            appendChunkToJsonl(chunksPath, chunkEv)
             hub.publish(reqId, chunkEv)
           } else if (ev.type === 'done') {
             if (ev.sessionId && !sdkSessionIdLogged) {
@@ -1155,7 +1028,7 @@ async function runDualTurnAnalysis(params: {
       }
     })()
     return {
-      done,
+      eventsDrained,
       cancel: () => {
         stopped = true
         try { void iterator.return?.(undefined) } catch { /* ignore */ }
@@ -1163,44 +1036,64 @@ async function runDualTurnAnalysis(params: {
     }
   }
 
-  // ---- turn-1: admission-check ----
-  dualTurnAssembler.setActiveSkill(params.admissionSkillBody ? 'admission-check' : null)
-  dualTurnAssembler.resetBaseCache()
-  const turn1Sub = subscribeOnce('INFER')
-  let turn1Ok = true
-  try {
-    await session.send(turn1UserMessage)
-  } catch (err) {
-    turn1Ok = false
-    fastify.log.error({ err, reqId, sessionId, turn: 'admission' }, 'turn-1 send failed')
+  /**
+   * 单个 turn 的编排 —— 抽出来消除 turn-1 / turn-2 copy-paste。
+   *
+   * 顺序:setActiveSkill → resetBaseCache → 起订阅 → send → 等 eventsDrained。
+   * send 抛错记日志但不抛(单 turn 失败保留半成品状态走下一 turn,
+   * ticket 第 12 行 + ADR-0020 D8)。
+   *
+   * eventsDrained 等到 SDK 流自然关闭(turn-done 由 `done` AIEvent 触发);
+   * 不设超时(handler 不该自行决定 turn 何时算完)。
+   */
+  async function runTurn(spec: {
+    turnLabel: 'INFER' | 'BRAINSTORM'
+    skillName: string | null
+    skillBody: string | null
+    userMessage: string
+    turnLogTag: 'admission' | 'brainstorm'
+  }): Promise<void> {
+    dualTurnAssembler.setActiveSkill(spec.skillBody ? spec.skillName : null)
+    dualTurnAssembler.resetBaseCache()
+    const sub = streamTurnEvents(spec.turnLabel)
+    try {
+      await session.send(spec.userMessage)
+    } catch (err) {
+      fastify.log.error({ err, reqId, sessionId, turn: spec.turnLogTag }, 'analysis turn send failed')
+    }
+    await sub.eventsDrained
+    sub.cancel()
   }
-  // 等订阅消费完(见到 done 或自然流关闭);失败时也给订阅一个超时退路
-  await Promise.race([
-    turn1Sub.done,
-    new Promise<void>((resolve) => setTimeout(resolve, 1500)),
-  ])
-  turn1Sub.cancel()
 
-  // ---- turn-2: requirement-brainstorm ----
-  const turn2UserMessage = buildTurn2UserMessage()
-  dualTurnAssembler.setActiveSkill(params.brainstormSkillBody ? 'requirement-brainstorm' : null)
-  dualTurnAssembler.resetBaseCache()
-  const turn2Sub = subscribeOnce('BRAINSTORM')
+  let turn1Ok = true
   let turn2Ok = true
   try {
-    await session.send(turn2UserMessage)
+    await runTurn({
+      turnLabel: 'INFER',
+      skillName: 'admission-check',
+      skillBody: params.admissionSkillBody,
+      userMessage: turn1UserMessage,
+      turnLogTag: 'admission',
+    })
+  } catch (err) {
+    turn1Ok = false
+    fastify.log.error({ err, reqId, sessionId, turn: 'admission' }, 'turn-1 orchestrator failed')
+  }
+
+  try {
+    await runTurn({
+      turnLabel: 'BRAINSTORM',
+      skillName: 'requirement-brainstorm',
+      skillBody: params.brainstormSkillBody,
+      userMessage: buildTurn2UserMessage(),
+      turnLogTag: 'brainstorm',
+    })
   } catch (err) {
     turn2Ok = false
-    fastify.log.error({ err, reqId, sessionId, turn: 'brainstorm' }, 'turn-2 send failed')
+    fastify.log.error({ err, reqId, sessionId, turn: 'brainstorm' }, 'turn-2 orchestrator failed')
   }
-  await Promise.race([
-    turn2Sub.done,
-    new Promise<void>((resolve) => setTimeout(resolve, 1500)),
-  ])
-  turn2Sub.cancel()
 
   // ---- cleanup ----
-  writer.close()
   try {
     await session.close()
   } catch (err) {

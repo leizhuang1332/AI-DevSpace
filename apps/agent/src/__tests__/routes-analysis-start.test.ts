@@ -16,8 +16,7 @@ import { authPlugin } from '../auth/authPlugin.js'
 import { createSseHub, type SseHub } from '../sse/SseHub.js'
 import { sseRoutes } from '../sse/requirementEventsRoute.js'
 import { analysisRoutes } from '../routes/analysis.js'
-import type { AIProvider, AISession, CreateSessionOptions } from '../providers/AIProvider.js'
-import type { AIEvent } from '../providers/AIEvent.js'
+import { createSilentProvider } from './__helpers__/fakeAnalysisProvider.js'
 
 let app: FastifyInstance
 let hub: SseHub
@@ -96,96 +95,9 @@ function seedRequirementMd(reqId: string, content = '# 测试 PRD\n'): void {
   writeFileSync(join(dir, 'requirement.md'), content, 'utf8')
 }
 
-/**
- * ticket 01 (ADR-0020 D8):测试 fake provider ——
- * 不依赖真 SDK 子进程,按既定 AIEvent 列表向 AISession.events() 推流,
- * 第一个 send() 完成后即关闭流。模拟双 turn 流程:handler 调 send() 两次,
- * 每次都拿到同一份 events 列表(因 fake 内部把 eventsSubject 单例化)。
- *
- * 这里用一个简化版:每次 createSession 都返回一个新 AISession,events
- * 推 1 条 text + 1 条 done。test 9 等需要"≥1 chunk"的 case 都能命中。
- */
-function fakeAnalysisProvider(opts: {
-  perTurnEvents?: AIEvent[]
-} = {}): AIProvider {
-  const perTurnEvents = opts.perTurnEvents ?? [
-    { type: 'text', text: 'first', delta: false },
-    { type: 'done', reason: 'end_turn', sessionId: 'fake-sdk' },
-  ]
-  let callCount = 0
-  return {
-    name: 'fake-analysis',
-    async createSession(_reqId, o: CreateSessionOptions): Promise<AISession> {
-      callCount++
-      const subs = new Set<{
-        queue: AIEvent[]
-        pending: Array<(v: IteratorResult<AIEvent>) => void>
-        closed: boolean
-      }>()
-      const push = (ev: AIEvent): void => {
-        for (const s of subs) {
-          if (s.closed) continue
-          const r = s.pending.shift()
-          if (r) r({ value: ev, done: false })
-          else s.queue.push(ev)
-        }
-      }
-      const closeAll = (): void => {
-        for (const s of subs) {
-          if (s.closed) continue
-          s.closed = true
-          while (s.pending.length) s.pending.shift()!({ value: undefined, done: true })
-        }
-      }
-      const toAsyncIter = () => {
-        const sub = {
-          queue: [] as AIEvent[],
-          pending: [] as Array<(v: IteratorResult<AIEvent>) => void>,
-          closed: false,
-        }
-        subs.add(sub)
-        return {
-          [Symbol.asyncIterator]: () => ({
-            next: () => new Promise<IteratorResult<AIEvent>>((resolve) => {
-              const head = sub.queue.shift()
-              if (head !== undefined) resolve({ value: head, done: false })
-              else if (sub.closed) resolve({ value: undefined, done: true })
-              else sub.pending.push(resolve)
-            }),
-            return: async () => {
-              sub.closed = true
-              return { value: undefined, done: true }
-            },
-          }),
-        }
-      }
-      let sendResolve!: () => void
-      const sendPromise = new Promise<void>((r) => { sendResolve = r })
-      const session: AISession = {
-        id: o.localSid ?? 'fake-analysis-sid',
-        reqId: _reqId,
-        kind: o.kind,
-        topic: o.topic,
-        state: 'idle',
-        sdkSessionId: 'fake-sdk',
-        model: undefined,
-        events: () => toAsyncIter(),
-        async send() {
-          // 在 send() 期间推流
-          for (const ev of perTurnEvents) push(ev)
-          closeAll()
-          await sendPromise
-        },
-        async cancel() { closeAll(); sendResolve() },
-        async close() { closeAll(); sendResolve() },
-      }
-      // 当 handler 调 send() 时,我们已经同步推完了所有 events
-      void callCount
-      return session
-    },
-    async shutdown() {},
-  }
-}
+// 注:ticket 01 review follow-up —— fake provider 抽取到
+// `__helpers__/fakeAnalysisProvider.ts` 共享;这里 import `createSilentProvider`,
+// 默认推 1 条 text + done,正好满足 SSE / jsonl 路径测试用例(≥1 chunk)。
 
 describe('POST /api/requirements/:id/analysis/start', () => {
   beforeEach(async () => {
@@ -198,7 +110,7 @@ describe('POST /api/requirements/:id/analysis/start', () => {
     await app.register(authPlugin, { tokenManager: tm, allowedOrigins: [] })
     await app.register(sseRoutes, { hub })
     // ticket 01:start handler 真接 SDK,测试用 fake provider 避免真子进程
-    await app.register(analysisRoutes, { hub, provider: fakeAnalysisProvider() })
+    await app.register(analysisRoutes, { hub, provider: createSilentProvider().provider })
     await app.ready()
     const url = await app.listen({ port: 0, host: '127.0.0.1' })
     port = new URL(url).port

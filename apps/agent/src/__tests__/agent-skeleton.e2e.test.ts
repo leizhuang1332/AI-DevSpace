@@ -3,8 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildServer } from '../server.js'
-import type { AIProvider, AISession, CreateSessionOptions } from '../providers/AIProvider.js'
-import type { AIEvent } from '../providers/AIEvent.js'
+import { createSilentProvider } from './__helpers__/fakeAnalysisProvider.js'
 
 const cleanups: Array<() => Promise<void>> = []
 
@@ -15,87 +14,14 @@ afterEach(async () => {
   }
 })
 
-/**
- * ticket 01 (ADR-0020 D8):start handler 真接 SDK,e2e 必须用 fake provider 避免
- * CI 触发真 SDK 子进程。fake provider 每个 turn emit 1 条 text + done,
- * 让 e2e 能验 SSE / jsonl 路径。契约放宽:chunks ≥ 1(不再是旧 mock 的 5 行)
- */
-function fakeProviderForE2E(): AIProvider {
-  return {
-    name: 'fake-e2e',
-    async createSession(_reqId, o: CreateSessionOptions): Promise<AISession> {
-      const subs = new Set<{
-        queue: AIEvent[]
-        pending: Array<(v: IteratorResult<AIEvent>) => void>
-        closed: boolean
-      }>()
-      const push = (ev: AIEvent): void => {
-        for (const s of subs) {
-          if (s.closed) continue
-          const r = s.pending.shift()
-          if (r) r({ value: ev, done: false })
-          else s.queue.push(ev)
-        }
-      }
-      const closeAll = (): void => {
-        for (const s of subs) {
-          if (s.closed) continue
-          s.closed = true
-          while (s.pending.length) s.pending.shift()!({ value: undefined, done: true })
-        }
-      }
-      const toAsyncIter = () => {
-        const sub = {
-          queue: [] as AIEvent[],
-          pending: [] as Array<(v: IteratorResult<AIEvent>) => void>,
-          closed: false,
-        }
-        subs.add(sub)
-        return {
-          [Symbol.asyncIterator]: () => ({
-            next: () => new Promise<IteratorResult<AIEvent>>((resolve) => {
-              const head = sub.queue.shift()
-              if (head !== undefined) resolve({ value: head, done: false })
-              else if (sub.closed) resolve({ value: undefined, done: true })
-              else sub.pending.push(resolve)
-            }),
-            return: async () => {
-              sub.closed = true
-              return { value: undefined, done: true }
-            },
-          }),
-        }
-      }
-      return {
-        id: o.localSid ?? 'fake-e2e-sid',
-        reqId: _reqId,
-        kind: o.kind,
-        topic: o.topic,
-        state: 'idle',
-        sdkSessionId: 'fake-e2e-sdk',
-        model: undefined,
-        events: () => toAsyncIter(),
-        async send() {
-          // 每个 turn 推 1 条 text + done
-          push({ type: 'text', text: 'fake e2e output', delta: false })
-          push({ type: 'done', reason: 'end_turn', sessionId: 'fake-e2e-sdk' })
-          closeAll()
-        },
-        async cancel() { closeAll() },
-        async close() { closeAll() },
-      }
-    },
-    async shutdown() {},
-  }
-}
-
 async function boot(): Promise<{ url: string; root: string }> {
   const root = mkdtempSync(join(tmpdir(), 'aidevsp-e2e-'))
   writeFileSync(join(root, 'config.yaml'), 'name: dev\n')
+  // ticket 01 (ADR-0020 D8):e2e 用 fake provider 避免 CI 触发真 SDK 子进程
   const app = await buildServer({
     workspaceRoot: root,
     logFilePath: join(root, 'agent.log'),
-    provider: fakeProviderForE2E(),
+    provider: createSilentProvider().provider,
   })
   const url = await app.listen({ port: 0, host: '127.0.0.1' })
   cleanups.push(async () => {
