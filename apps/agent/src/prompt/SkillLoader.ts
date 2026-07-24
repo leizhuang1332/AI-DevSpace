@@ -43,6 +43,12 @@ export interface SkillFrontmatter {
   context?: unknown
   /** 决策 48:👎 反馈历史 */
   bad_feedback?: unknown
+  /**
+   * ADR-0020 D7.1:是否推荐用户在 `~/.aidevspace/skills/` 下覆盖该 Skill。
+   * `true` 表示"鼓励覆盖以贴合团队业务"(由 SkillsPage 在下个 PR 显示"✨ 推荐定制"徽章);
+   * `false` 或缺省 = 非推荐覆盖。consumer 由下个 PR 接入,本字段本期仅按字面读出。
+   */
+  recommended_user_override?: boolean
 }
 
 /** 一个解析后的 Skill 完整形态 */
