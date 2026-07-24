@@ -969,6 +969,12 @@ async function runDualTurnAnalysis(params: {
    *
    * 返回 `{ eventsDrained, cancel }` —— cancel 仅作异常退出救场,正常路径
    * `done` AIEvent → 循环 break → eventsDrained resolve。
+   *
+   * 已知约束:本函数假设 fake provider(以及 ticket 03+ 待补的真 SDK 路径)
+   * 在 error envelope 后仍会推 `done` AIEvent —— handler 用 `error` log + `done`
+   * close 两段协作处理错误;若 SDK 未来在 error 后不推 done(目前不会),需要
+   * 在这里加 timeout 兜底(那是 ticket 03+ 的事)。详见
+   * `__helpers__/fakeAnalysisProvider.ts` 文件头"已知 mock 缺口"。
    */
   const streamTurnEvents = (
     turnLabel: 'INFER' | 'BRAINSTORM',

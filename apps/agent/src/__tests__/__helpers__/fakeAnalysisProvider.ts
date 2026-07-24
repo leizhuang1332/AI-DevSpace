@@ -22,6 +22,23 @@
  *   - send() 在推完 events 后立即 closeAll + resolve 真 Promise
  *     —— 让 handler 不依赖 timeout 推进;ticket 01 review 后 handler 不再有
  *     1.5s 兜底超时,send() 必须真正 resolve
+ *
+ * ----------------------------------------------------------------------------
+ * 已知 mock 缺口(ticket 03+ 待补,留 TODO):
+ *   - send() 拒绝路径未模拟:真 SDK 在网络/auth/billing 错误时 throw,本 fake
+ *     只覆盖成功路径。handler 现在依赖 `try { session.send(...) } catch`
+ *     兜底,但 fake 永远不抛,wiring 测试验不到 catch 分支。
+ *   - error envelope 中途推流未模拟:真 SDK 会在 token 上限 / content
+ *     filter / runtime error 时推 { type: 'error', message, code, recoverable }
+ *     AIEvent,后续紧跟 done{reason: 'error'}。本 fake 只能推文本 + done。
+ *     handler 的 `error AIEvent 仅 log` 分支(analysis.ts)未测。
+ *   - thinking / tool_use / tool_result 等非 text 事件未映射 chunk,handler
+ *     不实现该路径(本期只实现 text → narration chunk),ticket 02 SKILL.md
+ *     落地后可能需要扩展(handler 当前直接 break on non-text)。
+ *
+ * 后续 ticket 03+ 需扩展 fake 来覆盖:让测试可以注入 send() 抛错 + error
+ * envelope 中途推流,以验证 handler catch / error log 路径的真行为。
+ * ----------------------------------------------------------------------------
  */
 
 import type { AIProvider, AISession, CreateSessionOptions } from '../../providers/AIProvider.js'
