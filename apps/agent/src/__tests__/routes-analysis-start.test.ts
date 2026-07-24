@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import {
   mkdtempSync,
@@ -16,6 +16,8 @@ import { authPlugin } from '../auth/authPlugin.js'
 import { createSseHub, type SseHub } from '../sse/SseHub.js'
 import { sseRoutes } from '../sse/requirementEventsRoute.js'
 import { analysisRoutes } from '../routes/analysis.js'
+import type { AIProvider, AISession, CreateSessionOptions } from '../providers/AIProvider.js'
+import type { AIEvent } from '../providers/AIEvent.js'
 
 let app: FastifyInstance
 let hub: SseHub
@@ -94,6 +96,97 @@ function seedRequirementMd(reqId: string, content = '# 测试 PRD\n'): void {
   writeFileSync(join(dir, 'requirement.md'), content, 'utf8')
 }
 
+/**
+ * ticket 01 (ADR-0020 D8):测试 fake provider ——
+ * 不依赖真 SDK 子进程,按既定 AIEvent 列表向 AISession.events() 推流,
+ * 第一个 send() 完成后即关闭流。模拟双 turn 流程:handler 调 send() 两次,
+ * 每次都拿到同一份 events 列表(因 fake 内部把 eventsSubject 单例化)。
+ *
+ * 这里用一个简化版:每次 createSession 都返回一个新 AISession,events
+ * 推 1 条 text + 1 条 done。test 9 等需要"≥1 chunk"的 case 都能命中。
+ */
+function fakeAnalysisProvider(opts: {
+  perTurnEvents?: AIEvent[]
+} = {}): AIProvider {
+  const perTurnEvents = opts.perTurnEvents ?? [
+    { type: 'text', text: 'first', delta: false },
+    { type: 'done', reason: 'end_turn', sessionId: 'fake-sdk' },
+  ]
+  let callCount = 0
+  return {
+    name: 'fake-analysis',
+    async createSession(_reqId, o: CreateSessionOptions): Promise<AISession> {
+      callCount++
+      const subs = new Set<{
+        queue: AIEvent[]
+        pending: Array<(v: IteratorResult<AIEvent>) => void>
+        closed: boolean
+      }>()
+      const push = (ev: AIEvent): void => {
+        for (const s of subs) {
+          if (s.closed) continue
+          const r = s.pending.shift()
+          if (r) r({ value: ev, done: false })
+          else s.queue.push(ev)
+        }
+      }
+      const closeAll = (): void => {
+        for (const s of subs) {
+          if (s.closed) continue
+          s.closed = true
+          while (s.pending.length) s.pending.shift()!({ value: undefined, done: true })
+        }
+      }
+      const toAsyncIter = () => {
+        const sub = {
+          queue: [] as AIEvent[],
+          pending: [] as Array<(v: IteratorResult<AIEvent>) => void>,
+          closed: false,
+        }
+        subs.add(sub)
+        return {
+          [Symbol.asyncIterator]: () => ({
+            next: () => new Promise<IteratorResult<AIEvent>>((resolve) => {
+              const head = sub.queue.shift()
+              if (head !== undefined) resolve({ value: head, done: false })
+              else if (sub.closed) resolve({ value: undefined, done: true })
+              else sub.pending.push(resolve)
+            }),
+            return: async () => {
+              sub.closed = true
+              return { value: undefined, done: true }
+            },
+          }),
+        }
+      }
+      let sendResolve!: () => void
+      const sendPromise = new Promise<void>((r) => { sendResolve = r })
+      const session: AISession = {
+        id: o.localSid ?? 'fake-analysis-sid',
+        reqId: _reqId,
+        kind: o.kind,
+        topic: o.topic,
+        state: 'idle',
+        sdkSessionId: 'fake-sdk',
+        model: undefined,
+        events: () => toAsyncIter(),
+        async send() {
+          // 在 send() 期间推流
+          for (const ev of perTurnEvents) push(ev)
+          closeAll()
+          await sendPromise
+        },
+        async cancel() { closeAll(); sendResolve() },
+        async close() { closeAll(); sendResolve() },
+      }
+      // 当 handler 调 send() 时,我们已经同步推完了所有 events
+      void callCount
+      return session
+    },
+    async shutdown() {},
+  }
+}
+
 describe('POST /api/requirements/:id/analysis/start', () => {
   beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), 'aidevsp-start-'))
@@ -104,7 +197,8 @@ describe('POST /api/requirements/:id/analysis/start', () => {
     app = Fastify({ logger: false })
     await app.register(authPlugin, { tokenManager: tm, allowedOrigins: [] })
     await app.register(sseRoutes, { hub })
-    await app.register(analysisRoutes, { hub })
+    // ticket 01:start handler 真接 SDK,测试用 fake provider 避免真子进程
+    await app.register(analysisRoutes, { hub, provider: fakeAnalysisProvider() })
     await app.ready()
     const url = await app.listen({ port: 0, host: '127.0.0.1' })
     port = new URL(url).port
@@ -267,9 +361,12 @@ describe('POST /api/requirements/:id/analysis/start', () => {
   })
 
   // ========================================================================
-  // 9. SSE 联动:POST 后 /events 流收到 ≥5 条 analysis_chunk(真 hub)
+  // 9. SSE 联动:POST 后 /events 流收到 ≥1 条 analysis_chunk(真 hub)
+  //   ticket 01 (ADR-0020 D8):真 SDK 流式 chunk 数可变,测试只验证"有流"即可。
+  //   旧合约(5 行 mock)在 ticket 01 后失效,转交由 fake provider 在每个 turn
+  //   emit 1 条 text 事件 = 2 条 narration chunk;此处断言 ≥1(双 turn 至少 1 turn 有产物)。
   // ========================================================================
-  it('POST 后 → SSE /events 收到 ≥5 条 analysis_chunk', async () => {
+  it('POST 后 → SSE /events 收到 ≥1 条 analysis_chunk', async () => {
     seedRequirementMd('req-003')
 
     // 1. 先开 SSE 订阅
@@ -286,22 +383,20 @@ describe('POST /api/requirements/:id/analysis/start', () => {
     )
     expect(post.statusCode).toBe(201)
 
-    // 4. SSE 应收到 5 条 analysis_chunk
+    // 4. SSE 应收到 ≥1 条 analysis_chunk(ticket 01 后 fake provider 每 turn 推 1 条)
     const sse = await ssePromise
     expect(sse.statusCode).toBe(200)
     const matches = sse.body.match(/event: analysis_chunk/g) ?? []
-    expect(matches.length).toBeGreaterThanOrEqual(5)
+    expect(matches.length).toBeGreaterThanOrEqual(1)
     expect(sse.body).toMatch(/"reqId":"req-003"/)
     expect(sse.body).toMatch(/"type":"analysis_chunk"/)
-    // ADR-0017 D3 · ticket 06:解析 data 行,逐 chunk 验证 source_refs 契约。
-    // 不用 regex 粗断言(`source_refs` 字符串可能出现在任何位置),而是 parse 后
-    // 断言 chunk 对象本身带/不带该字段。
+    // ADR-0017 D3:解析 data 行,逐 chunk 验证 source_refs 契约 —— ticket 01 默认
+    // kind=narration,无 source_refs(无 PRD 段落索引)。这里只验契约,不强求具体条数。
     const dataLines = sse.body
       .split('\n')
       .filter((l) => l.startsWith('data: '))
       .map((l) => l.slice('data: '.length).trim())
       .filter((l) => l.length > 0)
-    let sseWithRefs = 0
     let sseNarration = 0
     for (const dl of dataLines) {
       try {
@@ -310,17 +405,14 @@ describe('POST /api/requirements/:id/analysis/start', () => {
         const chunk = obj.chunk as Record<string, unknown>
         if (chunk.kind === 'narration') {
           sseNarration++
+          // ticket 01 合约:narration chunk 不带 source_refs
           expect('source_refs' in chunk).toBe(false)
-        } else {
-          sseWithRefs++
-          expect(Array.isArray(chunk.source_refs)).toBe(true)
         }
       } catch {
         /* heartbeat 等非 JSON 行,跳过 */
       }
     }
-    expect(sseWithRefs).toBe(3)
-    expect(sseNarration).toBe(2)
+    expect(sseNarration).toBeGreaterThanOrEqual(1)
   })
 
   // ========================================================================
@@ -367,6 +459,8 @@ describe('POST /api/requirements/:id/analysis/start', () => {
 
   // ========================================================================
   // 11. chunks.jsonl 格式:web 端 loadSessionChunks() 可解析(id/ts/label/text/kind/tone/session_id)
+  //     ticket 01 后:fake provider 每个 turn 推 1 条 text 事件 → ≥1 行 jsonl,
+  //     字段全部合法(kind=narration),无 source_refs。
   // ========================================================================
   it('chunks.jsonl 每行 JSON 字段都能被 web loadSessionChunks() 解析', async () => {
     seedRequirementMd('req-005')
@@ -390,7 +484,7 @@ describe('POST /api/requirements/:id/analysis/start', () => {
     expect(existsSync(file)).toBe(true)
     const text = readFileSync(file, 'utf8')
     const lines = text.split('\n').filter((l) => l.trim().length > 0)
-    expect(lines.length).toBe(5)
+    expect(lines.length).toBeGreaterThanOrEqual(1)
 
     // 模拟 web 端 loadSessionChunks:逐行 JSON.parse + 字段断言
     const requiredFields = ['id', 'ts', 'label', 'text', 'kind', 'tone', 'session_id']
@@ -404,25 +498,15 @@ describe('POST /api/requirements/:id/analysis/start', () => {
       // kind 只能是 SSE 协议支持的 4 种之一
       expect(['narration', 'subproblem', 'risk', 'option']).toContain(obj.kind)
     }
-
-    // 5 条覆盖 4 种 kind:前两条 START/READ 是 narration,第 3 DETECT subproblem,第 4 RISK risk,第 5 OPTION option
-    const parsed = lines.map((l) => JSON.parse(l) as Record<string, string>)
-    expect(parsed[0].label).toBe('START')
-    expect(parsed[1].label).toBe('READ')
-    expect(parsed[2].label).toBe('DETECT')
-    expect(parsed[3].label).toBe('RISK')
-    expect(parsed[4].label).toBe('OPTION')
-    expect(parsed[2].kind).toBe('subproblem')
-    expect(parsed[3].kind).toBe('risk')
-    expect(parsed[4].kind).toBe('option')
   })
 
   // ========================================================================
-  // 12. ADR-0017 D3 · ticket 06:start mock chunks 的 source_refs 字段
-  //     - 3 条 product chunk (subproblem/risk/option) 带 source_refs
-  //     - 2 条 narration chunk 不带
+  // 12. ticket 01:start chunks 默认全为 narration(无 source_refs)
+  //     ADR-0017 D3 · ticket 06 的 source_refs 契约在真 SDK 流式输出下不再适用
+  //     (真实 AI 输出没有结构化 source_refs);narration 类别按 ADR-0017 D3 必
+  //     不带 source_refs —— 这里只验证"不带"。
   // ========================================================================
-  it('start chunks:subproblem/risk/option 含 source_refs;narration 不含', async () => {
+  it('start chunks:narration 不带 source_refs(ADR-0017 D3 契约)', async () => {
     seedRequirementMd('req-006')
     const sid = 'sess-source-refs'
     const res = await authedJson(
@@ -443,22 +527,13 @@ describe('POST /api/requirements/:id/analysis/start', () => {
     )
     const text = readFileSync(file, 'utf8')
     const lines = text.split('\n').filter((l) => l.trim().length > 0)
-    expect(lines.length).toBe(5)
+    expect(lines.length).toBeGreaterThanOrEqual(1)
     const parsed = lines.map((l) => JSON.parse(l) as Record<string, unknown>)
 
-    // 2 条 narration:无 source_refs
-    const narration = parsed.filter((c) => c.kind === 'narration')
-    expect(narration.length).toBe(2)
-    for (const n of narration) {
+    // ticket 01 合约:全部 narration(真 SDK 流式输出无结构化 source_refs)
+    for (const n of parsed) {
+      expect(n.kind).toBe('narration')
       expect('source_refs' in n).toBe(false)
-    }
-
-    // 3 条 product:有 source_refs(数组,至少 1 个)
-    const products = parsed.filter((c) => c.kind !== 'narration')
-    expect(products.length).toBe(3)
-    for (const p of products) {
-      expect(Array.isArray(p.source_refs)).toBe(true)
-      expect((p.source_refs as unknown[]).length).toBeGreaterThanOrEqual(1)
     }
   })
 })

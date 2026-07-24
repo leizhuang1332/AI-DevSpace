@@ -5,6 +5,11 @@
  * - POST /api/requirements/:id/analysis/interject —— 用户插话,启动 admission-check
  *   Skill → 产生新 chunks → 通过 SseHub.publish 推给该 reqId 的所有 SSE 订阅者
  *
+ * ticket 01 (ADR-0020 D8):start handler 单 session 双 turn 真接 SDK
+ *   - turn-1:admission-check Skill 装填,system prompt 注入 Skill body
+ *   - turn-2:requirement-brainstorm Skill 装填(同 session,SDK 自动保留 turn-1 history)
+ *   - chunks 实时落 jsonl + SSE 推送,turn-done 由 SDK 流关闭事件表达
+ *
  * 后续 slice(19e/19f)再扩展:
  * - POST /api/requirements/:id/analysis/regenerate  -- 重扫
  * - POST /api/requirements/:id/analysis/adjudicate  -- 裁决写入 + 应用
@@ -13,16 +18,18 @@
  * 设计要点:
  * - 接受 { text, session_id } body,缺失字段 → 400
  * - 返回 202(Accepted)+ ack —— chunks 是异步通过 SSE 推到客户端的,不阻塞 POST 返回
- * - 当前 mock 阶段没有真实 Skill runtime,模拟 admission-check Skill 收到用户输入后
- *   产生 1-2 条 acknowledgment chunk + 1 条 THINK chunk;真实 Skill 接通后此函数替换为
- *   Skill runner 调用
  */
 
-import type { FastifyPluginAsync } from 'fastify'
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
+import type { FastifyInstance, FastifyPluginAsync } from 'fastify'
+import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { SseHub } from '../sse/SseHub.js'
+import type { AIProvider } from '../providers/AIProvider.js'
+import type { AIEvent } from '../providers/AIEvent.js'
+import { createSystemPromptAssembler, type SystemPromptAssembler } from '../prompt/SystemPromptAssembler.js'
+import { createSkillLoader, type Skill } from '../prompt/SkillLoader.js'
 
 export interface AnalysisRoutesOptions {
   hub: SseHub
@@ -32,6 +39,12 @@ export interface AnalysisRoutesOptions {
    * 保留历史 fallback 兼容 dev 终端直接跑脚本的场景(ticket 00 baseline 校正)。
    */
   workspaceRoot?: string
+  /**
+   * ticket 01 (ADR-0020 D8):start handler 真接 SDK,需要 AIProvider 实例 —— 由
+   * buildServer 在 `createClaudeCodeProvider(...)` 之后注入。测试可通过
+   * BuildServerOptions.provider 覆盖为 fake。
+   */
+  provider: AIProvider
 }
 
 interface InterjectBody {
@@ -220,10 +233,14 @@ export const analysisRoutes: FastifyPluginAsync<AnalysisRoutesOptions> = async (
 
   // ============================================================================
   // POST /api/requirements/:id/analysis/start
-  // 显式启动首个会话(scalable-coalescing-sky · 决策 3)
+  // 显式启动首个会话(决策 3)+ ticket 01 (ADR-0020 D8) 真接 SDK
   // - 校验 angle 白名单 + 可选 session_id 格式
   // - 必须 requirement.md 已存在(否则 409 prd_not_ready,引导用户回 DRAFTING)
-  // - 落盘顺序:sessions/<sid>/ → appendSessionToIndex → appendChunksToJsonl → SSE publish
+  // - 落盘顺序:sessions/<sid>/ → appendSessionToIndex → 启动 AISession 跑双 turn
+  // - 双 turn(turn-1 admission-check / turn-2 requirement-brainstorm)单 session 串行
+  //   执行;每个 turn 的 SDK text 事件实时落 chunks.jsonl + 推 SseHub
+  // - handler 不另造 done chunk 标记;turn-done 由 SDK sendMessage 流关闭事件表达
+  // - 单 turn 失败时 jsonl 保留部分行(session 半成品状态),ticket 06 提供 snapshot 防御
   // ============================================================================
   fastify.post<{
     Params: { id: string }
@@ -281,7 +298,7 @@ export const analysisRoutes: FastifyPluginAsync<AnalysisRoutesOptions> = async (
       })
     }
 
-    // 5. 落盘顺序
+    // 5. 预落盘:sessions/<sid>/ + _index.yaml(沿用既有契约)
     mkdirSync(sessionDir, { recursive: true })
 
     const startedAt = new Date().toISOString()
@@ -293,24 +310,61 @@ export const analysisRoutes: FastifyPluginAsync<AnalysisRoutesOptions> = async (
       startedAt,
     })
 
-    const chunks = simulateStartChunks({
-      requirementId: id,
+    // 6. 预创建空 chunks.jsonl —— 双 turn 启动前先建立文件,后续 appendFileSync 流式写
+    //    (空文件头也是 web loadSessionChunks() 的合法形态:0 行解析为 [])
+    const chunksPath = join(sessionDir, 'chunks.jsonl')
+    writeFileSync(chunksPath, '', 'utf8')
+
+    // 7. 加载 Skills(union by name,user-wins)—— handler 硬过滤 active Skills。
+    //    built-in dir 不存在(本 PR 之前 ticket 02 才落 SKILL.md)→ empty;handler 仍跑,
+    //    降级到不含 Skill body 的 system prompt(ticket 02 落地后自然包含)。
+    const skillsByName = await loadSkillsUnion({
+      builtinDir: resolveBuiltinSkillsDir(),
+      userDir: resolveUserSkillsDir(),
+    })
+    const admissionSkill = skillsByName.get('admission-check')
+    const brainstormSkill = skillsByName.get('requirement-brainstorm')
+
+    // 8. PRD 全文 → turn-1 user message
+    const prdContent = readFileSync(requirementMdPath, 'utf8')
+    const turn1UserMessage = buildTurn1UserMessage({ prdContent, angle: angleTyped, label: labelText })
+
+    // 9. 构造 stateful dual-turn assembler —— turn-1 / turn-2 各装入对应 Skill body
+    const baseAssembler = createSystemPromptAssembler({
+      skillsRoot: resolveBuiltinSkillsDir(),
+    })
+    const dualTurnAssembler = createDualTurnAssembler({ base: baseAssembler, skillsByName })
+
+    // 10. 异步跑双 turn(POST 不等 turn 跑完即返回 201)—— chunks 通过 SseHub + jsonl 实时落
+    //    fire-and-forget:runDualTurnAnalysis 内部 await session.send() 可能
+    //    耗时数秒到数十秒,不能让 POST 阻塞。失败时只 log,不阻断 201 返回。
+    void runDualTurnAnalysis({
+      provider: opts.provider,
+      reqId: id,
       sessionId,
+      sessionDir,
+      analysisDir,
       angle: angleTyped,
       label: labelText,
+      turn1UserMessage,
+      dualTurnAssembler,
+      admissionSkillBody: admissionSkill?.body ?? null,
+      brainstormSkillBody: brainstormSkill?.body ?? null,
+      hub,
+      fastify,
+    }).catch((err: unknown) => {
+      // 防御:createSession 抛错 → log;session 目录已落,后续清理走 ticket 06 snapshot 路径
+      const message = err instanceof Error ? err.message : String(err)
+      fastify.log.error({ err, reqId: id, sessionId }, 'analysis start createSession failed')
     })
 
-    appendChunksToJsonl({ sessionDir, chunks })
-
-    // 6. 先 fs 后 SSE(fork 真 fs 真 hub)
-    for (const ev of chunks) hub.publish(id, ev)
-
+    // 11. POST 立即 201(session 目录已落,async turn 失败由 ticket 06 snapshot 兜底)
     return reply.code(201).send({
       ok: true,
       requirementId: id,
       sessionId,
       index_path: join(sessionsDir, '_index.yaml'),
-      chunks_path: join(sessionDir, 'chunks.jsonl'),
+      chunks_path: chunksPath,
       started_at: startedAt,
     })
   })
@@ -704,16 +758,9 @@ function appendChunksToJsonl(params: { sessionDir: string; chunks: AnalysisChunk
  *  chunk 硬编码合理的 `source_refs`(让 dev 端到端 demo 跑通 +
  *  前端 Tab 计数显示);narration(START / READ)按契约**禁止**带 source_refs。
  *
- *  lineRange 与 quote 的取值与 ticket 06 验收一致:
- *  - DETECT (subproblem) → 引用 PRD 第 12-14 行「退款单笔金额上限」
- *  - RISK (risk) → 同时引用 PRD 第 23 行「幂等」与 aux api 第 45-47 行
- *    「现有 API 无幂等键」(复合判断的真实场景)
- *  - OPTION (option) → 引用 aux sop 第 8 行「退款流程规范第 3 条」
- *
- *  auxId 当前用 sentinel `mock-aux-api` / `mock-aux-sop` —— ticket 06 显式
- *  允许"若 fixture 暂未注入 aux → 用 sentinel + web 端 SSR loader 注入
- *  对应 mock aux"。dev 真实 PRD 落地后,这里应替换为 fixture 实际 aux id;
- *  本期不动。
+ *  ticket 01 (ADR-0020 D8):start handler 已切换到真 SDK,此函数保留为
+ *  `__tests__/legacy-simulation.test.ts` 等历史引用兼容入口;若 start handler
+ *  后续不再引用,可整体移除。
  */
 function simulateStartChunks(params: {
   requirementId: string
@@ -826,4 +873,342 @@ function simulateStartChunks(params: {
       },
     },
   ]
+}
+
+// ============================================================================
+// ticket 01 (ADR-0020 D8):start handler 真接 SDK —— 双 turn 编排 helpers
+//
+// 范围:仅 start handler 内部使用,不影响 interject / generate-brief 既有 mock 路径。
+// 设计原则:
+//   - 沿用 ClaudeCodeProvider / AISession 既有路径,**不**引入 MockClaudeProvider 抽象层
+//   - chunks 实时落 jsonl(appendFileSync 流式)+ 同步推 SseHub
+//   - 单 turn 失败 → jsonl 保留部分行,session 半成品状态由 ticket 06 snapshot 兜底
+// ============================================================================
+
+/** built-in Skills 根目录 —— ADR-0020 D5。
+ *  与 `apps/agent/src/` 平行的 `skills/built-in/`,运行时通过相对
+ *  `apps/agent/dist/routes/analysis.js` 的路径推断。dev 模式走 `src/` 同级 `skills/`,
+ *  编译后走 `dist/` 同级 `skills/`(package.json 留空 — 部署时由 tsc 拷贝)。 */
+function resolveBuiltinSkillsDir(): string {
+  const candidates: string[] = []
+  // dev: dist/routes/analysis.js → ../../skills/built-in ; src/routes/analysis.ts → ../../skills/built-in
+  try {
+    const here = dirname(fileURLToPath(import.meta.url))
+    candidates.push(join(here, '..', '..', 'skills', 'built-in'))
+  } catch {
+    /* import.meta.url 不可用 → 退到 process.cwd() */
+  }
+  // dev 终端直跑:src/routes/analysis.ts → ../../skills/built-in (相对 process.cwd())
+  candidates.push(join(process.cwd(), 'apps', 'agent', 'skills', 'built-in'))
+  for (const c of candidates) {
+    if (existsSync(c)) return c
+  }
+  return candidates[0] ?? join(process.cwd(), 'apps', 'agent', 'skills', 'built-in')
+}
+
+/** user Skills 根目录 —— ADR-0020 D5。
+ *  跟随 `~/.aidevspace/skills/` 约定;不存在 → 创建空目录(loadAll 返回 [])。 */
+function resolveUserSkillsDir(): string {
+  try {
+    return join(homedir(), '.aidevspace', 'skills')
+  } catch {
+    return join(process.cwd(), '.aidevspace', 'skills')
+  }
+}
+
+/** ADR-0020 D5:union by name,user-wins。空目录 / 不存在 → 安静返回空 map。
+ *  handler 硬过滤只关心 admission-check + requirement-brainstorm 两个 name。 */
+async function loadSkillsUnion(opts: {
+  builtinDir: string
+  userDir: string
+}): Promise<Map<string, Skill>> {
+  const loader = createSkillLoader()
+  const builtin = await loader.loadAll(opts.builtinDir)
+  const user = await loader.loadAll(opts.userDir)
+  const out = new Map<string, Skill>()
+  // 先 built-in
+  for (const s of builtin) out.set(s.name, s)
+  // user-wins:同名 Skill 覆盖 built-in
+  for (const s of user) out.set(s.name, s)
+  return out
+}
+
+/** Stateful dual-turn assembler —— ADR-0020 D8。
+ *
+ *  行为:turn-1 setActiveSkill('admission-check') → assembleBase 返回
+ *  `platformPhilosophy + admission-check body`;turn-2 setActiveSkill('requirement-brainstorm')
+ *  → 切到 brainstorm body。AISession 内部对 `assembleBase` 按 session.id 缓存,
+ *  turn 间切换时**必须**调 `resetBaseCache()` 让 base 重算。
+ *
+ *  `assembleDynamic` 透传 base assembler —— dynamic 段不随 Skill 切换。
+ *
+ *  Skill body 缺失(本 PR 之前 ticket 02 才落 SKILL.md)→ assembleBase 退化为
+ *  仅 platform philosophy,handler 仍跑、turn 仍执行,只是 prompt 缺少 Skill 提示。
+ */
+interface DualTurnAssembler extends SystemPromptAssembler {
+  setActiveSkill(name: string | null): void
+}
+
+function createDualTurnAssembler(opts: {
+  base: SystemPromptAssembler
+  skillsByName: Map<string, Skill>
+}): DualTurnAssembler {
+  let activeSkillName: string | null = null
+
+  return {
+    async assembleBase(session) {
+      const base = await opts.base.assembleBase(session)
+      if (!activeSkillName) return base
+      const skill = opts.skillsByName.get(activeSkillName)
+      if (!skill || skill.body.length === 0) return base
+      return `${base}\n\n### ${activeSkillName}\n${skill.body}`
+    },
+    async assembleDynamic(input) {
+      return opts.base.assembleDynamic(input)
+    },
+    resetBaseCache() {
+      opts.base.resetBaseCache()
+    },
+    setActiveSkill(name: string | null) {
+      activeSkillName = name
+    },
+  }
+}
+
+/** turn-1 user message —— ADR-0020 D8 描述:PRD 全文 + "请按 5 维度做准入"。 */
+function buildTurn1UserMessage(params: {
+  prdContent: string
+  angle: AnalysisSessionAngle
+  label: string
+}): string {
+  return [
+    `PRD 全文如下,请基于 admission-check Skill 完成 5 维度准入校验:`,
+    '',
+    '<prd>',
+    params.prdContent,
+    '</prd>',
+    '',
+    `当前会话角度 = ${params.angle},label = ${params.label}。`,
+    '请按 5 维度(loss_prevention / performance / arch_conflict / business_reasonable / context_query)',
+    '输出每个维度的判断与依据。',
+  ].join('\n')
+}
+
+/** turn-2 user message —— ADR-0020 D8 描述:"已知准入结果 X,继续 brainstorm"。
+ *  不传具体准入结果(SDK 同 session 自动保留 turn-1 history,模型可自查),只指明
+ *  下一步动作 —— 转向 requirement-brainstorm 三桶 chunk 形态。 */
+function buildTurn2UserMessage(): string {
+  return [
+    '已知上一轮 admission-check 的 5 维度结果(SDK 同 session 已自动保留 history)。',
+    '请基于 requirement-brainstorm Skill 继续 brainstorm,按三桶形态输出:',
+    '- subproblem:还需澄清的子问题',
+    '- risk:潜在风险',
+    '- option:可选方案',
+    '每个 chunk 一条,简短文本。',
+  ].join('\n')
+}
+
+/** Append-only 流式写 chunks.jsonl —— SDK 每个 text 事件 → 1 行。
+ *  设计:openSync('a') 拿到 fd → 后续 writeFileSync(fd, ...) 复用同一 fd,
+ *  不再走 fs path 解析。close 时 fd 释放。
+ *  文件不存在 → 由 caller 预创建(handler 步骤 6 写空文件头)。
+ *
+ *  ADR-0017 D3:`source_refs` 仅在存在时写入 —— narration chunk 无该字段,
+ *  JSON 体积不受影响。 */
+class ChunkJsonlWriter {
+  readonly #filePath: string
+  #closed = false
+  constructor(filePath: string) {
+    this.#filePath = filePath
+  }
+  /** 写一条 analysis_chunk 事件。落 jsonl + 后续 caller 负责 SSE publish。 */
+  writeChunk(ev: AnalysisChunkEvent): void {
+    if (this.#closed || ev.type !== 'analysis_chunk') return
+    const serialized: Record<string, unknown> = {
+      id: ev.chunk.id,
+      ts: ev.chunk.ts,
+      label: ev.chunk.label,
+      tone: ev.chunk.tone,
+      text: ev.chunk.text,
+      kind: ev.chunk.kind,
+      session_id: ev.sessionId,
+    }
+    if (ev.chunk.source_refs !== undefined) {
+      serialized.source_refs = ev.chunk.source_refs
+    }
+    // appendFileSync 每次都重新 open('a') —— 简化模式:文件可能被并发写
+    // 但本 handler 单实例独占一个 writer,无并发。
+    appendFileSync(this.#filePath, JSON.stringify(serialized) + '\n', 'utf8')
+  }
+  close(): void {
+    this.#closed = true
+  }
+}
+
+/** runDualTurnAnalysis —— ADR-0020 D8 单 session 双 turn 编排主体。
+ *
+ * 契约:
+ *   - createSession 一次 → AISession 单例
+ *   - turn-1 sendMessage(turn1UserMessage, admission-check body 进 system prompt)
+ *   - turn-2 sendMessage(turn2UserMessage, requirement-brainstorm body 进 system prompt)
+ *   - 每个 SDK text 事件 → 1 行 analysis_chunk(jsonl appendFileSync) + 1 个 SseHub.publish
+ *   - turn-done 由 SDK 流关闭事件表达(不另造 done chunk)
+ *   - 任一 turn 失败 → log + 继续下一 turn;两 turn 全失败 → 返回 ok:false
+ *   - session.close() 在 finally 中执行
+ */
+async function runDualTurnAnalysis(params: {
+  provider: AIProvider
+  reqId: string
+  sessionId: string
+  sessionDir: string
+  analysisDir: string
+  angle: AnalysisSessionAngle
+  label: string
+  turn1UserMessage: string
+  dualTurnAssembler: DualTurnAssembler
+  admissionSkillBody: string | null
+  brainstormSkillBody: string | null
+  hub: SseHub
+  fastify: FastifyInstance
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const {
+    provider, reqId, sessionId, sessionDir, dualTurnAssembler,
+    turn1UserMessage, hub, fastify,
+  } = params
+
+  const chunksPath = join(sessionDir, 'chunks.jsonl')
+  const writer = new ChunkJsonlWriter(chunksPath)
+  let chunkCounter = 0
+  // SseHub publish 幂等保护:每个 reqId + sessionId 的 publish 都走同一个 hub,
+  // 无重复风险;但 sessionSdkId 仍记下供观测
+  let sdkSessionIdLogged: string | undefined
+
+  let session
+  try {
+    session = await provider.createSession(reqId, {
+      localSid: sessionId,
+      topic: params.label,
+      kind: 'task',
+      cwd: params.analysisDir, // SDK 在 analysis dir 下启动,读 requirement.md 用相对 path 兜底
+      assembler: dualTurnAssembler,
+    })
+  } catch (err) {
+    writer.close()
+    throw err
+  }
+
+  /** 订阅 session.events() → 把每个 text 事件转 chunk 并落 jsonl + 推 SSE。
+   *  返回订阅结束的 promise(见到 done 事件 resolve)。 */
+  const subscribeOnce = (turnLabel: 'INFER' | 'BRAINSTORM'): { done: Promise<void>; cancel: () => void } => {
+    const iterable = session.events()
+    const iterator = iterable[Symbol.asyncIterator]()
+    let stopped = false
+    const done = (async () => {
+      try {
+        while (!stopped) {
+          const r = await iterator.next()
+          if (r.done) break
+          const ev = r.value
+          if (ev.type === 'text') {
+            chunkCounter++
+            const id = `c-${turnLabel.toLowerCase()}-${sessionId}-${chunkCounter}`
+            const ts = new Date().toISOString().slice(11, 19) // HH:MM:SS
+            const chunkEv: AnalysisChunkEvent = {
+              ts: Date.now(),
+              type: 'analysis_chunk',
+              reqId,
+              sessionId,
+              chunk: {
+                id,
+                ts,
+                label: turnLabel,
+                kind: 'narration',
+                tone: 'info',
+                text: ev.text,
+                // narration 契约:无 source_refs
+              },
+            }
+            writer.writeChunk(chunkEv)
+            hub.publish(reqId, chunkEv)
+          } else if (ev.type === 'done') {
+            if (ev.sessionId && !sdkSessionIdLogged) {
+              sdkSessionIdLogged = ev.sessionId
+            }
+            break
+          } else if (ev.type === 'error') {
+            // turn-done 已通过 done 表达;error 仅 log,不阻断下一 turn
+            fastify.log.warn(
+              { err: ev, reqId, sessionId, turnLabel },
+              'analysis turn SDK error event',
+            )
+          }
+          // thinking / tool_use / tool_result / retrying → 不映射 chunk(本期不实现)
+        }
+      } catch (err) {
+        fastify.log.warn({ err, reqId, sessionId, turnLabel }, 'analysis turn event pump threw')
+      } finally {
+        try {
+          await iterator.return?.(undefined)
+        } catch {
+          /* ignore */
+        }
+      }
+    })()
+    return {
+      done,
+      cancel: () => {
+        stopped = true
+        try { void iterator.return?.(undefined) } catch { /* ignore */ }
+      },
+    }
+  }
+
+  // ---- turn-1: admission-check ----
+  dualTurnAssembler.setActiveSkill(params.admissionSkillBody ? 'admission-check' : null)
+  dualTurnAssembler.resetBaseCache()
+  const turn1Sub = subscribeOnce('INFER')
+  let turn1Ok = true
+  try {
+    await session.send(turn1UserMessage)
+  } catch (err) {
+    turn1Ok = false
+    fastify.log.error({ err, reqId, sessionId, turn: 'admission' }, 'turn-1 send failed')
+  }
+  // 等订阅消费完(见到 done 或自然流关闭);失败时也给订阅一个超时退路
+  await Promise.race([
+    turn1Sub.done,
+    new Promise<void>((resolve) => setTimeout(resolve, 1500)),
+  ])
+  turn1Sub.cancel()
+
+  // ---- turn-2: requirement-brainstorm ----
+  const turn2UserMessage = buildTurn2UserMessage()
+  dualTurnAssembler.setActiveSkill(params.brainstormSkillBody ? 'requirement-brainstorm' : null)
+  dualTurnAssembler.resetBaseCache()
+  const turn2Sub = subscribeOnce('BRAINSTORM')
+  let turn2Ok = true
+  try {
+    await session.send(turn2UserMessage)
+  } catch (err) {
+    turn2Ok = false
+    fastify.log.error({ err, reqId, sessionId, turn: 'brainstorm' }, 'turn-2 send failed')
+  }
+  await Promise.race([
+    turn2Sub.done,
+    new Promise<void>((resolve) => setTimeout(resolve, 1500)),
+  ])
+  turn2Sub.cancel()
+
+  // ---- cleanup ----
+  writer.close()
+  try {
+    await session.close()
+  } catch (err) {
+    fastify.log.warn({ err, reqId, sessionId }, 'session.close() failed')
+  }
+
+  if (!turn1Ok && !turn2Ok) {
+    return { ok: false, error: 'both turns failed; partial chunks in jsonl' }
+  }
+  return { ok: true }
 }

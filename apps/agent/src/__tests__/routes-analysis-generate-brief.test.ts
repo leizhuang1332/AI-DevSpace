@@ -14,12 +14,21 @@ import { authPlugin } from '../auth/authPlugin.js'
 import { createSseHub, type SseHub } from '../sse/SseHub.js'
 import { sseRoutes } from '../sse/requirementEventsRoute.js'
 import { analysisRoutes } from '../routes/analysis.js'
+import type { AIProvider } from '../providers/AIProvider.js'
 
 let app: FastifyInstance
 let hub: SseHub
 let token: string
 let root: string
 let snapshotDir: string
+
+// ticket 01:AnalysisRoutesOptions 现在强制要求 provider;generate-brief 自身
+// 不调 provider,但注册时仍需一个 stub 对象。
+const STUB_PROVIDER: AIProvider = {
+  name: 'stub',
+  async createSession() { throw new Error('stub: not used in generate-brief') },
+  async shutdown() {},
+}
 
 async function authedJson(
   method: 'POST',
@@ -50,7 +59,7 @@ describe('POST /api/requirements/:id/analysis/generate-brief', () => {
     app = Fastify({ logger: false })
     await app.register(authPlugin, { tokenManager: tm, allowedOrigins: [] })
     await app.register(sseRoutes, { hub })
-    await app.register(analysisRoutes, { hub })
+    await app.register(analysisRoutes, { hub, provider: STUB_PROVIDER })
     await app.ready()
   })
 

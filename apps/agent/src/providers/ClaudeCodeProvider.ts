@@ -437,7 +437,10 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
         // observer 内已携带 reqId/localSid,不需要在这里再注入
         onStateChange: onSessionStateChange,
         debug,
-        assembler,
+        // ticket 01 (ADR-0020 D8):per-session assembler 覆盖 ——
+        // 双 turn 编排需 turn-1 装 admission-check body,turn-2 装
+        // requirement-brainstorm body。未传时回落 Provider 默认 assembler。
+        assembler: createOpts.assembler ?? assembler,
         requirement,
       })
 

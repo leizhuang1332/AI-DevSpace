@@ -11,6 +11,7 @@
  */
 
 import type { AIEvent } from './AIEvent.js'
+import type { SystemPromptAssembler } from '../prompt/SystemPromptAssembler.js'
 
 /** session 种类 —— ADR-0010 Q2 */
 export type SessionKind = 'chat' | 'task'
@@ -51,6 +52,16 @@ export interface CreateSessionOptions {
   cwd?: string
   /** 取消信号 —— ADR-0010 Q8.2 */
   signal?: AbortSignal
+  /**
+   * 自定义 system prompt 装配器 —— ticket 01 (ADR-0020 D8) 双 turn 编排需求:
+   * `start` handler 创建单 session 跑双 turn,每个 turn 需要装入不同 Skill body
+   * (admission-check vs requirement-brainstorm)。handler 透传一个 stateful
+   * assembler,每次 `send()` 前调用 setter 切换 active skill body。
+   *
+   * 未传时 Provider 走自身默认 assembler(或 AISession 的 system prompt 走空,
+   * 见 `AiSession` 实现)。本字段是 ticket 01 新增,接口兼容——不传时行为不变。
+   */
+  assembler?: SystemPromptAssembler
 }
 
 /**

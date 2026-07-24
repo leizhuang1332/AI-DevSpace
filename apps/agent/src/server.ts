@@ -28,6 +28,7 @@ import { createCcSwitchClient, createNullCcSwitchClient } from './providers/CcSw
 import type { CcSwitchClient } from './providers/CcSwitchClient.js'
 import { createClaudeCodeProvider } from './providers/ClaudeCodeProvider.js'
 import type { RetryableSession } from './providers/ClaudeCodeProvider.js'
+import type { AIProvider } from './providers/AIProvider.js'
 import { SessionStore } from './session/SessionStore.js'
 import { MessagesMirror } from './session/MessagesMirror.js'
 import { ProviderSemaphore } from './error/ProviderSemaphore.js'
@@ -61,6 +62,13 @@ export interface BuildServerOptions {
   logFilePath?: string
   agentVersion?: string
   zonesDir?: string
+  /**
+   * ticket 01 (ADR-0020 D8):start handler 真接 SDK,需要 AIProvider 实例。
+   * 未传时默认构造 ClaudeCodeProvider(同既有 buildServer 内部行为);
+   * 测试可通过 `buildServer({ provider: fakeProvider })` 注入 fake provider,
+   * 避免 CI 触发真 SDK 子进程。
+   */
+  provider?: AIProvider
 }
 
 /**
@@ -176,7 +184,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   // 真实生产 key 由 provider 用 UUID 保证唯一。
   const retrySessions = new Map<string, RetryableSession>()
 
-  const provider = createClaudeCodeProvider({
+  const provider: AIProvider = opts.provider ?? createClaudeCodeProvider({
     ccSwitch,
     debug: false,
     providerSemaphore,
@@ -248,7 +256,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   // `requirement_created` 事件到新建 id 通道,Web 端 DRAFTING 据此切正常态 / 红色 banner
   await fastify.register(requirementRoutes, { requirementService, sseHub: hub })
 
-  await fastify.register(analysisRoutes, { hub, workspaceRoot })
+  await fastify.register(analysisRoutes, { hub, workspaceRoot, provider })
   await fastify.register(spikeRoutes, { hub, provider, ccSwitch, store: sessionStore, mirror: messagesMirror, registry: sessionStateRegistry })
   await fastify.register(bootstrapRoutes, { tokenManager, apiBase: 'http://localhost:7777' })
   // P4 · Task 4:retry route —— UI 点重试时调;GET/sessions/:sid 是 GET,POST /retry 是 action

@@ -9,12 +9,21 @@ import { authPlugin } from '../auth/authPlugin.js'
 import { createSseHub, type SseHub } from '../sse/SseHub.js'
 import { sseRoutes } from '../sse/requirementEventsRoute.js'
 import { analysisRoutes } from '../routes/analysis.js'
+import type { AIProvider } from '../providers/AIProvider.js'
 
 let app: FastifyInstance
 let hub: SseHub
 let token: string
 let root: string
 let port: number
+
+// ticket 01:interject 自身仍走 mock simulator,但 AnalysisRoutesOptions 现在
+// 强制 provider 字段;给个不会触发的 stub。
+const STUB_PROVIDER: AIProvider = {
+  name: 'stub',
+  async createSession() { throw new Error('stub: not used in interject') },
+  async shutdown() {},
+}
 
 interface CapturedResponse {
   statusCode: number
@@ -83,7 +92,7 @@ describe('POST /api/requirements/:id/analysis/interject', () => {
     app = Fastify({ logger: false })
     await app.register(authPlugin, { tokenManager: tm, allowedOrigins: [] })
     await app.register(sseRoutes, { hub })
-    await app.register(analysisRoutes, { hub })
+    await app.register(analysisRoutes, { hub, provider: STUB_PROVIDER })
     await app.ready()
     const url = await app.listen({ port: 0, host: '127.0.0.1' })
     port = new URL(url).port
