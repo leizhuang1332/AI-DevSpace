@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import Fastify, { type FastifyInstance } from 'fastify'
 import {
   mkdtempSync,
@@ -7,6 +7,7 @@ import {
   existsSync,
   readFileSync,
   writeFileSync,
+  readdirSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -16,12 +17,16 @@ import { authPlugin } from '../auth/authPlugin.js'
 import { createSseHub, type SseHub } from '../sse/SseHub.js'
 import { sseRoutes } from '../sse/requirementEventsRoute.js'
 import { analysisRoutes } from '../routes/analysis.js'
-import { createSilentProvider } from './__helpers__/fakeAnalysisProvider.js'
+import {
+  createSilentProvider,
+  createRecordingProvider,
+} from './__helpers__/fakeAnalysisProvider.js'
 
 let app: FastifyInstance
 let hub: SseHub
 let token: string
 let root: string
+let snapshotDir: string | null
 let port: number
 
 interface CapturedResponse {
@@ -121,6 +126,11 @@ describe('POST /api/requirements/:id/analysis/start', () => {
     await hub.close()
     rmSync(root, { recursive: true, force: true })
     delete process.env.AIDEVSPACE_ROOT
+    if (snapshotDir) {
+      rmSync(snapshotDir, { recursive: true, force: true })
+      snapshotDir = null
+    }
+    delete process.env.AIDEVSPACE_SNAPSHOT_DIR
   })
 
   // ========================================================================
@@ -447,5 +457,319 @@ describe('POST /api/requirements/:id/analysis/start', () => {
       expect(n.kind).toBe('narration')
       expect('source_refs' in n).toBe(false)
     }
+  })
+})
+
+// =============================================================================
+// ticket 06 (ADR-0020 D10):turn-bounded snapshot wiring
+//
+// 这组 describe 自带 Fastify 实例,因为需要 inject 不同的 recording provider
+// (eventsByTurn 控制 0 chunk / 正常 chunk / 异常场景)。setup 模式沿用
+// `analysis-source-refs.test.ts`:不共享 beforeEach app,每个 it 自己 build。
+// =============================================================================
+describe('start handler turn-snapshot wiring (ADR-0020 D10)', () => {
+  let localRoot: string
+  let localHub: SseHub
+  let localApp: FastifyInstance
+  let localSnapshotDir: string
+  let localToken: string
+  let localTm: TokenManager
+
+  beforeEach(async () => {
+    localRoot = mkdtempSync(join(tmpdir(), 'aidevsp-t06-snap-'))
+    localSnapshotDir = mkdtempSync(join(tmpdir(), 'aidevsp-t06-snaps-'))
+    process.env.AIDEVSPACE_ROOT = localRoot
+    process.env.AIDEVSPACE_SNAPSHOT_DIR = localSnapshotDir
+    localTm = new TokenManager(localRoot)
+    localToken = await localTm.ensure()
+    localHub = createSseHub({ heartbeatMs: 60_000 })
+  })
+
+  afterEach(async () => {
+    if (localApp) await localApp.close()
+    if (localHub) await localHub.close()
+    rmSync(localRoot, { recursive: true, force: true })
+    rmSync(localSnapshotDir, { recursive: true, force: true })
+    delete process.env.AIDEVSPACE_ROOT
+    delete process.env.AIDEVSPACE_SNAPSHOT_DIR
+  })
+
+  async function bootWithProvider(provider: import('../providers/AIProvider.js').AIProvider) {
+    localApp = Fastify({ logger: false })
+    await localApp.register(authPlugin, { tokenManager: localTm, allowedOrigins: [] })
+    await localApp.register(sseRoutes, { hub: localHub })
+    await localApp.register(analysisRoutes, { hub: localHub, provider, workspaceRoot: localRoot })
+    await localApp.ready()
+  }
+
+  async function postStart(reqId: string, body: Record<string, unknown>) {
+    const res = await localApp.inject({
+      method: 'POST',
+      url: `/api/requirements/${reqId}/analysis/start`,
+      headers: { 'x-aidevspace-token': localToken, 'content-type': 'application/json' },
+      payload: body,
+    })
+    return { statusCode: res.statusCode, body: res.json() as Record<string, unknown> }
+  }
+
+  function seedReq(reqId: string): void {
+    const dir = join(localRoot, 'requirements', reqId)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'requirement.md'), '# snapshot test PRD\n', 'utf8')
+  }
+
+  // --------------------------------------------------------------------------
+  // 1. 两 turn 都触发 snapshot:turn-1 / turn-2 各有 text 事件 → before_admission
+  //    + before_brainstorm 两个 snapshot dir 都存在,内含 chunks.jsonl
+  // --------------------------------------------------------------------------
+  it('两 turn 都触发 snapshot(before_admission + before_brainstorm 都落盘)', async () => {
+    const { provider } = createRecordingProvider({
+      eventsByTurn: [
+        // turn-1:admission(2 条 text + done)
+        [
+          { type: 'text', text: 'admission 段 1', delta: false },
+          { type: 'text', text: 'admission 段 2', delta: false },
+          { type: 'done', reason: 'end_turn' as const, sessionId: 'rec-t1' },
+        ],
+        // turn-2:brainstorm(1 条 text + done)
+        [
+          { type: 'text', text: 'brainstorm 段 1', delta: false },
+          { type: 'done', reason: 'end_turn' as const, sessionId: 'rec-t2' },
+        ],
+      ],
+    })
+    await bootWithProvider(provider)
+
+    const reqId = 'req-snap-both'
+    seedReq(reqId)
+    const res = await postStart(reqId, { angle: 'architecture', session_id: 'sess-snap-both' })
+    expect(res.statusCode).toBe(201)
+
+    // 等异步双 turn 跑完(实测 3500ms 足够跑完 fake provider 的 3 条 events)
+    await new Promise((r) => setTimeout(r, 3000))
+
+    // before_admission / before_brainstorm 两个 dir 都应存在
+    const reqSnapDir = join(localSnapshotDir, reqId)
+    expect(existsSync(join(reqSnapDir, 'before_admission'))).toBe(true)
+    expect(existsSync(join(reqSnapDir, 'before_brainstorm'))).toBe(true)
+    // 每个 dir 都应有 chunks.jsonl + .session-id sidecar
+    for (const id of ['before_admission', 'before_brainstorm']) {
+      expect(existsSync(join(reqSnapDir, id, 'chunks.jsonl'))).toBe(true)
+      expect(existsSync(join(reqSnapDir, id, '.session-id'))).toBe(true)
+      expect(readFileSync(join(reqSnapDir, id, '.session-id'), 'utf8')).toBe('sess-snap-both')
+    }
+    // before_admission 应是 turn-1 开始时的空 chunks.jsonl(start handler 已预创建空文件)
+    expect(readFileSync(join(reqSnapDir, 'before_admission', 'chunks.jsonl'), 'utf8')).toBe('')
+    // before_brainstorm 应是 turn-2 开始前的 jsonl(turn-1 已写入 2 行)
+    const turn1Lines = readFileSync(join(reqSnapDir, 'before_brainstorm', 'chunks.jsonl'), 'utf8')
+      .split('\n')
+      .filter((l) => l.trim().length > 0)
+    expect(turn1Lines.length).toBe(2)
+  })
+
+  // --------------------------------------------------------------------------
+  // 2. 空 turn 不 snapshot:turn-1 0 chunk → before_admission dir 被清掉;
+  //    turn-2 正常 → before_brainstorm 保留
+  // --------------------------------------------------------------------------
+  it('空 turn(SDK 返回 0 chunk)不 snapshot —— before_admission dir 被清', async () => {
+    const { provider } = createRecordingProvider({
+      eventsByTurn: [
+        // turn-1:无 text 直接 done → 0 chunk
+        [{ type: 'done', reason: 'end_turn' as const, sessionId: 'rec-t1' }],
+        // turn-2:正常 1 条 text
+        [
+          { type: 'text', text: 'brainstorm 段', delta: false },
+          { type: 'done', reason: 'end_turn' as const, sessionId: 'rec-t2' },
+        ],
+      ],
+    })
+    await bootWithProvider(provider)
+
+    const reqId = 'req-snap-empty'
+    seedReq(reqId)
+    const res = await postStart(reqId, { angle: 'data', session_id: 'sess-snap-empty' })
+    expect(res.statusCode).toBe(201)
+
+    await new Promise((r) => setTimeout(r, 3000))
+
+    const reqSnapDir = join(localSnapshotDir, reqId)
+    // turn-1 写了 0 chunk → before_admission dir 应被 remove(空 turn 不 snapshot)
+    expect(existsSync(join(reqSnapDir, 'before_admission'))).toBe(false)
+    // turn-2 写了 1 chunk → before_brainstorm dir 应保留
+    expect(existsSync(join(reqSnapDir, 'before_brainstorm'))).toBe(true)
+    expect(existsSync(join(reqSnapDir, 'before_brainstorm', 'chunks.jsonl'))).toBe(true)
+  })
+
+  // --------------------------------------------------------------------------
+  // 3. snapshot 失败不阻断后续 turn:把 AIDEVSPACE_SNAPSHOT_DIR 指到非法路径
+  //    (把一个**已存在文件**当作 snapshot 父目录 → mkdirSync 失败)→ 两条 turn
+  //    都仍跑通,chunks.jsonl 拿到完整 turn-2 产物
+  // --------------------------------------------------------------------------
+  it('snapshot 失败不阻断后续 turn —— turn-2 仍跑出 chunks', async () => {
+    // 把 snapshot dir 临时指向一个**已存在文件**(blocker):helper 内部 mkdirSync
+    // 会因 ENOTDIR 失败,验证 best-effort 兜底
+    const blockerDir = mkdtempSync(join(tmpdir(), 'aidevsp-t06-block-'))
+    writeFileSync(join(blockerDir, 'blocker'), '', 'utf8')
+    process.env.AIDEVSPACE_SNAPSHOT_DIR = join(blockerDir, 'blocker')
+
+    try {
+      const { provider } = createRecordingProvider({
+        eventsByTurn: [
+          [
+            { type: 'text', text: 'admission 段', delta: false },
+            { type: 'done', reason: 'end_turn' as const, sessionId: 'rec-t1' },
+          ],
+          [
+            { type: 'text', text: 'brainstorm 段', delta: false },
+            { type: 'done', reason: 'end_turn' as const, sessionId: 'rec-t2' },
+          ],
+        ],
+      })
+      await bootWithProvider(provider)
+
+      const reqId = 'req-snap-fail'
+      seedReq(reqId)
+      const res = await postStart(reqId, { angle: 'custom', session_id: 'sess-snap-fail' })
+      // POST 仍 201 —— 启动不应被 snapshot 失败阻断
+      expect(res.statusCode).toBe(201)
+
+      await new Promise((r) => setTimeout(r, 3000))
+
+      // chunks.jsonl 仍落 turn-1 + turn-2 内容(2 条 text → 2 行)
+      const chunksFile = join(
+        localRoot,
+        'requirements',
+        reqId,
+        'analysis',
+        'sessions',
+        'sess-snap-fail',
+        'chunks.jsonl',
+      )
+      const lines = readFileSync(chunksFile, 'utf8').split('\n').filter((l) => l.trim().length > 0)
+      expect(lines.length).toBe(2)
+    } finally {
+      rmSync(blockerDir, { recursive: true, force: true })
+    }
+  })
+
+  // --------------------------------------------------------------------------
+  // 4. (bonus)REST 端点契约:GET list + POST restore 走通
+  // --------------------------------------------------------------------------
+  it('GET /analysis/snapshots + POST /analysis/restore 端到端', async () => {
+    const { provider } = createRecordingProvider({
+      eventsByTurn: [
+        [
+          { type: 'text', text: 'admission 段', delta: false },
+          { type: 'done', reason: 'end_turn' as const, sessionId: 'rec-t1' },
+        ],
+        [
+          { type: 'text', text: 'brainstorm 段', delta: false },
+          { type: 'done', reason: 'end_turn' as const, sessionId: 'rec-t2' },
+        ],
+      ],
+    })
+    await bootWithProvider(provider)
+
+    const reqId = 'req-snap-restore'
+    seedReq(reqId)
+    const post = await postStart(reqId, { angle: 'architecture', session_id: 'sess-restore' })
+    expect(post.statusCode).toBe(201)
+
+    await new Promise((r) => setTimeout(r, 3000))
+
+    // 先 list
+    const list = await localApp.inject({
+      method: 'GET',
+      url: `/api/requirements/${reqId}/analysis/snapshots`,
+      headers: { 'x-aidevspace-token': localToken },
+    })
+    expect(list.statusCode).toBe(200)
+    const listBody = list.json() as { snapshots: Array<{ id: string; sessionId: string | null }> }
+    const ids = listBody.snapshots.map((s) => s.id).sort()
+    expect(ids).toEqual(['before_admission', 'before_brainstorm'])
+    expect(listBody.snapshots[0].sessionId).toBe('sess-restore')
+
+    // 还原 before_admission → 最新 session 的 chunks.jsonl 变空
+    const restore = await localApp.inject({
+      method: 'POST',
+      url: `/api/requirements/${reqId}/analysis/restore`,
+      headers: { 'x-aidevspace-token': localToken, 'content-type': 'application/json' },
+      payload: { snapshot_id: 'before_admission' },
+    })
+    expect(restore.statusCode).toBe(200)
+    const restoredBody = restore.json() as { ok: boolean; restoredSessionId: string; chunksLines: number }
+    expect(restoredBody.ok).toBe(true)
+    expect(restoredBody.restoredSessionId).toBe('sess-restore')
+    expect(restoredBody.chunksLines).toBe(0)
+
+    // 验证 chunks.jsonl 被覆盖为空
+    const chunksAfter = join(
+      localRoot,
+      'requirements',
+      reqId,
+      'analysis',
+      'sessions',
+      'sess-restore',
+      'chunks.jsonl',
+    )
+    expect(readFileSync(chunksAfter, 'utf8')).toBe('')
+  })
+
+  // --------------------------------------------------------------------------
+  // 5. 400 / 404:restore body 校验 + 不存在的 snapshot_id
+  // --------------------------------------------------------------------------
+  it('restore 端点:非法 snapshot_id → 400;未知 id → 400(snapshot_id 同样不在白名单)', async () => {
+    const { provider } = createSilentProvider()
+    await bootWithProvider(provider)
+
+    const reqId = 'req-snap-bad'
+    seedReq(reqId)
+    await postStart(reqId, { angle: 'architecture', session_id: 'sess-bad' })
+    await new Promise((r) => setTimeout(r, 1000))
+
+    const r1 = await localApp.inject({
+      method: 'POST',
+      url: `/api/requirements/${reqId}/analysis/restore`,
+      headers: { 'x-aidevspace-token': localToken, 'content-type': 'application/json' },
+      payload: { snapshot_id: 'bogus' },
+    })
+    expect(r1.statusCode).toBe(400)
+    expect((r1.json() as { error: string }).error).toBe('bad_request')
+
+    const r2 = await localApp.inject({
+      method: 'POST',
+      url: `/api/requirements/${reqId}/analysis/restore`,
+      headers: { 'x-aidevspace-token': localToken, 'content-type': 'application/json' },
+      payload: {},
+    })
+    expect(r2.statusCode).toBe(400)
+  })
+
+  it('snapshot dir 未配置 AIDEVSPACE_SNAPSHOT_DIR 时 list 返空 + restore 404', async () => {
+    delete process.env.AIDEVSPACE_SNAPSHOT_DIR
+    const { provider } = createSilentProvider()
+    await bootWithProvider(provider)
+
+    const reqId = 'req-snap-unset'
+    seedReq(reqId)
+    await postStart(reqId, { angle: 'architecture', session_id: 'sess-unset' })
+    await new Promise((r) => setTimeout(r, 1000))
+
+    const list = await localApp.inject({
+      method: 'GET',
+      url: `/api/requirements/${reqId}/analysis/snapshots`,
+      headers: { 'x-aidevspace-token': localToken },
+    })
+    expect(list.statusCode).toBe(200)
+    expect((list.json() as { snapshots: unknown[] }).snapshots).toEqual([])
+
+    const r = await localApp.inject({
+      method: 'POST',
+      url: `/api/requirements/${reqId}/analysis/restore`,
+      headers: { 'x-aidevspace-token': localToken, 'content-type': 'application/json' },
+      payload: { snapshot_id: 'before_admission' },
+    })
+    expect(r.statusCode).toBe(404)
+    expect((r.json() as { error: string }).error).toBe('snapshot_dir_unset')
   })
 })

@@ -30,6 +30,15 @@ import type { AIProvider } from '../providers/AIProvider.js'
 import type { AIEvent } from '../providers/AIEvent.js'
 import { createSystemPromptAssembler, type SystemPromptAssembler } from '../prompt/SystemPromptAssembler.js'
 import { createSkillLoader, type Skill } from '../prompt/SkillLoader.js'
+import {
+  SESSION_SNAPSHOT_IDS,
+  isSessionSnapshotId,
+  listSessionSnapshots,
+  removeSessionSnapshot,
+  restoreSnapshot,
+  takeSessionSnapshot,
+  type SessionSnapshotId,
+} from './analysis-snapshot.js'
 
 export interface AnalysisRoutesOptions {
   hub: SseHub
@@ -367,6 +376,55 @@ export const analysisRoutes: FastifyPluginAsync<AnalysisRoutesOptions> = async (
       chunks_path: chunksPath,
       started_at: startedAt,
     })
+  })
+
+  // ============================================================================
+  // ticket 06 (ADR-0020 D10):snapshot list + restore 端点
+  //
+  // GET  /api/requirements/:id/analysis/snapshots
+  //   列出该 req 下 turn-bounded snapshot(id ∈ {before_admission, before_brainstorm})
+  //   + sidecar 写入的 session_id(tell 前端这 snapshot 来自哪条 session)
+  //
+  // POST /api/requirements/:id/analysis/restore
+  //   body: { snapshot_id: 'before_admission' | 'before_brainstorm' }
+  //   还原到 latest session 的 chunks.jsonl(不挑 sid —— snapshot 是按 req-id 维度命名,
+  //   restore 目标永远 = mtime 最新 session,语义"回滚到一个已知 good 状态")
+  // ============================================================================
+
+  fastify.get<{
+    Params: { id: string }
+  }>('/api/requirements/:id/analysis/snapshots', async (req, reply) => {
+    const { id } = req.params
+    const snapshots = listSessionSnapshots(id)
+    return reply.code(200).send({ snapshots })
+  })
+
+  fastify.post<{
+    Params: { id: string }
+    Body: { snapshot_id?: unknown }
+  }>('/api/requirements/:id/analysis/restore', async (req, reply) => {
+    const { id } = req.params
+    const body = req.body ?? {}
+    const snapshotIdRaw = body.snapshot_id
+    if (!isSessionSnapshotId(snapshotIdRaw)) {
+      return reply.code(400).send(
+        badRequest(
+          `snapshot_id must be one of ${SESSION_SNAPSHOT_IDS.join('|')}`,
+        ),
+      )
+    }
+    const result = restoreSnapshot(id, snapshotIdRaw)
+    if (!result.ok) {
+      // snapshot_not_found / snapshot_dir_unset → 404
+      // no_active_session → 409(状态不允许)
+      const status = result.error === 'no_active_session' ? 409 : 404
+      return reply.code(status).send({
+        ok: false,
+        error: result.error,
+        reason: result.reason ?? '',
+      })
+    }
+    return reply.code(200).send(result)
   })
 
   // ============================================================================
@@ -1058,7 +1116,15 @@ async function runDualTurnAnalysis(params: {
     skillBody: string | null
     userMessage: string
     turnLogTag: 'admission' | 'brainstorm'
+    snapshotId: SessionSnapshotId
   }): Promise<void> {
+    // ticket 06 (ADR-0020 D10):turn chunks 落 chunks.jsonl 第一行前 snapshot
+    // 失败 best-effort —— helper 内部 try/catch 吞错,不影响 send 路径
+    takeSessionSnapshot(sessionDir, reqId, spec.snapshotId, sessionId)
+    // 记录 turn 开始时的 chunk 数;eventsDrained 后用与 counter.value 比较
+    // 判定该 turn 是否写了 0 chunk(空 turn → 清掉 snapshot,不留无意义副本)
+    const chunksAtStart = counter.value
+
     dualTurnAssembler.setActiveSkill(spec.skillBody ? spec.skillName : null)
     dualTurnAssembler.resetBaseCache()
     const sub = streamTurnEvents(spec.turnLabel)
@@ -1069,6 +1135,11 @@ async function runDualTurnAnalysis(params: {
     }
     await sub.eventsDrained
     sub.cancel()
+
+    // ticket 06:空 turn(SDK 返回 0 chunk)不 snapshot —— 此处静默 remove
+    if (counter.value === chunksAtStart) {
+      removeSessionSnapshot(reqId, spec.snapshotId)
+    }
   }
 
   let turn1Ok = true
@@ -1080,6 +1151,7 @@ async function runDualTurnAnalysis(params: {
       skillBody: params.admissionSkillBody,
       userMessage: turn1UserMessage,
       turnLogTag: 'admission',
+      snapshotId: 'before_admission',
     })
   } catch (err) {
     turn1Ok = false
@@ -1093,6 +1165,7 @@ async function runDualTurnAnalysis(params: {
       skillBody: params.brainstormSkillBody,
       userMessage: buildTurn2UserMessage(),
       turnLogTag: 'brainstorm',
+      snapshotId: 'before_brainstorm',
     })
   } catch (err) {
     turn2Ok = false
