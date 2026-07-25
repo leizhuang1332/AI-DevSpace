@@ -170,6 +170,96 @@ describe('AnalyzingZone · 满数据渲染(ticket 02 · ADR-0017 D1)', () => {
 })
 
 // ============================================================================
+// ticket 05 (ADR-0020 D9) · 「开始分析」CTA 条件触发逻辑
+//
+// 父组件 AnalyzingContent 计算 `showStartButton` 后传给 AdmissionDashboard:
+//   sessions.length === 0 && admission.dimensions.every(d => d.count === 0)
+// AdmissionDashboard 自身的单测只覆盖 prop 渲染分支(见 analyzing-admission-dashboard.test.tsx);
+// 这里覆盖父组件的条件组合 —— 任一前提不满足,AdmissionDashboard 不应渲染「开始分析」按钮。
+// ============================================================================
+
+describe('AnalyzingZone · 「开始分析」CTA 条件触发(ticket 05 · ADR-0020 D9)', () => {
+  it('空 sessions + 默认 0 count → 渲染「开始分析」按钮 + section data-phase=empty_armed', () => {
+    const data: AnalyzingData = {
+      ...emptyAnalyzing('req-empty'),
+      empty: false,
+      phase: 'active',
+      // sessions 默认 [] + admission 默认全 0 → 条件满足
+    }
+    render(<AnalyzingZone data={data} />)
+    expect(screen.getByTestId('admission-start-btn')).toBeInTheDocument()
+    expect(screen.getByTestId('admission-dashboard').getAttribute('data-phase')).toBe(
+      'empty_armed',
+    )
+  })
+
+  it('有 sessions(至少 1)→ 「开始分析」按钮不渲染', () => {
+    const data: AnalyzingData = {
+      ...emptyAnalyzing('req-with-sess'),
+      empty: false,
+      phase: 'active',
+      sessions: [
+        {
+          id: 'sess-arch',
+          label: '架构',
+          angle: 'architecture',
+          detectedCount: 0,
+          isStreaming: false,
+        },
+      ],
+      activeSessionId: 'sess-arch',
+    }
+    render(<AnalyzingZone data={data} />)
+    expect(screen.queryByTestId('admission-start-btn')).toBeNull()
+    expect(screen.getByTestId('admission-dashboard').getAttribute('data-phase')).toBe(
+      'active',
+    )
+  })
+
+  it('空 sessions + 至少一个维度 count > 0 → 「开始分析」按钮不渲染', () => {
+    // 注:此场景覆盖的是 `admission.dimensions.every(d => d.count === 0)` 子条件
+    // —— 即使 sessions 为空,只要有维度被 AI 标过非 0,空态就解除
+    const data: AnalyzingData = {
+      ...emptyAnalyzing('req-warm'),
+      empty: false,
+      phase: 'active',
+      sessions: [],
+      admission: {
+        ...emptyAnalyzing('req-warm').admission,
+        dimensions: [
+          {
+            id: 'loss_prevention',
+            label: '资损安全',
+            icon: '🔴',
+            severity: 'red',
+            count: 3,
+          },
+          ...emptyAnalyzing('req-warm').admission.dimensions.slice(1),
+        ],
+      },
+    }
+    render(<AnalyzingZone data={data} />)
+    expect(screen.queryByTestId('admission-start-btn')).toBeNull()
+  })
+
+  it('AdmissionDashboard 是全局共享:窄视口 / 桌面视口都同位置渲染', () => {
+    // ticket 05 spec 第 7 项验收:窄视口形态(<1024px,NarrowLayout)同样适用。
+    // AdmissionDashboard 实际挂在 AnalyzingContent 顶层(isDesktop 之上),
+    // 不在桌面 / 窄屏分支内;此断言守护这一契约不被未来的重构搬进窄屏分支。
+    const data: AnalyzingData = {
+      ...emptyAnalyzing('req-shared'),
+      empty: false,
+      phase: 'active',
+    }
+    render(<AnalyzingZone data={data} />)
+
+    // 与 analyzing-main 同级(analyzing-stage-strip 旁),不在 analyzing-grid/analyzing-narrow-tabs 内
+    const dash = screen.getByTestId('admission-dashboard')
+    expect(dash.compareDocumentPosition(screen.getByTestId('analyzing-main')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+})
+
+// ============================================================================
 // 打字机 phase 推进(原点击跳过测试改为 state 验证)
 // ticket 02 改动:ThinkingStream 渲染出口删除;原"点击流区跳过"不再适用,
 // 改为通过 DocumentReaderPane 在 phase 推进中仍稳定渲染来间接验证 phase state machine

@@ -219,3 +219,195 @@ describe('AdmissionDashboard · 维度卡点击(预留 hook)', () => {
     ).not.toThrow()
   })
 })
+
+// ============================================================================
+// ticket 05 · ADR-0020 D9 · 「开始分析」CTA
+//
+// 渲染条件(由父组件 AnalyzingZone 计算后通过 showStartButton 传入):
+//   sessions.length === 0 && admission.dimensions.every(d => d.count === 0)
+// 本组件只关心:prop 决定是否渲染按钮 + 点击回调 + 流式期间文案/禁用
+// ============================================================================
+
+describe('AdmissionDashboard · 开始分析按钮(ADR-0020 D9 · ticket 05)', () => {
+  it('showStartButton=true 时渲染 admission-start-btn,文案 「▶ 开始分析」', () => {
+    const onStart = vi.fn()
+    const admission = buildAdmission() // 默认 5 维度 count=0
+    render(
+      <AdmissionDashboard
+        admission={admission}
+        onAcceptRisk={vi.fn()}
+        showStartButton
+        onStart={onStart}
+      />,
+    )
+
+    const btn = screen.getByTestId('admission-start-btn')
+    expect(btn).toBeInTheDocument()
+    expect(btn.getAttribute('data-state')).toBe('idle')
+    // idle 态不显示 spinner
+    expect(screen.queryByTestId('admission-start-spinner')).toBeNull()
+    // 文案包含「开始分析」与 ▶ 图标
+    expect(btn.textContent).toContain('开始分析')
+    expect(btn.textContent).toContain('▶')
+    // idle 态可点击
+    expect(btn.hasAttribute('disabled')).toBe(false)
+  })
+
+  it('showStartButton=false(默认或显式)时不渲染 admission-start-btn', () => {
+    const noProp = buildAdmission()
+    const { unmount } = render(<AdmissionDashboard admission={noProp} onAcceptRisk={vi.fn()} />)
+    expect(screen.queryByTestId('admission-start-btn')).toBeNull()
+    unmount()
+
+    const explicit = buildAdmission()
+    render(
+      <AdmissionDashboard
+        admission={explicit}
+        onAcceptRisk={vi.fn()}
+        showStartButton={false}
+        onStart={vi.fn()}
+      />,
+    )
+    expect(screen.queryByTestId('admission-start-btn')).toBeNull()
+  })
+
+  it('空态渲染时 section 节点携带 data-phase="empty_armed"', () => {
+    const admission = buildAdmission()
+    render(
+      <AdmissionDashboard
+        admission={admission}
+        onAcceptRisk={vi.fn()}
+        showStartButton
+        onStart={vi.fn()}
+      />,
+    )
+    expect(screen.getByTestId('admission-dashboard').getAttribute('data-phase')).toBe(
+      'empty_armed',
+    )
+  })
+
+  it('有会话态时 section 节点 data-phase="active"', () => {
+    const admission = buildAdmission({}, { loss_prevention: 1 })
+    render(<AdmissionDashboard admission={admission} onAcceptRisk={vi.fn()} />)
+    expect(screen.getByTestId('admission-dashboard').getAttribute('data-phase')).toBe(
+      'active',
+    )
+  })
+
+  it('点击 admission-start-btn → 触发 onStart 回调', () => {
+    const onStart = vi.fn()
+    const admission = buildAdmission()
+    render(
+      <AdmissionDashboard
+        admission={admission}
+        onAcceptRisk={vi.fn()}
+        showStartButton
+        onStart={onStart}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('admission-start-btn'))
+    expect(onStart).toHaveBeenCalledOnce()
+  })
+
+  it('startState=starting → 文案「分析中…」,显示 spinner,disabled 防重', () => {
+    const onStart = vi.fn()
+    const admission = buildAdmission()
+    render(
+      <AdmissionDashboard
+        admission={admission}
+        onAcceptRisk={vi.fn()}
+        showStartButton
+        onStart={onStart}
+        startState="starting"
+      />,
+    )
+
+    const btn = screen.getByTestId('admission-start-btn')
+    expect(btn.getAttribute('data-state')).toBe('starting')
+    expect(btn.textContent).toContain('分析中')
+    // spinner 出现
+    expect(screen.getByTestId('admission-start-spinner')).toBeInTheDocument()
+    // 禁用 + aria-disabled
+    expect(btn.hasAttribute('disabled')).toBe(true)
+    expect(btn.getAttribute('aria-disabled')).toBe('true')
+    // 点击不会触发回调(disabled 防护)
+    fireEvent.click(btn)
+    expect(onStart).not.toHaveBeenCalled()
+  })
+
+  it('startState=running → 文案「分析中…」,显示 spinner,disabled 防重', () => {
+    const onStart = vi.fn()
+    const admission = buildAdmission()
+    render(
+      <AdmissionDashboard
+        admission={admission}
+        onAcceptRisk={vi.fn()}
+        showStartButton
+        onStart={onStart}
+        startState="running"
+      />,
+    )
+
+    const btn = screen.getByTestId('admission-start-btn')
+    expect(btn.getAttribute('data-state')).toBe('running')
+    expect(btn.textContent).toContain('分析中')
+    expect(screen.getByTestId('admission-start-spinner')).toBeInTheDocument()
+    expect(btn.hasAttribute('disabled')).toBe(true)
+    fireEvent.click(btn)
+    expect(onStart).not.toHaveBeenCalled()
+  })
+
+  it('startState=idle 时不显示 spinner(disabled=false)', () => {
+    const onStart = vi.fn()
+    const admission = buildAdmission()
+    render(
+      <AdmissionDashboard
+        admission={admission}
+        onAcceptRisk={vi.fn()}
+        showStartButton
+        onStart={onStart}
+        startState="idle"
+      />,
+    )
+    const btn = screen.getByTestId('admission-start-btn')
+    expect(btn.getAttribute('data-state')).toBe('idle')
+    expect(screen.queryByTestId('admission-start-spinner')).toBeNull()
+    expect(btn.hasAttribute('disabled')).toBe(false)
+  })
+
+  it('verdict=fail 时,「开始分析」与「接受风险」并列共存,不互斥', () => {
+    // ADR-0020 D9:「开始分析」独立于 verdict——空态就是空态,和
+    // verdict 是 fail / pending / pass 都无关(由父组件决定)
+    const onStart = vi.fn()
+    const admission = buildAdmission(
+      { verdict: 'fail' },
+      { loss_prevention: 1 },
+    )
+    render(
+      <AdmissionDashboard
+        admission={admission}
+        onAcceptRisk={vi.fn()}
+        showStartButton={false} // 默认 false,不代表禁用该 prop
+        onStart={onStart}
+        startState="idle"
+      />,
+    )
+    expect(screen.getByTestId('admission-accept-risk-btn')).toBeInTheDocument()
+    expect(screen.queryByTestId('admission-start-btn')).toBeNull()
+  })
+
+  it('未传 onStart 时点击不崩(showStartButton=true + onStart=undefined)', () => {
+    const admission = buildAdmission()
+    render(
+      <AdmissionDashboard
+        admission={admission}
+        onAcceptRisk={vi.fn()}
+        showStartButton
+      />,
+    )
+    expect(() =>
+      fireEvent.click(screen.getByTestId('admission-start-btn')),
+    ).not.toThrow()
+  })
+})

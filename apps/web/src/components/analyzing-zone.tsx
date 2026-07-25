@@ -5,6 +5,7 @@ import {
   deriveProducts,
   countCitationsByDoc,
   collectCitationRefs,
+  ANALYSIS_SESSION_ANGLE_META,
   type AnalysisSession,
   type AnalysisSessionAngle,
   type AnalyzingChunk,
@@ -21,6 +22,7 @@ import { useMediaQuery } from '@/lib/use-media-query'
 // 左栏"思考流"UI 删,phase state machine 内部状态保留(供未来 StatusBar/插话)。
 import { EmptyState } from './empty-state'
 import { AdmissionDashboard } from './admission-dashboard'
+import type { AdmissionStartState } from './admission-dashboard'
 import { SessionTabs } from './session-tabs'
 import type { ThinkingPhase } from './thinking-stream'
 import { ProductList, type CitationSourceOption } from './product-list'
@@ -31,6 +33,11 @@ import {
   DocumentReaderPane,
   PRD_TAB_ID,
 } from './document-reader-pane'
+import {
+  startAnalysis,
+  StartAnalysisError,
+  type StartAnalysisSuccess,
+} from '@/lib/analysis-start'
 
 /**
  * ANALYZING 工位组件(ADR-0011 §6 ANALYZING 布局 · issue 19)
@@ -94,6 +101,17 @@ const INTER_CHUNK_PAUSE_MS = 200
 
 /** 客户端 cookie 名:上次 active session id(SSR 通过 cookies() 注入 lastSessionId) */
 const LAST_SESSION_COOKIE = 'last_session_id'
+/** cookie 持久化周期:1 年(与既有 cookie 行为一致) */
+const LAST_SESSION_COOKIE_MAX_AGE = 31_536_000
+
+/**
+ * 把 active session id 写到 cookie,供下次 SSR 兜底默认值。
+ * 浏览器侧专属:服务端路径走过 `cookies()` 直接 set。
+ */
+function setLastSessionCookie(id: string): void {
+  if (typeof document === 'undefined') return
+  document.cookie = `${LAST_SESSION_COOKIE}=${encodeURIComponent(id)}; path=/; max-age=${LAST_SESSION_COOKIE_MAX_AGE}; samesite=lax`
+}
 
 /** SSE 端点路径(同 apps/agent/src/sse/requirementEventsRoute.ts) */
 function sseUrl(requirementId: string): string {
@@ -196,19 +214,12 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   // - activeSessionId:当前 active 会话 id(初始来自 server)
   // - chunksBySessionId:每个会话的 chunks map(mock 简化版:所有会话共用 data.chunks)
   // -------------------------------------------------------------------------
-  const [sessions, setSessions] = useState<AnalysisSession[]>(
-    data.sessions.length > 0 ? data.sessions : [
-      {
-        id: 'default',
-        label: '架构',
-        angle: 'architecture',
-        detectedCount: 0,
-        isStreaming: false,
-      },
-    ],
-  )
+  // ticket 05 · ADR-0020 D9:不做"空 sessions 自动塞 default"兜底 —— 让
+  // `sessions.length === 0` 在 disk 空时真实可达(否则「开始分析」按钮永远
+  // 不显示)。Sessions 由用户主动创建(POST start / onCreate)或由 SSR 注入。
+  const [sessions, setSessions] = useState<AnalysisSession[]>(data.sessions)
   const [activeSessionId, setActiveSessionId] = useState<string>(
-    data.activeSessionId || (sessions[0]?.id ?? 'default'),
+    data.activeSessionId || sessions[0]?.id || '',
   )
 
   // -------------------------------------------------------------------------
@@ -219,6 +230,10 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   // data.chunks 的副本(真实 D7 要求"每 session 是独立对话流 + 自己的 chunks
   // jsonl",本 slice 仅前端 mock,后端落盘推迟到 VS5 与 sessions 持久化一并接入)。
   // SSE 推送时仅追加到 active 会话;新建会话初始化为 []。
+  //
+  // ticket 05 · 读路径 fallback:有 sessions 时读对应 entry;无 sessions / 无匹配
+  // entry 时直接用 `data.chunks` —— 这让"raw chunks 已存在但还未 mock 进任一会话"
+  // 的状态(以及 ticket 03 fixture 化后的 `[makeLinkedData]` 测试)能继续渲染。
   // -------------------------------------------------------------------------
   const [chunksBySessionId, setChunksBySessionId] = useState<Record<string, AnalyzingChunk[]>>(
     () => {
@@ -227,11 +242,11 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       return map
     },
   )
-  const chunks = chunksBySessionId[activeSessionId] ?? []
+  const chunks = chunksBySessionId[activeSessionId] ?? data.chunks
   const setChunks = useCallback(
     (updater: AnalyzingChunk[] | ((prev: AnalyzingChunk[]) => AnalyzingChunk[])) => {
       setChunksBySessionId((prev) => {
-        const current = prev[activeSessionId] ?? []
+        const current = prev[activeSessionId] ?? data.chunks
         const next = typeof updater === 'function' ? updater(current) : updater
         return { ...prev, [activeSessionId]: next }
       })
@@ -283,6 +298,76 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id))
   }, [])
+
+  // -------------------------------------------------------------------------
+  // 「开始分析」状态机(ticket 05 · ADR-0020 D9)
+  // - startState: 'idle' | 'starting' | 'running'(传给 AdmissionDashboard)
+  //   - idle     → 「▶ 开始分析」可点击
+  //   - starting → POST 在路上;切 running 文案,disabled 防重
+  //   - running  → POST 201 已返,SSE 在推;disabled(等条件 false 按钮自然消失)
+  // - handleStart:点击 → startAnalysis() → 乐观追加 session 让按钮立即消失
+  //
+  // 渲染条件(由 AdmissionDashboard 单测覆盖):
+  //   sessions.length === 0 && admission.dimensions.every(d => d.count === 0)
+  // 此处只把结果传给 AdmissionDashboard;具体条件判定由 AdmissionDashboard
+  // 单测覆盖,AnalyzingZone 单测侧不重复断言。
+  // -------------------------------------------------------------------------
+  const [startState, setStartState] = useState<AdmissionStartState>('idle')
+
+  const handleStart = useCallback(async () => {
+    setStartState('starting')
+    // 默认首个会话 = 架构(ticket 05 spec 默认;UI 层暂无角度选择 — 产品层
+    // 后续 PR 由产品决定是否暴露角度选择)。label 派生自
+    // ANALYSIS_SESSION_ANGLE_META,避免与 agent 端 default 重复字面量。
+    const startAngle: AnalysisSessionAngle = 'architecture'
+    const startLabel = ANALYSIS_SESSION_ANGLE_META[startAngle].label
+    let success: StartAnalysisSuccess
+    try {
+      success = await startAnalysis(data.requirementId, {
+        angle: startAngle,
+        label: startLabel,
+      })
+    } catch (err) {
+      // 失败路径:toast 提示 + 状态回滚到 idle,允许用户重试
+      if (err instanceof StartAnalysisError) {
+        if (err.code === 'prd_not_ready') {
+          pushToast('PRD 未就绪,请先完成 DRAFTING 工位的需求文档', 'warn')
+        } else {
+          pushToast(`开始分析失败:${err.message}`, 'err')
+        }
+      } else {
+        pushToast(
+          `开始分析失败:${err instanceof Error ? err.message : String(err)}`,
+          'err',
+        )
+      }
+      setStartState('idle')
+      return
+    }
+
+    // 成功路径:乐观追回会话 + 切 active;AdmissionDashboard 渲染条件
+    // (sessions.length === 0) 立即变 false → 「开始分析」按钮自然消失。
+    // SSE 推过来的 chunks 通过既有 EventSource 订阅进入 chunksBySessionId。
+    const newSession: AnalysisSession = {
+      id: success.sessionId,
+      label: startLabel,
+      angle: startAngle,
+      detectedCount: 0,
+      isStreaming: true,
+    }
+    setSessions((prev) => {
+      // 防御:防重 → 避免 startState=running 时用户再点(若偶尔冒出)
+      if (prev.some((s) => s.id === newSession.id)) return prev
+      return [...prev, newSession]
+    })
+    setChunksBySessionId((prev) => ({ ...prev, [newSession.id]: [] }))
+    setActiveSessionId(newSession.id)
+    setPhase({ kind: 'idle' })
+    setLastSessionCookie(newSession.id)
+    // 标记 running(SSE 会继续推 chunks;AdmissionDashboard 端条件变 false
+    // → 按钮已消失,这里的 running 状态主要用于防御性 disabled 防抖)
+    setStartState('running')
+  }, [data.requirementId, pushToast])
 
   // 主区滚动位置持久化已删(ADR-0019 D4):analyzing-main 改为 overflow-hidden 后
   // 外层不再滚动,mainScrollRef / scrollStorageKey / sessionStorage 全部为死代码。
@@ -551,9 +636,7 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       // 重置打字机 phase(切换后会话的 chunks 长度/内容不同,phase 必须重置)
       setPhase({ kind: 'idle' })
       // 写入 cookie `last_session_id`,下次 SSR 默认值
-      if (typeof document !== 'undefined') {
-        document.cookie = `${LAST_SESSION_COOKIE}=${encodeURIComponent(sessionId)}; path=/; max-age=31536000; samesite=lax`
-      }
+      setLastSessionCookie(sessionId)
     },
     [activeSessionId],
   )
@@ -577,9 +660,7 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       // 直接切到新会话(不调用 handleSwitchSession,因为旧会话无需存滚动位置)
       setActiveSessionId(newId)
       setPhase({ kind: 'idle' })
-      if (typeof document !== 'undefined') {
-        document.cookie = `${LAST_SESSION_COOKIE}=${encodeURIComponent(newId)}; path=/; max-age=31536000; samesite=lax`
-      }
+      setLastSessionCookie(newId)
     },
     [],
   )
@@ -604,9 +685,7 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
         const neighbor = nextSessions[neighborIdx]
         setActiveSessionId(neighbor.id)
         setPhase({ kind: 'idle' })
-        if (typeof document !== 'undefined') {
-          document.cookie = `${LAST_SESSION_COOKIE}=${encodeURIComponent(neighbor.id)}; path=/; max-age=31536000; samesite=lax`
-        }
+        setLastSessionCookie(neighbor.id)
       }
     },
     [sessions, activeSessionId],
@@ -638,11 +717,21 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
         revealedCount={revealedCount}
         isStreaming={data.streamMeta.isStreaming}
       />
-      {/* issue 19a VS1 — 准入仪表板(顶部 5 维度卡 + verdict 徽章 + 待裁决 N · 全局共享) */}
+      {/* issue 19a VS1 — 准入仪表板(顶部 5 维度卡 + verdict 徽章 + 待裁决 N · 全局共享)
+          ticket 05 (ADR-0020 D9):空态时右端渲染「开始分析」按钮 →
+            sessions.length === 0 && admission.dimensions.every(d => d.count === 0) */}
       <div className="px-6 pt-4">
         <AdmissionDashboard
           admission={currentAdmission}
           onAcceptRisk={() => setVerdictOverride('pending')}
+          showStartButton={
+            sessions.length === 0 &&
+            currentAdmission.dimensions.every((d) => d.count === 0)
+          }
+          onStart={() => {
+            void handleStart()
+          }}
+          startState={startState}
         />
       </div>
       {/* issue 19c VS3 — 多会话 Tab(横向浏览器风格,主区按 activeSessionId 切换)
