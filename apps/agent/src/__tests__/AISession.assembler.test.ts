@@ -53,7 +53,7 @@ This is the full body that should land in the prompt.
         yield { kind: 'result', sessionId: 's', reason: 'end_turn' }
       },
     }
-    const assembler = createSystemPromptAssembler({ skillsRoot })
+    const assembler = createSystemPromptAssembler({ skillsRoots: [skillsRoot] })
     const session = new AiSession({
       id: 's-1',
       reqId: 'r-1',
@@ -108,7 +108,7 @@ This is the full body that should land in the prompt.
         yield { kind: 'result', sessionId: 's', reason: 'end_turn' }
       },
     }
-    const assembler = createSystemPromptAssembler({ skillsRoot })
+    const assembler = createSystemPromptAssembler({ skillsRoots: [skillsRoot] })
     const session = new AiSession({
       id: 's-cache',
       reqId: 'r-1',
@@ -138,7 +138,7 @@ This is the full body that should land in the prompt.
         yield { kind: 'result', sessionId: 's', reason: 'end_turn' }
       },
     }
-    const assembler = createSystemPromptAssembler({ skillsRoot: reqRoot })
+    const assembler = createSystemPromptAssembler({ skillsRoots: [reqRoot] })
     // 让 assembleBase 抛错 → AISession 应捕获并降级
     const spy = vi.spyOn(assembler, 'assembleBase').mockRejectedValue(new Error('boom'))
     const session = new AiSession({

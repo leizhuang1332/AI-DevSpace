@@ -4,15 +4,15 @@
 
 **Blocked by:** 01(handler 路径已就),02(已落 built-in Skill 实际内容,用于验证合并行为)
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
-- [ ] `SystemPromptAssembler` 的 `deps` 由 `skillsRoot: string` → `skillsRoots: string[]`
-- [ ] `assembleBase` / `assembleDynamic` 都做 `Promise.all(skillsRoots.map(skillLoader.loadAll))` 然后 union by name,user-wins
-- [ ] SkillLoader 公共 API(`loadAll(rootDir)` / `findByName(rootDir, name)`)不变
-- [ ] empty home 情形验证:仅 `apps/agent/skills/built-in` 一个 root 时,装入行为与旧版一致
-- [ ] SkillLoader 已有单测全过
-- [ ] `SystemPromptAssembler` 单测新增 `union by name user-wins` 用例:built-in 与 home 各放一个同名 Skill,home 的优先;不同名 Skill 都保留
-- [ ] `pnpm typecheck` 与 `pnpm test` 通过
+- [x] `SystemPromptAssembler` 的 `deps` 由 `skillsRoot: string` → `skillsRoots: string[]`
+- [x] `assembleBase` / `assembleDynamic` 都做 `Promise.all(skillsRoots.map(skillLoader.loadAll))` 然后 union by name,user-wins
+- [x] SkillLoader 公共 API(`loadAll(rootDir)` / `findByName(rootDir, name)`)不变
+- [x] empty home 情形验证:仅 `apps/agent/skills/built-in` 一个 root 时,装入行为与旧版一致
+- [x] SkillLoader 已有单测全过
+- [x] `SystemPromptAssembler` 单测新增 `union by name user-wins` 用例:built-in 与 home 各放一个同名 Skill,home 的优先;不同名 Skill 都保留
+- [x] `pnpm typecheck` 与 `pnpm test` 通过
 
 **ADR ref:** ADR-0020 ticket 01 / D5 / D6
 

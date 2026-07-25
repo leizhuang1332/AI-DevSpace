@@ -61,8 +61,8 @@ export interface AssemblerRequirement {
 
 /** Assembler 依赖注入 */
 export interface AssemblerDeps {
-  /** Skill 根目录;默认 ~/.aidevspace/skills/ */
-  skillsRoot: string
+  /** Skill 根目录,按 built-in → user 排列;同名 Skill 以后者为准 */
+  skillsRoots: string[]
   /** 文件系统读取(默认 node:fs/promises.readFile);测试时可注入 */
   readFile?: (path: string) => Promise<string>
   /** 平台哲学原文;默认用内置常量 PLATFORM_PHILOSOPHY(避免依赖外部资源) */
@@ -121,7 +121,7 @@ export function createSystemPromptAssembler(deps: AssemblerDeps): SystemPromptAs
     const cached = baseCache.get(session.id)
     if (cached !== undefined) return cached
 
-    const skills = await skillLoader.loadAll(deps.skillsRoot)
+    const skills = await loadSkillsUnion(skillLoader, deps.skillsRoots)
     const always = skills.filter((s) => getArming(s.frontmatter) === 'always')
     const onArming = skills.filter((s) => getArming(s.frontmatter) === 'on-arming')
 
@@ -162,7 +162,7 @@ export function createSystemPromptAssembler(deps: AssemblerDeps): SystemPromptAs
   }): Promise<string> {
     const { query, session, req, summaryPath } = input
 
-    const allSkills = await skillLoader.loadAll(deps.skillsRoot)
+    const allSkills = await loadSkillsUnion(skillLoader, deps.skillsRoots)
     // relevant = 当前 query 命中的 Skill(朴素的子串匹配)
     const relevant = pickRelevantSkills(allSkills, query)
 
@@ -224,6 +224,16 @@ export function createSystemPromptAssembler(deps: AssemblerDeps): SystemPromptAs
     assembleDynamic,
     resetBaseCache,
   }
+}
+
+/** 并行加载各 root,按传入顺序合并;后面的 user root 覆盖同名 built-in Skill。 */
+async function loadSkillsUnion(skillLoader: SkillLoader, roots: string[]): Promise<Skill[]> {
+  const skillLists = await Promise.all(roots.map((root) => skillLoader.loadAll(root)))
+  const byName = new Map<string, Skill>()
+  for (const skills of skillLists) {
+    for (const skill of skills) byName.set(skill.name, skill)
+  }
+  return [...byName.values()]
 }
 
 function getArming(fm: SkillFrontmatter): ArmingLevel {

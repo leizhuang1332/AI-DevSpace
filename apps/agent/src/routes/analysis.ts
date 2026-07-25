@@ -331,7 +331,7 @@ export const analysisRoutes: FastifyPluginAsync<AnalysisRoutesOptions> = async (
 
     // 9. 构造 stateful dual-turn assembler —— turn-1 / turn-2 各装入对应 Skill body
     const baseAssembler = createSystemPromptAssembler({
-      skillsRoot: resolveBuiltinSkillsDir(),
+      skillsRoots: [resolveBuiltinSkillsDir(), resolveUserSkillsDir()],
     })
     const dualTurnAssembler = createDualTurnAssembler({ base: baseAssembler, skillsByName })
 

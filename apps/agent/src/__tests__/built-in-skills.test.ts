@@ -220,9 +220,9 @@ describe('turn-1 admission-check 装配链(provider-stub 仿真)', () => {
     const admissionSkill = await loader.findByName(BUILTIN_DIR, 'admission-check')
     expect(admissionSkill).toBeDefined()
 
-    // 真创建 SystemPromptAssembler,skillsRoot 指向 built-in 目录
+    // 真创建 SystemPromptAssembler,skillsRoots 仅含 built-in 目录
     const assembler = createSystemPromptAssembler({
-      skillsRoot: BUILTIN_DIR,
+      skillsRoots: [BUILTIN_DIR],
       platformPhilosophy: 'TEST PHILOSOPHY',
     })
 

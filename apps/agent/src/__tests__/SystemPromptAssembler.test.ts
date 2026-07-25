@@ -40,7 +40,7 @@ describe('SystemPromptAssembler.assembleBase', () => {
   })
 
   it('renders Platform Philosophy + sections even when no skills', async () => {
-    const asm = createSystemPromptAssembler({ skillsRoot })
+    const asm = createSystemPromptAssembler({ skillsRoots: [skillsRoot] })
     const out = await asm.assembleBase({ id: 's-1', reqId: 'r-1', kind: 'chat', topic: 't' })
     expect(out).toContain('## Platform Philosophy')
     expect(out).toContain(PLATFORM_PHILOSOPHY.slice(0, 20))
@@ -78,7 +78,7 @@ arming: on-arming
 `,
     )
 
-    const asm = createSystemPromptAssembler({ skillsRoot })
+    const asm = createSystemPromptAssembler({ skillsRoots: [skillsRoot] })
     const out = await asm.assembleBase({ id: 's-1', reqId: 'r-1', kind: 'chat', topic: 't' })
 
     // Always-on full body present
@@ -89,8 +89,66 @@ arming: on-arming
     expect(out).not.toContain('arming skill body — should NOT appear')
   })
 
+  it('merges roots by skill name with later user root winning', async () => {
+    const userRoot = join(tmpdir(), `user-skills-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+    await mkdir(join(skillsRoot, 'shared-skill'), { recursive: true })
+    await mkdir(join(skillsRoot, 'builtin-only'), { recursive: true })
+    await mkdir(join(userRoot, 'shared-skill'), { recursive: true })
+    await mkdir(join(userRoot, 'user-only'), { recursive: true })
+
+    const skill = (name: string, description: string) => `---
+name: ${name}
+description: ${description}
+arming: always
+---
+
+${description}
+`
+
+    try {
+      await Promise.all([
+        writeFile(join(skillsRoot, 'shared-skill', 'SKILL.md'), skill('shared-skill', 'built-in version')),
+        writeFile(join(skillsRoot, 'builtin-only', 'SKILL.md'), skill('builtin-only', 'built-in only')),
+        writeFile(join(userRoot, 'shared-skill', 'SKILL.md'), skill('shared-skill', 'user version')),
+        writeFile(join(userRoot, 'user-only', 'SKILL.md'), skill('user-only', 'user only')),
+      ])
+
+      const asm = createSystemPromptAssembler({ skillsRoots: [skillsRoot, userRoot] })
+      const out = await asm.assembleBase({ id: 's-union', reqId: 'r-1', kind: 'chat', topic: 't' })
+
+      expect(out).toContain('user version')
+      expect(out).not.toContain('built-in version')
+      expect(out).toContain('built-in only')
+      expect(out).toContain('user only')
+    } finally {
+      await rm(userRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps built-in behavior when the user root does not exist', async () => {
+    const builtin = join(skillsRoot, 'builtin-only')
+    const missingUserRoot = join(tmpdir(), `missing-user-skills-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+    await mkdir(builtin)
+    await writeFile(
+      join(builtin, 'SKILL.md'),
+      `---
+name: builtin-only
+description: built-in fallback
+arming: always
+---
+
+built-in body
+`,
+    )
+
+    const asm = createSystemPromptAssembler({ skillsRoots: [skillsRoot, missingUserRoot] })
+    const out = await asm.assembleBase({ id: 's-missing-user', reqId: 'r-1', kind: 'chat', topic: 't' })
+
+    expect(out).toContain('built-in body')
+  })
+
   it('caches per-session: same session.id → same string', async () => {
-    const asm = createSystemPromptAssembler({ skillsRoot })
+    const asm = createSystemPromptAssembler({ skillsRoots: [skillsRoot] })
     const session = { id: 's-1', reqId: 'r-1', kind: 'chat' as const, topic: 't' }
     const a = await asm.assembleBase(session)
     const b = await asm.assembleBase(session)
@@ -98,7 +156,7 @@ arming: on-arming
   })
 
   it('different session.id → independent computation', async () => {
-    const asm = createSystemPromptAssembler({ skillsRoot })
+    const asm = createSystemPromptAssembler({ skillsRoots: [skillsRoot] })
     const a = await asm.assembleBase({ id: 's-1', reqId: 'r-1', kind: 'chat', topic: 't' })
     const b = await asm.assembleBase({ id: 's-2', reqId: 'r-1', kind: 'chat', topic: 't' })
     // 两次都返回同一字符串(skills 一样)但 Object.is 应该 false?——其实实现只缓存 string,
@@ -122,7 +180,7 @@ describe('SystemPromptAssembler.assembleDynamic', () => {
   })
 
   it('Current Context includes focus / topic / kind', async () => {
-    const asm = createSystemPromptAssembler({ skillsRoot })
+    const asm = createSystemPromptAssembler({ skillsRoots: [skillsRoot] })
     const out = await asm.assembleDynamic({
       query: 'hello world',
       session: { id: 's-1', reqId: 'r-1', kind: 'task', topic: 'refund feature' },
@@ -154,7 +212,7 @@ body
 `,
     )
 
-    const asm = createSystemPromptAssembler({ skillsRoot })
+    const asm = createSystemPromptAssembler({ skillsRoots: [skillsRoot] })
     const out = await asm.assembleDynamic({
       query: '帮我 code-review 一下退款逻辑',
       session: { id: 's-1', reqId: 'r-1', kind: 'chat', topic: 't' },
@@ -187,7 +245,7 @@ body
     await writeFile(join(reqRoot, 'PRD.md'), '# PRD\n\nRefund feature spec\n')
 
     const asm = createSystemPromptAssembler({
-      skillsRoot,
+      skillsRoots: [skillsRoot],
       readFile: makeFakeFs({}),
     })
     const out = await asm.assembleDynamic({
@@ -200,7 +258,7 @@ body
     expect(out).toContain('## Current Context')
 
     // 用真正文件读 → 应当出现 context files 段
-    const asm2 = createSystemPromptAssembler({ skillsRoot })
+    const asm2 = createSystemPromptAssembler({ skillsRoots: [skillsRoot] })
     const out2 = await asm2.assembleDynamic({
       query: 'run schema-design on this req',
       session: { id: 's-1', reqId: 'r-1', kind: 'chat', topic: 't' },
@@ -215,7 +273,7 @@ body
   })
 
   it('omits 99-summary section when summary file missing (no throw)', async () => {
-    const asm = createSystemPromptAssembler({ skillsRoot })
+    const asm = createSystemPromptAssembler({ skillsRoots: [skillsRoot] })
     const out = await asm.assembleDynamic({
       query: 'q',
       session: { id: 's-1', reqId: 'r-1', kind: 'chat', topic: 't' },
@@ -228,7 +286,7 @@ body
 
   it('includes 99-summary section when summary file exists', async () => {
     await writeFile(join(reqRoot, '99-summary.md'), '# summary\n\nfocus on refund flow\n')
-    const asm = createSystemPromptAssembler({ skillsRoot })
+    const asm = createSystemPromptAssembler({ skillsRoots: [skillsRoot] })
     const out = await asm.assembleDynamic({
       query: 'q',
       session: { id: 's-1', reqId: 'r-1', kind: 'chat', topic: 't' },
@@ -253,7 +311,7 @@ arming: on-arming
 body
 `,
     )
-    const asm = createSystemPromptAssembler({ skillsRoot })
+    const asm = createSystemPromptAssembler({ skillsRoots: [skillsRoot] })
     const out = await asm.assembleDynamic({
       query: 'run no-fb',
       session: { id: 's-1', reqId: 'r-1', kind: 'chat', topic: 't' },
