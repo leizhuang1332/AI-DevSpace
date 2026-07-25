@@ -9,7 +9,8 @@
  * - caller 不传 options 时,自动注入 analysisDir = <requirementsRoot>/<reqId>/analysis
  *   + analysisSessionsDir = analysis/sessions
  * - 显式传 options 仍可覆盖(后续 agent API 接管的入口)
- * - req-001 命中硬编码 mock 的短路仍在 default options 注入**之前**
+ * - ticket 03 改造后:`req-001` 不再有硬编码 mock 短路 —— 与其它 id 行为一致,
+ *   走 fs 装配(空时回退 default 单会话 / empty admission)
  *
  * 验收点(对应 ticket 02 / DESIGNING 部分):
  * - design/ 目录不存在 → emptyDesigning(reqId)
@@ -360,27 +361,17 @@ describe('ANALYZING · getAnalyzingData · 显式 options 覆盖', () => {
 })
 
 // ============================================================================
-// ANALYZING · req-001 硬编码 mock 仍在 default options 注入之前判定
+// ANALYZING · req-001 不再有硬编码 mock 短路(ticket 03 改造)
+//
+// ticket 01 之前 `req-001` 在 `getAnalyzingData` 里有硬短路 —— 不读 fs,
+// 直接返回 REFUND_ANALYZING 样例。ticket 01 改造 start handler 真接 SDK
+// 之后短路不再安全;ticket 03 删去短路,req-001 与其它 id 一视同仁。
+//
+// 验收集成的样例数据契约(17 chunks / 5+3+2 / admission counts / sessions)
+// 改用 `refundAnalyzingFixture('req-001')` 在 analyzing.test.ts 等处直接验证,
+// 不再依赖 `getAnalyzingData('req-001')` 的运行时短路。本文件不重复测样例
+// 数据形状 —— 这是 `__fixtures__/analyzing-fixtures.ts` 的契约。
 // ============================================================================
-
-describe('ANALYZING · getAnalyzingData · req-001 硬编码 mock 短路', () => {
-  it('req-001 即使 requirementsRoot 下没有 fs 内容,也走 REFUND_ANALYZING(短路优先)', async () => {
-    const data = await getAnalyzingData('req-001', { requirementsRoot: tmpRoot })
-
-    expect(data.requirementId).toBe('req-001')
-    expect(data.empty).toBe(false)
-    expect(data.sessions.length).toBe(3)
-    expect(data.activeSessionId).toBe('sess-data')
-  })
-
-  it('req-001 即便 fs 里有 _index.yaml,也不读 fs(短路在 default options 注入之前)', async () => {
-    writeAnalysisBundle('req-001')
-    const data = await getAnalyzingData('req-001', { requirementsRoot: tmpRoot })
-    expect(data.sessions.length).toBe(3)
-    expect(data.sessions[0].id).toBe('sess-arch')
-    expect(data.activeSessionId).toBe('sess-data')
-  })
-})
 
 // ============================================================================
 // DESIGNING · 状态 1:design/ 目录不存在

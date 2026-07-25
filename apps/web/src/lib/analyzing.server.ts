@@ -39,7 +39,6 @@ import type {
 } from './analyzing'
 import {
   ANALYSIS_SESSION_ANGLE_META,
-  REFUND_ANALYZING,
   buildAdmissionData,
   emptyAnalyzing,
   isSourceRef,
@@ -445,19 +444,30 @@ function extractPrdAssetRefs(prdMarkdown: string): Set<string> {
 // ---------------------------------------------------------------------------
 // RSC 数据入口
 //
-// Mock 数据源常量 `REFUND_ANALYZING` 在 `analyzing.ts`(client-safe)里声明,
-// 原因:它的 `chunks` + `stats` 也被客户端组件(analyzing-zone.test.tsx 等)测试
-// 使用;server 文件仅在运行时按 id 命中时浅拷贝它,不在此重复定义。
+// ticket 03 改造:删去 `requirementId === 'req-001'` 的硬短路分支。
+// 原短路副作用:"req-001 在磁盘空时也渲染 AdmissionDashboard 满数据",
+// 与其它 id 行为不一致;ticket 01 已把 start handler 真接 SDK,短路不再
+// 安全。现在 req-001 与其它 id 一视同仁 —— 走 `emptyAnalyzingWithOptions`,
+// fs 上有 requirement.md 就走 active,没有就走 empty 引导去 DRAFTING;
+// AdmissionDashboard 在 fs 空时自然落到 ticket 05 计划的"全 0 + 引导"空态。
+//
+// REFUND_ANALYZING 样例数据已迁到测试 fixture
+// `apps/web/src/__tests__/__fixtures__/analyzing-fixtures.ts`,此处不再 import。
+// 4 个测试文件(analyzing.test.ts / analyzing-data-fields.test.ts /
+// analyzing-zone.test.tsx / analyzing-designing-fs-loader.test.ts)改 import
+// fixture,样例数据契约(17 chunks / 5+3+2 / admission counts 等)继续被验证。
 // ---------------------------------------------------------------------------
 
 /**
  * 拉取 ANALYZING 工位数据(SSR 期 mock —— 后续替换为 `await fetch(...)`)。
  *
- * - 已知 id(req-001)→ REFUND_ANALYZING 样例数据(短路在 default options
- *   注入**之前**;即便 fs 里有 _index.yaml 也用硬编码 mock)
- * - 其他 id:若 caller 没传 `analysisDir` / `analysisSessionsDir`,自动按
- *   `<requirementsRoot>/<reqId>/analysis[/sessions]` 注入;fs 缺产物时
- *   走 fallback(default 单会话 / 0 待裁决 / 5 维度 + pending verdict)
+ * 所有 id 一视同仁:若 caller 没传 `analysisDir` / `analysisSessionsDir`,
+ * 自动按 `<requirementsRoot>/<reqId>/analysis[/sessions]` 注入;fs 缺产物时
+ * 走 fallback(default 单会话 / 0 待裁决 / 5 维度 + pending verdict)。
+ *
+ * ticket 03 之前:`req-001` 走硬编码 mock 短路(ticket 01 改造 start handler
+ * 之后此短路已不安全 —— req-001 既然真接 SDK,就不再该有"无条件渲染满数据"
+ * 的特权)。现统一走 `emptyAnalyzingWithOptions`,与其它 id 行为一致。
  *
  * options 用于接入真实数据源(后续 VS 接 server action):
  * - `skillFrontmatter`: Skill SKILL.md frontmatter(读 admission_dimensions + admission_override)
@@ -473,10 +483,6 @@ export async function getAnalyzingData(
   requirementId: string,
   options?: GetAnalyzingDataOptions,
 ): Promise<AnalyzingData> {
-  if (requirementId === 'req-001') {
-    return { ...REFUND_ANALYZING, requirementId }
-  }
-  // 未知 id / 新建需求 → 走 emptyAnalyzing + fs 装配(wiring 保留)
   const resolved = resolveAnalysisPaths(requirementId, options)
   return emptyAnalyzingWithOptions(requirementId, resolved)
 }

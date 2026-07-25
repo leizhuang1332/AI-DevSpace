@@ -12,6 +12,11 @@
  * 6. auxFiles 按 usage_tag 排序
  * 7. REFUND_ANALYZING mock 包含三个字段(向后兼容)
  * 8. emptyAnalyzing 包含三个字段
+ *
+ * ticket 03 改造:第 7 项的 mock 数据契约不再依赖 `getAnalyzingData('req-001')`
+ * 运行时短路,改用 `refundAnalyzingFixture('req-001')` 直接验证样例形状。
+ * 短路删除后 `getAnalyzingData('req-001')` 不再无条件返回 REFUND_ANALYZING,
+ * 而是走 fs 装配 —— 与其它 id 一致(空态走 default 单会话 / 5 维度)。
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
@@ -23,6 +28,7 @@ import {
   type AnalyzingData,
 } from '@/lib/analyzing'
 import { getAnalyzingData } from '@/lib/analyzing.server'
+import { refundAnalyzingFixture } from '@/__tests__/__fixtures__/analyzing-fixtures'
 
 // ============================================================================
 // loadAnalyzingDocs — SSR 装载(走 getAnalyzingData → 内部 loadAnalyzingDocs)
@@ -232,12 +238,16 @@ describe('getAnalyzingData · SSR 注入 prdMarkdown / auxFiles / assetList(ADR-
 })
 
 // ============================================================================
-// REFUND_ANALYZING mock —— 向后兼容(issue 19a/19b 既有测试对 RAF 不破坏)
+// REFUND_ANALYZING fixture —— ticket 03 迁出后的样例数据契约测试
+//
+// ticket 01 时代:这些用例走 `getAnalyzingData('req-001')` 的运行时短路,
+// 断言返回的样例数据含 prdMarkdown / auxFiles / assetList。ticket 03 删去
+// 短路,数据源改到 fixture —— 数据契约不变,只是不再依赖运行时 mock。
 // ============================================================================
 
-describe('REFUND_ANALYZING mock · 含 D5 三字段', () => {
-  it('req-001 mock 返回值含 prdMarkdown / auxFiles / assetList', async () => {
-    const data = await getAnalyzingData('req-001')
+describe('REFUND_ANALYZING fixture · 含 D5 三字段', () => {
+  it('fixture 含 prdMarkdown / auxFiles / assetList', () => {
+    const data = refundAnalyzingFixture('req-001')
     expect(typeof data.prdMarkdown).toBe('string')
     expect(data.prdMarkdown.length).toBeGreaterThan(0)
     expect(Array.isArray(data.auxFiles)).toBe(true)
@@ -246,8 +256,8 @@ describe('REFUND_ANALYZING mock · 含 D5 三字段', () => {
     expect(data.assetList.length).toBeGreaterThan(0)
   })
 
-  it('mock auxFiles 包含代表性 api 类 + 字段对齐 AuxFile', async () => {
-    const data = await getAnalyzingData('req-001')
+  it('fixture auxFiles 包含代表性 api 类 + 字段对齐 AuxFile', () => {
+    const data = refundAnalyzingFixture('req-001')
     const api = data.auxFiles.find((f) => f.usage_tag === 'api')
     expect(api).toBeDefined()
     expect(api).toHaveProperty('id')
@@ -257,8 +267,8 @@ describe('REFUND_ANALYZING mock · 含 D5 三字段', () => {
     expect(api).toHaveProperty('converted_to_md', false)
   })
 
-  it('mock assetList 字段对齐 AssetMeta', async () => {
-    const data = await getAnalyzingData('req-001')
+  it('fixture assetList 字段对齐 AssetMeta', () => {
+    const data = refundAnalyzingFixture('req-001')
     const a = data.assetList[0]
     expect(a).toHaveProperty('name')
     expect(a).toHaveProperty('url')

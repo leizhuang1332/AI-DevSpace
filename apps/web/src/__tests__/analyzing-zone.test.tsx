@@ -5,7 +5,7 @@ import {
   emptyAnalyzing,
   type AnalyzingData,
 } from '@/lib/analyzing'
-import { getAnalyzingData } from '@/lib/analyzing.server'
+import { refundAnalyzingFixture } from '@/__tests__/__fixtures__/analyzing-fixtures'
 
 // 注:打字机是 setTimeout 链 + 单一 phase 状态机(详见组件实现)。它在真实浏览器
 // 中流畅运行(20ms / 字,200ms chunk 间暂停),但 fake timers + React 18 commit
@@ -21,6 +21,10 @@ import { getAnalyzingData } from '@/lib/analyzing.server'
 //
 // ticket 09 改动:删 analyzing-toolbar 组件(暂停/重置/复制按钮)与 paused state machine;
 //   data-paused 属性删除;相关渲染断言随 it 整体移除。
+//
+// ticket 03 改造:`getAnalyzingData('req-001')` 不再有 req-001 短路 ——
+// 满数据渲染场景改用 `refundAnalyzingFixture('req-001')` 直接喂样例数据;
+// 组件契约仍测满数据,但数据源不再是运行时 mock,而是测试 fixture。
 
 afterEach(() => {
   cleanup()
@@ -80,8 +84,10 @@ describe('AnalyzingZone · 直接进入主区', () => {
     expect(screen.queryByTestId('analyzing-stream')).toBeNull()
   })
 
-  it('回归: req-001 仍走 REFUND_ANALYZING(主区 stage strip 可见)', async () => {
-    const data = await getAnalyzingData('req-001')
+  it('回归: req-001 满数据渲染(主区 stage strip 可见)', () => {
+    // ticket 03 改造:不再依赖 `getAnalyzingData('req-001')` 的运行时短路;
+    // 改用 `refundAnalyzingFixture('req-001')` 直接喂样例数据(组件契约不变)。
+    const data = refundAnalyzingFixture('req-001')
     render(<AnalyzingZone data={data} />)
 
     const root = screen.getByTestId('analyzing-zone')
@@ -99,8 +105,8 @@ describe('AnalyzingZone · 直接进入主区', () => {
 // ============================================================================
 
 describe('AnalyzingZone · 满数据渲染(ticket 02 · ADR-0017 D1)', () => {
-  it('根节点 + stage strip + summary + 2:1 grid + 左/右栏存在', async () => {
-    const data = await getAnalyzingData('req-001')
+  it('根节点 + stage strip + summary + 2:1 grid + 左/右栏存在', () => {
+    const data = refundAnalyzingFixture('req-001')
     render(<AnalyzingZone data={data} />)
 
     const root = screen.getByTestId('analyzing-zone')
@@ -138,8 +144,8 @@ describe('AnalyzingZone · 满数据渲染(ticket 02 · ADR-0017 D1)', () => {
     ).toBe('doc-reader-2-1')
   })
 
-  it('顶部三 stats:子问题 5 / 风险点 3 / 方案方向 2', async () => {
-    const data = await getAnalyzingData('req-001')
+  it('顶部三 stats:子问题 5 / 风险点 3 / 方案方向 2', () => {
+    const data = refundAnalyzingFixture('req-001')
     render(<AnalyzingZone data={data} />)
 
     expect(
@@ -151,8 +157,8 @@ describe('AnalyzingZone · 满数据渲染(ticket 02 · ADR-0017 D1)', () => {
     ).toBe('2')
   })
 
-  it('DocumentReaderPane 默认 Tab = PRD(SSR 注入的 prdMarkdown 全文)', async () => {
-    const data = await getAnalyzingData('req-001')
+  it('DocumentReaderPane 默认 Tab = PRD(SSR 注入的 prdMarkdown 全文)', () => {
+    const data = refundAnalyzingFixture('req-001')
     render(<AnalyzingZone data={data} />)
 
     const pane = screen.getByTestId('document-reader-pane')
@@ -171,8 +177,8 @@ describe('AnalyzingZone · 满数据渲染(ticket 02 · ADR-0017 D1)', () => {
 // ============================================================================
 
 describe('AnalyzingZone · 打字机 state machine(ticket 02 · 渲染出口删)', () => {
-  it('初始 phase=idle/typing 内部状态不影响 DocumentReaderPane 渲染', async () => {
-    const data = await getAnalyzingData('req-001')
+  it('初始 phase=idle/typing 内部状态不影响 DocumentReaderPane 渲染', () => {
+    const data = refundAnalyzingFixture('req-001')
     render(<AnalyzingZone data={data} />)
 
     // DocumentReaderPane 不依赖 phase,内容稳定渲染
@@ -439,7 +445,7 @@ describe('AnalyzingZone · 打字机 fake-timer 推进(20ms/字 · ticket 02 验
 
   it('推进 ≥ fullLen 时间后 DocumentReaderPane 不崩,仍渲染 PRD Tab', async () => {
     vi.useFakeTimers()
-    const data = await getAnalyzingData('req-001')
+    const data = refundAnalyzingFixture('req-001')
     render(<AnalyzingZone data={data} />)
 
     // 推 100ms(理论 5 个字,实际 React commit batch 漂移)
@@ -468,9 +474,9 @@ describe('AnalyzingZone · 主区锁高度契约(ADR-0019 D1/D2)', () => {
     globalThis.resetMatchMedia()
   })
 
-  it('analyzing-main 含 overflow-hidden 且不含 overflow-auto(外层不再滚动)', async () => {
+  it('analyzing-main 含 overflow-hidden 且不含 overflow-auto(外层不再滚动)', () => {
     globalThis.setMatchMedia('(min-width: 1024px)', true)
-    const data = await getAnalyzingData('req-001')
+    const data = refundAnalyzingFixture('req-001')
     render(<AnalyzingZone data={data} />)
 
     const analyzingMain = screen.getByTestId('analyzing-main')
@@ -478,9 +484,9 @@ describe('AnalyzingZone · 主区锁高度契约(ADR-0019 D1/D2)', () => {
     expect(analyzingMain.className).not.toContain('overflow-auto')
   })
 
-  it('analyzing-grid / left-col / right-col 各自含 overflow-hidden(桌面 2:1)', async () => {
+  it('analyzing-grid / left-col / right-col 各自含 overflow-hidden(桌面 2:1)', () => {
     globalThis.setMatchMedia('(min-width: 1024px)', true)
-    const data = await getAnalyzingData('req-001')
+    const data = refundAnalyzingFixture('req-001')
     render(<AnalyzingZone data={data} />)
 
     expect(screen.getByTestId('analyzing-grid').className).toContain('overflow-hidden')

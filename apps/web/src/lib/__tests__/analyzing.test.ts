@@ -18,6 +18,10 @@ import {
   parseSessionsIndexYaml,
   defaultSessionsBundle,
 } from '@/lib/analyzing.server'
+import {
+  REFUND_ANALYZING,
+  refundAnalyzingFixture,
+} from '@/__tests__/__fixtures__/analyzing-fixtures'
 
 // ============================================================================
 // summarizeAnalyzingStats — 纯函数(从 chunks 聚合 stats)
@@ -105,56 +109,17 @@ describe('emptyAnalyzing', () => {
 })
 
 // ============================================================================
-// getAnalyzingData — mock 拉取(后续接 agent API 时替换函数体)
+// getAnalyzingData — 数据装配入口(ticket 03 后:对所有 id 一视同仁)
+//
+// ticket 01 之前:`req-001` 在这里有硬短路 —— 不读 fs,直接返回 REFUND_ANALYZING
+// 样例。ticket 03 删去短路,req-001 与其它 id 一视同仁,均走 fs 装配路径。
+//
+// 样例数据契约(17 chunks / 5+3+2 / admission counts / toolbar 等)改用
+// `refundAnalyzingFixture('req-001')` 在下面的 `REFUND_ANALYZING fixture` 块
+// 直接验证;本 describe 块保留未知 id 的 fs 行为验证。
 // ============================================================================
 
 describe('getAnalyzingData', () => {
-  it('req-001 → 返回示例数据,empty=false', async () => {
-    const data = await getAnalyzingData('req-001')
-    expect(data.empty).toBe(false)
-    expect(data.requirementId).toBe('req-001')
-  })
-
-  it('req-001 → toolbar 含 copy + pause + reset 三动作(按 variant 渲染)', async () => {
-    const data = await getAnalyzingData('req-001')
-    expect(data.toolbar.actions.length).toBe(3)
-    const labels = data.toolbar.actions.map((a) => a.label)
-    expect(labels.some((l) => l?.includes('复制'))).toBe(true)
-    expect(labels.some((l) => l?.includes('暂停'))).toBe(true)
-    expect(labels.some((l) => l?.includes('重置'))).toBe(true)
-  })
-
-  it('req-001 → summary 含 icon + title + description 三字段', async () => {
-    const data = await getAnalyzingData('req-001')
-    expect(data.summary.icon).toBe('🧠')
-    expect(data.summary.title.length).toBeGreaterThan(0)
-    expect(data.summary.description.length).toBeGreaterThan(0)
-  })
-
-  it('req-001 → 17 个 chunks,含 5 subproblem + 3 risk + 2 option', async () => {
-    const data = await getAnalyzingData('req-001')
-    expect(data.chunks.length).toBe(17)
-    const stats = summarizeAnalyzingStats(data.chunks)
-    expect(stats.subproblems).toBe(5)
-    expect(stats.risks).toBe(3)
-    expect(stats.options).toBe(2)
-  })
-
-  it('req-001 → streamMeta.totalChunks 与 chunks.length 一致', async () => {
-    const data = await getAnalyzingData('req-001')
-    expect(data.streamMeta.totalChunks).toBe(data.chunks.length)
-    expect(data.streamMeta.isStreaming).toBe(true)
-    expect(data.streamMeta.startedAt.length).toBeGreaterThan(0)
-    expect(data.streamMeta.endedAt).toBeNull()
-  })
-
-  it('req-001 → 最后一 chunk 为 COMPLETE,kind=narration', async () => {
-    const data = await getAnalyzingData('req-001')
-    const last = data.chunks[data.chunks.length - 1]
-    expect(last.label).toBe('COMPLETE')
-    expect(last.kind).toBe('narration')
-  })
-
   it('未知 id → empty=true', async () => {
     const data = await getAnalyzingData('UNKNOWN-ID')
     expect(data.empty).toBe(true)
@@ -163,6 +128,73 @@ describe('getAnalyzingData', () => {
 
   it('未知 id 不抛错,正常返回', async () => {
     await expect(getAnalyzingData('any-string')).resolves.toBeDefined()
+  })
+})
+
+// ============================================================================
+// REFUND_ANALYZING fixture —— ticket 03 迁出后的样例数据契约测试
+// ============================================================================
+
+describe('REFUND_ANALYZING fixture · ticket 03 样例数据契约', () => {
+  it('refundAnalyzingFixture(req-001) → 返回满数据,empty=false,requirementId=req-001', () => {
+    const data = refundAnalyzingFixture('req-001')
+    expect(data.empty).toBe(false)
+    expect(data.requirementId).toBe('req-001')
+  })
+
+  it('toolbar 含 copy + pause + reset 三动作(按 variant 渲染)', () => {
+    const data = refundAnalyzingFixture('req-001')
+    expect(data.toolbar.actions.length).toBe(3)
+    const labels = data.toolbar.actions.map((a) => a.label)
+    expect(labels.some((l) => l?.includes('复制'))).toBe(true)
+    expect(labels.some((l) => l?.includes('暂停'))).toBe(true)
+    expect(labels.some((l) => l?.includes('重置'))).toBe(true)
+  })
+
+  it('summary 含 icon + title + description 三字段', () => {
+    const data = refundAnalyzingFixture('req-001')
+    expect(data.summary.icon).toBe('🧠')
+    expect(data.summary.title.length).toBeGreaterThan(0)
+    expect(data.summary.description.length).toBeGreaterThan(0)
+  })
+
+  it('17 个 chunks,含 5 subproblem + 3 risk + 2 option', () => {
+    const data = refundAnalyzingFixture('req-001')
+    expect(data.chunks.length).toBe(17)
+    const stats = summarizeAnalyzingStats(data.chunks)
+    expect(stats.subproblems).toBe(5)
+    expect(stats.risks).toBe(3)
+    expect(stats.options).toBe(2)
+  })
+
+  it('streamMeta.totalChunks 与 chunks.length 一致', () => {
+    const data = refundAnalyzingFixture('req-001')
+    expect(data.streamMeta.totalChunks).toBe(data.chunks.length)
+    expect(data.streamMeta.isStreaming).toBe(true)
+    expect(data.streamMeta.startedAt.length).toBeGreaterThan(0)
+    expect(data.streamMeta.endedAt).toBeNull()
+  })
+
+  it('最后一 chunk 为 COMPLETE,kind=narration', () => {
+    const data = refundAnalyzingFixture('req-001')
+    const last = data.chunks[data.chunks.length - 1]
+    expect(last.label).toBe('COMPLETE')
+    expect(last.kind).toBe('narration')
+  })
+
+  it('REFUND_ANALYZING fixture 含 admission 真实 count + verdict=fail(因 2 资损)', () => {
+    expect(REFUND_ANALYZING.admission.dimensions.find((d) => d.id === 'loss_prevention')?.count).toBe(2)
+    expect(REFUND_ANALYZING.admission.verdict).toBe('fail')
+  })
+
+  it('REFUND_ANALYZING fixture 含 3 个 sessions(架构/数据/接口),activeSessionId = sess-data', () => {
+    expect(REFUND_ANALYZING.sessions).toHaveLength(3)
+    expect(REFUND_ANALYZING.sessions.map((s) => s.id)).toEqual([
+      'sess-arch',
+      'sess-data',
+      'sess-interface',
+    ])
+    expect(REFUND_ANALYZING.activeSessionId).toBe('sess-data')
   })
 })
 
@@ -354,8 +386,9 @@ describe('deriveProducts', () => {
     expect(g.subproblems[0].id).toBe('q-stable')
   })
 
-  it('req-001 mock 样例 → 5 子问题 + 3 风险 + 2 方案(与 stats 一致)', async () => {
-    const data = await getAnalyzingData('req-001')
+  it('req-001 mock 样例 → 5 子问题 + 3 风险 + 2 方案(与 stats 一致)', () => {
+    // ticket 03 改造:数据源从 `getAnalyzingData('req-001')` 改到 fixture。
+    const data = refundAnalyzingFixture('req-001')
     const g = deriveProducts(data.chunks)
     expect(g.subproblems).toHaveLength(5)
     expect(g.risks).toHaveLength(3)
@@ -586,8 +619,9 @@ describe('getAnalyzingData · tech brief 段(issue 19e VS5)', () => {
     expect(data.briefGeneratedAt).not.toBeNull()
   })
 
-  it('req-001 mock → canGenerateBrief: true(verdict=fail 也允许生成)', async () => {
-    const data = await getAnalyzingData('req-001')
+  it('req-001 mock → canGenerateBrief: true(verdict=fail 也允许生成)', () => {
+    // ticket 03 改造:数据源从 `getAnalyzingData('req-001')` 改到 fixture。
+    const data = refundAnalyzingFixture('req-001')
     expect(data.canGenerateBrief).toBe(true)
     expect(data.admission.verdict).toBe('fail')
   })
@@ -617,8 +651,9 @@ describe('getAnalyzingData · admission 段', () => {
     expect(data.admission.dimensions.length).toBe(5)
   })
 
-  it('默认 5 维度按 DEFAULT_ADMISSION_DIMENSIONS 顺序渲染(已知 id)', async () => {
-    const data = await getAnalyzingData('req-001')
+  it('默认 5 维度按 DEFAULT_ADMISSION_DIMENSIONS 顺序渲染(已知 id)', () => {
+    // ticket 03 改造:数据源从 `getAnalyzingData('req-001')` 改到 fixture。
+    const data = refundAnalyzingFixture('req-001')
     expect(data.admission.dimensions.map((d) => d.id)).toEqual([
       'loss_prevention',
       'performance',
@@ -628,8 +663,9 @@ describe('getAnalyzingData · admission 段', () => {
     ])
   })
 
-  it('req-001 mock 样例 admission 段含真实 count + verdict=fail(因 2 资损)', async () => {
-    const data = await getAnalyzingData('req-001')
+  it('req-001 mock 样例 admission 段含真实 count + verdict=fail(因 2 资损)', () => {
+    // ticket 03 改造:数据源从 `getAnalyzingData('req-001')` 改到 fixture。
+    const data = refundAnalyzingFixture('req-001')
     expect(data.admission.dimensions.find((d) => d.id === 'loss_prevention')?.count).toBe(2)
     expect(data.admission.verdict).toBe('fail')
   })
@@ -985,8 +1021,9 @@ describe('getAnalyzingData · sessions 段', () => {
     expect(data.activeSessionId).toBe('sess-a')
   })
 
-  it('req-001 mock → sessions 含 3 个会话(架构/数据/接口),activeSessionId = sess-data', async () => {
-    const data = await getAnalyzingData('req-001')
+  it('req-001 mock → sessions 含 3 个会话(架构/数据/接口),activeSessionId = sess-data', () => {
+    // ticket 03 改造:数据源从 `getAnalyzingData('req-001')` 改到 fixture。
+    const data = refundAnalyzingFixture('req-001')
     expect(data.sessions).toHaveLength(3)
     expect(data.sessions.map((s) => s.id)).toEqual(['sess-arch', 'sess-data', 'sess-interface'])
     expect(data.activeSessionId).toBe('sess-data')
