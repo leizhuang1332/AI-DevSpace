@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start -p 3333",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e": "playwright test",
+    "e2e:install": "playwright install --with-deps chromium"
   },
   "dependencies": {
     "@ai-devspace/shared": "workspace:*",
@@ -29,6 +31,7 @@
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
+    "@playwright/test": "^1.49.0",
     "autoprefixer": "^10.5.2",
     "jsdom": "^25.0.0",
     "postcss": "^8.5.16",

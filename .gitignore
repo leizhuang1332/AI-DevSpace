@@ -40,3 +40,9 @@ coverage/
 
 # Isolated worktrees (superpowers skill convention)
 .worktrees/
+
+# Playwright (ticket 07 e2e)
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/blob-report/
+apps/web/playwright/.cache/
