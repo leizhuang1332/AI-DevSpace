@@ -1,8 +1,9 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   deriveProducts,
+  deriveAdmissionData,
   countCitationsByDoc,
   collectCitationRefs,
   ANALYSIS_SESSION_ANGLE_META,
@@ -436,9 +437,32 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       auxId: aux.id,
     })),
   ]
+  // AdmissionDashboard 数据(ADR-0020 D8 · audit-2026-07-26 #2)
+  //
+  // 五维卡 count / 总体 verdict / 待裁决数由**当前会话的 chunks** 实时派生 ——
+  // SSE 每推一条带 `admission` 的 chunk,对应维度卡的 count 就 +1,徽章随
+  // `[VERDICT]` 块更新。之前这里只是 spread `data.admission`(SSR 快照),
+  // 分析过程中仪表板纹丝不动。
+  //
+  // - `dimensions` 取 SSR 装配结果(Skill frontmatter 决定维度集合与顺序)
+  // - fallback 用 SSR 值:chunks 里还没有 admission 信息时(刚进页面 / 老数据)
+  //   保持与服务端一致,不会闪烁
+  // - `verdictOverride` 是用户点「接受风险」的本地覆盖,优先级最高
+  const derivedAdmission = useMemo(
+    () =>
+      deriveAdmissionData(chunks, {
+        dimensions: data.admission.dimensions.map((d) => d.id),
+        fallbackCounts: Object.fromEntries(
+          data.admission.dimensions.map((d) => [d.id, d.count]),
+        ),
+        fallbackVerdict: data.admission.verdict,
+        fallbackPendingCount: data.admission.pendingAdjudicationCount,
+      }),
+    [chunks, data.admission],
+  )
   const currentAdmission = {
-    ...data.admission,
-    verdict: verdictOverride ?? data.admission.verdict,
+    ...derivedAdmission,
+    verdict: verdictOverride ?? derivedAdmission.verdict,
   }
 
   // -------------------------------------------------------------------------

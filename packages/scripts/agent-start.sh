@@ -7,8 +7,12 @@ WORKSPACE_ROOT="${AIDEVSPACE_HOME:-$HOME/.aidevspace}"
 LOG_FILE="${AGENT_LOG_FILE:-$WORKSPACE_ROOT/logs/agent.log}"
 PID_FILE="$WORKSPACE_ROOT/.agent.pid"
 PORT="${PORT:-7777}"
+# ANALYZING turn-bounded snapshot 根(ADR-0020 D10 · audit-2026-07-26 #4)。
+# agent 内部同样有 `<workspaceRoot>/snapshots/analysis` 默认值,这里显式导出
+# 只是为了让 `ps` / 日志里能一眼看到实际路径,并允许外部覆盖。
+export AIDEVSPACE_SNAPSHOT_DIR="${AIDEVSPACE_SNAPSHOT_DIR:-$WORKSPACE_ROOT/snapshots/analysis}"
 
-mkdir -p "$(dirname "$LOG_FILE")" "$WORKSPACE_ROOT"
+mkdir -p "$(dirname "$LOG_FILE")" "$WORKSPACE_ROOT" "$AIDEVSPACE_SNAPSHOT_DIR"
 
 # If something is already alive on this PID file, skip relaunch.
 if [[ -f "$PID_FILE" ]]; then
@@ -31,6 +35,7 @@ else
 fi
 
 echo "agent-start: launching on port $PORT"
+echo "agent-start: snapshots -> $AIDEVSPACE_SNAPSHOT_DIR"
 nohup "${CMD[@]}" >/dev/null 2>>"$LOG_FILE" &
 APP_PID=$!
 echo "$APP_PID" > "$PID_FILE"

@@ -83,6 +83,29 @@ export interface AnalyzingChunk {
   source_refs?: SourceRef[]
   /** 可选:是否为合成的用户添加项(ADR-0017 D6 — 落地逻辑见 ticket 04) */
   synthetic?: boolean
+  /**
+   * 可选:准入侧信息(ADR-0020 D8 · audit-2026-07-26 #2)。
+   *
+   * 由 agent 的 SDK 文本解析层从 `admission-check` Skill 输出的
+   * `[DIM <id>]` / `[VERDICT]` 块解析而来,随 SSE 推送并落 chunks.jsonl。
+   * `deriveAdmissionData()` 据此让 AdmissionDashboard 五维卡 count 与总体
+   * 徽章随分析实时上涨(不再永远全 0)。
+   *
+   * 仅 narration chunk 携带(三桶 chunk 走 source_refs 通道)。
+   */
+  admission?: AdmissionChunkMeta
+}
+
+/** chunk 上的准入侧信息(与 agent `analysis-chunk-parser.ts` 镜像) */
+export interface AdmissionChunkMeta {
+  /** 单维度块:维度 id(对应 AdmissionDimension.id) */
+  dim?: string
+  /** 单维度块:该维度裁决 */
+  verdict?: 'pass' | 'warn' | 'fail'
+  /** 总体块:`[VERDICT] result:` 派生 */
+  overall?: AdmissionVerdict
+  /** 总体块:`[VERDICT] pending_count:` 派生 */
+  pendingCount?: number
 }
 
 /** 顶部 stats 三档计数(对应原型 .summary-stat 三块) */
@@ -900,6 +923,71 @@ export function buildAdmissionData(params: {
     verdict: params.verdict ?? 'pending',
     pendingAdjudicationCount: params.pendingAdjudicationCount ?? 0,
   }
+}
+
+// ---------------------------------------------------------------------------
+// chunks → AdmissionData 派生(ADR-0020 D8 · audit-2026-07-26 #2)
+// ---------------------------------------------------------------------------
+
+/**
+ * 从 chunks 的 `admission` 侧信息派生五维卡 count / 总体 verdict / 待裁决数。
+ *
+ * 语义(与 `admission-check` SKILL.md 输出契约一一对应):
+ * - **count**:该维度收到的 `[DIM <id>]` 块条数。**不区分 verdict** ——
+ *   卡片上的数字表达"这个维度已被评估了几次"(重扫 / 插话会累加),
+ *   而不是"有几个问题";颜色由 chunk.tone 表达严重度。这样五张卡在
+ *   turn-1 跑完后都会 > 0(ticket 07 E2E 强断言依赖此语义)。
+ *   某维度在 chunks 里**一次都没出现**时,回落到 `fallbackCounts[id]`
+ *   —— 让"服务端/fixture 已算好 count 但 chunks 里没有 admission 元数据"
+ *   的历史数据(以及组件单测的手工构造数据)继续正确渲染。
+ * - **verdict**:取**最后一条**带 `overall` 的 chunk(重扫后以最新结论为准);
+ *   没有则回落到 `fallbackVerdict`。
+ * - **pendingAdjudicationCount**:同样取最后一条 `pendingCount`;没有则回落到
+ *   `fallbackPendingCount`(来自 `adjudication.md` 计数)。
+ *
+ * 纯函数:SSR(读 chunks.jsonl)与客户端(SSE 追加)共用同一套派生,保证
+ * "刷新页面前后仪表板一致"。
+ *
+ * @param dimensions 维度 id 列表(由 `resolveAdmissionDimensions` 装配);
+ *                   chunk 里出现的未知维度 id 会被忽略(Skill 乱写不污染 UI)
+ */
+export function deriveAdmissionData(
+  chunks: readonly AnalyzingChunk[],
+  params: {
+    dimensions: readonly string[]
+    fallbackCounts?: Readonly<Record<string, number>>
+    fallbackVerdict?: AdmissionVerdict
+    fallbackPendingCount?: number
+  },
+): AdmissionData {
+  const known = new Set(params.dimensions)
+  const counts: Record<string, number> = {}
+  let verdict: AdmissionVerdict | undefined
+  let pendingCount: number | undefined
+
+  for (const c of chunks) {
+    const a = c.admission
+    if (!a) continue
+    if (typeof a.dim === 'string' && known.has(a.dim)) {
+      counts[a.dim] = (counts[a.dim] ?? 0) + 1
+    }
+    if (a.overall === 'pass' || a.overall === 'pending' || a.overall === 'fail') {
+      verdict = a.overall
+    }
+    if (typeof a.pendingCount === 'number' && Number.isFinite(a.pendingCount) && a.pendingCount >= 0) {
+      pendingCount = Math.trunc(a.pendingCount)
+    }
+  }
+
+  const merged: Record<string, number> = { ...(params.fallbackCounts ?? {}) }
+  for (const [id, n] of Object.entries(counts)) merged[id] = n
+
+  return buildAdmissionData({
+    dimensions: params.dimensions,
+    counts: merged,
+    verdict: verdict ?? params.fallbackVerdict ?? 'pending',
+    pendingAdjudicationCount: pendingCount ?? params.fallbackPendingCount ?? 0,
+  })
 }
 
 // ---------------------------------------------------------------------------

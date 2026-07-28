@@ -6,14 +6,14 @@
 
 **Status:** ready-for-agent
 
-- [ ] `start` handler 不再调 `simulateStartChunks`;改为创建 `AISession` 并按 ADR-0020 D8 编排双 turn
-- [ ] turn-1 收到 SDK 流式 chunk → 写入 `requirements/<id>/analysis/sessions/<sid>/chunks.jsonl` 一行,并通过 SSE 推 web
-- [ ] turn-2 同一 session,SDK 自动保留 turn-1 history;user message 显式提示"已知准入结果,继续 brainstorm"
-- [ ] handler 不另造 `done` chunk 标记;turn-done 完全由 SDK `sendMessage` 流关闭事件表达(ADR-0020 D8 末段约定)
-- [ ] 单 turn 失败时 jsonl 可留下部分 row,session 保留半成品状态(snapshot 防御由 ticket 06 提供)
-- [ ] provider 桥接点(`ClaudeCodeProvider` / `AISession`)沿用既有路径;**不**引入 `MockClaudeProvider` 等抽象层(ADR-0020 D11)
-- [ ] handler wiring 单测:turn-1 与 turn-2 都被触发、session 创建一次、user message 文本符合 ADR-0020 D8 描述
-- [ ] `pnpm typecheck` 与 `pnpm test` 通过
+- [x] `start` handler 不再调 `simulateStartChunks`;改为创建 `AISession` 并按 ADR-0020 D8 编排双 turn
+- [x] turn-1 收到 SDK 流式 chunk → 写入 `requirements/<id>/analysis/sessions/<sid>/chunks.jsonl` 一行,并通过 SSE 推 web
+- [x] turn-2 同一 session,SDK 自动保留 turn-1 history;user message 显式提示"已知准入结果,继续 brainstorm"
+- [x] handler 不另造 `done` chunk 标记;turn-done 完全由 SDK `sendMessage` 流关闭事件表达(ADR-0020 D8 末段约定)
+- [x] 单 turn 失败时 jsonl 可留下部分 row,session 保留半成品状态(snapshot 防御由 ticket 06 提供)
+- [x] provider 桥接点(`ClaudeCodeProvider` / `AISession`)沿用既有路径;**不**引入 `MockClaudeProvider` 等抽象层(ADR-0020 D11)
+- [x] handler wiring 单测:turn-1 与 turn-2 都被触发、session 创建一次、user message 文本符合 ADR-0020 D8 描述
+- [x] `pnpm typecheck` 与 `pnpm test` 通过
 
 **Notes / non-goals:**
 - 准入 / brainstorm 产物 prompt 内容由 ticket 02(SKILL.md)提供;本 ticket 不写 prompt
@@ -21,3 +21,8 @@
 - snapshot 落盘与回滚菜单由 ticket 06
 - e2e 套件由 ticket 07
 - `apps/agent/src/zones/analyzing.yaml` 不动(handler 内部硬过滤 active Skills)
+
+
+---
+
+**Status update (2026-07-28):** 本 issue 在 audit-2026-07-26 之后的 batch 修复中落地;见 `audit-2026-07-26.md` 修复合计 PR。

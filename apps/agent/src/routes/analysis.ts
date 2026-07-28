@@ -38,7 +38,13 @@ import {
   restoreSnapshot,
   takeSessionSnapshot,
   type SessionSnapshotId,
+  type SnapshotOptions,
 } from './analysis-snapshot.js'
+import {
+  createAnalysisTextParser,
+  type ParsedAnalysisChunk,
+  type SourceRef as ParsedSourceRef,
+} from './analysis-chunk-parser.js'
 
 export interface AnalysisRoutesOptions {
   hub: SseHub
@@ -77,11 +83,12 @@ interface InterjectBody {
 //
 // lineRange 是 0-based 半开区间 [start, end),对齐 `extractPrdAnchors`
 // (packages/shared/src/drafting.ts) 既有约定。
+//
+// audit-2026-07-26 #2 之后:类型的**单一定义点**已移到
+// `./analysis-chunk-parser.ts`(SDK 文本解析层同样要产出 SourceRef),
+// 本文件只 re-import,避免两份同名结构漂移。
 // ============================================================================
-type SourceRef =
-  | { kind: 'prd'; lineRange: readonly [number, number]; quote?: string }
-  | { kind: 'aux'; auxId: string; lineRange: readonly [number, number]; quote?: string }
-  | { kind: 'asset'; assetId: string }
+type SourceRef = ParsedSourceRef
 
 /** Agent 端内部 SSE chunk 形态:在 shared `SseEvent['analysis_chunk'].chunk`
  *  基础上扩展 `source_refs` 字段。narration chunk 一律不设该字段;只有
@@ -98,6 +105,13 @@ interface AnalysisChunkPayload {
   tone: 'info' | 'success' | 'warn' | 'err'
   text: string
   source_refs?: readonly SourceRef[]
+  /** ADR-0020 D8:`[DIM]` / `[VERDICT]` 解析出的准入侧信息(见 shared/sse.ts) */
+  admission?: {
+    dim?: string
+    verdict?: 'pass' | 'warn' | 'fail'
+    overall?: 'pass' | 'pending' | 'fail'
+    pendingCount?: number
+  }
 }
 
 interface AnalysisChunkEvent {
@@ -204,6 +218,23 @@ export const analysisRoutes: FastifyPluginAsync<AnalysisRoutesOptions> = async (
   // 优先用 server 注入的 workspaceRoot(test/dev 通过 buildServer({ workspaceRoot }) 覆盖);
   // 未设时退化到 env / 默认 ~/.aidevspace,保留旧行为。
   const resolveRoot = (): string => opts.workspaceRoot ?? process.env.AIDEVSPACE_ROOT ?? defaultAgentRoot()
+
+  /**
+   * 本路由使用的 snapshot 注入项(ADR-0020 D10 · audit-2026-07-26 #4)。
+   *
+   * **snapshot 默认开启** —— 未显式配置 `AIDEVSPACE_SNAPSHOT_DIR` 时落到
+   * `<workspaceRoot>/snapshots/analysis`。审计前的行为是"env 未设 → 全程 no-op",
+   * 于是正常启动应用时:不生成 snapshot、列表恒空、StatusBar 回滚入口永不出现、
+   * restore 恒返 `snapshot_dir_unset` —— ticket 06 的能力等于没上线。
+   *
+   * `workspaceRoot` 同样显式注入,让 restore 写回**本路由的** workspace,
+   * 而不是 helper 各自读 env(多 workspace / 测试隔离下会写错目录)。
+   */
+  const snapshotOpts = (): SnapshotOptions => ({
+    snapshotRoot:
+      process.env.AIDEVSPACE_SNAPSHOT_DIR ?? join(resolveRoot(), 'snapshots', 'analysis'),
+    workspaceRoot: resolveRoot(),
+  })
 
   fastify.post<{
     Params: { id: string }
@@ -361,6 +392,7 @@ export const analysisRoutes: FastifyPluginAsync<AnalysisRoutesOptions> = async (
       brainstormSkillBody: brainstormSkill?.body ?? null,
       hub,
       fastify,
+      snapshotOpts: snapshotOpts(),
     }).catch((err: unknown) => {
       // 防御:createSession 抛错 → log;session 目录已落,后续清理走 ticket 06 snapshot 路径
       const message = err instanceof Error ? err.message : String(err)
@@ -395,7 +427,7 @@ export const analysisRoutes: FastifyPluginAsync<AnalysisRoutesOptions> = async (
     Params: { id: string }
   }>('/api/requirements/:id/analysis/snapshots', async (req, reply) => {
     const { id } = req.params
-    const snapshots = listSessionSnapshots(id)
+    const snapshots = listSessionSnapshots(id, snapshotOpts())
     return reply.code(200).send({ snapshots })
   })
 
@@ -413,7 +445,7 @@ export const analysisRoutes: FastifyPluginAsync<AnalysisRoutesOptions> = async (
         ),
       )
     }
-    const result = restoreSnapshot(id, snapshotIdRaw)
+    const result = restoreSnapshot(id, snapshotIdRaw, snapshotOpts())
     if (!result.ok) {
       // snapshot_not_found / snapshot_dir_unset → 404
       // no_active_session → 409(状态不允许)
@@ -966,6 +998,12 @@ function appendChunkToJsonl(filePath: string, ev: AnalysisChunkEvent): void {
   if (ev.chunk.source_refs !== undefined) {
     serialized.source_refs = ev.chunk.source_refs
   }
+  // ADR-0020 D8 / audit-2026-07-26 #2:admission 侧信息必须落盘 —— web 端
+  // SSR(`loadSessionChunks`)据此重建 AdmissionDashboard 五维卡 count 与
+  // 总体徽章;只推 SSE 不落盘会让刷新页面后仪表板归零。
+  if (ev.chunk.admission !== undefined) {
+    serialized.admission = ev.chunk.admission
+  }
   appendFileSync(filePath, JSON.stringify(serialized) + '\n', 'utf8')
 }
 
@@ -994,6 +1032,8 @@ async function runDualTurnAnalysis(params: {
   brainstormSkillBody: string | null
   hub: SseHub
   fastify: FastifyInstance
+  /** ADR-0020 D10 · audit #4:snapshot 根与 workspace 根由路由显式注入 */
+  snapshotOpts: SnapshotOptions
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const {
     provider, reqId, sessionId, sessionDir, dualTurnAssembler,
@@ -1016,57 +1056,75 @@ async function runDualTurnAnalysis(params: {
 
   /**
    * streamTurnEvents —— 订阅 `session.events()` 直到流关闭(=SDK sendMessage
-   * 流关闭 = turn-done,ADR-0020 D8 字面契约)。每条 `text` 事件 → 1 行
-   * analysis_chunk(jsonl + SseHub)。`done` AIEvent 关闭订阅;`error` 仅 log
-   * 不阻断(后续 `done` 仍会到达 —— SDK native retry / 业务错误都是 deterministic
-   * 终态,不再走 retry loop)。
+   * 流关闭 = turn-done,ADR-0020 D8 字面契约)。
    *
-   * 之前的 `Promise.race([done, 1500ms])` 兜底被 review 标记为 Spec 违反
-   * (handler 不该自行决定 turn 何时算完);ticket 01 follow-up 已删,这里
-   * 纯 await `eventsDrained` 让 SDK 流自然关闭即收。
+   * **文本 → chunk 映射(audit-2026-07-26 #2 修复)**:每条 `text` 事件先喂给
+   * `analysis-chunk-parser`,由它把 built-in Skill 约定的 `[DIM]` / `[VERDICT]` /
+   * `[SUBPROBLEM]` / `[RISK]` / `[OPTION]` 标记解析成结构化 chunk(kind /
+   * source_refs / admission),解析不出标记的自由文本仍退化成 narration
+   * (不丢内容)。turn 结束时 `flush()` 收尾未闭合块。
    *
-   * 返回 `{ eventsDrained, cancel }` —— cancel 仅作异常退出救场,正常路径
-   * `done` AIEvent → 循环 break → eventsDrained resolve。
+   * `done` AIEvent 关闭订阅;`error` 仅 log 不阻断(后续 `done` 仍会到达 ——
+   * SDK native retry / 业务错误都是 deterministic 终态,不再走 retry loop)。
    *
-   * 已知约束:本函数假设 fake provider(以及 ticket 03+ 待补的真 SDK 路径)
-   * 在 error envelope 后仍会推 `done` AIEvent —— handler 用 `error` log + `done`
-   * close 两段协作处理错误;若 SDK 未来在 error 后不推 done(目前不会),需要
-   * 在这里加 timeout 兜底(那是 ticket 03+ 的事)。详见
-   * `__helpers__/fakeAnalysisProvider.ts` 文件头"已知 mock 缺口"。
+   * **cancel 必须能真正解开阻塞**(audit-2026-07-26 #3 修复):`AiSession.events()`
+   * 的 `iterator.return()` **不会** resolve 一个已挂起的 `next()` promise
+   * (见 AISession.ts `events()`:return 只是把 slot 从 #consumers 摘掉)。
+   * 所以这里把 `iterator.next()` 与一个 cancel promise 做 race —— 否则
+   * `session.send()` reject(session 已 errored,后续不会再有任何事件)时,
+   * pump 会永远挂在 `await iterator.next()` 上,turn-2 不执行、session 不关闭、
+   * analysis job 永远 running。
    */
   const streamTurnEvents = (
     turnLabel: 'INFER' | 'BRAINSTORM',
   ): { eventsDrained: Promise<void>; cancel: () => void } => {
     const iterable = session.events()
     const iterator = iterable[Symbol.asyncIterator]()
-    let stopped = false
+    const CANCELLED = Symbol('cancelled')
+    let fireCancel: () => void = () => {}
+    const cancelSignal = new Promise<typeof CANCELLED>((resolve) => {
+      fireCancel = () => resolve(CANCELLED)
+    })
+    // turn 维度的解析器:自由文本 fallback label 用 turnLabel
+    const parser = createAnalysisTextParser({ fallbackLabel: turnLabel })
+
+    const emit = (parsed: ParsedAnalysisChunk): void => {
+      counter.value++
+      const id = `c-${turnLabel.toLowerCase()}-${sessionId}-${counter.value}`
+      const ts = new Date().toISOString().slice(11, 19) // HH:MM:SS
+      const chunk: AnalysisChunkPayload = {
+        id,
+        ts,
+        label: parsed.label,
+        kind: parsed.kind,
+        tone: parsed.tone,
+        text: parsed.text,
+      }
+      // 可选字段:undefined 不写 key(保持 JSONL 行与既有契约一致)
+      if (parsed.source_refs && parsed.source_refs.length > 0) {
+        chunk.source_refs = parsed.source_refs
+      }
+      if (parsed.admission) chunk.admission = parsed.admission
+      const chunkEv: AnalysisChunkEvent = {
+        ts: Date.now(),
+        type: 'analysis_chunk',
+        reqId,
+        sessionId,
+        chunk,
+      }
+      appendChunkToJsonl(chunksPath, chunkEv)
+      hub.publish(reqId, chunkEv)
+    }
+
     const eventsDrained = (async () => {
       try {
-        while (!stopped) {
-          const r = await iterator.next()
+        for (;;) {
+          const r = await Promise.race([iterator.next(), cancelSignal])
+          if (r === CANCELLED) break
           if (r.done) break
           const ev = r.value
           if (ev.type === 'text') {
-            counter.value++
-            const id = `c-${turnLabel.toLowerCase()}-${sessionId}-${counter.value}`
-            const ts = new Date().toISOString().slice(11, 19) // HH:MM:SS
-            const chunkEv: AnalysisChunkEvent = {
-              ts: Date.now(),
-              type: 'analysis_chunk',
-              reqId,
-              sessionId,
-              chunk: {
-                id,
-                ts,
-                label: turnLabel,
-                kind: 'narration',
-                tone: 'info',
-                text: ev.text,
-                // narration 契约:无 source_refs
-              },
-            }
-            appendChunkToJsonl(chunksPath, chunkEv)
-            hub.publish(reqId, chunkEv)
+            for (const parsed of parser.push(ev.text)) emit(parsed)
           } else if (ev.type === 'done') {
             if (ev.sessionId && !sdkSessionIdLogged) {
               sdkSessionIdLogged = ev.sessionId
@@ -1084,6 +1142,12 @@ async function runDualTurnAnalysis(params: {
       } catch (err) {
         fastify.log.warn({ err, reqId, sessionId, turnLabel }, 'analysis turn event pump threw')
       } finally {
+        // 收尾:把未闭合块(SDK 最后一段没有以空行/新标记结束)产出
+        try {
+          for (const parsed of parser.flush()) emit(parsed)
+        } catch (err) {
+          fastify.log.warn({ err, reqId, sessionId, turnLabel }, 'analysis turn parser flush threw')
+        }
         try {
           await iterator.return?.(undefined)
         } catch {
@@ -1094,8 +1158,7 @@ async function runDualTurnAnalysis(params: {
     return {
       eventsDrained,
       cancel: () => {
-        stopped = true
-        try { void iterator.return?.(undefined) } catch { /* ignore */ }
+        fireCancel()
       },
     }
   }
@@ -1104,11 +1167,15 @@ async function runDualTurnAnalysis(params: {
    * 单个 turn 的编排 —— 抽出来消除 turn-1 / turn-2 copy-paste。
    *
    * 顺序:setActiveSkill → resetBaseCache → 起订阅 → send → 等 eventsDrained。
-   * send 抛错记日志但不抛(单 turn 失败保留半成品状态走下一 turn,
-   * ticket 第 12 行 + ADR-0020 D8)。
    *
-   * eventsDrained 等到 SDK 流自然关闭(turn-done 由 `done` AIEvent 触发);
-   * 不设超时(handler 不该自行决定 turn 何时算完)。
+   * **send 失败路径(audit-2026-07-26 #3 修复)**:`send()` reject 意味着
+   * AISession 已 errored / busy / closed —— 这一 turn **不会再有任何事件**,
+   * 继续 `await eventsDrained` 会永久挂起。因此 catch 里先 `sub.cancel()`
+   * 解开 pump,再 await(此时会立即 resolve),让 turn-2 与 session.close()
+   * 正常继续(单 turn 失败保留半成品状态走下一 turn,ADR-0020 D8)。
+   *
+   * 正常路径下 eventsDrained 等到 SDK 流自然关闭(turn-done 由 `done` AIEvent
+   * 触发);不设超时(handler 不该自行决定 turn 何时算完)。
    */
   async function runTurn(spec: {
     turnLabel: 'INFER' | 'BRAINSTORM'
@@ -1120,7 +1187,7 @@ async function runDualTurnAnalysis(params: {
   }): Promise<void> {
     // ticket 06 (ADR-0020 D10):turn chunks 落 chunks.jsonl 第一行前 snapshot
     // 失败 best-effort —— helper 内部 try/catch 吞错,不影响 send 路径
-    takeSessionSnapshot(sessionDir, reqId, spec.snapshotId, sessionId)
+    takeSessionSnapshot(sessionDir, reqId, spec.snapshotId, sessionId, params.snapshotOpts)
     // 记录 turn 开始时的 chunk 数;eventsDrained 后用与 counter.value 比较
     // 判定该 turn 是否写了 0 chunk(空 turn → 清掉 snapshot,不留无意义副本)
     const chunksAtStart = counter.value
@@ -1132,13 +1199,15 @@ async function runDualTurnAnalysis(params: {
       await session.send(spec.userMessage)
     } catch (err) {
       fastify.log.error({ err, reqId, sessionId, turn: spec.turnLogTag }, 'analysis turn send failed')
+      // send reject ⇒ 本 turn 不会再有任何事件 —— 主动解开 pump,否则永久挂起
+      sub.cancel()
     }
     await sub.eventsDrained
     sub.cancel()
 
     // ticket 06:空 turn(SDK 返回 0 chunk)不 snapshot —— 此处静默 remove
     if (counter.value === chunksAtStart) {
-      removeSessionSnapshot(reqId, spec.snapshotId)
+      removeSessionSnapshot(reqId, spec.snapshotId, params.snapshotOpts)
     }
   }
 

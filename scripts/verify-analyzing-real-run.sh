@@ -14,13 +14,14 @@
 #   2. 启动 web + agent(走既有 `pnpm dev:web` + `pnpm agent:start` 守护脚本)
 #   3. 等 agent `/api/health` 返 200(SDK idle 健康)
 #   4. bootstrap token → POST /api/requirements 创建 fixture 需求
-#   5. POST /api/requirements/<id>/analysis/start(angle=architecture)
-#   6. 等 chunks.jsonl 出现(最长 180s)
+#   5. **先订阅 SSE**,再 POST /api/requirements/<id>/analysis/start
+#      (audit-2026-07-26 #5:旧版先 POST 后订阅,会丢掉早期事件)
+#   6. 等结构化产物落盘:5 个 admission 维度 + ≥1 个三桶产物
+#      (audit-2026-07-26 #2:"chunks.jsonl 非空"已不足以证明链路通)
 #   7. 把 SSE / chunks.jsonl 头几行归档到
 #      ~/.aidevspace/verification/<timestamp>/
-#   8. (可选)调浏览器 Playwright 跑 e2e 套件,把 trace 归档到同目录
-#   9. 关 agent(交给 agent-stop.sh)
-#  10. 输出物:verification 目录路径 + 头 5 行 chunks.jsonl 内容
+#   8. 关 agent(交给 agent-stop.sh)
+#   9. 输出物:verification 目录路径 + 头 5 行 chunks.jsonl + 断言结果
 #
 # 设计要点:
 #   - 真 SDK 跑(无 mock);若 key 缺 → 立刻退出,避免 reviewer 误以为脚本跑通
@@ -189,9 +190,32 @@ REQUIREMENT_ID="$(grep -o '"id":"[^"]*"' "$REQ_JSON" | head -1 | cut -d'"' -f4)"
 ok "requirement created: id=$REQUIREMENT_ID title=$TITLE"
 
 # ============================================================================
-# 步骤 3:启动分析(POST /api/requirements/<id>/analysis/start)
+# 步骤 3:**先订阅 SSE,再 POST start**(ticket 00 修复的顺序 ·
+#         audit-2026-07-26 #5)
+#
+# 之前的顺序是"先 POST、后订阅",与 ticket 00 修好的顺序相反:start handler
+# 是同步 201 + 异步推流,POST 返回时第一批 chunk 很可能已经推完,订阅方只能
+# 拿到残缺的尾巴(甚至一条都拿不到),归档出来的 SSE 物证不可信。
 # ============================================================================
-log "step 3 · POST /api/requirements/$REQUIREMENT_ID/analysis/start"
+log "step 3 · 先订阅 SSE(后台),再 POST start"
+SSE_LOG="$RUN_DIR/sse-stream.log"
+curl -sN -H "origin: $WEB_URL" \
+  -H "x-aidevspace-token: $TOKEN" \
+  "$AGENT_URL/api/requirement/$REQUIREMENT_ID/events" \
+  --max-time 300 \
+  > "$SSE_LOG" 2>&1 &
+SSE_PID=$!
+# 等订阅真正建立(hello 事件落盘)再 POST —— 否则仍有竞态
+for _ in $(seq 1 25); do
+  [[ -s "$SSE_LOG" ]] && break
+  sleep 0.2
+done
+ok "SSE 订阅已建立(pid=$SSE_PID)"
+
+# ============================================================================
+# 步骤 4:启动分析(POST /api/requirements/<id>/analysis/start)
+# ============================================================================
+log "step 4 · POST /api/requirements/$REQUIREMENT_ID/analysis/start"
 START_JSON="$RUN_DIR/start.json"
 HTTP_CODE="$(curl -s -o "$START_JSON" -w "%{http_code}" \
   -X POST "$AGENT_URL/api/requirements/$REQUIREMENT_ID/analysis/start" \
@@ -202,51 +226,74 @@ HTTP_CODE="$(curl -s -o "$START_JSON" -w "%{http_code}" \
 if [[ "$HTTP_CODE" != "201" ]]; then
   fail "start analysis 失败:HTTP $HTTP_CODE"
   cat "$START_JSON" >&2 || true
+  kill "$SSE_PID" 2>/dev/null || true
   exit 1
 fi
 SESSION_ID="$(grep -o '"sessionId":"[^"]*"' "$START_JSON" | head -1 | cut -d'"' -f4)"
 ok "session started: $SESSION_ID"
 
 # ============================================================================
-# 步骤 4:订阅 SSE(50 行够 review 看 turn-1/turn-2 形态),同时等
-# chunks.jsonl 写第一行后归零超时
+# 步骤 5:等结构化产物落盘
+#
+# audit-2026-07-26 #2 之后,"chunks.jsonl 非空"已不足以证明链路通 ——
+# 真正的验收是 **5 个 admission 维度 + ≥1 个三桶产物**都被解析出来。
+# 这里直接对 jsonl 做断言,和 e2e spec 的 UI 断言互为交叉验证。
 # ============================================================================
-log "step 4 · 订阅 SSE 50 行 + 等 chunks.jsonl ≥1 行"
-SSE_LOG="$RUN_DIR/sse-stream.log"
+log "step 5 · 等 5 维 admission + ≥1 三桶产物(最长 300s)"
 CHUNKS_PATH="$WORKSPACE_ROOT/requirements/$REQUIREMENT_ID/analysis/sessions/$SESSION_ID/chunks.jsonl"
-# 后台 curl -N 走 SSE 流;50 行后 timeout(单 SDK turn 文本不长)
-curl -sN -H "origin: $WEB_URL" \
-  "$AGENT_URL/api/requirement/$REQUIREMENT_ID/events" \
-  --max-time 60 \
-  > "$SSE_LOG" 2>&1 &
-SSE_PID=$!
 
-# 等 chunks.jsonl 出现且非空(最长 120s);turn-1 完成通常 < 60s
-DEADLINE=$((SECONDS + 120))
+count_dims() {
+  [[ -s "$CHUNKS_PATH" ]] || { echo 0; return; }
+  grep -o '"dim":"[a-z_]*"' "$CHUNKS_PATH" | sort -u | wc -l | tr -d ' '
+}
+count_products() {
+  [[ -s "$CHUNKS_PATH" ]] || { echo 0; return; }
+  grep -c -E '"kind":"(subproblem|risk|option)"' "$CHUNKS_PATH" || true
+}
+
+DEADLINE=$((SECONDS + 300))
 SAW_CHUNK=0
 while (( SECONDS < DEADLINE )); do
   if [[ -s "$CHUNKS_PATH" ]]; then
     SAW_CHUNK=1
-    break
+    if [[ "$(count_dims)" -ge 5 && "$(count_products)" -ge 1 ]]; then
+      break
+    fi
   fi
   sleep 2
 done
-# 等 SSE 流自然退出 / 兜底杀
+# SSE 流已拿到足够内容,收掉后台订阅
+kill "$SSE_PID" 2>/dev/null || true
 wait "$SSE_PID" 2>/dev/null || true
 
 if (( SAW_CHUNK == 0 )); then
-  fail "chunks.jsonl 未在 120s 内出现;agent log tail:"
+  fail "chunks.jsonl 未在 300s 内出现;agent log tail:"
   if [[ -f "$WORKSPACE_ROOT/logs/agent.log" ]]; then
     tail -100 "$WORKSPACE_ROOT/logs/agent.log" >&2 || true
   fi
   exit 1
 fi
+
+DIM_COUNT="$(count_dims)"
+PRODUCT_COUNT="$(count_products)"
 ok "chunks.jsonl 已写: $(wc -l < "$CHUNKS_PATH") lines"
+ok "  admission 维度(去重): $DIM_COUNT / 5"
+ok "  三桶产物(subproblem/risk/option): $PRODUCT_COUNT"
+
+VERDICT_OK=1
+if (( DIM_COUNT < 5 )); then
+  fail "只解析出 $DIM_COUNT 个 admission 维度(期望 5)—— AdmissionDashboard 五卡不会全亮"
+  VERDICT_OK=0
+fi
+if (( PRODUCT_COUNT < 1 )); then
+  fail "没有解析出任何三桶产物 —— ProductList 会是空的"
+  VERDICT_OK=0
+fi
 
 # ============================================================================
-# 步骤 5:归档 SSE 头 3 段 + chunks.jsonl 头 5 行
+# 步骤 6:归档 SSE 头 3 段 + chunks.jsonl 头 5 行
 # ============================================================================
-log "step 5 · 归档头几行 → 上线门槛物证"
+log "step 6 · 归档头几行 → 上线门槛物证"
 ARCHIVE_HEAD="$RUN_DIR/chunks-head-5.txt"
 {
   echo "# chunks.jsonl head 5 lines"
@@ -271,7 +318,7 @@ ok "  - $ARCHIVE_HEAD"
 ok "  - $ARCHIVE_SSE"
 
 # ============================================================================
-# 步骤 6:打印 reviewer 报告(粘 PR 评论用)
+# 步骤 7:打印 reviewer 报告(粘 PR 评论用)
 # ============================================================================
 echo
 printf "%s%s%s\n" "$C_BOLD" "========================================" "$C_RESET"
@@ -283,6 +330,8 @@ printf "sessionId=%s\n" "$SESSION_ID"
 printf "workspaceRoot=%s\n" "$WORKSPACE_ROOT"
 printf "chunks_path=%s\n" "$CHUNKS_PATH"
 printf "chunks_lines=%s\n" "$(wc -l < "$CHUNKS_PATH")"
+printf "admission_dims=%s/5\n" "$DIM_COUNT"
+printf "products=%s\n" "$PRODUCT_COUNT"
 echo
 printf "%s chunks.jsonl head 5:%s\n" "$C_BOLD" "$C_RESET"
 cat "$ARCHIVE_HEAD"
@@ -292,5 +341,10 @@ cat "$ARCHIVE_SSE"
 echo
 printf "%s%s%s\n" "$C_BOLD" "========================================" "$C_RESET"
 echo
+
+if (( VERDICT_OK == 0 )); then
+  fail "结构化产物断言未通过(见上方 admission_dims / products);归档目录:$RUN_DIR"
+  exit 1
+fi
 ok "完成。归档目录:$RUN_DIR"
 ok "PR 上线门槛 reviewer 报告请贴:$ARCHIVE_HEAD + $ARCHIVE_SSE"

@@ -274,17 +274,26 @@ describe('ANALYZING · getAnalyzingData · 默认 options 自动注入', () => {
     expect(data.sessions[0].id).toBe('sess-arch')
   })
 
-  it('不传 options 且 fs 不存在 → 退回到 defaultSessionsBundle()(id="default")', async () => {
+  // audit-2026-07-26 关键阻塞项 #1:磁盘上无会话 → 真正的空数组,不再合成
+  // `{ id: 'default' }` 占位(否则 ticket 05 的「开始分析」CTA 永远不显示)。
+  it('不传 options 且 fs 不存在 → 空 sessions(「开始分析」CTA 可达)', async () => {
     const data = await getAnalyzingData('req-fs-missing', { requirementsRoot: tmpRoot })
-    expect(data.sessions.length).toBe(1)
-    expect(data.sessions[0].id).toBe('default')
-    expect(data.activeSessionId).toBe('default')
+    expect(data.sessions).toEqual([])
+    expect(data.activeSessionId).toBe('')
   })
 
-  it('不传 options 且 _index.yaml 不存在 → 退回 defaultSessionsBundle()', async () => {
+  it('不传 options 且 _index.yaml 不存在 → 按 sessions/<id>/ 目录自愈', async () => {
     writeAnalysisBundle('req-fs-noindex', { skipIndex: true })
     const data = await getAnalyzingData('req-fs-noindex', { requirementsRoot: tmpRoot })
-    expect(data.sessions[0].id).toBe('default')
+    // chunks.jsonl 仍在磁盘上 → 不该因为索引丢了就让用户看不到历史
+    expect(data.sessions.map((s) => s.id)).toEqual(['sess-arch'])
+    expect(data.activeSessionId).toBe('sess-arch')
+  })
+
+  it('_index.yaml 与 sessions/ 目录都不存在 → 空 sessions', async () => {
+    writeAnalysisBundle('req-fs-bare', { skipIndex: true, skipChunks: true })
+    const data = await getAnalyzingData('req-fs-bare', { requirementsRoot: tmpRoot })
+    expect(data.sessions).toEqual([])
   })
 })
 

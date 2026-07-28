@@ -942,24 +942,31 @@ describe('getAnalyzingData · sessions 段', () => {
     rmSync(tmpDir, { recursive: true, force: true })
   })
 
-  it('未传 analysisSessionsDir → 默认单会话 [架构]', async () => {
+  // audit-2026-07-26 关键阻塞项 #1:磁盘上没有任何会话时,工位 loader 必须返回
+  // **真正的空数组** —— 旧行为(合成一个 `{ id: 'default' }` 占位会话)会让
+  // ticket 05 的「▶ 开始分析」CTA 渲染条件 `sessions.length === 0` 永远不成立,
+  // 真实"有 PRD、还没跑分析"的首次访问看不到任何启动入口。
+  //
+  // `defaultSessionsBundle()` / `loadSessionsBundle()` 的原语义未变(见下方
+  // "loadSessionsBundle · 默认单会话契约" 分组),只是工位 loader 不再用它。
+  it('未传 analysisSessionsDir → 空 sessions(CTA 可达)', async () => {
     const data = await getAnalyzingData('UNKNOWN-SESS-1')
-    expect(data.sessions).toEqual([
-      {
-        id: 'default',
-        label: '架构',
-        angle: 'architecture',
-        detectedCount: 0,
-        isStreaming: false,
-      },
-    ])
-    expect(data.activeSessionId).toBe('default')
+    expect(data.sessions).toEqual([])
+    expect(data.activeSessionId).toBe('')
   })
 
-  it('传 analysisSessionsDir 但 _index.yaml 不存在 → 默认单会话 [架构]', async () => {
+  it('传 analysisSessionsDir 但 _index.yaml 不存在 → 空 sessions(CTA 可达)', async () => {
     const data = await getAnalyzingData('UNKNOWN-SESS-2', { analysisSessionsDir: tmpDir })
+    expect(data.sessions).toEqual([])
+    expect(data.activeSessionId).toBe('')
+  })
+
+  it('_index.yaml 缺失但 sessions/<id>/ 目录存在 → 按目录名自愈出会话', async () => {
+    mkdirSync(join(tmpDir, 'sess-recovered'), { recursive: true })
+    const data = await getAnalyzingData('UNKNOWN-SESS-3', { analysisSessionsDir: tmpDir })
     expect(data.sessions).toHaveLength(1)
-    expect(data.activeSessionId).toBe('default')
+    expect(data.sessions[0].id).toBe('sess-recovered')
+    expect(data.activeSessionId).toBe('sess-recovered')
   })
 
   it('传 analysisSessionsDir + 有效 _index.yaml → 解析为多 sessions', async () => {

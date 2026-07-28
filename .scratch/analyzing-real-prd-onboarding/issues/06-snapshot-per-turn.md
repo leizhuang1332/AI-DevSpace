@@ -6,13 +6,13 @@
 
 **Status:** ready-for-agent
 
-- [ ] turn-1 chunks 落 `chunks.jsonl` 第一行前 → 调 `snapshot('before_admission')`
-- [ ] turn-2 chunks 落 `chunks.jsonl` 第一行前 → 调 `snapshot('before_brainstorm')`
-- [ ] 空 turn(SDK 返回 0 chunk)不 snapshot
-- [ ] StatusBar "回滚" 下拉菜单列出 `before_admission` 与 `before_brainstorm` 两个 snapshot id;选中触发 ADR-0009 既有 `restoreSnapshot` 流程
-- [ ] snapshot 文件落 `~/.aidevspace/snapshots/` 目录,文件名以 `before_admission` / `before_brainstorm` 为前缀(沿用 ADR-0009 既有命名规范)
-- [ ] handler wiring 单测新增三条断言:(a) 两 turn 都触发 snapshot;(b) 空 turn 不 snapshot;(c) snapshot 失败不阻断后续 turn
-- [ ] `pnpm typecheck` 与 `pnpm test` 通过
+- [x] turn-1 chunks 落 `chunks.jsonl` 第一行前 → 调 `snapshot('before_admission')`
+- [x] turn-2 chunks 落 `chunks.jsonl` 第一行前 → 调 `snapshot('before_brainstorm')`
+- [x] 空 turn(SDK 返回 0 chunk)不 snapshot
+- [x] StatusBar "回滚" 下拉菜单列出 `before_admission` 与 `before_brainstorm` 两个 snapshot id;选中触发 ADR-0009 既有 `restoreSnapshot` 流程
+- [x] snapshot 文件落 `~/.aidevspace/snapshots/` 目录,文件名以 `before_admission` / `before_brainstorm` 为前缀(沿用 ADR-0009 既有命名规范)
+- [x] handler wiring 单测新增三条断言:(a) 两 turn 都触发 snapshot;(b) 空 turn 不 snapshot;(c) snapshot 失败不阻断后续 turn
+- [x] `pnpm typecheck` 与 `pnpm test` 通过
 
 **ADR ref:** ADR-0020 ticket 06 / D10
 
@@ -20,3 +20,8 @@
 - 不修改 snapshot 落盘格式(沿用 ADR-0009 既有)
 - 不动 timeline / StatusBar 其它面板
 - 不引入新的 snapshot 策略(仅在 turn 边界触发,不在 chunk-row 边界)
+
+
+---
+
+**Status update (2026-07-28):** 本 issue 在 audit-2026-07-26 之后的 batch 修复中落地;见 `audit-2026-07-26.md` 修复合计 PR。

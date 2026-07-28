@@ -83,6 +83,22 @@ export type SseEvent =
          * web 端的 brand 标记,具体 narrow 由消费方按 `kind` 分支处理。
          */
         source_refs?: readonly unknown[]
+        /**
+         * ADR-0020 D8 / audit-2026-07-26 #2:准入侧信息。由 agent 的 SDK 文本
+         * 解析层(`analysis-chunk-parser.ts`)从 `admission-check` Skill 输出的
+         * `[DIM <id>]` / `[VERDICT]` 块解析而来;web 端 `deriveAdmissionData`
+         * 据此让 AdmissionDashboard 五维卡 count 与总体徽章随 SSE 实时上涨。
+         *
+         * - `dim` + `verdict`:一条 `[DIM <id>]` 块(单维度裁决)
+         * - `overall` + `pendingCount`:一条 `[VERDICT]` 块(总体结论)
+         * 两组互斥;narration 之外的 chunk(三桶)不携带本字段。
+         */
+        admission?: {
+          dim?: string
+          verdict?: 'pass' | 'warn' | 'fail'
+          overall?: 'pass' | 'pending' | 'fail'
+          pendingCount?: number
+        }
       }
     }
   /**

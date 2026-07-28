@@ -526,14 +526,18 @@ describe('start handler turn-snapshot wiring (ADR-0020 D10)', () => {
     const { provider } = createRecordingProvider({
       eventsByTurn: [
         // turn-1:admission(2 条 text + done)
+        //
+        // audit-2026-07-26 #2 之后 SDK text 事件先过 `analysis-chunk-parser`,
+        // **块边界 = 空行或标记行**(SDK 推的是 delta,不再是"1 事件 = 1 chunk")。
+        // 因此测试数据必须用 `\n\n` 显式分块,否则两段会被正确地合并成 1 条 chunk。
         [
-          { type: 'text', text: 'admission 段 1', delta: false },
-          { type: 'text', text: 'admission 段 2', delta: false },
+          { type: 'text', text: 'admission 段 1\n\n', delta: false },
+          { type: 'text', text: 'admission 段 2\n\n', delta: false },
           { type: 'done', reason: 'end_turn' as const, sessionId: 'rec-t1' },
         ],
         // turn-2:brainstorm(1 条 text + done)
         [
-          { type: 'text', text: 'brainstorm 段 1', delta: false },
+          { type: 'text', text: 'brainstorm 段 1\n\n', delta: false },
           { type: 'done', reason: 'end_turn' as const, sessionId: 'rec-t2' },
         ],
       ],
@@ -745,31 +749,51 @@ describe('start handler turn-snapshot wiring (ADR-0020 D10)', () => {
     expect(r2.statusCode).toBe(400)
   })
 
-  it('snapshot dir 未配置 AIDEVSPACE_SNAPSHOT_DIR 时 list 返空 + restore 404', async () => {
+  // --------------------------------------------------------------------------
+  // 6. snapshot 默认开启(audit-2026-07-26 #4)
+  //
+  // 旧契约:`AIDEVSPACE_SNAPSHOT_DIR` 未设 → list 返空 + restore 404
+  // (`snapshot_dir_unset`)。审计判定这是缺陷而非特性 —— 默认启动脚本从不设
+  // 该变量,于是正常启动应用时 ticket 06 的整条回滚能力等于没上线:
+  // 不生成 snapshot、列表恒空、StatusBar 回滚入口永不出现。
+  //
+  // 新契约:env 未设 → 落到 `<workspaceRoot>/snapshots/analysis`,snapshot
+  // 默认开启;env 显式配置时仍然优先(上一条测试覆盖)。
+  // --------------------------------------------------------------------------
+  it('未配置 AIDEVSPACE_SNAPSHOT_DIR 时默认落 <workspaceRoot>/snapshots/analysis', async () => {
     delete process.env.AIDEVSPACE_SNAPSHOT_DIR
     const { provider } = createSilentProvider()
     await bootWithProvider(provider)
 
-    const reqId = 'req-snap-unset'
+    const reqId = 'req-snap-default'
     seedReq(reqId)
-    await postStart(reqId, { angle: 'architecture', session_id: 'sess-unset' })
+    await postStart(reqId, { angle: 'architecture', session_id: 'sess-default' })
     await new Promise((r) => setTimeout(r, 1000))
 
+    // 1. 磁盘上落到默认目录
+    expect(existsSync(join(localRoot, 'snapshots', 'analysis', reqId, 'before_admission'))).toBe(
+      true,
+    )
+
+    // 2. list 端点看得到(StatusBar 回滚入口的前提)
     const list = await localApp.inject({
       method: 'GET',
       url: `/api/requirements/${reqId}/analysis/snapshots`,
       headers: { 'x-aidevspace-token': localToken },
     })
     expect(list.statusCode).toBe(200)
-    expect((list.json() as { snapshots: unknown[] }).snapshots).toEqual([])
+    const snapshots = (list.json() as { snapshots: Array<{ id: string }> }).snapshots
+    expect(snapshots.map((s) => s.id)).toContain('before_admission')
 
+    // 3. restore 走通(不再是 snapshot_dir_unset 404)
     const r = await localApp.inject({
       method: 'POST',
       url: `/api/requirements/${reqId}/analysis/restore`,
       headers: { 'x-aidevspace-token': localToken, 'content-type': 'application/json' },
       payload: { snapshot_id: 'before_admission' },
     })
-    expect(r.statusCode).toBe(404)
-    expect((r.json() as { error: string }).error).toBe('snapshot_dir_unset')
+    expect(r.statusCode).toBe(200)
+    // restore 用的是**注入的** workspace root,写回本测试的临时目录
+    expect((r.json() as { chunksPath: string }).chunksPath).toContain(reqId)
   })
 })

@@ -20,3 +20,8 @@
 - 这是 wide refactor 例外(`/to-tickets` skill 的 expand-contract 原则适用);SkillLoader API 不动,变更收敛在 Assembler 一层
 - `recommended_user_override` 字段消费在下个 PR(ADR-0020 D12)
 - bootstrap 注入路径:Agent 启动时从 `~/.aidevspace/skills`(若存在)与 `apps/agent/skills/built-in/` 两个目录拼装 `skillsRoots` 数组
+
+
+---
+
+**Status update (2026-07-28):** 本 issue 在 audit-2026-07-26 之后的 batch 修复中落地;见 `audit-2026-07-26.md` 修复合计 PR。

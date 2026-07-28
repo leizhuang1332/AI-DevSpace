@@ -66,9 +66,37 @@ function snapshotRoot(): string | null {
   return process.env.AIDEVSPACE_SNAPSHOT_DIR ?? null
 }
 
+/**
+ * 解析本次调用使用的 snapshot 根(audit-2026-07-26 #4)。
+ *
+ * 优先级:显式注入 > `AIDEVSPACE_SNAPSHOT_DIR` env > null(禁用)。
+ *
+ * 路由层(`analysisRoutes`)总是显式注入
+ * `<workspaceRoot>/snapshots/analysis`,所以**正常启动应用时 snapshot 默认开启**
+ * —— 审计前的行为是"env 未设 → 全程 no-op",导致 snapshot 列表恒空、
+ * StatusBar 回滚入口永不出现、restore 恒返 `snapshot_dir_unset`。
+ *
+ * 保留 env / null 分支的意义:直接调用这些 helper 的单测与"显式关闭"场景。
+ */
+function resolveSnapshotRoot(opts?: SnapshotOptions): string | null {
+  return opts?.snapshotRoot ?? snapshotRoot()
+}
+
+/** 所有 snapshot helper 的可选注入项 —— 不注入时退回 env / 默认 fallback */
+export interface SnapshotOptions {
+  /** snapshot 根目录;注入后不再读 `AIDEVSPACE_SNAPSHOT_DIR` */
+  snapshotRoot?: string
+  /**
+   * workspace 根(restore 定位 `requirements/<id>/analysis/sessions/`)。
+   * 审计要求 restore 使用**注入的** workspace root,而不是各自读 env ——
+   * 否则测试 / 多 workspace 场景下会写到错误的目录。
+   */
+  workspaceRoot?: string
+}
+
 /** workspace root(给 restore 写回用,沿用 analysis.ts 同款 fallback 链) */
-function workspaceRoot(): string {
-  return process.env.AIDEVSPACE_ROOT ?? defaultRoot()
+function workspaceRoot(opts?: SnapshotOptions): string {
+  return opts?.workspaceRoot ?? process.env.AIDEVSPACE_ROOT ?? defaultRoot()
 }
 
 function defaultRoot(): string {
@@ -93,8 +121,9 @@ export function takeSessionSnapshot(
   reqId: string,
   snapshotId: SessionSnapshotId,
   sessionId: string,
+  opts?: SnapshotOptions,
 ): void {
-  const root = snapshotRoot()
+  const root = resolveSnapshotRoot(opts)
   if (!root) return
   try {
     const targetDir = join(root, reqId, snapshotId)
@@ -116,8 +145,9 @@ export function takeSessionSnapshot(
 export function removeSessionSnapshot(
   reqId: string,
   snapshotId: SessionSnapshotId,
+  opts?: SnapshotOptions,
 ): void {
-  const root = snapshotRoot()
+  const root = resolveSnapshotRoot(opts)
   if (!root) return
   try {
     rmSync(join(root, reqId, snapshotId), { recursive: true, force: true })
@@ -132,8 +162,11 @@ export function removeSessionSnapshot(
  * 过滤规则:目录存在 + 含 chunks.jsonl(空 turn 被 remove 后不会进列表);
  * sessionId 从 `.session-id` sidecar 读;takenAt 取目录 mtime ISO。
  */
-export function listSessionSnapshots(reqId: string): SessionSnapshotEntry[] {
-  const root = snapshotRoot()
+export function listSessionSnapshots(
+  reqId: string,
+  opts?: SnapshotOptions,
+): SessionSnapshotEntry[] {
+  const root = resolveSnapshotRoot(opts)
   if (!root) return []
   const reqDir = join(root, reqId)
   if (!existsSync(reqDir)) return []
@@ -165,8 +198,11 @@ export function listSessionSnapshots(reqId: string): SessionSnapshotEntry[] {
  * 找到 req-id 下 mtime 最新的 session 目录(不带 .jsonl / .yaml 后缀)。
  * 若 sessions/ 目录不存在或为空 → 返 null。
  */
-function latestSessionDir(reqId: string): { dir: string; sessionId: string } | null {
-  const base = join(workspaceRoot(), 'requirements', reqId, 'analysis', 'sessions')
+function latestSessionDir(
+  reqId: string,
+  opts?: SnapshotOptions,
+): { dir: string; sessionId: string } | null {
+  const base = join(workspaceRoot(opts), 'requirements', reqId, 'analysis', 'sessions')
   if (!existsSync(base)) return null
   const entries = readdirSync(base, { withFileTypes: true }).filter((e) => e.isDirectory())
   if (entries.length === 0) return null
@@ -199,8 +235,9 @@ function latestSessionDir(reqId: string): { dir: string; sessionId: string } | n
 export function restoreSnapshot(
   reqId: string,
   snapshotId: SessionSnapshotId,
+  opts?: SnapshotOptions,
 ): RestoreResult {
-  const root = snapshotRoot()
+  const root = resolveSnapshotRoot(opts)
   if (!root) {
     return { ok: false, error: 'snapshot_dir_unset', reason: 'AIDEVSPACE_SNAPSHOT_DIR not set' }
   }
@@ -208,7 +245,7 @@ export function restoreSnapshot(
   if (!existsSync(sourcePath)) {
     return { ok: false, error: 'snapshot_not_found' }
   }
-  const latest = latestSessionDir(reqId)
+  const latest = latestSessionDir(reqId, opts)
   if (!latest) {
     return { ok: false, error: 'no_active_session' }
   }

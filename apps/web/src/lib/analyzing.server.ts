@@ -30,6 +30,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type {
+  AdmissionChunkMeta,
   AnalysisSession,
   AnalysisSessionAngle,
   AnalyzingChunk,
@@ -40,6 +41,7 @@ import type {
 import {
   ANALYSIS_SESSION_ANGLE_META,
   buildAdmissionData,
+  deriveAdmissionData,
   emptyAnalyzing,
   isSourceRef,
   resolveAdmissionDimensions,
@@ -126,6 +128,11 @@ export function loadSessionChunks(
         if (typeof obj.synthetic === 'boolean') {
           chunk.synthetic = obj.synthetic
         }
+        // admission 侧信息(ADR-0020 D8 · audit-2026-07-26 #2):
+        // 逐字段校验后写入 —— 脏值(未知 verdict / 负 pendingCount)整字段丢弃,
+        // 避免 AdmissionDashboard 拿到非法 verdict 渲染出未定义徽章。
+        const admission = parseAdmissionMeta(obj.admission)
+        if (admission) chunk.admission = admission
         result.push(chunk)
       }
     } catch {
@@ -135,10 +142,36 @@ export function loadSessionChunks(
   return result
 }
 
+/**
+ * 校验并窄化 chunks.jsonl 行上的 `admission` 字段(ADR-0020 D8)。
+ *
+ * 逐字段白名单:未知 verdict / overall 取值、非有限或负 pendingCount 一律丢弃;
+ * 全部字段都无效 → 返回 null(不写 `chunk.admission`,保持 JSONL 契约一致)。
+ */
+function parseAdmissionMeta(raw: unknown): AdmissionChunkMeta | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
+  const o = raw as Record<string, unknown>
+  const meta: AdmissionChunkMeta = {}
+  if (typeof o.dim === 'string' && o.dim.length > 0) meta.dim = o.dim
+  if (o.verdict === 'pass' || o.verdict === 'warn' || o.verdict === 'fail') {
+    meta.verdict = o.verdict
+  }
+  if (o.overall === 'pass' || o.overall === 'pending' || o.overall === 'fail') {
+    meta.overall = o.overall
+  }
+  if (
+    typeof o.pendingCount === 'number' &&
+    Number.isFinite(o.pendingCount) &&
+    o.pendingCount >= 0
+  ) {
+    meta.pendingCount = Math.trunc(o.pendingCount)
+  }
+  return Object.keys(meta).length > 0 ? meta : null
+}
+
 // ---------------------------------------------------------------------------
 // analysis/adjudication.md 计数(SSR 期 mock 路径由调用方注入)
 // ---------------------------------------------------------------------------
-
 /**
  * 从 analysisDir 读 adjudication.md,计数未裁决项(`applied: false` 或未标 applied)。
  * 文件不存在 / 解析失败 → 0(容错)。
@@ -608,16 +641,28 @@ function emptyAnalyzingWithOptions(
   const pending = options?.analysisDir
     ? countPendingAdjudications(options.analysisDir)
     : 0
-  const sessionsBundle = loadSessionsBundle(options?.analysisSessionsDir, options?.lastSessionId)
+  const sessionsBundle = loadZoneSessionsBundle(
+    options?.analysisSessionsDir,
+    options?.lastSessionId,
+  )
   // SSR 装载 active session 的 chunks(zone-data-fidelity-fixes/04 — 修复 ticket 阶段
   // 遗漏的 wiring:fs 路径下 ANALYZING 工位 chunks 永远是 [],真 AI 重启后查看历史 /
   // mock 数据都无法进入 UI。本函数之前未调 `loadSessionChunks`,active session 的
   // chunks 完全丢失,UI 渲染"暂无思考流"。补这一行后,active session 的 chunks
   // 走 fs 真实装载;切到非 active Tab 仍由 SSR 简化版决定(ticket 后续补 client
   // 切 Tab 重发请求,本期不修)。
-  const activeChunks = options?.analysisSessionsDir
-    ? loadSessionChunks(options.analysisSessionsDir, sessionsBundle.activeSessionId)
-    : []
+  const activeChunks =
+    options?.analysisSessionsDir && sessionsBundle.activeSessionId
+      ? loadSessionChunks(options.analysisSessionsDir, sessionsBundle.activeSessionId)
+      : []
+  // ADR-0020 D8 · audit-2026-07-26 #2:五维卡 count / 总体 verdict 由 chunks 的
+  // admission 侧信息派生 —— 之前恒为 `count: 0 + verdict: 'pending'`,刷新页面
+  // 后 AdmissionDashboard 永远归零。fallback 走 adjudication.md 计数。
+  const admission = deriveAdmissionData(activeChunks, {
+    dimensions: dims,
+    fallbackVerdict: 'pending',
+    fallbackPendingCount: pending,
+  })
   const techBrief = options?.analysisDir ? loadTechBriefFromAnalysisDir(options.analysisDir) : null
   const requirementsRoot = options?.requirementsRoot ?? defaultRequirementsRoot()
   const hasRequirementMd = existsRequirementMd(requirementsRoot, requirementId)
@@ -629,11 +674,7 @@ function emptyAnalyzingWithOptions(
   if (!hasRequirementMd) {
     return {
       ...emptyAnalyzing(requirementId),
-      admission: buildAdmissionData({
-        dimensions: dims,
-        pendingAdjudicationCount: pending,
-        verdict: 'pending',
-      }),
+      admission,
       sessions: sessionsBundle.sessions,
       activeSessionId: sessionsBundle.activeSessionId,
       ...techBrief,
@@ -651,11 +692,7 @@ function emptyAnalyzingWithOptions(
     ...emptyAnalyzing(requirementId),
     empty: false,
     phase: 'active',
-    admission: buildAdmissionData({
-      dimensions: dims,
-      pendingAdjudicationCount: pending,
-      verdict: 'pending',
-    }),
+    admission,
     sessions: sessionsBundle.sessions,
     activeSessionId: sessionsBundle.activeSessionId,
     // active session 的 chunks(zone-data-fidelity-fixes/04 修复;ticket 阶段
@@ -798,6 +835,77 @@ export function loadSessionsBundle(
       : null) ?? sessions[0]
 
   return { sessions, activeSessionId: active.id }
+}
+
+/**
+ * ANALYZING 工位专用的会话装载(audit-2026-07-26 关键阻塞项 #1)。
+ *
+ * 与 `loadSessionsBundle()` 的区别 —— **磁盘上没有任何会话时返回真正的空数组**,
+ * 而不是合成一个 `{ id: 'default' }` 占位会话。
+ *
+ * 为什么必须区分:ticket 05 的「▶ 开始分析」CTA 渲染条件是
+ * `sessions.length === 0 && dimensions.every(d => d.count === 0)`。
+ * 旧 loader 在 `_index.yaml` 不存在时返回 1 个默认会话,于是"有 requirement.md、
+ * 还没跑过分析"的真实首次访问拿到 `sessions.length === 1` —— CTA 永远不显示,
+ * 用户没有任何入口启动分析(既有单测用手工构造的 `sessions: []` 掩盖了这个缺口)。
+ *
+ * 三级判定(顺序敏感):
+ * 1. `_index.yaml` 存在且解析出 ≥1 条 → 用它(权威来源,含 label / angle)
+ * 2. `_index.yaml` 缺失/损坏,但 sessions/ 下有子目录 → 按目录名合成会话
+ *    (start handler 崩在写 `_index.yaml` 之前时的自愈路径:chunks 还在,
+ *     不该因为索引丢了就让用户看不到历史)
+ * 3. 都没有 → `{ sessions: [], activeSessionId: '' }`(CTA 可达)
+ *
+ * `defaultSessionsBundle()` / `loadSessionsBundle()` 保持原语义不变(issue 19c
+ * 验收 #13 仍由其单测守护),仅工位 loader 改用本函数。
+ */
+export function loadZoneSessionsBundle(
+  sessionsDir: string | undefined,
+  lastSessionId: string | undefined,
+): SessionsBundle {
+  const empty: SessionsBundle = { sessions: [], activeSessionId: '' }
+  if (!sessionsDir) return empty
+
+  const pickActive = (sessions: AnalysisSession[]): SessionsBundle => {
+    const active =
+      (lastSessionId && sessions.some((s) => s.id === lastSessionId)
+        ? sessions.find((s) => s.id === lastSessionId)
+        : null) ?? sessions[0]
+    return { sessions, activeSessionId: active.id }
+  }
+
+  // 1. _index.yaml 权威来源
+  const indexFile = join(sessionsDir, '_index.yaml')
+  if (existsSync(indexFile)) {
+    try {
+      const sessions = parseSessionsIndexYaml(readFileSync(indexFile, 'utf8'))
+      if (sessions.length > 0) return pickActive(sessions)
+    } catch {
+      /* 落到目录扫描兜底 */
+    }
+  }
+
+  // 2. 目录扫描自愈:sessions/<id>/ 存在即视作一条会话
+  if (!existsSync(sessionsDir)) return empty
+  let dirs: string[]
+  try {
+    dirs = readdirSync(sessionsDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort()
+  } catch {
+    return empty
+  }
+  if (dirs.length === 0) return empty
+  return pickActive(
+    dirs.map((id) => ({
+      id,
+      label: id,
+      angle: 'custom' as const,
+      detectedCount: 0,
+      isStreaming: false,
+    })),
+  )
 }
 
 /**

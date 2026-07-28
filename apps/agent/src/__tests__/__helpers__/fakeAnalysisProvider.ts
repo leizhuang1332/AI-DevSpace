@@ -24,20 +24,13 @@
  *     1.5s 兜底超时,send() 必须真正 resolve
  *
  * ----------------------------------------------------------------------------
- * 已知 mock 缺口(ticket 03+ 待补,留 TODO):
- *   - send() 拒绝路径未模拟:真 SDK 在网络/auth/billing 错误时 throw,本 fake
- *     只覆盖成功路径。handler 现在依赖 `try { session.send(...) } catch`
- *     兜底,但 fake 永远不抛,wiring 测试验不到 catch 分支。
- *   - error envelope 中途推流未模拟:真 SDK 会在 token 上限 / content
- *     filter / runtime error 时推 { type: 'error', message, code, recoverable }
- *     AIEvent,后续紧跟 done{reason: 'error'}。本 fake 只能推文本 + done。
- *     handler 的 `error AIEvent 仅 log` 分支(analysis.ts)未测。
- *   - thinking / tool_use / tool_result 等非 text 事件未映射 chunk,handler
- *     不实现该路径(本期只实现 text → narration chunk),ticket 02 SKILL.md
- *     落地后可能需要扩展(handler 当前直接 break on non-text)。
- *
- * 后续 ticket 03+ 需扩展 fake 来覆盖:让测试可以注入 send() 抛错 + error
- * envelope 中途推流,以验证 handler catch / error log 路径的真行为。
+ * mock 缺口补齐记录(audit-2026-07-26 #3):
+ *   - `sendBehaviorByTurn` 已补 send() reject 路径('reject' / 'reject-after'),
+ *     覆盖 handler 的 catch + cancel 分支(send reject 后不再等一个永不到来的 done)。
+ *   - error envelope 中途推流:调用方直接在 `eventsByTurn` 里塞
+ *     `{ type: 'error', ... }` 即可(handler 只 log 不阻断)。
+ *   - thinking / tool_use / tool_result 仍不映射 chunk —— handler 显式忽略,
+ *     这是 ADR-0020 D8 本期范围内的设计,不是缺口。
  * ----------------------------------------------------------------------------
  */
 
@@ -116,6 +109,20 @@ export interface RecordingProviderHandle {
 export function createRecordingProvider(opts: {
   /** 每个 turn 要推的 events;turnIndex 递增取数组;缺位默认推 done。 */
   eventsByTurn: AIEvent[][]
+  /**
+   * 每个 turn 的 send() 行为(audit-2026-07-26 #3 补齐的"已知 mock 缺口")。
+   *
+   * - `'ok'`(缺省)      —— 推完 eventsByTurn[i] 后 resolve(成功路径)
+   * - `'reject'`         —— **不推任何事件**直接 reject,模拟真 SDK 在
+   *                          auth / 网络 / session errored 时 `send()` 抛错。
+   *                          这是 handler 最危险的路径:此后不会再有任何
+   *                          AIEvent,pump 若无 cancel 会永久挂起。
+   * - `'reject-after'`   —— 先推完 eventsByTurn[i](含 error envelope)再 reject,
+   *                          模拟"SDK 推了 error 但没推 done"。
+   *
+   * 索引与 eventsByTurn 一致;缺位视作 'ok'。
+   */
+  sendBehaviorByTurn?: Array<'ok' | 'reject' | 'reject-after'>
 } = { eventsByTurn: [] }): RecordingProviderHandle {
   const captures: RecordingCaptures = {
     createSessionCalls: [],
@@ -148,13 +155,23 @@ export function createRecordingProvider(opts: {
           const events = opts.eventsByTurn[turnIndex] ?? [
             { type: 'done', reason: 'end_turn' as const, sessionId: 'rec-sdk' },
           ]
+          const behavior = opts.sendBehaviorByTurn?.[turnIndex] ?? 'ok'
           turnIndex++
+          if (behavior === 'reject') {
+            // 真 SDK 语义:session 已 errored / auth 失败 → send() 直接抛,
+            // **之后不会再有任何 AIEvent**(也不会有 done)。
+            throw new Error(`fake send failure (turn ${turnIndex - 1})`)
+          }
           for (const ev of events) pubsub.push(ev)
           // closeAll 只在 events 全部被消费者 drain 后才发生 —— 等下一个
           // microtask 跑完所有 pending resolvers 才 close。
           // 真实 SDK 的 send() await SDK 流关闭才 resolve,这里用 queueMicrotask
           // 让 inner iterator 先消化 events 再 close。
           await new Promise<void>((r) => { queueMicrotask(r) })
+          if (behavior === 'reject-after') {
+            // events 推完但流没关(无 done)→ 再 reject。pump 只能靠 cancel 解开。
+            throw new Error(`fake send failure after events (turn ${turnIndex - 1})`)
+          }
           pubsub.closeAll()
         },
         async cancel() { pubsub.closeAll() },

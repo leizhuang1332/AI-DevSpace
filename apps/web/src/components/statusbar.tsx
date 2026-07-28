@@ -28,6 +28,9 @@ function parseReqId(pathname: string | null): string | null {
   return m ? m[1] : null;
 }
 
+/** SSE 推流触发 snapshot 列表刷新的尾部防抖窗口(ms) */
+const SNAPSHOT_REFRESH_DEBOUNCE_MS = 1500;
+
 export function StatusBar({ tabs, currentId }: Props) {
   const router = useRouter();
   const pathname = usePathname();
@@ -35,8 +38,15 @@ export function StatusBar({ tabs, currentId }: Props) {
   const [snapshots, setSnapshots] = useState<SnapshotEntry[]>([]);
   const [open, setOpen] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  // 刷新计数器:analysis SSE 推流时自增 → 触发下方 effect 重新拉 snapshot 列表
+  const [refreshTick, setRefreshTick] = useState(0);
 
-  // ticket 06:从 agent 拉 snapshot 列表 —— 仅在 requirement 路由 + dropdown 打开时拉
+  // ticket 06:从 agent 拉 snapshot 列表
+  //
+  // audit-2026-07-26 #4:依赖项加 `refreshTick` —— 之前只在 `reqId` 变化时拉一次,
+  // 而 snapshot 是**分析过程中**才生成的:首次加载(分析还没跑)列表为空 →
+  // `snapshots.length > 0` 为 false → 回滚入口整块不渲染;分析跑完 reqId 没变,
+  // effect 不重跑,用户直到手动刷新页面前都看不到回滚按钮。
   useEffect(() => {
     if (!reqId) {
       setSnapshots([]);
@@ -55,6 +65,34 @@ export function StatusBar({ tabs, currentId }: Props) {
     })();
     return () => {
       cancelled = true;
+    };
+  }, [reqId, refreshTick]);
+
+  // audit-2026-07-26 #4:订阅该需求的 SSE,分析推流时刷新 snapshot 列表。
+  //
+  // 为什么防抖:一次分析会推几十条 analysis_chunk,但 snapshot 每 turn 只有一个
+  // (before_admission / before_brainstorm)。用 1.5s 尾部防抖把整串推流收敛成
+  // 少数几次拉取,避免 chunk 级别的请求风暴。
+  useEffect(() => {
+    if (!reqId) return;
+    if (typeof window === 'undefined' || typeof EventSource === 'undefined') return;
+    const es = new EventSource(`/api/requirement/${reqId}/events`);
+    let timer: number | null = null;
+    const scheduleRefresh = (): void => {
+      if (timer !== null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        timer = null;
+        setRefreshTick(t => t + 1);
+      }, SNAPSHOT_REFRESH_DEBOUNCE_MS);
+    };
+    es.addEventListener('analysis_chunk', scheduleRefresh);
+    es.addEventListener('error', () => {
+      /* 浏览器自动重连;回滚菜单是辅助入口,断线不需要提示 */
+    });
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+      es.removeEventListener('analysis_chunk', scheduleRefresh);
+      es.close();
     };
   }, [reqId]);
 

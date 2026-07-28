@@ -1,0 +1,82 @@
+# ANALYZING 真跑 E2E(ADR-0020 D11 · audit-2026-07-26 #5)
+#
+# 这条 workflow **默认不入主仓 CI** —— 它需要 `ANTHROPIC_API_KEY` 才能跑出
+# 真实断言,缺 key 时按 `scripts/e2e-run.sh` 的 SKIP 语义走(不 fail)。
+# 触发方式:
+#   - 手动:`Actions` → `ANALYZING real run E2E` → `Run workflow`(可选填
+#     `branch` 走非 main 分支)
+#   - 定时:每周一 UTC 08:00 跑一次(海外 reviewer 周一上班时已经归档完毕)
+#
+# 物证:`verify-analyzing-real-run.sh` 把 SSE 流 / chunks.jsonl 头几行归档到
+# `~/.aidevspace/verification/<timestamp>/`,reviewer 通过 GitHub Actions
+# artifact(`verification-<timestamp>`)拉下来对照 PR 评论里的报告。
+
+name: ANALYZING real run E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to check out'
+        required: false
+        default: 'main'
+  schedule:
+    - cron: '0 8 * * 1'
+  # 显式不入 push / PR:审计明确说"是否接入 CI 待跑过一次真实物证后再决定"
+
+concurrency:
+  group: analyzing-real-run-e2e
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # 必填:CI 上拿不到 key 走 SKIP 分支(脚本默认行为),不 fail
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      # 让 e2e 配置自启 web + agent(audit-2026-07-26 #5 修)
+      E2E_AUTOSTART: '1'
+      # 隔离工作区,避免污染本机 ~/.aidevspace
+      AIDEVSPACE_HOME: ${{ runner.temp }}/aidevspace
+      # 让 web 启动脚本能自动建 snapshot 目录
+      AIDEVSPACE_SNAPSHOT_DIR: ${{ runner.temp }}/aidevspace/snapshots/analysis
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || 'main' }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.0.0
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright chromium
+        run: pnpm --filter @ai-devspace/web exec playwright install chromium --with-deps
+
+      - name: Build (only typecheck, not next build — see CLAUDE.md)
+        run: pnpm typecheck
+
+      - name: Run verification script (SDK 真跑 + 结构化产物断言)
+        run: bash scripts/verify-analyzing-real-run.sh
+
+      - name: Upload verification artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.AIDEVSPACE_HOME }}/verification/**
+            ${{ env.AIDEVSPACE_HOME }}/logs/**
+          if-no-files-found: warn
+          retention-days: 14
