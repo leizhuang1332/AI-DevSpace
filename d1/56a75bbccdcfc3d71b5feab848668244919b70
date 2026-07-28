@@ -1,0 +1,113 @@
+apps/agent/src/routes/analysis.ts
+  s_90467e6f62d5ec::t_3e3f16cb9530e6 1202-1203
+  s_90467e6f62d5ec::t_d69c806011ff15 395
+  s_90467e6f62d5ec::t_3907b2edc3f0f8 86-89,91
+  s_90467e6f62d5ec::t_3a72268ac9a045 41,430,448
+  s_90467e6f62d5ec::t_e14b7dad75df59 46
+  s_90467e6f62d5ec::t_468c7a17e03b48 1035-1036,1190,1210
+  s_90467e6f62d5ec::t_3b96ec9b743de6 108-114
+  s_90467e6f62d5ec::t_78ace4ae7f065f 43-45,47,1146,1176
+  s_90467e6f62d5ec::t_3f3e322bd94e01 222-238
+  s_90467e6f62d5ec::t_2a1739665e6167 1001-1006
+  s_90467e6f62d5ec::t_8a7597a55d1c98 1059,1061-1065,1067-1068,1070-1076,1083-1118,1121-1123,1127,1145,1147-1150,1161,1171-1175,1177-1178
+apps/agent/src/routes/analysis-snapshot.ts
+  s_90467e6f62d5ec::t_391abd01359ae2 69-96,98-99
+  s_90467e6f62d5ec::t_abc3a750d3808e 124,126
+  s_90467e6f62d5ec::t_482c2a4a8f6996 148,150
+  s_90467e6f62d5ec::t_5011915d6a01e0 165-169
+  s_90467e6f62d5ec::t_727543daf3c11e 238,240,248
+  s_90467e6f62d5ec::t_5b91b4d90129e2 201-205
+.scratch/analyzing-real-prd-onboarding/issues/07-e2e-analyzing-real-run.md
+  s_90467e6f62d5ec::t_df96b3296783f0 9-10,18-21,30-34
+.scratch/analyzing-real-prd-onboarding/issues/00-baseline-test-green.md
+  s_90467e6f62d5ec::t_df96b3296783f0 9-10,13-16,25-29
+apps/web/src/__tests__/statusbar-rollback.test.tsx
+  s_90467e6f62d5ec::t_5497363f7617ff 1-119
+apps/agent/src/__tests__/analysis-chunk-parser.test.ts
+  s_90467e6f62d5ec::t_13c58a4e164124 52-57
+  s_90467e6f62d5ec::t_c47fa57e176674 1-44,58-239
+  s_90467e6f62d5ec::t_fcac78b2380a6b 45-51
+apps/agent/src/__tests__/__helpers__/fakeAnalysisProvider.ts
+  s_90467e6f62d5ec::t_c501dfd56eacf2 27-33
+  s_90467e6f62d5ec::t_637f04160eaf24 112-125
+  s_90467e6f62d5ec::t_0113f8dd282fef 158,160-164,171-174
+packages/shared/src/sse.ts
+  s_90467e6f62d5ec::t_8bbc735575ec08 86-101
+apps/web/src/__tests__/analyzing-loader-cta-integration.test.tsx
+  s_90467e6f62d5ec::t_717fb893a50c61 1-193
+packages/scripts/agent-start.sh
+  s_90467e6f62d5ec::t_deff0a6cdab70b 10-13,15
+  s_90467e6f62d5ec::t_15bf0bd3b85dac 38
+.scratch/analyzing-real-prd-onboarding/issues/04-skill-loader-dual-root-union.md
+  s_90467e6f62d5ec::t_df96b3296783f0 23-27
+scripts/verify-analyzing-real-run.sh
+  s_90467e6f62d5ec::t_d0e4370b87e81a 193-216,218,229,236-240,242,245-254,259-261,265-266,270,276-278,280-291
+  s_90467e6f62d5ec::t_916b927285cab3 294,296
+  s_90467e6f62d5ec::t_2a58755921c441 17-20,23-24
+  s_90467e6f62d5ec::t_e7b44681151094 321,333-334,344-348
+.scratch/analyzing-real-prd-onboarding/issues/03-refund-fixture-and-short-circuit-removal.md
+  s_90467e6f62d5ec::t_df96b3296783f0 9-13,21-25
+.scratch/analyzing-real-prd-onboarding/issues/06-snapshot-per-turn.md
+  s_90467e6f62d5ec::t_df96b3296783f0 9-15,23-27
+apps/web/src/components/analyzing-zone.tsx
+  s_90467e6f62d5ec::t_d106b0b4e08c8d 440-454,458-462,464-465
+  s_90467e6f62d5ec::t_75175e281b96dd 3,6
+  s_90467e6f62d5ec::t_812dafd4169bf2 455-457
+apps/web/src/__tests__/analyzing-designing-fs-loader.test.ts
+  s_90467e6f62d5ec::t_5427a0bb1e7451 277-279,281-282,285,288-296
+.scratch/analyzing-real-prd-onboarding/issues/02-built-in-skill-md-content.md
+  s_90467e6f62d5ec::t_df96b3296783f0 9-15,23-27
+apps/agent/src/__tests__/routes-analysis-start.test.ts
+  s_90467e6f62d5ec::t_99027ad0480d0f 797
+  s_90467e6f62d5ec::t_ca846cff28e1c5 529-532,534-535,540
+  s_90467e6f62d5ec::t_703eb686b81eda 752-763,768,770,773-778,785-786,788,795-796
+apps/agent/src/__tests__/analysis-dual-turn-real-paths.test.ts
+  s_90467e6f62d5ec::t_b0a2ac4d21733a 56-65,68,74
+  s_90467e6f62d5ec::t_00359ff4763e99 1-55,66-67,69-73,75-319
+apps/agent/src/routes/analysis-chunk-parser.ts
+  s_90467e6f62d5ec::t_b68e4e924f36b2 1-322,328-364,373-480
+  s_90467e6f62d5ec::t_de6d42e487ce55 365-366,372
+  s_90467e6f62d5ec::t_54f0d7167916c9 323-327
+  s_90467e6f62d5ec::t_cd3b57808decf0 367-371
+apps/web/src/lib/__tests__/analyzing.test.ts
+  s_90467e6f62d5ec::t_7d23761eea4615 945-952,954-955,958,960-966,968-969
+apps/web/src/lib/analyzing.ts
+  s_90467e6f62d5ec::t_d489b459b420f2 940-942,958,982-984,987
+  s_90467e6f62d5ec::t_72d42d599d7c42 929-939,943-957,959-981,985-986,988-992
+  s_90467e6f62d5ec::t_90358c88c22d80 86-108,928
+.github/workflows/analyzing-real-run-e2e.yml
+  s_90467e6f62d5ec::t_37ba36ee4b2646 1-82
+.scratch/analyzing-real-prd-onboarding/issues/05-admission-dashboard-start-cta.md
+  s_90467e6f62d5ec::t_df96b3296783f0 9-16,24-28
+apps/web/src/lib/analyzing.server.ts
+  s_90467e6f62d5ec::t_5873630a626872 677
+  s_90467e6f62d5ec::t_4eb7d0795f9930 695
+  s_90467e6f62d5ec::t_4c35c25c52c0f4 644-647,654-665
+  s_90467e6f62d5ec::t_a4f9c64775feae 841-910
+  s_90467e6f62d5ec::t_3e1e406ed1383b 131-135,840
+  s_90467e6f62d5ec::t_a6e1d1d5008721 145-171
+  s_90467e6f62d5ec::t_878b168f07dd9b 33,44
+apps/web/src/components/statusbar.tsx
+  s_90467e6f62d5ec::t_3daeeb902333c5 31-33
+  s_90467e6f62d5ec::t_d378dc00653606 41-42,44-49,69-96
+.scratch/analyzing-real-prd-onboarding/issues/01-start-handler-dual-turn-real-sdk.md
+  s_90467e6f62d5ec::t_df96b3296783f0 9-16,24-28
+apps/web/playwright.config.ts
+  s_90467e6f62d5ec::t_1591160d2e2290 4-11,27-53,76,87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "d156a75bbccdcfc3d71b5feab848668244919b70",
+  "prompts": {},
+  "sessions": {
+    "s_90467e6f62d5ec": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6ed7bb50-9b0e-4c97-a412-5f4d1f1ba0a5",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
