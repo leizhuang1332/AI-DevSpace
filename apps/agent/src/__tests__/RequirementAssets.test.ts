@@ -25,6 +25,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { TokenManager } from '../auth/TokenManager.js'
 import { authPlugin } from '../auth/authPlugin.js'
 import { requirementRoutes } from '../routes/requirement.js'
@@ -47,9 +48,14 @@ function makePngImage(name: string): ParsedUploadImage {
   return { name, mime: 'image/png', base64: TINY_PNG_B64 }
 }
 
-/** 真实 fixture 路径(与 RequirementUpload.test.ts 共用) */
-const SAMPLE_DOCX = new URL('../../test/fixtures/sample-prd.docx', import.meta.url)
-  .pathname
+/** 真实 fixture 路径(与 RequirementUpload.test.ts 共用)
+ *
+ *  必须走 `fileURLToPath` 而不是 `.pathname` —— Windows 下 `.pathname` 是
+ *  `/D:/...`,readFileSync 会把它当成"当前盘根目录下的相对路径"解析成
+ *  `D:\D:\...` → ENOENT。 */
+const SAMPLE_DOCX = fileURLToPath(
+  new URL('../../test/fixtures/sample-prd.docx', import.meta.url),
+)
 
 function gitMainOnly(): RequirementServiceDeps['git'] {
   return vi.fn(async () => ({ code: 0, stdout: '', stderr: '' }))

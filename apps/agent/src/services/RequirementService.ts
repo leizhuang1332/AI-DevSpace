@@ -848,9 +848,14 @@ export class RequirementService {
     return out
   }
 
-  /** `path` 字段相对 workspace root(便于 agent 内部测试断言;实际写盘走 `assetPath`) */
+  /** `path` 字段相对 workspace root(便于 agent 内部测试断言;实际写盘走 `assetPath`)
+   *
+   *  **必须用 POSIX 分隔符** —— 该字段经 JSON API 返回给 web 端作为逻辑资源标识
+   *  (拼 URL / 做 key / 展示),不是用来给 fs 用的。Windows 下若用 `join()` 会
+   *  产出 `requirements\<id>\assets\x.png`,反斜杠进 URL 即破。真实写盘路径由
+   *  `assetPath()` 单独用 `join()` 生成,与本方法无关。 */
   private relativeAssetPath(reqId: string, name: string): string {
-    return join('requirements', reqId, 'assets', name)
+    return `requirements/${reqId}/assets/${name}`
   }
 
   /** `url` 字段:agent 路由路径(前端 fetcher 追加 agent base) */
@@ -1123,7 +1128,10 @@ export class RequirementService {
           type: 'directory',
           children: children.map((child) => ({
             name: child,
-            path: `${name}${sep}${child}`,
+            // POSIX 分隔符:ResourceTree 的 path 是 API 层逻辑标识(前端拿去拼
+            // URL / 做 React key),不是 fs 路径。Windows 下用 `sep` 会产出
+            // `assets\prd-1.png`,反斜杠进 URL 即破。
+            path: `${name}/${child}`,
             type: 'file' as const,
           })),
         })

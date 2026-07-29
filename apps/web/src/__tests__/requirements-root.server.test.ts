@@ -14,7 +14,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { isAbsolute, join, resolve, sep } from 'node:path'
 import {
   resolveRequirementsRoot,
   expandHome,
@@ -62,8 +62,10 @@ describe('expandHome', () => {
 
   it('~ 后跟子路径(如 ~/.aidevspace/requirements)→ 正确展开', () => {
     const expanded = expandHome('~/.aidevspace/requirements')
-    expect(expanded.endsWith('/.aidevspace/requirements')).toBe(true)
-    expect(expanded.startsWith('/')).toBe(true) // 绝对路径
+    // 断言必须跨平台:expandHome 走 `join()`,Windows 下产出 `C:\...\.aidevspace\requirements`,
+    // 所以不能用 `startsWith('/')` 判绝对路径、也不能用 `/` 硬编码分隔符。
+    expect(expanded.split(sep).join('/')).toMatch(/\/\.aidevspace\/requirements$/)
+    expect(isAbsolute(expanded)).toBe(true)
   })
 
   it('非 ~ 开头 → 原样返回(相对路径)', () => {
@@ -115,7 +117,7 @@ describe('resolveRequirementsRoot · 第一层 config.yaml', () => {
     const root = resolveRequirementsRoot({ configPath })
 
     expect(root).toMatch(/\.aidevspace$/)
-    expect(root.startsWith('/')).toBe(true)
+    expect(isAbsolute(root)).toBe(true)
   })
 
   it('config.yaml workspaceRoot 带引号 → 解析后正确(去掉引号)', () => {

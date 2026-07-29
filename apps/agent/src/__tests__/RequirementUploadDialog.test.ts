@@ -21,6 +21,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { TokenManager } from '../auth/TokenManager.js'
 import { authPlugin } from '../auth/authPlugin.js'
 import { requirementRoutes } from '../routes/requirement.js'
@@ -35,8 +36,9 @@ import { createSseHub } from '../sse/SseHub.js'
 const TINY_PNG_B64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
 
-const SAMPLE_DOCX = new URL('../../test/fixtures/sample-prd.docx', import.meta.url)
-  .pathname
+const SAMPLE_DOCX = fileURLToPath(
+  new URL('../../test/fixtures/sample-prd.docx', import.meta.url),
+)
 
 function gitMainOnly(): RequirementServiceDeps['git'] {
   return vi.fn(async () => ({ code: 0, stdout: '', stderr: '' }))
