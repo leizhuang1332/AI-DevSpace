@@ -114,7 +114,8 @@ export async function startAnalysis(
       `/api/requirements/${encodeURIComponent(requirementId)}/analysis/start`,
       {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        // 不显式传 content-type：agentFetch 在有 body 时自动补 'Content-Type'
+        // （与 requirement.ts / repo-attach.ts 等邻居调用方保持一致）
         body: JSON.stringify(params),
       },
     )

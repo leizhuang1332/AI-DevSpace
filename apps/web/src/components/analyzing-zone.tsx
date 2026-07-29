@@ -216,8 +216,11 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   // - chunksBySessionId:每个会话的 chunks map(mock 简化版:所有会话共用 data.chunks)
   // -------------------------------------------------------------------------
   // ticket 05 · ADR-0020 D9:不做"空 sessions 自动塞 default"兜底 —— 让
-  // `sessions.length === 0` 在 disk 空时真实可达(否则「开始分析」按钮永远
-  // 不显示)。Sessions 由用户主动创建(POST start / onCreate)或由 SSR 注入。
+  // `sessions.length === 0` 在 disk 空时真实可达。
+  // ticket 08 (ADR-0020 D2/D9 修订 · 2026-07-28):按钮常驻,这条兜底约束
+  // 的"否则按钮永不显示"前提已失效,但"不做默认兜底"契约保留 —— 它仍是
+  // audit-2026-07-26 #1 的修复(避免 loader 合成默认会话骗 SSR 数据)。
+  // Sessions 由用户主动创建(POST start / onCreate)或由 SSR 注入。
   const [sessions, setSessions] = useState<AnalysisSession[]>(data.sessions)
   const [activeSessionId, setActiveSessionId] = useState<string>(
     data.activeSessionId || sessions[0]?.id || '',
@@ -301,21 +304,28 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   }, [])
 
   // -------------------------------------------------------------------------
-  // 「开始分析」状态机(ticket 05 · ADR-0020 D9)
+  // 「开始分析」状态机(ticket 05 · ADR-0020 D9 · ticket 08 修订 · 2026-07-28)
   // - startState: 'idle' | 'starting' | 'running'(传给 AdmissionDashboard)
   //   - idle     → 「▶ 开始分析」可点击
   //   - starting → POST 在路上;切 running 文案,disabled 防重
-  //   - running  → POST 201 已返,SSE 在推;disabled(等条件 false 按钮自然消失)
-  // - handleStart:点击 → startAnalysis() → 乐观追加 session 让按钮立即消失
+  //   - running  → POST 201 已返,SSE 在推;disabled(等 analysis_done 事件复位)
   //
-  // 渲染条件(由 AdmissionDashboard 单测覆盖):
-  //   sessions.length === 0 && admission.dimensions.every(d => d.count === 0)
-  // 此处只把结果传给 AdmissionDashboard;具体条件判定由 AdmissionDashboard
-  // 单测覆盖,AnalyzingZone 单测侧不重复断言。
+  // ticket 08 调整:按钮从「空态 CTA」改为「常驻」(D2/D9 修订);handleStart
+  // 不再因"按钮自然消失"而被迫变成一次性 — 加幂等守卫 `startState !== 'idle'`
+  // 直接 return,确保流式期间/并发点击不重复 POST;running → idle 由下方 SSE
+  // EventSource 监听 `'analysis_done'` 命名事件触发(agent 端 turn-done 时
+  // publish,见 apps/agent/src/routes/analysis.ts runTurn 末尾)。
+  //
+  // 「再次点击」语义:已存在 sessions 时点按钮 = 再开一轮新分析(POST start
+  // → 乐观追加新 session → 切过去),与首次点击完全对称;不再有"空 sessions
+  // 兜底"前提 — 父组件永远传 showStartButton。
   // -------------------------------------------------------------------------
   const [startState, setStartState] = useState<AdmissionStartState>('idle')
 
   const handleStart = useCallback(async () => {
+    // ticket 08 幂等守卫:流式期间 disabled 是主防线,但 onClick 仍可能被
+    // 键盘回车 / dev HMR 瞬态 disabled 丢失触发;提前 return 保安全。
+    if (startState !== 'idle') return
     setStartState('starting')
     // 默认首个会话 = 架构(ticket 05 spec 默认;UI 层暂无角度选择 — 产品层
     // 后续 PR 由产品决定是否暴露角度选择)。label 派生自
@@ -346,9 +356,10 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       return
     }
 
-    // 成功路径:乐观追回会话 + 切 active;AdmissionDashboard 渲染条件
-    // (sessions.length === 0) 立即变 false → 「开始分析」按钮自然消失。
-    // SSE 推过来的 chunks 通过既有 EventSource 订阅进入 chunksBySessionId。
+    // 成功路径:乐观追加 session + 切 active(button 因 showStartButton=true
+    // 仍显示,但 disabled 因 startState='running')。SSE 推过来的 chunks 通过
+    // 既有 EventSource 订阅进入 chunksBySessionId;turn-done 时 agent 端
+    // publish `analysis_done` 事件,本组件下方监听 → setStartState('idle')。
     const newSession: AnalysisSession = {
       id: success.sessionId,
       label: startLabel,
@@ -365,10 +376,9 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
     setActiveSessionId(newSession.id)
     setPhase({ kind: 'idle' })
     setLastSessionCookie(newSession.id)
-    // 标记 running(SSE 会继续推 chunks;AdmissionDashboard 端条件变 false
-    // → 按钮已消失,这里的 running 状态主要用于防御性 disabled 防抖)
+    // 标记 running;按钮 disabled 至 SSE analysis_done 事件触发复位
     setStartState('running')
-  }, [data.requirementId, pushToast])
+  }, [data.requirementId, pushToast, startState])
 
   // 主区滚动位置持久化已删(ADR-0019 D4):analyzing-main 改为 overflow-hidden 后
   // 外层不再滚动,mainScrollRef / scrollStorageKey / sessionStorage 全部为死代码。
@@ -390,10 +400,15 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   }, [data.chunks, activeSessionId, setChunks])
 
   // -------------------------------------------------------------------------
-  // SSE 订阅(issue 19b D2 ② 插话后 AI 推送新 chunk)
+  // SSE 订阅(issue 19b D2 ② 插话后 AI 推送新 chunk · ticket 08 扩展
+  // `analysis_done` 监听用于 startState 复位)
   // 用 EventSource 订阅 /api/requirement/<id>/events,监听 **命名事件**
-  // 'analysis_chunk'(服务端 publish 走 `event: analysis_chunk\ndata: ...`,
+  // 'analysis_chunk' / 'analysis_done'(服务端 publish 走 `event: <type>\ndata: ...`,
   // 命名事件不会触发 EventSource 默认的 'message' 监听)
+  //
+  // ticket 08:agent 端 turn-done 时 publish `analysis_done`(reqId/sessionId/turn),
+  // 本监听仅在 payload.sessionId 与当前 activeSessionId 匹配时复位 startState —
+  // 避免后台其它 session 完成时误复位"最近一次点击"造成的 running 状态。
   // -------------------------------------------------------------------------
   useEffect(() => {
     if (typeof window === 'undefined' || typeof EventSource === 'undefined') return
@@ -412,15 +427,28 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
         /* ignore malformed event */
       }
     }
+    const onAnalysisDone = (e: MessageEvent<string>): void => {
+      try {
+        const parsed = JSON.parse(e.data) as { sessionId?: string; turn?: 1 | 2 }
+        // 仅复位与当前 active session 匹配的 done;否则后台 session 完成会
+        // 误清掉"最近一次点击"造成的 running 状态
+        if (!parsed.sessionId || parsed.sessionId !== activeSessionId) return
+        setStartState('idle')
+      } catch {
+        /* ignore malformed event */
+      }
+    }
     es.addEventListener('analysis_chunk', onAnalysisChunk)
+    es.addEventListener('analysis_done', onAnalysisDone)
     es.addEventListener('error', () => {
       /* browser will auto-reconnect; nothing to do */
     })
     return () => {
       es.removeEventListener('analysis_chunk', onAnalysisChunk)
+      es.removeEventListener('analysis_done', onAnalysisDone)
       es.close()
     }
-  }, [data.requirementId, setChunks])
+  }, [data.requirementId, setChunks, activeSessionId])
 
   const totalChunks = chunks.length
   const products = deriveProducts(chunks)
@@ -742,16 +770,18 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
         isStreaming={data.streamMeta.isStreaming}
       />
       {/* issue 19a VS1 — 准入仪表板(顶部 5 维度卡 + verdict 徽章 + 待裁决 N · 全局共享)
-          ticket 05 (ADR-0020 D9):空态时右端渲染「开始分析」按钮 →
-            sessions.length === 0 && admission.dimensions.every(d => d.count === 0) */}
+          ticket 05 (ADR-0020 D9):原空态时右端渲染「开始分析」按钮 →
+            sessions.length === 0 && admission.dimensions.every(d => d.count === 0)
+          ticket 08 (ADR-0020 D2/D9 修订 · 2026-07-28):按钮常驻,父组件永远传
+            showStartButton;已存在 sessions 时点按钮 = 再开一轮新分析
+            (handleStart 现状就是 POST start → 追加新 session)。AdmissionDashboard
+            自身的 data-phase 仍由 dimensions.every(count===0) 派生,仅作为
+            "空/有产物"视觉区分,与按钮渲染门解耦。 */}
       <div className="px-6 pt-4">
         <AdmissionDashboard
           admission={currentAdmission}
           onAcceptRisk={() => setVerdictOverride('pending')}
-          showStartButton={
-            sessions.length === 0 &&
-            currentAdmission.dimensions.every((d) => d.count === 0)
-          }
+          showStartButton
           onStart={() => {
             void handleStart()
           }}

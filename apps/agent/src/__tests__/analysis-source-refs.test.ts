@@ -107,18 +107,26 @@ describe('start handler dual-turn wiring (ADR-0020 D8)', () => {
     // 2. send 被调 2 次
     expect(captures.sendCalls.length).toBe(2)
 
-    // 3. turn-1 user message 含 PRD + 5 维度
+    // 3. turn-1 user message 含 PRD + 5 维度 + 输出格式约束
+    //    注意(fix:识别产物为空):user message **刻意不再出现 "admission-check Skill"**
+    //    字样 —— 该措辞会让模型去查 Claude Code 的 Skill 注册表,查不到就自由发挥、
+    //    输出 markdown,导致 [DIM] 标记全丢。改为直接约束输出格式。
     const turn1Text = captures.sendCalls[0].text
     expect(turn1Text).toContain('Wiring 测试 PRD')
     expect(turn1Text).toContain('内容很简短')
     expect(turn1Text).toContain('5 维度')
-    expect(turn1Text).toContain('admission-check')
+    expect(turn1Text).toContain('[DIM')
+    expect(turn1Text).toContain('[VERDICT]')
+    expect(turn1Text).not.toContain('admission-check Skill')
 
-    // 4. turn-2 user message 含 已知 + brainstorm
+    // 4. turn-2 user message 含 已知 + brainstorm + 三桶标记约束
     const turn2Text = captures.sendCalls[1].text
     expect(turn2Text).toContain('已知')
     expect(turn2Text).toContain('brainstorm')
-    expect(turn2Text).toContain('requirement-brainstorm')
+    expect(turn2Text).toContain('[SUBPROBLEM]')
+    expect(turn2Text).toContain('[RISK]')
+    expect(turn2Text).toContain('[OPTION]')
+    expect(turn2Text).not.toContain('requirement-brainstorm Skill')
 
     // 5. jsonl ≥ 1 行(双 turn 各推 ≥1 条 text → 至少 2 行)
     const chunksFile = join(root, 'requirements', reqId, 'analysis', 'sessions', 'sess-wiring-1', 'chunks.jsonl')

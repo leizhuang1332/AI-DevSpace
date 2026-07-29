@@ -170,21 +170,26 @@ describe('AnalyzingZone · 满数据渲染(ticket 02 · ADR-0017 D1)', () => {
 })
 
 // ============================================================================
-// ticket 05 (ADR-0020 D9) · 「开始分析」CTA 条件触发逻辑
+// ticket 05 (ADR-0020 D9) · ticket 08 (ADR-0020 D2/D9 修订 · 2026-07-28) ·
+// 「开始分析」按钮常驻显示
 //
-// 父组件 AnalyzingContent 计算 `showStartButton` 后传给 AdmissionDashboard:
-//   sessions.length === 0 && admission.dimensions.every(d => d.count === 0)
-// AdmissionDashboard 自身的单测只覆盖 prop 渲染分支(见 analyzing-admission-dashboard.test.tsx);
-// 这里覆盖父组件的条件组合 —— 任一前提不满足,AdmissionDashboard 不应渲染「开始分析」按钮。
+// ticket 08:父组件 AnalyzingContent 现在**永远传** `showStartButton` 给
+// AdmissionDashboard(按钮常驻);data-phase 属性独立派生自
+// `dimensions.every(count===0)`,仅反映"是否有产物",与按钮渲染门解耦。
+// 这里覆盖父组件的两条独立派生:
+//   - 按钮渲染门:永远 true(sessions / count 都不影响,只是不再 hide)
+//   - data-phase:基于 dimensions.every(count===0)
+// AdmissionDashboard 自身的单测只覆盖 prop 渲染分支
+// (见 analyzing-admission-dashboard.test.tsx);这里覆盖父组件的条件组合。
 // ============================================================================
 
-describe('AnalyzingZone · 「开始分析」CTA 条件触发(ticket 05 · ADR-0020 D9)', () => {
-  it('空 sessions + 默认 0 count → 渲染「开始分析」按钮 + section data-phase=empty_armed', () => {
+describe('AnalyzingZone · 「开始分析」按钮常驻 + data-phase 派生(ticket 08)', () => {
+  it('空 sessions + 默认 0 count → 按钮渲染 + section data-phase=empty_armed', () => {
     const data: AnalyzingData = {
       ...emptyAnalyzing('req-empty'),
       empty: false,
       phase: 'active',
-      // sessions 默认 [] + admission 默认全 0 → 条件满足
+      // sessions 默认 [] + admission 默认全 0 → 按钮常驻可见,空态 data-phase
     }
     render(<AnalyzingZone data={data} />)
     expect(screen.getByTestId('admission-start-btn')).toBeInTheDocument()
@@ -193,7 +198,10 @@ describe('AnalyzingZone · 「开始分析」CTA 条件触发(ticket 05 · ADR-0
     )
   })
 
-  it('有 sessions(至少 1)→ 「开始分析」按钮不渲染', () => {
+  it('有 sessions(至少 1)→ 按钮仍渲染 + section data-phase=active', () => {
+    // ticket 08:常驻按钮后,已有 sessions 时按钮应仍可见(再次点击 = 再开一轮
+    // 新分析);data-phase 因 dimensions.every(count===0) 仍可能为 active 或
+    // empty_armed 取决于 admission chunks,这里强制 dimensions 有 count > 0
     const data: AnalyzingData = {
       ...emptyAnalyzing('req-with-sess'),
       empty: false,
@@ -208,17 +216,24 @@ describe('AnalyzingZone · 「开始分析」CTA 条件触发(ticket 05 · ADR-0
         },
       ],
       activeSessionId: 'sess-arch',
+      admission: {
+        ...emptyAnalyzing('req-with-sess').admission,
+        dimensions: emptyAnalyzing('req-with-sess').admission.dimensions.map(
+          (d) => ({ ...d, count: 1 }),
+        ),
+      },
     }
     render(<AnalyzingZone data={data} />)
-    expect(screen.queryByTestId('admission-start-btn')).toBeNull()
+    expect(screen.getByTestId('admission-start-btn')).toBeInTheDocument()
     expect(screen.getByTestId('admission-dashboard').getAttribute('data-phase')).toBe(
       'active',
     )
   })
 
-  it('空 sessions + 至少一个维度 count > 0 → 「开始分析」按钮不渲染', () => {
-    // 注:此场景覆盖的是 `admission.dimensions.every(d => d.count === 0)` 子条件
-    // —— 即使 sessions 为空,只要有维度被 AI 标过非 0,空态就解除
+  it('空 sessions + 至少一个维度 count > 0 → 按钮仍渲染 + section data-phase=active', () => {
+    // ticket 08:data-phase 派生自 dimensions.every(count===0),与 sessions
+    // 是否为空无关 —— 此处即使 sessions 为空,有维度 count > 0 也会解除
+    // empty_armed 视觉态;按钮仍常驻可见
     const data: AnalyzingData = {
       ...emptyAnalyzing('req-warm'),
       empty: false,
@@ -239,7 +254,10 @@ describe('AnalyzingZone · 「开始分析」CTA 条件触发(ticket 05 · ADR-0
       },
     }
     render(<AnalyzingZone data={data} />)
-    expect(screen.queryByTestId('admission-start-btn')).toBeNull()
+    expect(screen.getByTestId('admission-start-btn')).toBeInTheDocument()
+    expect(screen.getByTestId('admission-dashboard').getAttribute('data-phase')).toBe(
+      'active',
+    )
   })
 
   it('AdmissionDashboard 是全局共享:窄视口 / 桌面视口都同位置渲染', () => {

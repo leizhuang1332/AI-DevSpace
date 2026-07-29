@@ -42,6 +42,23 @@ describe('slice 15: agentFetch', () => {
     expect(call[1].headers['Content-Type']).toBe('application/json')
   })
 
+  it('调用方已传小写 content-type 时不重复注入（回归：415 FST_ERR_CTP_INVALID_MEDIA_TYPE）', async () => {
+    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      new Response('{}', { status: 200 }),
+    )
+    await agentFetch('/api/requirements/req-001/analysis/start', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ angle: 'architecture' }),
+    })
+    const call = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0]
+    const keys = Object.keys(call[1].headers).filter((k) => k.toLowerCase() === 'content-type')
+    // 只能有一个 content-type key —— 两个 key 会被 fetch 合并成
+    // "application/json, application/json"，Fastify 端 415
+    expect(keys).toHaveLength(1)
+    expect(new Headers(call[1].headers).get('content-type')).toBe('application/json')
+  })
+
   it('非 2xx 抛 AgentError 含 status + body', async () => {
     ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       new Response(JSON.stringify({ error: 'invalid_patch', details: ['x'] }), {

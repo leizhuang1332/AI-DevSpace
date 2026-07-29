@@ -20,16 +20,19 @@ recommended_user_override: true
 
 ---
 
-## ⚠️ 下游解析责任说明(ticket 03+ 待补)
+## 🔴 输出格式硬约束(违反 = 产物全部丢失)
 
-本 Skill 当前 prompt 阶段只约定 SDK 输出的文本形态(`[SUBPROBLEM]` / `[RISK]` / `[OPTION]`
-+ `source_refs:`)。SDK 流式 text 事件到 chunks.jsonl 行 + `kind` 字段 + `source_refs`
-字段的解析 / 映射由**下游 SDK 文本解析层**负责(ADR-0020 D8 末段标注 ticket 03+ 范围):
-- 当前 handler 默认把所有 SDK text 事件包装为 `kind: 'narration'`(apps/agent/src/routes/analysis.ts:1004)
-- 在文本解析层落地前,本 Skill 输出的三桶标记在 jsonl 里仍表现为"plain narration 行",
-  web 端 `<ProductList>` 不直接吃这些 chunk(直到 ticket 03+ 接入文本解析层)
+你的输出会被 `analysis-chunk-parser` **逐行**解析。解析器**只认独占一行的方括号标记**:
+`[SUBPROBLEM]` / `[RISK]` / `[OPTION]` / `[SUBPROBLEM_EMPTY]` 等。
 
-本 ticket 02 只负责 prompt 内容,不引入 SDK 文本解析逻辑。
+- ✅ 标记行必须**独占一行**、顶格、无任何前后缀
+- ❌ 任何**没有标记**的行一律被降级为 `kind: 'narration'`,**不进入**「识别产物」三桶 UI
+- ❌ 严禁输出 markdown 标题(`#` / `##`)、表格(`|`)、有序/无序列表(`1.` / `-`)、
+  emoji 分组标题(如 `## 🪣 subproblem`)—— 这些都不是标记,会导致整轮产物为空
+- ❌ 不要写导语、总结、"使用建议"等包裹性文字
+
+**本轮唯一合法的输出形态**:若干个「标记行 + `text:` 行 + `source_refs:` 块」构成的段落,
+段落之间用一个空行分隔。除此之外不要输出任何内容。
 
 ---
 

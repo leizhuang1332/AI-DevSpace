@@ -225,9 +225,16 @@ test('analyzing real run — 真 SDK 跑通 admission + brainstorm', async ({
   await expect(startBtn).toBeVisible()
   await expect(startBtn).toHaveAttribute('data-state', 'idle')
 
-  // 4. 点按钮 —— 期望 state 切到 starting/running,然后 admission-start-btn
-  //    渲染条件变 false 自然消失(5 卡 count > 0)
+  // 4. 点按钮 —— 期望 state 切到 starting/running;按钮常驻(ticket 08),
+  //    不会被卸载;startState 在 SSE 推 `analysis_done` 事件后由 web 端
+  //    AnalyzingZone 监听复位回 idle
   await startBtn.click()
+
+  // 4a. ticket 08 断言:按钮常驻可见;state=running(disabled 防重)
+  await expect(startBtn).toBeVisible()
+  await expect(startBtn).toHaveAttribute('data-state', 'running', {
+    timeout: 30_000,
+  })
 
   // 5. 等 5 张 admission dim count 全部 > 0(turn-1 阶段产物)
   //    顺序:loss_prevention → performance → arch_conflict → business_reasonable
@@ -247,6 +254,14 @@ test('analyzing real run — 真 SDK 跑通 admission + brainstorm', async ({
     .getByTestId('product-subproblems-item')
     .first()
   await expect(firstSubproblem).toBeVisible({ timeout: 180_000 })
+
+  // 6a. ticket 08:等 agent 端 turn-done publish `analysis_done` → web 端
+  //     AnalyzingZone 监听 → setStartState('idle');按钮回到可点击 idle 态
+  //     60s 超时覆盖双 turn 串行最长允许时长
+  await expect(startBtn).toHaveAttribute('data-state', 'idle', {
+    timeout: 60_000,
+  })
+  await expect(startBtn).toBeVisible()
 
   // 7. 截图(全页 + AdmissionDashboard 局部)
   const screenshotDir = testInfo.outputDir

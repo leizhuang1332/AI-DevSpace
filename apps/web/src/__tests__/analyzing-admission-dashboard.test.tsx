@@ -272,6 +272,9 @@ describe('AdmissionDashboard · 开始分析按钮(ADR-0020 D9 · ticket 05)', (
   })
 
   it('空态渲染时 section 节点携带 data-phase="empty_armed"', () => {
+    // ticket 08:data-phase 现在独立派生自 dimensions.every(count===0),
+    // 与 showStartButton 解耦(此处传 showStartButton 是为了让"按钮渲染"
+    // 单测不被绑定;data-phase 的派生逻辑不再依赖按钮 prop)。
     const admission = buildAdmission()
     render(
       <AdmissionDashboard
@@ -377,8 +380,10 @@ describe('AdmissionDashboard · 开始分析按钮(ADR-0020 D9 · ticket 05)', (
   })
 
   it('verdict=fail 时,「开始分析」与「接受风险」并列共存,不互斥', () => {
-    // ADR-0020 D9:「开始分析」独立于 verdict——空态就是空态,和
-    // verdict 是 fail / pending / pass 都无关(由父组件决定)
+    // ticket 08 升级:本测试原传 `showStartButton={false}`,实际从未验证两按钮
+    // 真正共存 —— 只验证了"接受风险"存在 + "开始分析"不存在。新版本传
+    // `showStartButton`(true,父组件 AnalyzingZone 的现状),同时验证两按钮
+    // 都在 DOM;verdict=fail 不影响按钮渲染门(由父组件决定,与 verdict 无关)。
     const onStart = vi.fn()
     const admission = buildAdmission(
       { verdict: 'fail' },
@@ -388,13 +393,13 @@ describe('AdmissionDashboard · 开始分析按钮(ADR-0020 D9 · ticket 05)', (
       <AdmissionDashboard
         admission={admission}
         onAcceptRisk={vi.fn()}
-        showStartButton={false} // 默认 false,不代表禁用该 prop
+        showStartButton
         onStart={onStart}
         startState="idle"
       />,
     )
     expect(screen.getByTestId('admission-accept-risk-btn')).toBeInTheDocument()
-    expect(screen.queryByTestId('admission-start-btn')).toBeNull()
+    expect(screen.getByTestId('admission-start-btn')).toBeInTheDocument()
   })
 
   it('未传 onStart 时点击不崩(showStartButton=true + onStart=undefined)', () => {

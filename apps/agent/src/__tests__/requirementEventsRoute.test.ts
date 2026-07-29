@@ -155,6 +155,53 @@ describe('GET /api/requirement/:id/events', () => {
     expect(body).toMatch(/hello future/)
   })
 
+  it('writes an analysis_done event when turn-done is published (ticket 08)', async () => {
+    // ticket 08 (ADR-0020 D2/D9 修订 · 2026-07-28):agent 端 turn-done 时
+    // publish `analysis_done` 命名事件,web 端 SSE 监听后 setStartState('idle')
+    // 让按钮常驻可再次点击。本测试守护 SSE 透传链路通畅 —— payload 字段
+    // (reqId/sessionId/turn)必须原样到达客户端。
+    const chunks: Buffer[] = []
+    let resolved = false
+    await new Promise<void>((resolve) => {
+      const req = http.request(
+        {
+          method: 'GET',
+          hostname: '127.0.0.1',
+          port,
+          path: '/api/requirement/REFUND-001/events',
+          headers: { 'x-aidevspace-token': token },
+        },
+        (res) => {
+          res.on('data', (c: Buffer) => {
+            chunks.push(c)
+            const body = Buffer.concat(chunks).toString('utf8')
+            if (body.includes('event: analysis_done') && !resolved) {
+              resolved = true
+              req.destroy()
+              resolve()
+            }
+          })
+          res.on('end', () => resolve())
+        },
+      )
+      setTimeout(() => {
+        hub.publish('REFUND-001', {
+          type: 'analysis_done',
+          reqId: 'REFUND-001',
+          sessionId: 'sess-arch',
+          ts: 1700000000000,
+          turn: 1,
+        })
+      }, 100)
+      req.on('error', () => resolve())
+      req.end()
+    })
+    const body = Buffer.concat(chunks).toString('utf8')
+    expect(body).toMatch(/event: analysis_done/)
+    expect(body).toMatch(/"sessionId":"sess-arch"/)
+    expect(body).toMatch(/"turn":1/)
+  })
+
   it('unsubscribes from SseHub when client socket closes', async () => {
     expect(hub.stats().subscribers).toBe(0)
     await openSse('/api/requirement/REFUND-001/events', {

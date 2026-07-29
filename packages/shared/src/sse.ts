@@ -102,6 +102,30 @@ export type SseEvent =
       }
     }
   /**
+   * 分析 turn 流结束信号(ticket 08 · 2026-07-28 按钮常驻化)。
+   *
+   * Agent 在 `streamTurnEvents()` 的 SDK 流关闭处(=turn-done,ADR-0020 D8)
+   * 通过 `SseHub.publish(reqId, ...)` 推此 variant 到该 reqId 的所有订阅者;
+   * 每个 turn 完成各发一次(双 turn 即发两次),让 Web 端 `startState` 复位
+   * 回 idle 后用户可以再次触发新一轮分析。
+   *
+   * Web 端按 `sessionId` 与当前 active 会话匹配后再复位 —— 避免后台其它
+   * session 完成时误复位"最近一次点击"造成的 running 状态。
+   *
+   * - `turn: 1 | 2`:对应 ADR-0020 D8 的 admission-check / requirement-brainstorm
+   *   双 turn;如未来 turn 数变,扩展为字面量 union 即可。
+   * - 不携带 `chunk`:业务数据已在先前 `analysis_chunk` 事件里推完;本事件
+   *   仅做"流阶段结束"的进度信号,与下方 `query_succeeded` 不同(后者是
+   *   query 级终态,与 retry/失败语义绑定;本事件是 turn 级成功信号)。
+   */
+  | {
+      type: 'analysis_done'
+      reqId: string
+      sessionId: string
+      ts: number
+      turn: 1 | 2
+    }
+  /**
    * 权限请求(ADR-0010 Q6.3 + ADR-0009 第 3 层「亮」模态)。
    *
    * Agent 在 SDK PreToolUse hook 命中 5 类高危时,通过 SseHub.publish(reqId, ...)

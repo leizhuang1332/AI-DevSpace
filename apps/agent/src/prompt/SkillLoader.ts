@@ -83,7 +83,12 @@ export function parseSkillMarkdown(
 ): { frontmatter: SkillFrontmatter; body: string } | null {
   // 容错 BOM
   // eslint-disable-next-line no-irregular-whitespace
-  const trimmed = text.replace(/^﻿/, '')
+  const withoutBom = text.replace(/^﻿/, '')
+  // 归一化 CRLF → LF(fix:Windows 检出的 SKILL.md 是 `---\r\n` 开头,旧代码
+  // `startsWith('---\n')` 匹配不到 → frontmatter 静默变成 {} → `arming: always`
+  // 失效,built-in Skill 全部被降级成 on-arming(只进 name+description,不进 body),
+  // 且 body 里混入未剥离的 YAML 原文。所有下游解析都基于 LF 假设,这里统一归一。)
+  const trimmed = withoutBom.replace(/\r\n/g, '\n')
   // frontmatter 必须以 --- 开头,跟一行换行
   if (!trimmed.startsWith('---\n') && trimmed !== '---') {
     return { frontmatter: {}, body: trimmed }

@@ -4,20 +4,20 @@
  * 顶部展示 PRD 准入校验状态:
  * - 左:N 张维度卡(默认 5 卡 · 顺序由 Skill frontmatter 装配决定)
  * - 右:总体结论徽章(pass / pending / fail)+ 待裁决 N 徽章 + [接受风险] 按钮 +
- *      ticket 05 「开始分析」主按钮(仅空态可见)
+ *      ticket 05/08 「开始分析」主按钮(常驻显示)
  *
  * 设计要点:
  * - 数据由 server 注入(admission 段),组件纯渲染 + 简单回调
  * - 维度卡点击 → onDimensionClick(预留 hook,后续 slice 填充内容)
  * - "接受风险" 按钮仅 verdict=fail 时显示,点击 → onAcceptRisk(将 verdict 改为 pending)
- * - ticket 05 (ADR-0020 D9):「开始分析」按钮仅当父组件判定空态时渲染
- *   (条件:`sessions.length === 0 && admission.dimensions.every(d => d.count === 0)` —
- *   sessions 来自 analyzing-zone,dimensions 通过 admission 字段传入,
- *   由父组件组合后通过 `showStartButton` 传入);点击 → onStart → POST start
- *   → SSE 推 chunks → count 自然变化 → 条件变 false 按钮自然消失
+ * - ticket 08 (ADR-0020 D2/D9 修订 · 2026-07-28):「开始分析」按钮**常驻显示**,
+ *   不再依赖 `sessions.length === 0` 空态判定;父组件 AnalyzingZone 永远传
+ *   `showStartButton=true`。已存在 sessions 时点击 = 再开一轮新分析
+ *   (POST start → 追加新 session → 切过去)。
  *
- * ticket 05 (ADR-0020 D9):空态时根节点附加 `data-phase="empty_armed"` 数据属性,
- * 供 CSS / 后续 E2E 区分空态与有产物态(视觉差异暂不强制,留 hook)。
+ * ticket 05/08:`data-phase` 属性独立派生自 `dimensions.every(count===0)` —
+ * 仅作为 "空态/有产物"视觉区分(E2E 与 CSS 用),与按钮渲染门解耦。
+ * 修复 ticket 05 原"按钮渲染条件 = data-phase 条件"同源 bug。
  *
  * 视觉参考:docs/design/pages/11h-A-zone-multisession-tabs.html 顶部"准入仪表板"段
  */
@@ -30,7 +30,7 @@ import type {
   AdmissionVerdict,
 } from '@/lib/analyzing'
 
-/** ticket 05 (ADR-0020 D9):「开始分析」按钮流式状态。决定文案 + 禁用 + spinner。 */
+/** ticket 05 (ADR-0020 D9) · ticket 08:「开始分析」按钮流式状态。决定文案 + 禁用 + spinner。 */
 export type AdmissionStartState = 'idle' | 'starting' | 'running'
 
 export interface AdmissionDashboardProps {
@@ -39,7 +39,12 @@ export interface AdmissionDashboardProps {
   onAcceptRisk: () => void
   /** 维度卡点击回调(预留 hook,后续 slice 填充具体行为) */
   onDimensionClick?: (dimensionId: string) => void
-  /** ticket 05:渲染「开始分析」按钮(渲染条件由父组件计算) */
+  /**
+   * ticket 08 (ADR-0020 D2/D9 修订):父组件决定是否渲染「开始分析」按钮。
+   * ticket 05 原语义"空态判定门"已移除 —— AnalyzingZone 现在永远传 true,
+   * 让按钮常驻。此 prop 保留以便单独单测 / 未来特殊场景(如 Loading 态)
+   * 仍可显式关闭;默认 false。
+   */
   showStartButton?: boolean
   /** ticket 05:「开始分析」按钮点击回调 */
   onStart?: () => void
@@ -76,11 +81,15 @@ export function AdmissionDashboard({
   onStart,
   startState = 'idle',
 }: AdmissionDashboardProps) {
+  // ticket 08:data-phase 独立派生 —— 仅反映"是否有产物"(五维卡 count 全 0)
+  // 不再与按钮渲染门耦合。修复 ticket 05 原 bug:常驻按钮后 showStartButton
+  // 永远 true,旧实现会让 data-phase 永远 stuck 'empty_armed'。
+  const isEmptyArmed = admission.dimensions.every((d) => d.count === 0)
   return (
     <section
       data-testid="admission-dashboard"
       data-verdict={admission.verdict}
-      data-phase={showStartButton ? 'empty_armed' : 'active'}
+      data-phase={isEmptyArmed ? 'empty_armed' : 'active'}
       className="bg-bg-elevated border border-border rounded-lg px-4 py-1.5 flex items-center gap-2"
     >
       {/* 左:N 张维度卡 */}
@@ -97,7 +106,8 @@ export function AdmissionDashboard({
         ))}
       </div>
 
-      {/* 右:徽章 + 按钮(ticket 05 · ADR-0020 D9:「开始分析」条件渲染) */}
+      {/* 右:徽章 + 按钮(ticket 05 · ADR-0020 D9 · ticket 08 修订:
+          「开始分析」按钮常驻渲染,门控条件由父组件 showStartButton 控制) */}
       <div className="flex items-center gap-1.5 flex-shrink-0">
         {admission.pendingAdjudicationCount > 0 && (
           <span
@@ -136,11 +146,12 @@ export function AdmissionDashboard({
 }
 
 // ---------------------------------------------------------------------------
-// StartAnalysisButton(ticket 05 · ADR-0020 D9)
+// StartAnalysisButton(ticket 05 · ADR-0020 D9 · ticket 08 修订 · 2026-07-28)
 // ---------------------------------------------------------------------------
 
 /**
- * 「开始分析」按钮 — 仅 AdmissionDashboard 空态可见。
+ * 「开始分析」按钮 — ticket 08 调整为常驻显示(AdmissionDashboard 父组件
+ * 决定是否渲染,父组件 AnalyzingZone 现在永远传 true)。
  *
  * 视觉:与 verdict 徽章平行(h-6,text-[11px]),brand 主色填充;不抢眼、
  * 不破坏 ADR-0019 主区锁高度 + 列内独立滚动契约。
@@ -148,14 +159,17 @@ export function AdmissionDashboard({
  * 状态机:
  *   idle      → 「▶ 开始分析」,可点击
  *   starting  → 「分析中…」(等待 POST 返回);disabled 防重
- *   running   → 「分析中…」(POST 已返回,SSE 推 chunks);disabled 防重
+ *   running   → 「分析中…」(POST 已返回,SSE 推 chunks);disabled(等
+ *                agent 端 turn-done publish `analysis_done` 命名事件 →
+ *                AnalyzingZone 监听 → setStartState('idle'))
  *
  * 设计注意:starting 与 running 共用同一份"分析中…"文案,二态在视觉上等价
  * 即可(用户不需要区分"等待 POST"与"等 SDK");`data-state` 属性保留以供测试
  * 区分两态。
  *
  * `onClick` 可省略:流式态(`state !== 'idle'`)时按钮 disabled,故未传
- * onClick 也不会触发"不存在的回调"。
+ * onClick 也不会触发"不存在的回调"。AnalyzingZone.handleStart 内部另有
+ * 幂等守卫 `if (startState !== 'idle') return`,作为 disabled 的二次防线。
  */
 function StartAnalysisButton({
   state,

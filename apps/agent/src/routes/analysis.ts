@@ -811,6 +811,37 @@ function appendSessionToIndex(params: {
   writeFileSync(indexPath, serializeSessionsIndexYaml(next), 'utf8')
 }
 
+/** 双 turn 跑完后回写 `_index.yaml` 的 `detected_count` / `is_streaming`。
+ *
+ *  fix(识别产物为空):`appendSessionToIndex` 起手固定写 `detected_count: 0` +
+ *  `is_streaming: true`,而**此前全仓库没有任何地方回写这两个字段** —— 会话跑完
+ *  后索引仍显示 0 条产物 + 永久"流式中",StatusBar / 会话切换器据此渲染会一直
+ *  停在错误状态。
+ *
+ *  best-effort:索引缺失 / session 不在索引里 / 写盘失败都静默跳过 —— 收尾回写
+ *  不应该把一次成功的分析 turn 变成失败。 */
+function finalizeSessionInIndex(params: {
+  sessionsDir: string
+  sessionId: string
+  detectedCount: number
+}): void {
+  try {
+    const indexPath = join(params.sessionsDir, '_index.yaml')
+    if (!existsSync(indexPath)) return
+    const sessions = parseSimpleIndexYaml(indexPath)
+    let touched = false
+    const next = sessions.map((s) => {
+      if (s.id !== params.sessionId) return s
+      touched = true
+      return { ...s, detectedCount: params.detectedCount, isStreaming: false }
+    })
+    if (!touched) return
+    writeFileSync(indexPath, serializeSessionsIndexYaml(next), 'utf8')
+  } catch {
+    /* best-effort:收尾回写失败不影响已落盘的 chunks */
+  }
+}
+
 /** 把首批 analysis_chunk 列表序列化为 jsonl,写入 sessions/<sid>/chunks.jsonl。
  *  web 端 loadSessionChunks() 的解析契约:每行 JSON 包含 id/ts/label/text/kind/tone/session_id。
  *
@@ -943,14 +974,20 @@ function createDualTurnAssembler(opts: {
   }
 }
 
-/** turn-1 user message —— ADR-0020 D8 描述:PRD 全文 + "请按 5 维度做准入"。 */
+/** turn-1 user message —— ADR-0020 D8 描述:PRD 全文 + "请按 5 维度做准入"。
+ *
+ *  措辞注意(fix:识别产物为空):**不要**出现 "基于 xx Skill" 字样 —— Claude Code
+ *  默认 system prompt 自带 Skill 注册表,模型会把这句话理解成"去调用一个已注册的
+ *  Skill 工具",查不到就自行发挥、输出自由 markdown,导致 `[DIM ...]` 标记全部丢失。
+ *  这里只引用 "system prompt 中约定的输出格式",把模型拉回 appendSystemPrompt 里的
+ *  Skill body。 */
 function buildTurn1UserMessage(params: {
   prdContent: string
   angle: AnalysisSessionAngle
   label: string
 }): string {
   return [
-    `PRD 全文如下,请基于 admission-check Skill 完成 5 维度准入校验:`,
+    `PRD 全文如下,请完成 5 维度准入校验:`,
     '',
     '<prd>',
     params.prdContent,
@@ -959,20 +996,28 @@ function buildTurn1UserMessage(params: {
     `当前会话角度 = ${params.angle},label = ${params.label}。`,
     '请按 5 维度(loss_prevention / performance / arch_conflict / business_reasonable / context_query)',
     '输出每个维度的判断与依据。',
+    '',
+    '严格遵循 system prompt 中约定的输出格式:5 个 `[DIM <维度key>]` 段 + 1 个 `[VERDICT]` 段,',
+    '标记独占一行、顶格,段间空行分隔。不要输出 markdown 标题 / 表格 / 列表 / 导语 / 总结。',
   ].join('\n')
 }
 
 /** turn-2 user message —— ADR-0020 D8 描述:"已知准入结果 X,继续 brainstorm"。
  *  不传具体准入结果(SDK 同 session 自动保留 turn-1 history,模型可自查),只指明
- *  下一步动作 —— 转向 requirement-brainstorm 三桶 chunk 形态。 */
+ *  下一步动作 —— 转向三桶 chunk 形态。
+ *
+ *  措辞注意:同 turn-1,**不要**出现 "基于 xx Skill" 字样(见上方说明)。 */
 function buildTurn2UserMessage(): string {
   return [
-    '已知上一轮 admission-check 的 5 维度结果(SDK 同 session 已自动保留 history)。',
-    '请基于 requirement-brainstorm Skill 继续 brainstorm,按三桶形态输出:',
+    '已知上一轮 5 维度准入结果(SDK 同 session 已自动保留 history)。',
+    '请继续 brainstorm,按三桶形态输出:',
     '- subproblem:还需澄清的子问题',
     '- risk:潜在风险',
     '- option:可选方案',
-    '每个 chunk 一条,简短文本。',
+    '',
+    '严格遵循 system prompt 中约定的输出格式:每条产物一段,以 `[SUBPROBLEM]` / `[RISK]` /',
+    '`[OPTION]` 标记开头,标记独占一行、顶格,段间空行分隔。',
+    '不要输出 markdown 标题 / 表格 / 列表 / emoji 分组标题 / 导语 / 总结 —— 没有标记的行会被丢弃。',
   ].join('\n')
 }
 
@@ -1042,6 +1087,8 @@ async function runDualTurnAnalysis(params: {
 
   const chunksPath = join(sessionDir, 'chunks.jsonl')
   const counter: { value: number } = { value: 0 }
+  /** 三桶产物命中数 —— 收尾回写 `_index.yaml` 的 detected_count + 可观测告警 */
+  const productCounter: { value: number } = { value: 0 }
   // SseHub publish 幂等保护:每个 reqId + sessionId 的 publish 都走同一个 hub,
   // 无重复风险;但 sessionSdkId 仍记下供观测
   let sdkSessionIdLogged: string | undefined
@@ -1085,11 +1132,18 @@ async function runDualTurnAnalysis(params: {
     const cancelSignal = new Promise<typeof CANCELLED>((resolve) => {
       fireCancel = () => resolve(CANCELLED)
     })
-    // turn 维度的解析器:自由文本 fallback label 用 turnLabel
-    const parser = createAnalysisTextParser({ fallbackLabel: turnLabel })
+    // turn 维度的解析器:自由文本 fallback label 用 turnLabel。
+    // bucketFallback 仅 BRAINSTORM turn 打开 —— 模型若把三桶写成 markdown 分组标题
+    // + 列表(实测常见),降级路径仍能升级出 subproblem/risk/option kind;
+    // INFER turn 不开,避免 `## 主要风险` 这类叙述小标题被误判成 risk 产物。
+    const parser = createAnalysisTextParser({
+      fallbackLabel: turnLabel,
+      bucketFallback: turnLabel === 'BRAINSTORM',
+    })
 
     const emit = (parsed: ParsedAnalysisChunk): void => {
       counter.value++
+      if (parsed.kind !== 'narration') productCounter.value++
       const id = `c-${turnLabel.toLowerCase()}-${sessionId}-${counter.value}`
       const ts = new Date().toISOString().slice(11, 19) // HH:MM:SS
       const chunk: AnalysisChunkPayload = {
@@ -1195,15 +1249,32 @@ async function runDualTurnAnalysis(params: {
     dualTurnAssembler.setActiveSkill(spec.skillBody ? spec.skillName : null)
     dualTurnAssembler.resetBaseCache()
     const sub = streamTurnEvents(spec.turnLabel)
+    let sendFailed = false
     try {
       await session.send(spec.userMessage)
     } catch (err) {
+      sendFailed = true
       fastify.log.error({ err, reqId, sessionId, turn: spec.turnLogTag }, 'analysis turn send failed')
       // send reject ⇒ 本 turn 不会再有任何事件 —— 主动解开 pump,否则永久挂起
       sub.cancel()
     }
     await sub.eventsDrained
     sub.cancel()
+
+    // ticket 08 (ADR-0020 D2/D9 修订 · 2026-07-28):turn-done → publish
+    // `analysis_done` 让 Web 端 `startState` 从 running 复位回 idle。
+    // 仅在 send 成功时发(sendFailed 时 SDK 已 errored,语义上 turn 没真正
+    // 完成,Web 端不应误判"已可再次触发")。
+    if (!sendFailed) {
+      const turn: 1 | 2 = spec.turnLabel === 'INFER' ? 1 : 2
+      hub.publish(reqId, {
+        type: 'analysis_done',
+        reqId,
+        sessionId,
+        ts: Date.now(),
+        turn,
+      })
+    }
 
     // ticket 06:空 turn(SDK 返回 0 chunk)不 snapshot —— 此处静默 remove
     if (counter.value === chunksAtStart) {
@@ -1246,6 +1317,29 @@ async function runDualTurnAnalysis(params: {
     await session.close()
   } catch (err) {
     fastify.log.warn({ err, reqId, sessionId }, 'session.close() failed')
+  }
+
+  // fix(识别产物为空):收尾回写 `_index.yaml` —— 无论 turn 成败都要落
+  // `is_streaming: false`,否则失败会话会永久卡在"流式中"。
+  finalizeSessionInIndex({
+    sessionsDir: join(params.analysisDir, 'sessions'),
+    sessionId,
+    detectedCount: productCounter.value,
+  })
+
+  // 可观测性:三桶命中 0 条 = 模型没按标记格式输出(或降级路径也没兜住),
+  // 前端「识别产物」会是空的。静默失败很难查,这里显式 warn。
+  if (productCounter.value === 0) {
+    fastify.log.warn(
+      { reqId, sessionId, totalChunks: counter.value },
+      'analysis produced 0 product chunks; ProductList will be empty ' +
+        '(模型可能未按 [SUBPROBLEM]/[RISK]/[OPTION] 标记输出)',
+    )
+  } else {
+    fastify.log.info(
+      { reqId, sessionId, products: productCounter.value, totalChunks: counter.value },
+      'analysis session finished',
+    )
   }
 
   if (!turn1Ok && !turn2Ok) {

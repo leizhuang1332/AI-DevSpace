@@ -24,8 +24,13 @@ export async function agentFetch<T>(path: string, init?: RequestInit): Promise<T
   const headers: Record<string, string> = {
     ...(init?.headers as Record<string, string> | undefined),
   }
-  // 仅在有 body 时设置 Content-Type，避免 GET / 空 body 请求携带 body 头
-  if (init?.body != null && headers['Content-Type'] == null) {
+  // 仅在有 body 时设置 Content-Type，避免 GET / 空 body 请求携带 body 头。
+  // 判断必须大小写不敏感：JS 对象 key 大小写敏感，调用方若传了小写
+  // 'content-type'，这里再写一个 'Content-Type' 会让两个 key 并存 →
+  // fetch 的 Headers fill 走 append 语义合并成 "application/json, application/json"
+  // → Fastify 匹配不到 content-type parser → 415 FST_ERR_CTP_INVALID_MEDIA_TYPE。
+  const hasContentType = Object.keys(headers).some((k) => k.toLowerCase() === 'content-type')
+  if (init?.body != null && !hasContentType) {
     headers['Content-Type'] = 'application/json'
   }
   // credentials: include 让浏览器把 localhost:3333 上的 cookie 跨端口发到 localhost:7777

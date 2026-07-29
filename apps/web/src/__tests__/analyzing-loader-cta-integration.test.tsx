@@ -80,7 +80,10 @@ describe('真实 loader → CTA(audit #1)', () => {
     expect(screen.queryByTestId('admission-start-btn')).toBeNull()
   })
 
-  it('已有 session + admission chunks → CTA 消失,五维卡 count 全部 > 0', async () => {
+  it('已有 session + admission chunks → CTA 仍可见(常驻),五维卡 count 全部 > 0', async () => {
+    // ticket 08 (ADR-0020 D2/D9 修订):按钮常驻显示,即使已有 session +
+    // admission chunks 跑完也仍可见(再点 = 再开一轮新分析)。data-phase 仍
+    // 切到 active(因为 dimensions.every(count===0) 不再成立)。
     const id = 'req-cta-analyzed'
     seedRequirementOnly(id)
     const dims = [
@@ -118,7 +121,12 @@ describe('真实 loader → CTA(audit #1)', () => {
     expect(data.admission.pendingAdjudicationCount).toBe(3)
 
     render(<AnalyzingZone data={data} />)
-    expect(screen.queryByTestId('admission-start-btn')).toBeNull()
+    // ticket 08:按钮常驻 → 即使已有 chunks 也可见
+    expect(screen.getByTestId('admission-start-btn')).toBeInTheDocument()
+    // data-phase 切到 active(因为 count 全部 > 0)
+    expect(screen.getByTestId('admission-dashboard').getAttribute('data-phase')).toBe(
+      'active',
+    )
     for (const dim of dims) {
       expect(screen.getByTestId(`admission-dim-${dim}`).getAttribute('data-count')).toBe('1')
     }

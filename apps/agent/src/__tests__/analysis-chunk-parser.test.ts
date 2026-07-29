@@ -237,3 +237,100 @@ describe('createAnalysisTextParser — 流式与兜底', () => {
     expect(out[0].text).toBe('第一行,\n第二行。')
   })
 })
+
+// ============================================================================
+// markdown 降级路径(fix:识别产物为空)
+//
+// 回归背景:真实 SDK 输出(req-001-fafe / sess-architecture-ms4ltt1r)把三桶写成了
+// `## 🪣 subproblem(子问题,需澄清)` + 数字列表,一条 `[SUBPROBLEM]` 标记都没有,
+// 导致 43 条 chunk 全部降级 narration → deriveProducts() 返回空 → ProductList 空白。
+// ============================================================================
+
+/** 便捷:打开 bucketFallback 的一次性解析 */
+function parseAllFallback(text: string, fallbackLabel = 'BRAINSTORM') {
+  const p = createAnalysisTextParser({ fallbackLabel, bucketFallback: true })
+  return [...p.push(text), ...p.flush()]
+}
+
+describe('createAnalysisTextParser — markdown 降级(bucketFallback)', () => {
+  it('markdown 桶标题 + 数字列表 → 逐条升级为对应 kind', () => {
+    const out = parseAllFallback(
+      [
+        '## 🪣 subproblem(子问题,需澄清)',
+        '',
+        '1. 尾差"有值节点"判定是否排除被截断为 0 的节点',
+        '2. 加班子类型枚举是否含变体字',
+        '',
+        '## ⚠️ risk(潜在风险)',
+        '',
+        '1. 尾差规则歧义 → 月度万元级系统偏差',
+        '',
+        '## 💡 option(可选方案)',
+        '',
+        '1. 尾差规则:固定放始发节点',
+      ].join('\n'),
+    )
+    const kinds = out.map((c) => c.kind)
+    expect(kinds).toEqual(['subproblem', 'subproblem', 'risk', 'option'])
+    expect(out[0].text).toBe('尾差"有值节点"判定是否排除被截断为 0 的节点')
+    expect(out[0].label).toBe('DETECT')
+    expect(out[2].label).toBe('RISK')
+    expect(out[3].label).toBe('OPTION')
+  })
+
+  it('无序列表与中文桶标题同样识别', () => {
+    const out = parseAllFallback(
+      ['### 风险点', '- 上游接口未交付 → 强阻塞联调', '- 批量同步调用 → 接口被打垮'].join('\n'),
+    )
+    expect(out).toHaveLength(2)
+    expect(out.every((c) => c.kind === 'risk')).toBe(true)
+    expect(out[1].text).toBe('批量同步调用 → 接口被打垮')
+  })
+
+  it('列表项中的 **加粗** 被去掉,续行被合并', () => {
+    const out = parseAllFallback(
+      ['## option', '1. **异步化** + 进度条', '   可中断,支持分片执行'].join('\n'),
+    )
+    expect(out).toHaveLength(1)
+    expect(out[0].kind).toBe('option')
+    expect(out[0].text).toBe('异步化 + 进度条\n可中断,支持分片执行')
+  })
+
+  it('非桶标题仍作为 narration 保留(绝不丢内容)', () => {
+    const out = parseAllFallback(
+      ['# Requirement Brainstorm:运力预估账单', '', '> 接续 5 维度准入校验。'].join('\n'),
+    )
+    expect(out.every((c) => c.kind === 'narration')).toBe(true)
+    expect(out.map((c) => c.text).join('\n')).toContain('Requirement Brainstorm')
+    expect(out.map((c) => c.text).join('\n')).toContain('接续 5 维度准入校验')
+  })
+
+  it('水平分隔线结束桶上下文,其后正文回落 narration', () => {
+    const out = parseAllFallback(
+      ['## risk', '- 真风险一条', '', '---', '', '> 使用建议:优先管控 #1。'].join('\n'),
+    )
+    expect(out[0].kind).toBe('risk')
+    expect(out.slice(1).every((c) => c.kind === 'narration')).toBe(true)
+  })
+
+  it('显式 [BUCKET] 标记优先级高于 markdown 降级', () => {
+    const out = parseAllFallback(
+      ['## risk', '- markdown 风险', '[OPTION]', 'text: 显式方案。'].join('\n'),
+    )
+    expect(out.map((c) => c.kind)).toEqual(['risk', 'option'])
+    expect(out[1].text).toBe('显式方案。')
+  })
+
+  it('bucketFallback 关闭时行为与旧版一致(全部 narration)', () => {
+    const md = ['## 🪣 subproblem(子问题)', '1. 某个子问题', '2. 另一个子问题'].join('\n')
+    const out = parseAll(md)
+    expect(out.every((c) => c.kind === 'narration')).toBe(true)
+  })
+
+  it('降级路径下逐字符喂入与一次性喂入等价', () => {
+    const md = ['## risk', '- 风险甲', '- 风险乙', '', '## option', '1. 方案丙'].join('\n')
+    const p = createAnalysisTextParser({ fallbackLabel: 'BRAINSTORM', bucketFallback: true })
+    const streamed = [...md].flatMap((ch) => p.push(ch)).concat(p.flush())
+    expect(streamed).toEqual(parseAllFallback(md))
+  })
+})

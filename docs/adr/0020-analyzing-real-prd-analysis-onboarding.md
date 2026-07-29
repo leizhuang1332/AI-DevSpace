@@ -102,6 +102,14 @@ web 端 `apps/web/src/lib/analyzing.server.ts:472-482` 把 `req-001 === 'req-001
 
 **理由:**`AdmissionDashboard` 已经是 product-as-container,空态行为可以无侵入地表达;为分析动作保留 `StatusBar` 单源状态位的契约不被破坏。
 
+> **2026-07-28 修订(ticket 08)**:**"开始分析"按钮改为常驻显示**。空态判别式不再用于按钮渲染门 — `AdmissionDashboard.showStartButton` 现在永远由父组件 `AnalyzingZone` 传 `true`(原条件已删)。`data-phase` 属性仍派生自 `dimensions.every(count===0)`,仅作 "空/有产物"视觉区分,与按钮渲染门解耦(修复 ticket 05 原"按钮门 = data-phase 条件"同源 bug)。
+>
+> **再次点击语义**:已存在 sessions 时点按钮 = 再开一轮新分析(POST start → 乐观追加新 session → 切过去),与首次点击完全对称。
+>
+> **startState 复位**:agent 端在 `streamTurnEvents` 完成时(每个 turn 各发一次)通过 `SseHub.publish(reqId, {type:'analysis_done', sessionId, turn})` 推送命名事件;web 端 `AnalyzingZone` 的 EventSource `addEventListener('analysis_done', ...)` 仅在 `payload.sessionId === activeSessionId` 时 `setStartState('idle')`,允许用户再次触发(避免后台其它 session 完成时误复位"最近一次点击"造成的 running 状态)。
+>
+> 修订详情见 `.scratch/analyzing-real-prd-onboarding/issues/05-admission-dashboard-start-cta.md` 与 code-review PR。
+
 ### D3 · `req-001` mock 处理:fixture 化 + 零磁盘种子
 
 **原文:**
@@ -199,6 +207,13 @@ web 端 `apps/web/src/lib/analyzing.server.ts:472-482` 把 `req-001 === 'req-001
 - handler 成功返回后 AdmissionDashboard 自动切 active 视觉(AdmissionDashboard 本组件可在外层包一个 `data-phase="empty_armed"`,由 CSS 视觉区分),"开始分析"按钮条件 false 自动消失
 
 **理由:**不引入新的工位 phase(避免 AdmissionDashboard 之外再叠一层 EmptyAnalyzing),与 D2 触发策略同源;渲染条件极小,小到可以用单 props 函数判断。
+
+> **2026-07-28 修订(ticket 08)**:见 D2 修订段。补充验收项:
+>
+> - AdmissionDashboard 按钮**常驻显示**(已存在 sessions 时仍可见)
+> - handleStart 加幂等守卫 `if (startState !== 'idle') return`,作为 disabled 二次防线
+> - `analyzing-zone.tsx` EventSource 监听 `'analysis_done'` 命名事件 → `setStartState('idle')`,允许再次点击
+> - E2E 增补:点完按钮 → 等 `data-state='running'` → 等 `data-state='idle'`
 
 ### D10 · snapshot 时机:每 turn 写前各一次
 

@@ -130,6 +130,58 @@ function matchMarker(line: string): Marker | null {
 }
 
 // ============================================================================
+// Markdown 降级识别(fix:识别产物为空)
+//
+// 背景:`[SUBPROBLEM]` 之类标记纯靠 prompt 约束,模型(尤其在 Claude Code 默认
+// system prompt 之下)经常改写成 markdown 分组标题 + 列表,例如
+//     ## 🪣 subproblem(子问题,需澄清)
+//     1. 尾差"有值节点"判定是否排除被截断为 0 的节点
+// 此时旧解析器一条标记都匹配不到 → 全量降级 narration → ProductList 三桶为空。
+//
+// 因此增加**降级路径**:识别"桶标题"markdown heading,把其后的列表项逐条升级为
+// 对应 kind 的 chunk。仅在 `bucketFallback` 打开时生效(brainstorm turn),避免
+// 污染 turn-1 admission(其 `## 主要风险` 之类小标题不应被当成 risk 产物)。
+//
+// 优先级:显式 `[BUCKET]` 标记 > markdown 降级 > narration 兜底。
+// ============================================================================
+
+/** markdown ATX 标题:`## 🪣 subproblem(子问题)` → 捕获标题文字 */
+const MD_HEADING_RE = /^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/
+/** markdown 列表项:`- xxx` / `* xxx` / `1. xxx` / `1) xxx` */
+const MD_LIST_ITEM_RE = /^(?:[-*+]|\d{1,3}[.)])\s+(.+)$/
+/** 水平分隔线:`---` / `***` / `___` —— 视作 section 结束 */
+const MD_HR_RE = /^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/
+
+/** 桶标题关键词 —— 按顺序首次命中即返回(subproblem → risk → option) */
+const BUCKET_HEADING_PATTERNS: ReadonlyArray<{ re: RegExp; bucket: BucketMarker }> = [
+  { re: /subproblems?|子问题|待澄清/i, bucket: 'SUBPROBLEM' },
+  { re: /\brisks?\b|风险/i, bucket: 'RISK' },
+  { re: /\boptions?\b|方案|选项/i, bucket: 'OPTION' },
+]
+
+/** 标题文字 → 桶;非桶标题返回 null */
+function matchBucketHeading(headingText: string): BucketMarker | null {
+  for (const p of BUCKET_HEADING_PATTERNS) {
+    if (p.re.test(headingText)) return p.bucket
+  }
+  return null
+}
+
+/** 整行是否 markdown 标题;是则返回标题文字,否则 null */
+function matchMarkdownHeading(line: string): string | null {
+  const m = MD_HEADING_RE.exec(line.replace(/\r$/, ''))
+  return m ? m[1].trim() : null
+}
+
+/** 去掉列表项文字里的 markdown 强调符,保留正文(仅用于降级产物 title) */
+function stripInlineEmphasis(s: string): string {
+  return s
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/__(.+?)__/g, '$1')
+    .trim()
+}
+
+// ============================================================================
 // 块内字段解析
 // ============================================================================
 
@@ -409,11 +461,25 @@ function blockToChunk(
 export function createAnalysisTextParser(opts: {
   /** 无标记自由文本 / 空桶占位使用的 chunk label(turn 维度传 'INFER' / 'THINK') */
   fallbackLabel: string
+  /**
+   * 打开 markdown 降级(fix:识别产物为空)。
+   *
+   * 开启后,`## subproblem` / `## 风险` 之类**桶标题**下的 markdown 列表项会被逐条
+   * 升级成对应 kind 的产物 chunk;关闭时行为与旧版完全一致(全部走 narration)。
+   *
+   * 仅 brainstorm turn 传 true —— admission turn 的 `## 主要风险` 是叙述性小标题,
+   * 不应被误判成 risk 产物。
+   */
+  bucketFallback?: boolean
 }): AnalysisTextParser {
   let buffer = ''
   let currentMarker: Marker | null = null
   let currentLines: string[] = []
   let started = false
+  /** 当前 markdown 桶上下文(null = 不在桶内);仅 bucketFallback 时非 null */
+  let mdBucket: BucketMarker | null = null
+  /** 当前累积中的 markdown 列表项(支持续行) */
+  let mdItemLines: string[] = []
 
   const closeBlock = (out: ParsedAnalysisChunk[]): void => {
     if (!started) return
@@ -422,6 +488,21 @@ export function createAnalysisTextParser(opts: {
     currentMarker = null
     currentLines = []
     started = false
+  }
+
+  /** 收口当前 markdown 列表项 → 一条桶 chunk */
+  const flushMdItem = (out: ParsedAnalysisChunk[]): void => {
+    if (mdItemLines.length === 0) return
+    const bucket = mdBucket
+    const text = stripInlineEmphasis(mdItemLines.join('\n'))
+    mdItemLines = []
+    if (!bucket || text.length === 0) return
+    out.push({
+      kind: BUCKET_KIND[bucket],
+      label: BUCKET_LABEL[bucket],
+      tone: BUCKET_TONE[bucket],
+      text,
+    })
   }
 
   const handleLine = (raw: string, out: ParsedAnalysisChunk[]): void => {
@@ -434,10 +515,58 @@ export function createAnalysisTextParser(opts: {
     const marker = matchMarker(line)
     if (marker) {
       closeBlock(out)
+      // 显式标记优先级最高 —— 退出 markdown 降级上下文
+      flushMdItem(out)
+      mdBucket = null
       currentMarker = marker
       currentLines = []
       started = true
       return
+    }
+
+    // ---- markdown 降级路径(opt-in) ----
+    if (opts.bucketFallback === true) {
+      const heading = matchMarkdownHeading(line)
+      if (heading !== null) {
+        closeBlock(out)
+        flushMdItem(out)
+        const bucket = matchBucketHeading(heading)
+        mdBucket = bucket
+        // 桶标题是纯结构行(`## 🪣 subproblem`),不再单独产 narration;
+        // 非桶标题(如 `# Requirement Brainstorm`)仍按正文保留,绝不丢内容。
+        if (bucket === null) {
+          currentMarker = null
+          currentLines = [line]
+          started = true
+        }
+        return
+      }
+
+      if (mdBucket !== null) {
+        // section 分隔线 → 结束当前桶上下文(纯结构行,不产 narration)
+        if (MD_HR_RE.test(trimmed)) {
+          flushMdItem(out)
+          mdBucket = null
+          return
+        }
+        const item = MD_LIST_ITEM_RE.exec(trimmed)
+        if (item) {
+          flushMdItem(out)
+          mdItemLines = [item[1].trim()]
+          return
+        }
+        // 桶内空行:不结束桶上下文(列表项之间常有空行),但收口当前项
+        if (trimmed.length === 0) {
+          flushMdItem(out)
+          return
+        }
+        // 列表项续行(缩进续写)
+        if (mdItemLines.length > 0) {
+          mdItemLines.push(trimmed)
+          return
+        }
+        // 桶标题下的非列表正文 → 照旧走 narration 兜底
+      }
     }
 
     if (trimmed.length === 0) {
@@ -473,6 +602,8 @@ export function createAnalysisTextParser(opts: {
         handleLine(buffer, out)
         buffer = ''
       }
+      flushMdItem(out)
+      mdBucket = null
       closeBlock(out)
       return out
     },
