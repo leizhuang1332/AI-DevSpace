@@ -36,6 +36,7 @@ import { ProviderSemaphore as DefaultProviderSemaphore } from '../error/Provider
 import type { SessionLogger } from '../log/SessionLogger.js'
 import type { GlobalLogger } from '../log/GlobalLogger.js'
 import type { SessionStore } from '../session/SessionStore.js'
+import type { CachedDefault } from './defaultSystemPromptCache.js'
 
 /** SDK query 函数的类型 —— 用 type-only import 避免运行时依赖倒置 */
 type QueryFn = (params: {
@@ -82,6 +83,12 @@ export interface ClaudeCodeProviderOptions {
   onLifecycle?: (event: { type: 'query_succeeded'; runId: string; durationMs: number; attempts: number; ts: number; reqId: string; sessionId: string }) => void
   /** P5 · Q10.4:session state 变化 observer —— 透传到每个新建的 AISession */
   onSessionStateChange?: SessionStateObserver
+  /**
+   * SDK 原始 default system prompt 读取器(同步)。
+   * 返回 null 表示没有 cache —— dump 块会打 "(NOT CACHED)" 提示用户去跑 capture 脚本。
+   * Provider 不负责捕获,只负责读取;捕获由 server 启动或独立脚本触发。
+   */
+  defaultSystemPromptReader?: () => CachedDefault | null
 }
 
 /** P4 · Task 4:retry registry 需要的最小 AISession 形态 */
@@ -285,6 +292,7 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
   const sessionStore = opts.sessionStore
   const onSessionCreated = opts.onSessionCreated
   const onLifecycle = opts.onLifecycle
+  const defaultSystemPromptReader = opts.defaultSystemPromptReader
   const onSessionStateChange = opts.onSessionStateChange
 
   // Task 7:Provider 共享的 FIFO limiter(顶层只创建一次);null 表示不限流
@@ -380,6 +388,58 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
               `[ClaudeCodeProvider] runTurn model=${sdkOptions['model']} resume=${resume ?? '<none>'} cwd=${sdkOptions['cwd']} promptAppended=${appendSystemPrompt ? 'yes' : 'no'} hookWired=${permissionHook ? 'yes' : 'no'}`,
             )
           }
+
+          // ── always-on full prompt dump ─────────────────────────────────
+          // 把「真正进入 Claude Code 子进程」的 prompt + appendSystemPrompt +
+          // SDK options 全量打到 stdout;Skill body 可能 30~100KB,跑分析时
+          // 噪声大,但排查「模型究竟收到什么」是最直接的取证方式。
+          const dumpSdkOptions: Record<string, unknown> = {}
+          for (const k of [
+            'model',
+            'resume',
+            'cwd',
+            'env',
+            'permissionMode',
+            'allowedTools',
+            'disallowedTools',
+          ]) {
+            const v = sdkOptions[k]
+            if (v !== undefined) dumpSdkOptions[k] = v
+          }
+          if (sdkOptions['hooks']) {
+            dumpSdkOptions['hooks'] = Object.keys(sdkOptions['hooks'] as Record<string, unknown>)
+          }
+          console.log('[ClaudeCodeProvider] ═══ runTurn prompt dump ═══')
+          console.log(`[ClaudeCodeProvider] ── prompt (${prompt.length} chars) ──`)
+          console.log(prompt)
+          // SDK 原始 default system prompt —— 由 defaultSystemPromptReader 提供
+          // (capture 流程见 ./defaultSystemPromptCache.ts)
+          const cachedDefault = defaultSystemPromptReader?.() ?? null
+          if (cachedDefault) {
+            console.log(
+              `[ClaudeCodeProvider] ── sdk default system prompt (cached, claude ${cachedDefault.claude_version}, captured ${cachedDefault.captured_at}, ${cachedDefault.system_combined_chars} chars across ${cachedDefault.system_blocks.length} blocks) ──`,
+            )
+            for (const [i, block] of cachedDefault.system_blocks.entries()) {
+              console.log(
+                `[ClaudeCodeProvider]   [block ${i}] type=${block.type} chars=${block.text.length} cache_control=${JSON.stringify(block.cache_control) ?? '<none>'}`,
+              )
+              console.log(block.text)
+            }
+          } else {
+            console.log(
+              '[ClaudeCodeProvider] ── sdk default system prompt: (NOT CACHED) ──',
+            )
+            console.log(
+              '[ClaudeCodeProvider]   run `node apps/agent/scripts/capture-default-system-prompt.mjs` (or set AIDEVSPACE_CAPTURE_DEFAULT_SYSTEM_PROMPT=1 at server startup) to capture once.',
+            )
+          }
+          console.log(
+            `[ClaudeCodeProvider] ── appendSystemPrompt (${appendSystemPrompt?.length ?? 0} chars) ──`,
+          )
+          console.log(appendSystemPrompt ?? '<none>')
+          console.log('[ClaudeCodeProvider] ── sdk options ──')
+          console.log(JSON.stringify(dumpSdkOptions, null, 2))
+          console.log('[ClaudeCodeProvider] ═══ end prompt dump ═══')
 
           const stream = q({ prompt, options: sdkOptions })
           for await (const raw of stream) {

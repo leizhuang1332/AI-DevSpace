@@ -28,6 +28,11 @@ import { createCcSwitchClient, createNullCcSwitchClient } from './providers/CcSw
 import type { CcSwitchClient } from './providers/CcSwitchClient.js'
 import { createClaudeCodeProvider } from './providers/ClaudeCodeProvider.js'
 import type { RetryableSession } from './providers/ClaudeCodeProvider.js'
+import {
+  readCache as readDefaultSystemPromptCache,
+  ensureCached,
+  getCachePath as getDefaultSystemPromptCachePath,
+} from './providers/defaultSystemPromptCache.js'
 import type { AIProvider } from './providers/AIProvider.js'
 import { SessionStore } from './session/SessionStore.js'
 import { MessagesMirror } from './session/MessagesMirror.js'
@@ -191,6 +196,8 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     sessionLogger,
     sessionStore,
     globalLogger,
+    // 同步读取 SDK default system prompt cache —— dump 时打
+    defaultSystemPromptReader: () => readDefaultSystemPromptCache(workspaceRoot),
     onSessionCreated: (entry) => {
       retrySessions.set(entry.id, entry)
     },
@@ -290,6 +297,39 @@ if (isMain) {
   const workspaceRoot = process.env.AIDEVSPACE_HOME ?? defaultWorkspaceRoot()
   const logFilePath = process.env.AGENT_LOG_FILE ?? defaultLogPath()
   const app = await buildServer({ workspaceRoot, logFilePath })
+
+  // ── 可选:启动时自动 capture SDK default system prompt ──
+  // AIDEVSPACE_CAPTURE_DEFAULT_SYSTEM_PROMPT=1 时触发,缺则跳过。
+  // cache 已存在则跳过(用 --force 走脚本重抓)。
+  if (process.env.AIDEVSPACE_CAPTURE_DEFAULT_SYSTEM_PROMPT === '1') {
+    const existing = readDefaultSystemPromptCache(workspaceRoot)
+    if (existing) {
+      app.log.info(
+        { cached_at: existing.captured_at, claude: existing.claude_version },
+        'sdk default system prompt cache present; skipping capture',
+      )
+    } else {
+      app.log.info('capturing sdk default system prompt (one-time, ~3-5s) …')
+      ensureCached({ workspaceRoot })
+        .then((cached) => {
+          if (cached) {
+            app.log.info(
+              {
+                claude: cached.claude_version,
+                chars: cached.system_combined_chars,
+                blocks: cached.system_blocks.length,
+                path: getDefaultSystemPromptCachePath(workspaceRoot),
+              },
+              'sdk default system prompt captured',
+            )
+          }
+        })
+        .catch((err) => {
+          app.log.warn({ err: String(err) }, 'sdk default system prompt capture failed (non-fatal)')
+        })
+    }
+  }
+
   try {
     await app.listen({ port, host })
     app.log.info(`agent listening on http://${host}:${port}`)
