@@ -1,0 +1,28 @@
+apps/agent/src/__tests__/analysis-chunk-parser.test.ts
+  s_011690c17dd80e::t_9c753d9721f97e 338-424
+  s_011690c17dd80e::t_2f8e92491001d2 337,425-426
+apps/agent/src/routes/analysis-chunk-parser.ts
+  s_011690c17dd80e::t_117f7b812262af 546
+  s_011690c17dd80e::t_2be36a6ffa79b3 545,547-548
+  s_011690c17dd80e::t_854c68d9a4cb0e 97-114
+  s_011690c17dd80e::t_ea564f9d9a17a4 132-139,142,146-147,149,152
+apps/agent/skills/built-in/requirement-brainstorm/SKILL.md
+  s_011690c17dd80e::t_f727b45675e25d 25,28-31,37
+  s_011690c17dd80e::t_e009dc9344f79f 153-154,156,160,164,167-175
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "c3eeda889fb48cbfd14c464b0cc98ebe2ee90b2a",
+  "prompts": {},
+  "sessions": {
+    "s_011690c17dd80e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "737c9a5c-f59f-43a5-b266-57ef68abb41b",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
