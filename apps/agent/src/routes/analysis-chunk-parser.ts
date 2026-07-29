@@ -94,8 +94,24 @@ type Marker =
   | { type: 'bucket'; bucket: BucketMarker }
   | { type: 'bucket_empty'; bucket: BucketMarker }
 
-const DIM_MARKER_RE = /^\[DIM\s+([A-Za-z_][A-Za-z0-9_]*)\]$/
-const PLAIN_MARKER_RE = /^\[([A-Z_]+)\]$/
+/**
+ * 标记正则 —— **允许标记后同行跟正文**(fix:识别产物仍为空 · 第二轮)。
+ *
+ * 实测(req-001-fafe / sess-architecture-ms5hsbpp):模型 50/50 条产物都写成
+ *     [SUBPROBLEM] 尾差落点:文档仅描述"在有一个有值的金额上"...
+ * 即「标记 + 空格 + 正文」**同一行**,而不是 SKILL.md 要求的「标记独占一行 +
+ * 次行 `text:`」。旧正则用 `$` 锚死行尾,50 条全部匹配不上 → 再次全量降级
+ * narration。
+ *
+ * 结论:标记独占行是 prompt 一厢情愿的约定,内联前缀才是模型的自然产出,且
+ * 语义**同样无歧义**。这里把行尾锚点换成「捕获同行剩余正文」,两种写法都收:
+ *   - `[SUBPROBLEM]\ntext: xxx`  → rest = ''      (走既有 `text:` 字段路径)
+ *   - `[SUBPROBLEM] xxx`         → rest = 'xxx'   (作为块首行正文,走 loose 兜底)
+ *
+ * 同时容忍 `**[RISK]**` 这类加粗包裹的前缀。
+ */
+const DIM_MARKER_RE = /^(?:\*\*|__)?\[DIM\s+([A-Za-z_][A-Za-z0-9_]*)\](?:\*\*|__)?\s*(.*)$/
+const PLAIN_MARKER_RE = /^(?:\*\*|__)?\[([A-Z_]+)\](?:\*\*|__)?\s*(.*)$/
 
 /** 代码块围栏(``` / ```text / ~~~)—— 直接忽略该行 */
 const FENCE_RE = /^(?:`{3,}|~{3,})\s*\w*$/
@@ -113,19 +129,27 @@ function stripDecoration(line: string): string {
   return s
 }
 
-function matchMarker(line: string): Marker | null {
+/** 标记匹配结果:marker 本体 + 同行剩余正文(内联写法时非空) */
+interface MarkerMatch {
+  marker: Marker
+  /** 标记后同行剩余的正文;`[SUBPROBLEM]` 独占一行时为空串 */
+  rest: string
+}
+
+function matchMarker(line: string): MarkerMatch | null {
   const s = stripDecoration(line)
   const dim = DIM_MARKER_RE.exec(s)
-  if (dim) return { type: 'dim', dim: dim[1] }
+  if (dim) return { marker: { type: 'dim', dim: dim[1] }, rest: dim[2].trim() }
   const plain = PLAIN_MARKER_RE.exec(s)
   if (!plain) return null
   const name = plain[1]
-  if (name === 'VERDICT') return { type: 'verdict' }
+  const rest = plain[2].trim()
+  if (name === 'VERDICT') return { marker: { type: 'verdict' }, rest }
   if (name === 'SUBPROBLEM' || name === 'RISK' || name === 'OPTION') {
-    return { type: 'bucket', bucket: name }
+    return { marker: { type: 'bucket', bucket: name }, rest }
   }
   const empty = /^(SUBPROBLEM|RISK|OPTION)_EMPTY$/.exec(name)
-  if (empty) return { type: 'bucket_empty', bucket: empty[1] as BucketMarker }
+  if (empty) return { marker: { type: 'bucket_empty', bucket: empty[1] as BucketMarker }, rest }
   return null
 }
 
@@ -518,8 +542,10 @@ export function createAnalysisTextParser(opts: {
       // 显式标记优先级最高 —— 退出 markdown 降级上下文
       flushMdItem(out)
       mdBucket = null
-      currentMarker = marker
-      currentLines = []
+      currentMarker = marker.marker
+      // 内联写法(`[SUBPROBLEM] 正文`):同行正文作为块首行,交给既有块解析流程
+      // (无 `key:` 前缀 → 落 loose → blockToChunk 用 loose 兜底当 text)
+      currentLines = marker.rest.length > 0 ? [marker.rest] : []
       started = true
       return
     }

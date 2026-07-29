@@ -334,3 +334,93 @@ describe('createAnalysisTextParser — markdown 降级(bucketFallback)', () => {
     expect(streamed).toEqual(parseAllFallback(md))
   })
 })
+
+// ============================================================================
+// 内联标记写法(fix:识别产物仍为空 · 第二轮)
+//
+// 回归背景:真实 SDK 输出(req-001-fafe / sess-architecture-ms5hsbpp)在提示词
+// 修好后确实产出了 [SUBPROBLEM]/[RISK]/[OPTION] 标记,但 50/50 条都写成
+// 「标记 + 空格 + 正文」同一行,而非「标记独占一行 + 次行 text:」。
+// 旧正则 `^\[NAME\]$` 锚死行尾 → 50 条再次全量降级 narration。
+// ============================================================================
+
+describe('createAnalysisTextParser — 内联标记(marker + 同行正文)', () => {
+  it('[SUBPROBLEM] 正文 同行 → subproblem chunk,text 取同行正文', () => {
+    const out = parseAll('[SUBPROBLEM] 尾差落点:文档仅描述"在有一个有值的金额上",需业务侧明确。')
+    expect(out).toHaveLength(1)
+    expect(out[0].kind).toBe('subproblem')
+    expect(out[0].label).toBe('DETECT')
+    expect(out[0].text).toBe('尾差落点:文档仅描述"在有一个有值的金额上",需业务侧明确。')
+  })
+
+  it('三桶内联标记连续多行 → 逐条升级,顺序保持', () => {
+    const out = parseAll(
+      [
+        '[SUBPROBLEM] 尾差落点未指定节点。',
+        '[RISK] 上游接口延期导致准入延期。',
+        '[OPTION] 方案A固定落入始发节点;建议A。',
+      ].join('\n'),
+    )
+    expect(out.map((c) => c.kind)).toEqual(['subproblem', 'risk', 'option'])
+    expect(out[1].text).toBe('上游接口延期导致准入延期。')
+    expect(out[2].label).toBe('OPTION')
+  })
+
+  it('内联 [DIM] 写法 → 保留 admission.dim 与 verdict', () => {
+    const out = parseAll(['[DIM loss_prevention] verdict: warn', 'evidence: 免审路径缺风控。'].join('\n'))
+    expect(out).toHaveLength(1)
+    expect(out[0].admission?.dim).toBe('loss_prevention')
+    expect(out[0].admission?.verdict).toBe('warn')
+  })
+
+  it('内联 [VERDICT] 写法 → 保留 overall', () => {
+    const out = parseAll('[VERDICT] result: ❌')
+    expect(out).toHaveLength(1)
+    expect(out[0].admission?.overall).toBe('fail')
+  })
+
+  it('内联标记后仍可跟 source_refs 续行', () => {
+    const out = parseAll(
+      ['[RISK] 尾差规则不明导致月末不平。', 'source_refs:', '  - prd:10-20 "尾差处理"'].join('\n'),
+    )
+    expect(out).toHaveLength(1)
+    expect(out[0].kind).toBe('risk')
+    expect(out[0].text).toBe('尾差规则不明导致月末不平。')
+    expect(out[0].source_refs).toEqual([{ kind: 'prd', lineRange: [10, 20], quote: '尾差处理' }])
+  })
+
+  it('加粗包裹的内联标记 **[OPTION]** 正文 同样识别', () => {
+    const out = parseAll('**[OPTION]** 引入 BigDecimal 全程高精度。')
+    expect(out).toHaveLength(1)
+    expect(out[0].kind).toBe('option')
+    expect(out[0].text).toBe('引入 BigDecimal 全程高精度。')
+  })
+
+  it('独占一行的旧写法仍然完全兼容(不回归)', () => {
+    const out = parseAll(['[SUBPROBLEM]', 'text: 独占一行写法。'].join('\n'))
+    expect(out).toHaveLength(1)
+    expect(out[0].kind).toBe('subproblem')
+    expect(out[0].text).toBe('独占一行写法。')
+  })
+
+  it('内联空桶占位 [SUBPROBLEM_EMPTY] 说明 → narration,不计入三桶', () => {
+    const out = parseAll('[SUBPROBLEM_EMPTY] turn-1 已覆盖,无新增子问题。')
+    expect(out).toHaveLength(1)
+    expect(out[0].kind).toBe('narration')
+    expect(out[0].text).toBe('turn-1 已覆盖,无新增子问题。')
+  })
+
+  it('未知标记名不误判为桶(仍走 narration,不丢内容)', () => {
+    const out = parseAll('[NOTE] 这是一条普通说明。')
+    expect(out).toHaveLength(1)
+    expect(out[0].kind).toBe('narration')
+    expect(out[0].text).toBe('[NOTE] 这是一条普通说明。')
+  })
+
+  it('内联写法逐字符喂入与一次性喂入等价', () => {
+    const text = '[SUBPROBLEM] 甲问题。\n[RISK] 乙风险。\n'
+    const p = createAnalysisTextParser({ fallbackLabel: 'BRAINSTORM' })
+    const streamed = [...text].flatMap((ch) => p.push(ch)).concat(p.flush())
+    expect(streamed).toEqual(parseAll(text, 'BRAINSTORM'))
+  })
+})
