@@ -1,0 +1,29 @@
+CONTEXT.md
+  s_3fdfe96512910f::t_5fe80495933a5c 6
+  s_3fdfe96512910f::t_81743cbfed1e00 355,357-358
+  s_3fdfe96512910f::t_00b7e2d06e46bc 271-304,307-311,313-354,359-363
+  s_3fdfe96512910f::t_ea7c7b10fec5ae 494-506,508-517
+  s_3fdfe96512910f::t_fd6563d81d9659 356
+  s_3fdfe96512910f::t_bf7ab96c761061 312
+  s_3fdfe96512910f::t_b40e075ed7efeb 255
+  s_3fdfe96512910f::t_b866dd24f2f8e2 305-306
+  s_3fdfe96512910f::t_cdc96044de8fcb 507
+docs/adr/0021-admission-pack-framework.md
+  s_3fdfe96512910f::t_33e286588fcfe4 1-424
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "734f6484bec624dbdcdc30784772c3ef59d8ba93",
+  "prompts": {},
+  "sessions": {
+    "s_3fdfe96512910f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8e7e1abe-6cf3-4017-8db5-8573f68e71a2",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
