@@ -1,0 +1,30 @@
+apps/agent/src/services/RequirementService.ts
+  s_011690c17dd80e::t_92e1192e4a4380 851-856,858
+  s_011690c17dd80e::t_b9ff290b6b3385 1131-1134
+apps/web/src/__tests__/requirements-root.server.test.ts
+  s_011690c17dd80e::t_891c7d1fb8a427 65-68
+  s_011690c17dd80e::t_6133aa75251035 120
+  s_011690c17dd80e::t_1375a2317e0525 17
+apps/agent/src/__tests__/RequirementAssets.test.ts
+  s_011690c17dd80e::t_e105a5c4014af8 28
+  s_011690c17dd80e::t_cf7f1c8d742d82 51-58
+apps/agent/src/__tests__/RequirementUploadDialog.test.ts
+  s_011690c17dd80e::t_fad67611293475 24
+  s_011690c17dd80e::t_0db55f64899ce6 39-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "57a75d92ab7e3461a4283142ddc78efc7a4de629",
+  "prompts": {},
+  "sessions": {
+    "s_011690c17dd80e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "737c9a5c-f59f-43a5-b266-57ef68abb41b",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
