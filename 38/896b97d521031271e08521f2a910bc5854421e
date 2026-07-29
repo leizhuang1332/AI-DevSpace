@@ -1,0 +1,31 @@
+apps/agent/src/routes/analysis.ts
+  s_13de0da1f30a60::t_e83eeee7639b73 925-952
+  s_13de0da1f30a60::t_b71a7e1d8521d6 402
+  s_13de0da1f30a60::t_76505947476c0a 1018-1024,1027,1039-1040
+  s_13de0da1f30a60::t_599f7f0a4f19e8 1126-1131
+  s_13de0da1f30a60::t_84452197ebd296 1155
+  s_13de0da1f30a60::t_9a9fc9e048e844 1150-1154
+  s_13de0da1f30a60::t_07500455452f47 368-369,371-376
+apps/agent/src/__tests__/__helpers__/fakeAnalysisProvider.ts
+  s_13de0da1f30a60::t_3764068bbbfd4d 100-102
+  s_13de0da1f30a60::t_35a016cd81e419 144
+apps/agent/src/__tests__/analysis-source-refs.test.ts
+  s_13de0da1f30a60::t_38f45c8c91f008 27
+  s_13de0da1f30a60::t_d5b2bb3ee680da 141-188
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "38896b97d521031271e08521f2a910bc5854421e",
+  "prompts": {},
+  "sessions": {
+    "s_13de0da1f30a60": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d62615de-9731-4528-be61-4518069ac016",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
