@@ -1,0 +1,101 @@
+apps/web/src/__tests__/analyzing-loader-cta-integration.test.tsx
+  s_aceae5b4515b46::t_542545bde9d886 83-86,124-129
+.scratch/analyzing-real-prd-onboarding/issues/05-admission-dashboard-start-cta.md
+  s_aceae5b4515b46::t_7b171924d7840f 38
+  s_aceae5b4515b46::t_8129dfe7cf74ce 5-6,20,22-35,45-47
+  s_aceae5b4515b46::t_724d7e39921642 21
+apps/agent/src/prompt/SkillLoader.ts
+  s_011690c17dd80e::t_6a091e6a7f60c6 86-91
+apps/web/src/__tests__/lib/agent-client.test.ts
+  s_6cc435d0290643::t_12813bbc308028 45-61
+apps/agent/src/__tests__/analysis-source-refs.test.ts
+  s_011690c17dd80e::t_6627494f66e01a 110-113,118-120,122,126-129
+apps/web/src/app/api/requirement/[id]/events/__tests__/route.test.ts
+  s_011690c17dd80e::t_6b50d513a365bc 1-142
+apps/web/src/components/analyzing-zone.tsx
+  s_aceae5b4515b46::t_1b94592763a5a7 219-223
+  s_aceae5b4515b46::t_0c57e7d4cf87fd 307,311,313-321,326-328,359-362,379,381
+  s_aceae5b4515b46::t_fdfdc8e1b54ec5 403-404,406,408-411,430-440,442,448,451
+  s_aceae5b4515b46::t_e318a7de53b4db 773-779,784
+apps/agent/skills/built-in/requirement-brainstorm/SKILL.md
+  s_011690c17dd80e::t_14ffff8f1c9c8d 23,25-26,28-35
+apps/agent/src/__tests__/requirementEventsRoute.test.ts
+  s_aceae5b4515b46::t_37bdaf8e76c8a3 158-204
+docs/adr/0020-analyzing-real-prd-analysis-onboarding.md
+  s_aceae5b4515b46::t_0ba5404c76c633 211,213-217
+  s_aceae5b4515b46::t_bb67f582a42ead 105-112
+  s_aceae5b4515b46::t_5e9c8cf6d94324 212
+apps/agent/src/routes/analysis-chunk-parser.ts
+  s_011690c17dd80e::t_f31a417eee8f37 132-183,464-473,479-482,493-507,518-520,527-571,605-606
+apps/web/src/app/api/requirement/[id]/events/route.ts
+  s_011690c17dd80e::t_6b50d513a365bc 1-76
+apps/agent/skills/built-in/admission-check/SKILL.md
+  s_011690c17dd80e::t_1c9d2f05b7a19c 67-82
+apps/web/src/lib/analysis-start.ts
+  s_6cc435d0290643::t_621ea59d200e0f 117-118
+apps/web/src/components/admission-dashboard.tsx
+  s_aceae5b4515b46::t_1925ceff2d6e0b 109-110
+  s_aceae5b4515b46::t_13d5391745ce68 84-87,92
+  s_aceae5b4515b46::t_93290513338c3a 149,153-154,162-164,171-172
+  s_aceae5b4515b46::t_ae12685661c9b2 7,13-16,18-20,33,42-47
+apps/web/src/app/api/requirement/[id]/assets/[filename]/__tests__/route.test.ts
+  s_011690c17dd80e::t_6b50d513a365bc 1-149
+apps/agent/src/__tests__/analysis-chunk-parser.test.ts
+  s_011690c17dd80e::t_f31a417eee8f37 240-336
+apps/web/src/__tests__/analyzing-zone.test.tsx
+  s_aceae5b4515b46::t_a6a459e60824b0 173-174,176-183,186-187,192,201-204,219-224,227,233-236,257-260
+packages/shared/src/sse.ts
+  s_aceae5b4515b46::t_a62bc1e184b330 104-127
+apps/web/e2e/analyzing-real-run.spec.ts
+  s_aceae5b4515b46::t_1ac4efedb39352 258-265
+  s_aceae5b4515b46::t_992758fe1a2ca0 233-238
+  s_aceae5b4515b46::t_4972bd7c6bf6a8 228-230
+apps/web/src/app/api/requirement/[id]/assets/[filename]/route.ts
+  s_011690c17dd80e::t_6b50d513a365bc 1-70
+apps/agent/src/routes/analysis.ts
+  s_011690c17dd80e::t_62640fb1d211bb 814-844
+  s_011690c17dd80e::t_e059cdc1ba2926 1322-1344
+  s_011690c17dd80e::t_3801914c9a6021 1146
+  s_011690c17dd80e::t_a623c89e907663 1090-1091
+  s_aceae5b4515b46::t_6085019f918f49 1270,1276
+  s_011690c17dd80e::t_4cd2bd07b35ddb 977-983,990,999-1001,1007-1009,1012-1013,1017-1020,1278
+  s_011690c17dd80e::t_d3d5071a356f8f 1135-1142
+  s_aceae5b4515b46::t_8298d4d776f7b8 1252,1256,1264-1269,1271-1275,1277
+apps/web/src/lib/agent-client.ts
+  s_6cc435d0290643::t_ac314f984abcda 27-33
+apps/web/src/__tests__/analyzing-admission-dashboard.test.tsx
+  s_aceae5b4515b46::t_cb6566328f2013 383-386,396,402
+  s_aceae5b4515b46::t_2552e05ce9911e 275-277
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "fb993336f2933b6b445cb7e9131f4e89d3400121",
+  "prompts": {},
+  "sessions": {
+    "s_011690c17dd80e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "737c9a5c-f59f-43a5-b266-57ef68abb41b",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    },
+    "s_6cc435d0290643": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6feaf592-4b1b-45c4-a227-1ef6d083c1ee",
+        "model": "MiniMax-M3"
+      },
+      "human_author": null
+    },
+    "s_aceae5b4515b46": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b89dc25d-200d-40ff-ab7a-28d37ced70e0",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
