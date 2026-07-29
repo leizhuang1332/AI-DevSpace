@@ -3,7 +3,7 @@
 > 本文档是项目的"活字典"。所有领域名词在此有且仅有一个含义。修改任何产品设计前，请先来对照术语。
 >
 > 创建：2026-07-08  
-> 当前版本：v1.0（产品形态定稿）
+> 当前版本：v1.0.5（产品形态定稿 + Admission Pack Framework 落地）
 
 ---
 
@@ -252,7 +252,7 @@ requirements/<req-id>/analysis/
 
 **与 CLARIFYING 交接:** 直接共享 `analysis/modules.yaml`(双向引用,无快照 / 无冻结点)。用户回到 ANALYZING 修改后,CLARIFYING 下次进入自动 reload 最新版本。
 
-**准入维度可配置:** 每个 Skill 在 frontmatter 声明它需要检查的准入维度集合,不同 Skill 可能有不同维度集(如"退款分析" vs "会员分析");详见 ADR-0013 D10。
+**准入维度可配置:** 见 ADR-0021 D1-D15 —— 由独立的 Admission Pack Framework 承载:评估单元(N 个,自描述,5 维度只是 baseline pack 预设)、评估策略(verdict 算法写在 `algorithm.yaml`)、评估包(`~/.aidevspace/admission/packs/<id>/` 自包含,用户实际装载单位)。原 ADR-0013 D10 描述的 frontmatter 方案被本框架完全取代。
 
 ### Overview 概览页（需求工作台仪表板）
 
@@ -265,6 +265,99 @@ requirements/<req-id>/analysis/
 - 默认行为：从 `/requirements/[id]/` 重定向到 cookie `last_zone` 或默认 `drafting`
 
 详见 [ADR-0011](docs/adr/0011-requirement-workbench-zone-adaptive.md) · [ADR-0012](docs/adr/0012-requirement-workbench-shell-topology.md)
+
+---
+
+## Admission Pack Framework 术语（v1.0.5）
+
+PRD 准入评估的"可装载组合"机制 —— 把原本硬编码在 `admission-check/SKILL.md` 的 5 维度 / severity 表 / verdict 规则拆成三层独立对象。详见 [ADR-0021](docs/adr/0021-admission-pack-framework.md)。
+
+### Admission Unit（评估单元）
+
+PRD 准入评估的单一视角。产出 per-dimension `pass / warn / fail` judgment。
+
+- **类比**：传感器（温度计 / 烟雾报警器）
+- **存储**：`~/.aidevspace/admission/packs/<pack-id>/units/<unit-id>.yaml`
+- **关键字段**：
+  - `id` —— slug，与文件名一致
+  - `displayName` —— UI 显示名
+  - `severityIcon` —— `🔴 / 🟠 / 🟡 / 🟢 / 💬`
+  - `outputMarker` —— parser 识别的标记（如 `[DIM loss_prevention]`）
+  - `admissionPrompt` —— 注入到 system prompt 的评估 prompt（注意：字段名曾叫 `evaluationPrompt`，v1.0.5 重命名）
+- **特性**：单元**只在 pack 内有效**；不同 pack 的同名 unit 内容可不同（金融 loss_prevention ≠ 互联网 loss_prevention）
+
+### Admission Algorithm / Policy（评估策略 / 算法）
+
+拿 N 个单元 judgment 算**唯一**总体 verdict 的规则集。
+
+- **类比**：报警规则（"任一传感器触发 → 拉警报"）
+- **存储**：`~/.aidevspace/admission/packs/<pack-id>/algorithm.yaml`
+- **DSL**：JSON 规则列表 + jq 简化版表达式（10 个语法元素：`.field` / `==` / `and|or|not` / `any|all` / `[A|select(pred)]` / `length|count` / `true|false`）
+- **执行者**：service 层（不是模型）—— 模型只输出 `[DIM xxx]` 块，service 跑 algorithm.yaml 算 verdict（ADR-0021 D12）
+- **特性**：评估单元**不**声明 verdict 角色（blocker / warner）；策略用 unit 的 severity 字段决定严格度
+
+### Admission Pack（评估包）
+
+用户的**实际装载单位** = 一组 units + 一个 algorithm + UI 提示 + 元数据。
+
+- **类比**：建筑物消防配置（传感器组合 + 报警规则）
+- **存储**：`~/.aidevspace/admission/packs/<pack-id>/` 目录（自包含）：
+
+  ```text
+  packs/<pack-id>/
+  ├── manifest.yaml           # 元数据 + units 顺序 + algorithm 引用
+  ├── units/<unit-id>.yaml    # 评估单元（多个）
+  └── algorithm.yaml          # 评估策略
+  ```
+
+- **特性**：
+  - **自包含**——每个 pack 可独立分发（`tar` / GitHub release）
+  - **用户操作的对象**——不是单元，也不是策略
+  - **built-in 不在 app bundle** —— 应用不携带 pack；首次启动自动生成 `baseline-5dim` 到 workspace
+
+### Enabled Packs（启用列表）
+
+workspace 级别的"用户已启用" pack 列表。
+
+- **存储**：`~/.aidevspace/config.yaml` 的 `analysis.enabled_packs: [...]`
+- **API 必填**：`POST /analysis/start` body 的 `pack_id` 必须在此列表内；否则 400 错误（ADR-0021 D10）
+- **UI 入口**：Web Settings → Admission Packs 页面勾选；或 CLI `aidevspace pack enable|disable`
+
+### Pack Import（导入）
+
+从"外部"把 pack 文件弄到 workspace `~/.aidevspace/admission/packs/` 的动作。
+
+- **来源**：
+  - 本地目录（开发 / 测试）
+  - Git URL（发布 / 共享）—— `git+https://...#subdir=...&ref=...` 格式
+- **执行面**：CLI 底层 + Web UI 调 CLI（同一份代码）
+- **冲突规则**：已 enabled 的 pack id 不允许覆盖；必须先 disable 旧 pack
+
+### baseline-5dim
+
+应用首启自动生成的默认 pack。包含 5 单元（`loss_prevention` / `performance` / `arch_conflict` / `business_reasonable` / `context_query`） + 默认算法（任一 🔴 fail → ❌；任一 warn → ⚠️；全部 pass → ✅）。
+
+- **与原 admission-check Skill 行为等价**（对照测试覆盖）
+- 用户可 disable，但应用升级不会自动 disable 用户手动加的 pack
+
+### Pack Loader
+
+`apps/agent/src/admission/packLoader.ts` —— 负责装载 pack 的模块。
+
+- **职责**：解析 manifest / unit / algorithm YAML；V-3 校验（结构 fail-fast / 语义降级）；返回内存中的 Pack 对象
+- **注入**：`SystemPromptAssembler` 接 `admissionLoader` 作为 deps（D7 C.2 形态）
+- **V-3 校验**：
+  - 结构错（YAML parse / 缺必填字段 / unit 文件缺失 / outputMarker 冲突）→ fail-fast
+  - 语义错（algorithm 表达式 syntax 错 / 规则重复）→ 降级 + warning log + session 仍跑
+
+### 与"Skill"概念的严格边界
+
+| 概念 | 性质 | 谁维护 | 谁装载 |
+| --- | --- | --- | --- |
+| Skill | 平台固化资产（admission-check / requirement-brainstorm / tech-brief-scaffold / requirement-critique 等） | 平台核心 | 平台升级 |
+| Admission Pack | 用户运行时配置 | 用户 / 企业管理员 | 用户 |
+
+**Skill loader 只管 prose；Admission Pack Loader 只管结构化配置**。两个域不互相侵入。
 
 ---
 
@@ -395,6 +488,30 @@ requirements/<req-id>/analysis/
 | 85 | **点右栏 issue → 联动左栏**（切 Tab + 滚 lineRange + 高亮 pulse 1.5s）；点左栏高亮 → 暂不联动右栏（D4 v2 候选） | [ADR-0017](docs/adr/0017-analyzing-main-document-reader.md) D4 |
 | 86 | **VS4 用户加 product 合成 synthetic chunk**（id 前缀 `user-added-<uuid>` + `synthetic: true` 标记）；`source_refs` 不强制（允许"先记草稿"）；重扫时 AI 不复读 synthetic 标记 | [ADR-0017](docs/adr/0017-analyzing-main-document-reader.md) D6 |
 | 87 | **新术语 `AuxFile`（辅助文件）入术语表**——Requirement 内的参考资料文档（独立 markdown），与 Asset（PRD 内联图）/ Knowledge（全局共享）/ PRD（正文）严格区分；数据模型见 `packages/shared/src/drafting.ts` | [ADR-0017](docs/adr/0017-analyzing-main-document-reader.md) |
+
+---
+
+## v1.0.5 增量决策（15 轮 grilling 沉淀 · 2026-07-29）
+
+> 本节是 v1.0.4 锁定后的迭代记录，不修改上面 v1.0 / v1.0.1 / v1.0.2 / v1.0.3 / v1.0.4 决策。所有增量由 [ADR-0021](docs/adr/0021-admission-pack-framework.md) 承载完整内容；本节仅沉淀决策号 + 一句话。
+
+| # | 决策 | 关联 ADR |
+| --- | --- | --- |
+| 88 | **评估视角模型 = N 个自描述评估单元**：5 维度不是核心机制，只是 baseline pack 的预设配置；任意评估单元集都是合法 pack 内容 | [ADR-0021](docs/adr/0021-admission-pack-framework.md) D1 |
+| 89 | **Admission Pack Framework 仅控制 turn-1**（admission check）；turn-2（requirement-brainstorm 三桶）独立配置，不在本框架范围 | [ADR-0021](docs/adr/0021-admission-pack-framework.md) D2 |
+| 90 | **verdict 算法归属 = pack 的属性**（写在 `algorithm.yaml`），不独立成全局策略目录，不写到 prompt 让模型自己算 | [ADR-0021](docs/adr/0021-admission-pack-framework.md) D3 |
+| 91 | **装载作用域 = workspace + req + session 三层**：workspace `~/.aidevspace/config.yaml` 的 `enabled_packs`；req 级 override 留位 v1.1；session = `/analysis/start` body 的 `pack_id`（唯一装载入口） | [ADR-0021](docs/adr/0021-admission-pack-framework.md) D4 |
+| 92 | **物理布局 = `~/.aidevspace/admission/packs/<id>/`**（单目录嵌套），每个 pack 自包含 manifest + units + algorithm | [ADR-0021](docs/adr/0021-admission-pack-framework.md) D5 |
+| 93 | **unit prompt 拼接格式 = 分段标号**：`### N. <id> (<displayName> · <severityIcon>)` + 末尾 `output_marker` 行；不走 Skill loader 装 admission | [ADR-0021](docs/adr/0021-admission-pack-framework.md) D6 |
+| 94 | **干掉 admission-check Skill**；`SystemPromptAssembler` 注入 `admissionLoader` 作为 deps；dualTurnAssembler 不再追加 Skill body（去重） | [ADR-0021](docs/adr/0021-admission-pack-framework.md) D7 |
+| 95 | **verdict DSL = JSON 规则列表 + jq 简化版表达式**（10 个语法元素：`.field` / `==` / `and\|or\|not` / `any\|all` / `[A\|select(pred)]` / `length\|count` / `true\|false`） | [ADR-0021](docs/adr/0021-admission-pack-framework.md) D8 |
+| 96 | **id 命名空间 = 物理目录路径**天然提供；不同 pack 同名 unit 内容可不同；冲突由"已 enabled 不允许覆盖"规则解决 | [ADR-0021](docs/adr/0021-admission-pack-framework.md) D9 |
+| 97 | **`/analysis/start` body 必填 `pack_id`**；不在 `enabled_packs` → 400 + 显式错误 | [ADR-0021](docs/adr/0021-admission-pack-framework.md) D10 |
+| 98 | **manifest schema = M-1**：`units[].file` 引用 + algorithm 独立文件 + `displayHints` UI 提示；unit YAML 含 `admissionPrompt` 字段（原 `evaluationPrompt` 重命名） | [ADR-0021](docs/adr/0021-admission-pack-framework.md) D11 |
+| 99 | **verdict 计算 = service 层**：模型只输出 `[DIM xxx]` 块；service 跑 `algorithm.yaml` 算 verdict → 推 SSE `verdict_finalized` 事件 | [ADR-0021](docs/adr/0021-admission-pack-framework.md) D12 |
+| 100 | **enabled_packs + 本地目录 / Git URL 导入**（CLI 底层 + Web UI 调 CLI）；导入的 pack 与 built-in 同目录；built-in 不在 app bundle，首启自动生成 `baseline-5dim` | [ADR-0021](docs/adr/0021-admission-pack-framework.md) D13 |
+| 101 | **装载校验 = V-3** 结构 fail-fast（YAML 错 / 缺字段 / 文件缺失 / outputMarker 冲突）/ 语义降级 warning（algorithm 表达式 syntax 错 / 规则重复） | [ADR-0021](docs/adr/0021-admission-pack-framework.md) D14 |
+| 102 | **评估包 ID 冲突 = 显式禁止已 enabled 覆盖**：导入与已 enabled 同 id 的 pack → 拒绝，提示先 disable 旧 pack | [ADR-0021](docs/adr/0021-admission-pack-framework.md) D15 |
 
 ---
 
