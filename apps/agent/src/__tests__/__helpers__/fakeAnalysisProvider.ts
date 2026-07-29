@@ -97,6 +97,9 @@ export interface RecordingCaptures {
     localSid: string
     topic: string
     assemblerKind: 'injected' | 'default'
+    /** 路由层注入的 SDK cwd —— 验证"非 git 目录"约束(详见 analysis.ts
+     * `resolveAnalysisSdkCwd` 注释)。 */
+    cwd: string | undefined
   }>
   sendCalls: Array<{ text: string; index: number }>
 }
@@ -138,6 +141,7 @@ export function createRecordingProvider(opts: {
         localSid,
         topic: o.topic,
         assemblerKind: o.assembler ? 'injected' : 'default',
+        cwd: o.cwd,
       })
       const pubsub = makePubSub()
 

@@ -365,9 +365,15 @@ export const analysisRoutes: FastifyPluginAsync<AnalysisRoutesOptions> = async (
     const admissionSkill = skillsByName.get('admission-check')
     const brainstormSkill = skillsByName.get('requirement-brainstorm')
 
-    // 8. PRD 全文 → turn-1 user message
+    // 8. PRD 全文 + 绝对路径 → turn-1 user message。绝对路径给模型一个"二次校验 /
+    //    精确定位行号"的兜底入口(详见 buildTurn1UserMessage 注释),与 cwd 解耦。
     const prdContent = readFileSync(requirementMdPath, 'utf8')
-    const turn1UserMessage = buildTurn1UserMessage({ prdContent, angle: angleTyped, label: labelText })
+    const turn1UserMessage = buildTurn1UserMessage({
+      prdContent,
+      prdAbsolutePath: requirementMdPath,
+      angle: angleTyped,
+      label: labelText,
+    })
 
     // 9. 构造 stateful dual-turn assembler —— turn-1 / turn-2 各装入对应 Skill body
     const baseAssembler = createSystemPromptAssembler({
@@ -393,6 +399,7 @@ export const analysisRoutes: FastifyPluginAsync<AnalysisRoutesOptions> = async (
       hub,
       fastify,
       snapshotOpts: snapshotOpts(),
+      analysisSdkCwd: resolveAnalysisSdkCwd(root),
     }).catch((err: unknown) => {
       // 防御:createSession 抛错 → log;session 目录已落,后续清理走 ticket 06 snapshot 路径
       const message = err instanceof Error ? err.message : String(err)
@@ -915,6 +922,34 @@ function resolveUserSkillsDir(): string {
   }
 }
 
+/**
+ * SDK 子进程 cwd 解析 —— 显式指向非 git 目录,切断 git-ai.exe trace2 频繁 fork。
+ *
+ * 背景(git-ai.exe 频繁 fork 根因):
+ *  - 全局 `~/.gitconfig` 设了 `trace2.eventtarget = \\.\pipe\git-ai-...-trace2`,
+ *    每一次 git 命令都会向命名管道写事件,触发 git-ai.exe daemon 端 fork
+ *    worker 监听;
+ *  - Claude CLI 启动时跑 `git status` / `git log` / `git rev-parse` / etc.
+ *    "读仓库上下文"——只要 cwd 命中 git 仓库,就会激活 trace2 路径;
+ *  - 分析工位双 turn 编排里 SDK 活跃窗口远长于普通 Edit,500ms × 10⁰ 调用
+ *    → 9+ 个 git-ai.exe 进程(zombie worker)并发堆积。
+ *
+ * 策略:把 SDK cwd 强制指到 `<workspaceRoot>/.analysis-cwd/`,由我们
+ * `mkdirSync` 显式创建 → 永远不是 git 仓库(目录里没有 `.git/`)→ Claude CLI
+ * 跳过 git 上下文 → trace2 路径不激活。**
+ *
+ * 配套:`buildTurn1UserMessage` 的 prompt 末尾追加 PRD 绝对路径,模型若需
+ * 二次校验可 Read absolute path,与 cwd 解耦。
+ *
+ * 失败:不显式抛错 —— cwd 缺失时 SDK 会退到 `process.cwd()`(dev 场景
+ * `apps/agent/`,命中 git 仓库),所以这里必须 mkdir + 始终返回真路径。
+ */
+export function resolveAnalysisSdkCwd(workspaceRoot: string): string {
+  const dir = join(workspaceRoot, '.analysis-cwd')
+  mkdirSync(dir, { recursive: true })
+  return dir
+}
+
 /** ADR-0020 D5:union by name,user-wins。空目录 / 不存在 → 安静返回空 map。
  *  handler 硬过滤只关心 admission-check + requirement-brainstorm 两个 name。 */
 async function loadSkillsUnion(opts: {
@@ -980,9 +1015,16 @@ function createDualTurnAssembler(opts: {
  *  默认 system prompt 自带 Skill 注册表,模型会把这句话理解成"去调用一个已注册的
  *  Skill 工具",查不到就自行发挥、输出自由 markdown,导致 `[DIM ...]` 标记全部丢失。
  *  这里只引用 "system prompt 中约定的输出格式",把模型拉回 appendSystemPrompt 里的
- *  Skill body。 */
+ *  Skill body。
+ *
+ *  `prdAbsolutePath` 在末尾追加 PRD 源文件绝对路径 —— 给模型一个"二次校验 /
+ *  精确定位行号"的兜底入口(用 Read 读 absolute path)。这是因为 SDK session 的
+ *  cwd 被强制指到非 git 目录(避免 git-ai.exe trace2 频繁 fork),相对路径漂移
+ *  不可靠,绝对路径是与 cwd 解耦的稳定锚点。**
+ */
 function buildTurn1UserMessage(params: {
   prdContent: string
+  prdAbsolutePath: string
   angle: AnalysisSessionAngle
   label: string
 }): string {
@@ -994,6 +1036,8 @@ function buildTurn1UserMessage(params: {
     '</prd>',
     '',
     `当前会话角度 = ${params.angle},label = ${params.label}。`,
+    `PRD 源文件绝对路径 = ${params.prdAbsolutePath}`,
+    '(若需重新校验 / 精确定位行号,可用 Read 工具读取 <absolute_path>)。',
     '请按 5 维度(loss_prevention / performance / arch_conflict / business_reasonable / context_query)',
     '输出每个维度的判断与依据。',
     '',
@@ -1079,6 +1123,12 @@ async function runDualTurnAnalysis(params: {
   fastify: FastifyInstance
   /** ADR-0020 D10 · audit #4:snapshot 根与 workspace 根由路由显式注入 */
   snapshotOpts: SnapshotOptions
+  /**
+   * SDK 子进程的 cwd —— 由路由显式注入,确保指向非 git 目录(详见
+   * `resolveAnalysisSdkCwd` 注释)。**不传**会让 SDK 退到 `process.cwd()`,
+   * 在 dev / 测试场景下命中 git 仓库,触发 git-ai.exe trace2 频繁 fork。
+   */
+  analysisSdkCwd: string
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const {
     provider, reqId, sessionId, sessionDir, dualTurnAssembler,
@@ -1097,7 +1147,12 @@ async function runDualTurnAnalysis(params: {
     localSid: sessionId,
     topic: params.label,
     kind: 'task',
-    cwd: params.analysisDir, // SDK 在 analysis dir 下启动,读 requirement.md 用相对 path 兜底
+    // SDK cwd 显式指到非 git 目录(workspaceRoot/.analysis-cwd)—— 阻止 Claude
+    // CLI 启动时跑 git status / log / rev-parse 等"读仓库上下文"调用,从而
+    // 切断 git-ai.exe trace2 路径的频繁 fork。PRD 全文已在 turn-1 prompt 中
+    // 以 <prd>...</prd> 块送达,绝对路径也一并写入(见 buildTurn1UserMessage),
+    // 模型无需依赖 cwd 解析相对路径。
+    cwd: params.analysisSdkCwd,
     assembler: dualTurnAssembler,
   })
 

@@ -24,6 +24,7 @@ import {
   mkdirSync,
   readFileSync,
   writeFileSync,
+  existsSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -135,6 +136,54 @@ describe('start handler dual-turn wiring (ADR-0020 D8)', () => {
 
     // 6. SSE 收到 analysis_chunk 事件(adapter 接 text delta 即推)
     //    这里我们没订阅 SSE;但通过 chunks.jsonl 间接验证了 handler 路径走通
+  })
+
+  /**
+   * cwd + prdAbsolutePath 契约 —— 用于切断 git-ai.exe trace2 频繁 fork。
+   *
+   * 锁定 3 条契约:
+   *  1. `createSession` 的 `cwd` 必须是 `<workspaceRoot>/.analysis-cwd/`,
+   *     **不**回退到 `process.cwd()`(否则 dev 场景命中 git 仓库)。
+   *  2. 该 cwd 目录**不**是 git 仓库(没有 `.git/`)→ 模型无 git 上下文,
+   *     trace2 路径不激活。
+   *  3. turn-1 userMessage 包含 PRD 源文件绝对路径(模型二次校验 / 定位
+   *     行号的兜底入口),与 cwd 解耦。
+   */
+  it('SDK cwd = <workspaceRoot>/.analysis-cwd(非 git 目录)+ turn-1 含 PRD 绝对路径', async () => {
+    const { provider, captures } = createRecordingProvider({
+      eventsByTurn: [
+        [{ type: 'done', reason: 'end_turn' as const, sessionId: 'rec-sdk-1' }],
+        [{ type: 'done', reason: 'end_turn' as const, sessionId: 'rec-sdk-2' }],
+      ],
+    })
+    await fastify.register(analysisRoutes, { hub, workspaceRoot: root, provider })
+
+    const reqId = 'req-wiring-3'
+    const reqDir = join(root, 'requirements', reqId)
+    mkdirSync(reqDir, { recursive: true })
+    const prdAbsolutePath = join(reqDir, 'requirement.md')
+    writeFileSync(prdAbsolutePath, '# AbsolutePath 测试\n', 'utf8')
+
+    const res = await fastify.inject({
+      method: 'POST',
+      url: `/api/requirements/${reqId}/analysis/start`,
+      headers: { 'content-type': 'application/json' },
+      payload: { angle: 'interface', session_id: 'sess-wiring-3' },
+    })
+    expect(res.statusCode).toBe(201)
+    await new Promise((r) => setTimeout(r, 200))
+
+    expect(captures.createSessionCalls.length).toBe(1)
+    const cwd = captures.createSessionCalls[0].cwd
+    expect(cwd).toBeDefined()
+    // 契约 1:cwd 必须是 <workspaceRoot>/.analysis-cwd(非 process.cwd())
+    expect(cwd).toBe(join(root, '.analysis-cwd'))
+    // 契约 2:不是 git 仓库(没有 .git/)
+    expect(existsSync(join(cwd!, '.git'))).toBe(false)
+    // 契约 3:turn-1 userMessage 含 PRD 绝对路径
+    const turn1Text = captures.sendCalls[0].text
+    expect(turn1Text).toContain('PRD 源文件绝对路径')
+    expect(turn1Text).toContain(prdAbsolutePath)
   })
 
   it('turn-1 失败时 turn-2 仍跑,jsonl 保留 turn-2 产物(半成品状态)', async () => {
