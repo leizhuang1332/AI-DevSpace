@@ -10,6 +10,12 @@
  *  - assembleDynamic:Skill context 文件读到 → 渲染为 Skill context files 段
  *  - assembleDynamic:bad_feedback 字段 → 渲染为 Skill Feedback 段
  *  - assembleDynamic:99-summary 读不到 → 跳过该节(不抛错)
+ *
+ * ticket 02 (ADR-0021 D6/D7):assembleBase 接入 admissionLoader
+ *  - loader 返 pack → 渲染 `## Admission Lenses` 段,每 unit 一段 `### N. <id> (...)` + output_marker
+ *  - loader 返 pack → 抑制 admission-check Skill body(turn-1 内容由 pack 驱动)
+ *  - loader 抛错 / 返 null → admission section 省略,turn-1 prompt 仍流
+ *  - 不传 admissionLoader → 与 ticket 01 行为完全一致(向后兼容)
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
@@ -20,6 +26,8 @@ import {
   createSystemPromptAssembler,
   PLATFORM_PHILOSOPHY,
 } from '../prompt/SystemPromptAssembler.js'
+import type { AdmissionLoader } from '../admission/index.js'
+import type { AdmissionPack } from '@ai-devspace/shared'
 
 /** In-memory readFile —— 接受路径,返回预置内容;否则 throw 像真 fs 一样 */
 function makeFakeFs(files: Record<string, string>): (p: string) => Promise<string> {
@@ -318,5 +326,221 @@ body
       req: { reqId: 'r-1', rootPath: reqRoot },
     })
     expect(out).not.toContain('## Skill Feedback')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// ticket 02 (ADR-0021 D6/D7):assembleBase 接入 admissionLoader
+//
+// - loader 返 pack → 渲染 `## Admission Lenses` 段,每 unit 一段 `### N. <id> (...)` + output_marker
+// - loader 返 pack → 抑制 admission-check Skill body(turn-1 内容由 pack 驱动)
+// - loader 抛错 / 返 null → admission section 省略,turn-1 prompt 仍流
+// - 不传 admissionLoader → 与 ticket 01 行为完全一致(向后兼容)
+// ---------------------------------------------------------------------------
+
+function makeBaselinePackFixture(): AdmissionPack {
+  // 与 apps/agent/src/admission/baselineGenerator.ts BASELINE_UNITS 形态对齐
+  // —— 5 个 unit,1-based 顺序,severity / marker 各自唯一
+  return {
+    id: 'baseline-5dim',
+    displayName: '默认 5 维度基线',
+    description: 'fixture for assembler test',
+    units: [
+      {
+        id: 'loss_prevention',
+        displayName: '资损安全',
+        severityIcon: '🔴',
+        outputMarker: '[DIM loss_prevention]',
+        admissionPrompt: '聚焦资金流 / 资产扣减 / 退款 / 优惠券 / 余额等路径。',
+        outputSchema: {
+          verdict: { type: 'enum', options: ['pass', 'warn', 'fail'] },
+          evidence: { type: 'string', maxChars: 80 },
+          pending: { type: 'string?', optional: true },
+          quote: { type: 'string?', optional: true },
+        },
+      },
+      {
+        id: 'performance',
+        displayName: '性能',
+        severityIcon: '🟠',
+        outputMarker: '[DIM performance]',
+        admissionPrompt: '聚焦 RT / 吞吐量 / 长尾延迟 / 资源占用等指标。',
+        outputSchema: {
+          verdict: { type: 'enum', options: ['pass', 'warn', 'fail'] },
+          evidence: { type: 'string', maxChars: 80 },
+          pending: { type: 'string?', optional: true },
+          quote: { type: 'string?', optional: true },
+        },
+      },
+      {
+        id: 'arch_conflict',
+        displayName: '架构冲突',
+        severityIcon: '🟡',
+        outputMarker: '[DIM arch_conflict]',
+        admissionPrompt: '聚焦现有架构 / 上下游契约 / 服务边界。',
+        outputSchema: {
+          verdict: { type: 'enum', options: ['pass', 'warn', 'fail'] },
+          evidence: { type: 'string', maxChars: 80 },
+          pending: { type: 'string?', optional: true },
+          quote: { type: 'string?', optional: true },
+        },
+      },
+      {
+        id: 'business_reasonable',
+        displayName: '业务合理性',
+        severityIcon: '🟢',
+        outputMarker: '[DIM business_reasonable]',
+        admissionPrompt: '聚焦业务目标 / 边界 / 一致性 / 异常路径。',
+        outputSchema: {
+          verdict: { type: 'enum', options: ['pass', 'warn', 'fail'] },
+          evidence: { type: 'string', maxChars: 80 },
+          pending: { type: 'string?', optional: true },
+          quote: { type: 'string?', optional: true },
+        },
+      },
+      {
+        id: 'context_query',
+        displayName: '上下文确认',
+        severityIcon: '💬',
+        outputMarker: '[DIM context_query]',
+        admissionPrompt: '聚焦 PRD 中定义模糊 / 需要业务确认的项。',
+        outputSchema: {
+          verdict: { type: 'enum', options: ['pass', 'warn', 'fail'] },
+          evidence: { type: 'string', maxChars: 80 },
+          pending: { type: 'string?', optional: true },
+          quote: { type: 'string?', optional: true },
+        },
+      },
+    ],
+    algorithm: {
+      id: 'baseline-loose',
+      displayName: '默认宽松策略',
+      rules: [],
+      else: { result: '✅', reason: 'fixture else' },
+    },
+    sourcePath: '/tmp/fixture',
+  }
+}
+
+describe('SystemPromptAssembler.assembleBase — admissionLoader 接线 (ticket 02 · ADR-0021 D6/D7)', () => {
+  let skillsRoot: string
+  beforeEach(async () => {
+    skillsRoot = join(tmpdir(), `skills-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+    await mkdir(skillsRoot, { recursive: true })
+    // 放一个 admission-check always Skill(dual-turn 在 ticket 02 之前一直用其 body)
+    const s = join(skillsRoot, 'admission-check')
+    await mkdir(s)
+    await writeFile(
+      join(s, 'SKILL.md'),
+      `---
+name: admission-check
+description: 5-dimension admission
+arming: always
+---
+
+# admission-check SKILL body
+this body MUST NOT appear when admissionLoader returns a pack.
+`,
+    )
+  })
+  afterEach(async () => {
+    await rm(skillsRoot, { recursive: true, force: true })
+  })
+
+  it('loader 返 pack → 渲染 ## Admission Lenses 段(5 个 unit + output_marker 行)', async () => {
+    const pack = makeBaselinePackFixture()
+    const loader: AdmissionLoader = async () => pack
+    const asm = createSystemPromptAssembler({ skillsRoots: [skillsRoot], admissionLoader: loader })
+    const out = await asm.assembleBase({ id: 's-1', reqId: 'r-1', kind: 'task', topic: 't' })
+
+    // 1. 段标题
+    expect(out).toContain('## Admission Lenses')
+
+    // 2. 5 个 unit 各一段:`### N. <id> (<displayName> · <severityIcon>)`
+    expect(out).toContain('### 1. loss_prevention (资损安全 · 🔴)')
+    expect(out).toContain('### 2. performance (性能 · 🟠)')
+    expect(out).toContain('### 3. arch_conflict (架构冲突 · 🟡)')
+    expect(out).toContain('### 4. business_reasonable (业务合理性 · 🟢)')
+    expect(out).toContain('### 5. context_query (上下文确认 · 💬)')
+
+    // 3. 每个 unit 的 admissionPrompt 内容被拼入
+    expect(out).toContain('聚焦资金流 / 资产扣减')
+    expect(out).toContain('聚焦 RT / 吞吐量')
+    expect(out).toContain('聚焦现有架构')
+    expect(out).toContain('聚焦业务目标')
+    expect(out).toContain('聚焦 PRD 中定义模糊')
+
+    // 4. 每个 unit 末尾 output_marker 行
+    expect(out).toContain(`output_marker: '[DIM loss_prevention]'`)
+    expect(out).toContain(`output_marker: '[DIM performance]'`)
+    expect(out).toContain(`output_marker: '[DIM arch_conflict]'`)
+    expect(out).toContain(`output_marker: '[DIM business_reasonable]'`)
+    expect(out).toContain(`output_marker: '[DIM context_query]'`)
+  })
+
+  it('loader 返 pack → 抑制 admission-check Skill body(turn-1 admission 内容由 pack 驱动)', async () => {
+    const pack = makeBaselinePackFixture()
+    const loader: AdmissionLoader = async () => pack
+    const asm = createSystemPromptAssembler({ skillsRoots: [skillsRoot], admissionLoader: loader })
+    const out = await asm.assembleBase({ id: 's-2', reqId: 'r-1', kind: 'task', topic: 't' })
+
+    // admission-check 的 Skill body 关键标识不应出现
+    expect(out).not.toContain('this body MUST NOT appear')
+    expect(out).not.toContain('### admission-check')
+
+    // pack 渲染段仍然存在(行为自洽)
+    expect(out).toContain('## Admission Lenses')
+    expect(out).toContain('### 1. loss_prevention (资损安全 · 🔴)')
+  })
+
+  it('loader 返 null → admission section 省略 + admission-check Skill body 抑制(no Skill body fallback)', async () => {
+    // ticket line 13:no Skill body fallback —— admissionLoader 配置后,无论
+    // pack 是否成功装载,admission-check Skill body 都不再进 Always-on 段。
+    const loader: AdmissionLoader = async () => null
+    const asm = createSystemPromptAssembler({ skillsRoots: [skillsRoot], admissionLoader: loader })
+    const out = await asm.assembleBase({ id: 's-3', reqId: 'r-1', kind: 'task', topic: 't' })
+
+    expect(out).not.toContain('## Admission Lenses')
+    expect(out).not.toContain('### 1. loss_prevention')
+
+    // ticket line 13 硬约束:admission 由 caller 接管后,Skill body 不再出现
+    expect(out).not.toContain('### admission-check')
+    expect(out).not.toContain('this body MUST NOT appear')
+  })
+
+  it('loader 抛错 → admission section 省略 + admission-check Skill body 抑制(不阻断 send)', async () => {
+    const loader: AdmissionLoader = async () => {
+      throw new Error('pack structure error: foo')
+    }
+    const asm = createSystemPromptAssembler({ skillsRoots: [skillsRoot], admissionLoader: loader })
+    const out = await asm.assembleBase({ id: 's-4', reqId: 'r-1', kind: 'task', topic: 't' })
+
+    expect(out).not.toContain('## Admission Lenses')
+    // 同样遵守 ticket line 13
+    expect(out).not.toContain('### admission-check')
+  })
+
+  it('不传 admissionLoader → ticket 01 兼容行为(admission-check body 仍进 Always-on 段)', async () => {
+    const asm = createSystemPromptAssembler({ skillsRoots: [skillsRoot] })
+    const out = await asm.assembleBase({ id: 's-5', reqId: 'r-1', kind: 'task', topic: 't' })
+
+    expect(out).not.toContain('## Admission Lenses')
+    expect(out).toContain('### admission-check')
+    expect(out).toContain('this body MUST NOT appear')
+  })
+
+  it('loader 在 base 缓存命中时只调一次(per-session 缓存语义)', async () => {
+    const pack = makeBaselinePackFixture()
+    let calls = 0
+    const loader: AdmissionLoader = async () => {
+      calls++
+      return pack
+    }
+    const asm = createSystemPromptAssembler({ skillsRoots: [skillsRoot], admissionLoader: loader })
+    const session = { id: 's-cache', reqId: 'r-1', kind: 'task' as const, topic: 't' }
+    const a = await asm.assembleBase(session)
+    const b = await asm.assembleBase(session)
+    expect(calls).toBe(1)
+    expect(a).toBe(b)
   })
 })
