@@ -121,3 +121,50 @@ export interface AIProvider {
   /** 关闭所有 session (e.g. agent 退出时) */
   shutdown(): Promise<void>
 }
+
+// ============================================================================
+// Analysis Run 专用扩展(issue 02 · ADR-0021)
+//
+// AIProvider 接口默认只覆盖 chat/task session 路径。Analysis Run 需要
+// 完全替换 systemPrompt + 通过 in-process MCP server 注入业务工具
+// `report_analysis_issue` / `complete_analysis`,不走 AISession 包装。
+//
+// 通过 module augmentation 让 ClaudeCodeProvider 在自身实现该方法,
+// 测试 fake provider 可选择不实现(由 AnalysisAgentRunner 走兜底)。
+// ============================================================================
+
+/** Analysis Run 路径入参(issue 02) */
+export interface AnalysisQueryInput {
+  prompt: string
+  /** 完全替换 Claude Code 默认 system prompt(ADR-0021 决策 16) */
+  systemPrompt: string
+  /** SDK 子进程 cwd(指向非 git 目录,避免 git-ai.exe trace2 fork) */
+  cwd: string
+  /** 只读宿主工具白名单(Read / Glob / Grep) */
+  allowedTools: ReadonlyArray<string>
+  /** 业务工具名 → handler;handler 同步处理 + 返回 tool_result 喂回模型 */
+  businessTools: Record<string, (toolUseId: string, args: unknown) => unknown>
+  /** SDK envelope 流式回调(由 AnalysisAgentRunner 落到 log + SSE) */
+  onEvent: (envelope: unknown) => void
+}
+
+/** Analysis Run 路径结果 */
+export type AnalysisQueryResult =
+  | { ok: true }
+  | { ok: false; error: string }
+
+/** 扩展:Analysis Run 直接 SDK query 接口(可选 —— 普通 Provider 不必实现) */
+export interface AnalysisQueryCapableProvider {
+  runAnalysisQuery(input: AnalysisQueryInput): Promise<AnalysisQueryResult>
+}
+
+// 让 AIProvider 在任意实现中可选地包含 runAnalysisQuery
+// (TypeScript 的 declaration merging 不能直接扩展同名属性,
+// 通过函数签名兼容实现 —— 调用前用 type guard 检验)
+declare module './AIProvider.js' {
+  interface AIProvider {
+    /** 见 AnalysisQueryCapableProvider(issue 02);非 Analysis Run 场景
+     *  不必实现 —— AnalysisAgentRunner 会 type-guard 后调用 */
+    runAnalysisQuery?: AnalysisQueryCapableProvider['runAnalysisQuery']
+  }
+}

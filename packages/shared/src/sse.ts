@@ -291,5 +291,73 @@ export type SseEvent =
       code?: string
       message?: string
     }
+  // -------------------------------------------------------------------------
+  // Analysis Run 事件簇(issue 02 · ADR-0021)
+  //
+  // 所有 Run 事件都带 `reqId` + `runId`,Web 端按 Run 路由后再按类型 narrow。
+  // 终态事件(succeeded / failed)互斥;Run 内事件顺序保证:
+  //   analysis_run_created → (0..N analysis_issue_reported)
+  //   → (0..N analysis_run_log) → analysis_run_succeeded | analysis_run_failed
+  // -------------------------------------------------------------------------
+  /**
+   * 新 Run 创建(issue 02 acceptance 3 · 4)。Agent 启动 handler 同步落盘后
+   * publish,Web 端可在 POST 201 返回前就收到事件,用于"按钮 loading 状态 →
+   * 真实 Run 渲染"无缝衔接;同时把新 Run 加入历史列表。
+   */
+  | {
+      type: 'analysis_run_created'
+      reqId: string
+      runId: string
+      ts: number
+      skillName: string
+      createdAt: string
+    }
+  /**
+   * Issue 提交成功(issue 02 · 决策 29 落点)。Agent 在业务工具
+   * `report_analysis_issue` 接受后立即 publish;Web 端据此前置追加 Issue
+   * 卡(不等 SSE 心跳延迟),Issue 已落盘。
+   */
+  | {
+      type: 'analysis_issue_reported'
+      reqId: string
+      runId: string
+      ts: number
+      issue: import('./analysis-run.js').AnalysisIssue
+    }
+  /**
+   * Run Log 增量(决策 37 · 38)。Agent 在 SDK 推到文本/工具事件时落
+   * `log.jsonl` 后 publish;Web 端据此展开 Run Log 面板实时滚动。
+   * 排除 system prompt 与模型原始思维链(决策 71 / 72)。
+   */
+  | {
+      type: 'analysis_run_log'
+      reqId: string
+      runId: string
+      ts: number
+      entry: import('./analysis-run.js').AnalysisLogEntry
+    }
+  /** Run 成功终态(issue 02 acceptance 9 / 17)。Agent 在所有条件满足
+   * (完成工具接受 / SDK 成功 / 无未决 / 持久化完成)时 publish 一次;
+   * 与 `analysis_run_failed` 互斥。issue_count 为最终数量(成功且零 Issue
+   * 也合法,UI 显示"本次 Skill 未识别出问题")。 */
+  | {
+      type: 'analysis_run_succeeded'
+      reqId: string
+      runId: string
+      ts: number
+      finishedAt: string
+      issueCount: number
+    }
+  /** Run 失败终态。Agent 在 SDK 错误 / 超时 / 完成工具缺失等终态失败时
+   * publish 一次;保留错误原因 + 已提交的部分 Issue 与 Run Log。 */
+  | {
+      type: 'analysis_run_failed'
+      reqId: string
+      runId: string
+      ts: number
+      finishedAt: string
+      error: string
+      issueCount: number
+    }
 
 export const SSE_HEARTBEAT_MS = 30_000

@@ -43,12 +43,19 @@ export interface SdkAdapter {
    * - `resume`: SDK session_id(Q3:续上下文)
    * - `appendSystemPrompt`: 由 SystemPromptAssembler 计算的 per-query system prompt 增量
    *   (Q5.1:SDK 接受 `appendSystemPrompt`,我们追加到 Claude Code 默认 system prompt 之后)
+   * - `systemPrompt`: 完全替换 Claude Code 默认 system prompt 的字符串
+   *   (issue 02 · ADR-0021:Analysis Run 路径需要"平台外壳"最高权限,
+   *   不能 append 到 Claude Code preset)。与 `appendSystemPrompt` 互斥。
+   * - `tools`: SDK in-process MCP server 配置(issue 02 · Analysis Run
+   *   需要把业务工具 `report_analysis_issue` / `complete_analysis` 作为 SDK tool 注入)
    * - `signal`: AbortController.signal(用于 cancel)
    */
   runTurn(input: {
     prompt: string
     resume?: string
     appendSystemPrompt?: string
+    systemPrompt?: string
+    tools?: Record<string, unknown>
     signal?: AbortSignal
   }): AsyncIterable<SdkMessageEnvelope>
 }

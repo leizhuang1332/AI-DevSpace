@@ -55,10 +55,12 @@ import { stripQuotes } from './yaml.server'
 import {
   extensionToImageMime,
   AnalysisSkillMetaSchema,
+  AnalysisRunMetaSchema,
   isReservedAnalysisSkillName,
   parseMinimalFrontmatter,
   splitSkillMarkdown,
   type AnalysisSkillMeta,
+  type AnalysisRunMeta,
 } from '@ai-devspace/shared'
 import type { AssetMeta, AuxFile, UsageTag } from '@ai-devspace/shared'
 
@@ -612,6 +614,61 @@ function readSelectedSkillName(file: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Analysis Run SSR 装载(issue 02 · ADR-0021)
+//
+// 数据源:`<workspaceRoot>/requirements/<req-id>/analysis/runs/<run-id>/meta.yaml`
+// 与 Agent `AnalysisRunService.listRuns()` 行为一致 —— 实时 readdir,
+// 按 created_at 倒序,非法 Run 跳过不阻断 SSR。
+// ---------------------------------------------------------------------------
+
+/**
+ * 扫描 `<root>/requirements/<req-id>/analysis/runs/<run-id>/` 子目录,读取
+ * 每个子目录的 `meta.yaml`,校验通过 `AnalysisRunMetaSchema` 的入列表;
+ * 非法 Run 跳过;按 created_at 倒序(最新在前)。
+ *
+ * 与 Agent 端 `AnalysisRunService.listRuns()` 行为一致 —— SSR 直接读 fs,
+ * 绕过 HTTP;Zod 二次校验(与 `repos` 端点同款),防契约漂移。
+ *
+ * 容错:目录不存在 / 解析失败 / 子目录无 meta.yaml → 跳过,不阻断 SSR。
+ */
+export function loadAnalysisRuns(
+  workspaceRoot: string,
+  requirementId: string,
+): AnalysisRunMeta[] {
+  const runsDir = join(workspaceRoot, 'requirements', requirementId, 'analysis', 'runs')
+  if (!existsSync(runsDir)) return []
+  let entries: { name: string; isDir: boolean }[]
+  try {
+    entries = readdirSync(runsDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => ({ name: e.name, isDir: true }))
+  } catch {
+    return []
+  }
+  const out: AnalysisRunMeta[] = []
+  for (const entry of entries) {
+    const metaPath = join(runsDir, entry.name, 'meta.yaml')
+    if (!existsSync(metaPath)) continue
+    let raw: string
+    try {
+      raw = readFileSync(metaPath, 'utf8')
+    } catch {
+      continue
+    }
+    let parsed: unknown
+    try {
+      parsed = yaml.parse(raw)
+    } catch {
+      continue
+    }
+    const validated = AnalysisRunMetaSchema.safeParse(parsed)
+    if (validated.success) out.push(validated.data)
+  }
+  out.sort((a, b) => b.created_at.localeCompare(a.created_at))
+  return out
+}
+
+// ---------------------------------------------------------------------------
 // RSC 数据入口
 //
 // ticket 03 改造:删去 `requirementId === 'req-001'` 的硬短路分支。
@@ -809,6 +866,8 @@ function emptyAnalyzingWithOptions(
   // SSR 直接读 fs(workspaceRoot 来自 requirementsRoot,与 agent 端同源)
   // —— 与 HTTP list/selection 端点行为一致(都走 fs + Zod 校验)
   const analysisSkills = loadAnalysisSkillsBundle(requirementsRoot, requirementId)
+  // issue 02 · ADR-0021:Analysis Run 列表 SSR 装载(按 created_at 倒序)
+  const analysisRuns = loadAnalysisRuns(requirementsRoot, requirementId)
 
   // 二路分支(顺序敏感)
   // 1. requirement.md 不存在 → 引导去 DRAFTING(老 empty 路径)
@@ -826,6 +885,8 @@ function emptyAnalyzingWithOptions(
       // issue 01 · ADR-0021:即使 empty 态也试着注入 Skill 集合(容错回退)
       availableSkills: analysisSkills.availableSkills,
       selectedSkillName: analysisSkills.selectedSkillName,
+      // issue 02 · ADR-0021:Analysis Run 列表
+      runs: analysisRuns,
       empty: true,
       phase: 'empty',
     }
@@ -857,6 +918,8 @@ function emptyAnalyzingWithOptions(
     // issue 01 · ADR-0021
     availableSkills: analysisSkills.availableSkills,
     selectedSkillName: analysisSkills.selectedSkillName,
+    // issue 02 · ADR-0021:Analysis Run 列表(按 created_at 倒序)
+    runs: analysisRuns,
   }
 }
 

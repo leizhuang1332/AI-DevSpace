@@ -16,6 +16,7 @@ import { bootstrapRoutes } from './routes/bootstrap.js'
 import { analysisRoutes } from './routes/analysis.js'
 import { spikeRoutes } from './routes/spike.js'
 import { analysisSkillRoutes } from './routes/analysis-skill.js'
+import { analysisRunRoutes } from './routes/analysis-run.js'
 import { AnalysisSkillService } from './analysis-skill/AnalysisSkillService.js'
 import { createWorktreeManager, createDefaultGitExec } from './worktree/WorktreeManager.js'
 import { RequirementService } from './services/RequirementService.js'
@@ -293,6 +294,8 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   await fastify.register(analysisRoutes, { hub, workspaceRoot, provider })
   // issue 01 (ADR-0021):Analysis Skill catalog + per-requirement selection endpoints
   await fastify.register(analysisSkillRoutes, { workspaceRoot })
+  // issue 02 (ADR-0021):Analysis Run start / list / detail + SDK 集成
+  await fastify.register(analysisRunRoutes, { hub, provider, workspaceRoot })
   await fastify.register(spikeRoutes, { hub, provider, ccSwitch, store: sessionStore, mirror: messagesMirror, registry: sessionStateRegistry })
   await fastify.register(bootstrapRoutes, { tokenManager, apiBase: 'http://localhost:7777' })
   // P4 · Task 4:retry route —— UI 点重试时调;GET/sessions/:sid 是 GET,POST /retry 是 action

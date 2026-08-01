@@ -14,6 +14,7 @@ import {
   type AnalyzingStats,
   type SourceRef,
 } from '@/lib/analyzing'
+import type { AnalysisIssue, AnalysisRunMeta } from '@ai-devspace/shared'
 import type { ProductChange } from '@/lib/products'
 import { updateProduct } from '@/lib/products-actions'
 import { useMediaQuery } from '@/lib/use-media-query'
@@ -36,6 +37,11 @@ import {
   StartAnalysisError,
   type StartAnalysisSuccess,
 } from '@/lib/analysis-start'
+import {
+  startAnalysisRun,
+  StartAnalysisRunError,
+  type StartAnalysisRunSuccess,
+} from '@/lib/analysis-run-start'
 
 /**
  * 「开始分析」按钮流式状态(issue 01 · ADR-0021 改造):在父组件
@@ -338,8 +344,27 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
     setCurrentSelectedSkill(data.selectedSkillName)
   }
 
+  // -------------------------------------------------------------------------
+  // Analysis Run 状态(issue 02 · ADR-0021)
+  // - runs:Run 元数据列表(SSR 初始 + SSE 增量更新)
+  // - currentRunId:当前主区聚焦的 Run id(开始新 Run 时自动选中)
+  // - currentRunIssues:当前 Run 已提交 Issue(由 analysis_issue_reported SSE 累积)
+  // - currentRunLog:当前 Run Log(由 analysis_run_log SSE 累积)
+  // 简化:本期不在 chunksBySessionId 里塞历史 Issue,而是单独维护 Run 视角
+  // 的 Issue 列表(因 chunksBySessionId 是 ticket 05 旧 session 路径的接口)
+  // -------------------------------------------------------------------------
+  const [runs, setRuns] = useState<AnalysisRunMeta[]>(data.runs)
+  const [currentRunId, setCurrentRunId] = useState<string>(() => {
+    const sorted = [...data.runs].sort((a, b) =>
+      b.created_at.localeCompare(a.created_at),
+    )
+    return sorted[0]?.run_id ?? ''
+  })
+  const [currentRunIssues, setCurrentRunIssues] = useState<AnalysisIssue[]>([])
+  const currentRun = runs.find((r) => r.run_id === currentRunId) ?? null
+
   const handleStart = useCallback(async () => {
-    // ticket 08 幂等守卫:流式期间 disabled 是主防线,但 onClick 仍可能被
+    // 幂等守卫:流式期间 disabled 是主防线,但 onClick 仍可能被
     // 键盘回车 / dev HMR 瞬态 disabled 丢失触发;提前 return 保安全。
     if (startState !== 'idle') return
     // 校验:无可用 Skill(issue 01 acceptance 8:不允许用非法 Skill 启动)
@@ -348,22 +373,22 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       return
     }
     setStartState('starting')
-    // 默认首个会话 = 架构(ticket 05 spec 默认;UI 层暂无角度选择 — 产品层
-    // 后续 PR 由产品决定是否暴露角度选择)。label 派生自
-    // ANALYSIS_SESSION_ANGLE_META,避免与 agent 端 default 重复字面量。
-    const startAngle: AnalysisSessionAngle = 'architecture'
-    const startLabel = ANALYSIS_SESSION_ANGLE_META[startAngle].label
-    let success: StartAnalysisSuccess
+
+    // issue 02 · ADR-0021:调用新 Analysis Run 端点
+    //   body: { skill_name }
+    //   201 → Run 元数据(status='running')
+    let success: StartAnalysisRunSuccess
     try {
-      success = await startAnalysis(data.requirementId, {
-        angle: startAngle,
-        label: startLabel,
+      success = await startAnalysisRun(data.requirementId, {
+        skill_name: currentSelectedSkill,
       })
     } catch (err) {
       // 失败路径:toast 提示 + 状态回滚到 idle,允许用户重试
-      if (err instanceof StartAnalysisError) {
+      if (err instanceof StartAnalysisRunError) {
         if (err.code === 'prd_not_ready') {
           pushToast('PRD 未就绪,请先完成 DRAFTING 工位的需求文档', 'warn')
+        } else if (err.code === 'analysis_run_already_running') {
+          pushToast('已有运行中的 Analysis Run,请等待其结束', 'warn')
         } else {
           pushToast(`开始分析失败:${err.message}`, 'err')
         }
@@ -377,19 +402,37 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       return
     }
 
-    // 成功路径:乐观追加 session + 切 active(button 因 showStartButton=true
-    // 仍显示,但 disabled 因 startState='running')。SSE 推过来的 chunks 通过
-    // 既有 EventSource 订阅进入 chunksBySessionId;turn-done 时 agent 端
-    // publish `analysis_done` 事件,本组件下方监听 → setStartState('idle')。
+    // 成功路径:乐观追加 Run + 切到新 Run(issue 02 acceptance 4)
+    // SSE 在 POST 返回前/后都可能先收到 analysis_run_created;SSE 监听
+    // 内会做去重(同 run_id 不重复追加)。
+    const newRun: AnalysisRunMeta = {
+      run_id: success.run_id,
+      requirement_id: success.requirement_id,
+      skill_name: success.skill_name,
+      status: 'running',
+      created_at: success.created_at,
+      finished_at: null,
+      issue_count: 0,
+      error: null,
+    }
+    setRuns((prev) => {
+      if (prev.some((r) => r.run_id === newRun.run_id)) return prev
+      return [newRun, ...prev]
+    })
+    // 自动选中新 Run(issue 02 acceptance 4)
+    setCurrentRunId(newRun.run_id)
+    setCurrentRunIssues([])
+    // 兼容旧 session 字段:虽然 ADR-0021 删除了 session 概念,但保留 UI 不破坏
+    const startAngle: AnalysisSessionAngle = 'architecture'
+    const startLabel = ANALYSIS_SESSION_ANGLE_META[startAngle].label
     const newSession: AnalysisSession = {
-      id: success.sessionId,
+      id: success.run_id,
       label: startLabel,
       angle: startAngle,
       detectedCount: 0,
       isStreaming: true,
     }
     setSessions((prev) => {
-      // 防御:防重 → 避免 startState=running 时用户再点(若偶尔冒出)
       if (prev.some((s) => s.id === newSession.id)) return prev
       return [...prev, newSession]
     })
@@ -397,7 +440,6 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
     setActiveSessionId(newSession.id)
     setPhase({ kind: 'idle' })
     setLastSessionCookie(newSession.id)
-    // 标记 running;按钮 disabled 至 SSE analysis_done 事件触发复位
     setStartState('running')
   }, [
     data.requirementId,
@@ -465,17 +507,128 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
         /* ignore malformed event */
       }
     }
+    // issue 02 · ADR-0021:Analysis Run 事件簇
+    const onRunCreated = (e: MessageEvent<string>): void => {
+      try {
+        const parsed = JSON.parse(e.data) as {
+          type: 'analysis_run_created'
+          runId: string
+          skillName: string
+          createdAt: string
+        }
+        setRuns((prev) => {
+          if (prev.some((r) => r.run_id === parsed.runId)) return prev
+          return [
+            {
+              run_id: parsed.runId,
+              requirement_id: data.requirementId,
+              skill_name: parsed.skillName,
+              status: 'running',
+              created_at: parsed.createdAt,
+              finished_at: null,
+              issue_count: 0,
+              error: null,
+            },
+            ...prev,
+          ]
+        })
+        // issue 02 焦点规则(ADR):开始新 Run 自动选中新 Run —— 跨标签 SSE
+        // 也强制切,让多标签窗口保持同步焦点。
+        setCurrentRunId(parsed.runId)
+      } catch {
+        /* ignore */
+      }
+    }
+    const onIssueReported = (e: MessageEvent<string>): void => {
+      try {
+        const parsed = JSON.parse(e.data) as {
+          runId: string
+          issue: AnalysisIssue
+        }
+        // 只追加到当前 Run(决策 41:不抢回用户手动切换后的焦点)
+        if (parsed.runId !== currentRunId) return
+        setCurrentRunIssues((prev) => {
+          if (prev.some((it) => it.issue_id === parsed.issue.issue_id)) return prev
+          return [...prev, parsed.issue]
+        })
+      } catch {
+        /* ignore */
+      }
+    }
+    const onRunSucceeded = (e: MessageEvent<string>): void => {
+      try {
+        const parsed = JSON.parse(e.data) as {
+          runId: string
+          finishedAt: string
+          issueCount: number
+        }
+        setRuns((prev) =>
+          prev.map((r) =>
+            r.run_id === parsed.runId
+              ? {
+                  ...r,
+                  status: 'succeeded',
+                  finished_at: parsed.finishedAt,
+                  issue_count: parsed.issueCount,
+                }
+              : r,
+          ),
+        )
+        // 复位 startState(只在 activeSessionId 对应 runId 时复位)
+        if (parsed.runId === activeSessionId) {
+          setStartState('idle')
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    const onRunFailed = (e: MessageEvent<string>): void => {
+      try {
+        const parsed = JSON.parse(e.data) as {
+          runId: string
+          finishedAt: string
+          error: string
+          issueCount: number
+        }
+        setRuns((prev) =>
+          prev.map((r) =>
+            r.run_id === parsed.runId
+              ? {
+                  ...r,
+                  status: 'failed',
+                  finished_at: parsed.finishedAt,
+                  error: parsed.error,
+                  issue_count: parsed.issueCount,
+                }
+              : r,
+          ),
+        )
+        if (parsed.runId === activeSessionId) {
+          setStartState('idle')
+        }
+      } catch {
+        /* ignore */
+      }
+    }
     es.addEventListener('analysis_chunk', onAnalysisChunk)
     es.addEventListener('analysis_done', onAnalysisDone)
+    es.addEventListener('analysis_run_created', onRunCreated)
+    es.addEventListener('analysis_issue_reported', onIssueReported)
+    es.addEventListener('analysis_run_succeeded', onRunSucceeded)
+    es.addEventListener('analysis_run_failed', onRunFailed)
     es.addEventListener('error', () => {
       /* browser will auto-reconnect; nothing to do */
     })
     return () => {
       es.removeEventListener('analysis_chunk', onAnalysisChunk)
       es.removeEventListener('analysis_done', onAnalysisDone)
+      es.removeEventListener('analysis_run_created', onRunCreated)
+      es.removeEventListener('analysis_issue_reported', onIssueReported)
+      es.removeEventListener('analysis_run_succeeded', onRunSucceeded)
+      es.removeEventListener('analysis_run_failed', onRunFailed)
       es.close()
     }
-  }, [data.requirementId, setChunks, activeSessionId])
+  }, [data.requirementId, setChunks, activeSessionId, currentRunId])
 
   const totalChunks = chunks.length
   const products = deriveProducts(chunks)
@@ -849,7 +1002,7 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
               data-testid="analyzing-right-col"
               className="col-span-1 flex flex-col gap-5 min-h-0 overflow-hidden"
             >
-              <Summary summary={data.summary} stats={data.stats} />
+              <Summary summary={data.summary} stats={data.stats} currentRun={currentRun} />
               <div className="flex-1 min-h-0">
                 <ProductList
                   products={products}
@@ -935,6 +1088,8 @@ interface NarrowLayoutProps {
   onAddSyntheticChunk: (chunk: AnalyzingChunk) => void
   narrowTab: 'doc' | 'products'
   onNarrowTabChange: (tab: 'doc' | 'products') => void
+  /** issue 02 · ADR-0021:当前 Run 元数据(零 Issue 空态判断用) */
+  currentRun?: AnalysisRunMeta | null
 }
 
 function NarrowLayout({
@@ -950,6 +1105,7 @@ function NarrowLayout({
   onAddSyntheticChunk,
   narrowTab,
   onNarrowTabChange,
+  currentRun,
 }: NarrowLayoutProps) {
   return (
     <div
@@ -1029,7 +1185,7 @@ function NarrowLayout({
             aria-labelledby="analyzing-narrow-tab-products"
             className="flex flex-col gap-5 h-full min-h-0"
           >
-            <Summary summary={data.summary} stats={data.stats} />
+            <Summary summary={data.summary} stats={data.stats} currentRun={currentRun} />
             <div className="flex-1 min-h-0">
               <ProductList
                 products={products}
@@ -1177,10 +1333,21 @@ function StartAnalysisButton({
 function Summary({
   summary,
   stats,
+  currentRun,
 }: {
   summary: AnalyzingData['summary']
   stats: AnalyzingStats
+  /**
+   * 当前 Run 信息(issue 02 · ADR-0021)
+   * - `run`:当前 active Run 元数据;null 表示"还没选 Run"
+   * - 当 run.status='succeeded' && run.issue_count===0 → 显示"本次 Skill 未识别出问题"
+   */
+  currentRun?: AnalysisRunMeta | null
 }) {
+  const isZeroIssueSuccess =
+    currentRun != null &&
+    currentRun.status === 'succeeded' &&
+    currentRun.issue_count === 0
   return (
     <div
       data-testid="analyzing-summary"
@@ -1197,10 +1364,12 @@ function Summary({
           data-testid="analyzing-summary-title"
           className="text-sm font-semibold text-brand-700 mb-0"
         >
-          {summary.title}
+          {isZeroIssueSuccess ? '本次 Skill 未识别出问题' : summary.title}
         </div>
         <div className="text-text-2 text-[11px] leading-relaxed">
-          {summary.description}
+          {isZeroIssueSuccess
+            ? `Skill "${currentRun?.skill_name}" 已完成检查,未发现需要处理的问题。`
+            : summary.description}
         </div>
       </div>
       <div data-testid="analyzing-stats" className="flex gap-2 flex-shrink-0">

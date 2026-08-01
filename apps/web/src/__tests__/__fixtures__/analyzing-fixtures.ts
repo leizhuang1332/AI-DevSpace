@@ -347,6 +347,8 @@ export const REFUND_ANALYZING: Omit<AnalyzingData, 'requirementId'> = {
     },
   ],
   selectedSkillName: 'prd-completeness',
+  // issue 02 · ADR-0021:Analysis Run 列表(空数组表示"尚未运行过 Analysis Run")
+  runs: [],
 }
 
 /**

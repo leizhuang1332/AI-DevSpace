@@ -300,6 +300,10 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
     ? null
     : (opts.providerSemaphore ?? new DefaultProviderSemaphore({ limit: 5 }))
 
+  /** issue 02 (ADR-0021):Analysis Run 路径的 MCP tool_use_id 自增 key
+   *  —— SDK 不透传 tool_use_id,handler 内自己生成;同 SDK session 内唯一。 */
+  let mcpCallCounter = 0
+
   /** Lazy import SDK —— 避免启动时拉 cli 子进程 */
   let cachedQuery: QueryFn | null = opts.queryFn ?? null
   async function getQuery(): Promise<QueryFn> {
@@ -456,6 +460,122 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
 
   return {
     name: 'claude-code',
+
+    /**
+     * Analysis Run 路径专用:直接调 SDK `query({prompt, options:{systemPrompt,
+     * mcpServers, allowedTools, cwd}})`,不走 AISession 包装。
+     *
+     * 用途:AnalysisAgentRunner 需要把 system prompt **完全替换**(SDK
+     * `systemPrompt: string`)并通过 in-process MCP server 注入业务工具
+     * `report_analysis_issue` / `complete_analysis`。
+     *
+     * **不**复用 `provider.createSession + session.send` 路径 —— 那条
+     * 路径假设 system prompt 走 appendSystemPrompt,且 AISession 的
+     * retry loop 会干扰业务工具同步 handler 的语义。
+     */
+    runAnalysisQuery: (async (input: {
+      prompt: string
+      systemPrompt: string
+      cwd: string
+      allowedTools: ReadonlyArray<string>
+      businessTools: Record<string, (toolUseId: string, args: unknown) => unknown>
+      onEvent: (envelope: unknown) => void
+    }) => {
+      try {
+        const q = await getQuery()
+        const providerIndex = ccSwitch.getCurrent()
+        const sdkOptions: Record<string, unknown> = {
+          systemPrompt: input.systemPrompt,
+          cwd: input.cwd,
+          allowedTools: [...input.allowedTools],
+          disallowedTools: [
+            'Bash',
+            'Write',
+            'Edit',
+            'MultiEdit',
+            'NotebookEdit',
+            'WebSearch',
+            'WebFetch',
+          ],
+          permissionMode: 'default',
+          model: 'sonnet',
+        }
+        if (providerIndex) {
+          const env: Record<string, string> = {}
+          if (providerIndex.baseUrl) env['ANTHROPIC_BASE_URL'] = providerIndex.baseUrl
+          if (providerIndex.apiKey) env['ANTHROPIC_AUTH_TOKEN'] = providerIndex.apiKey
+          if (Object.keys(env).length > 0) sdkOptions['env'] = env
+        }
+
+        // 业务工具通过 in-process MCP server 注入(SDK 0.3.206)。
+        // 工具 schema 用 zod raw shape(允许任意字段);真正的字段校验由
+        // AnalysisAgentRunner.parseReportIssueInput 在 handler 内部完成。
+        const sdkModule = await import('@anthropic-ai/claude-agent-sdk')
+        const { z } = await import('zod')
+        const looseArgsShape = z.object({}).passthrough().shape
+        const mcpServer = sdkModule.createSdkMcpServer({
+          name: 'analysis-run-tools',
+          version: '1.0.0',
+          tools: Object.entries(input.businessTools).map(([name, handler]) =>
+            sdkModule.tool(
+              name,
+              `Analysis Run 业务工具:${name}。由 AnalysisAgentRunner 在 handler 内执行持久化。`,
+              looseArgsShape,
+              async (args: unknown) => {
+                // 这里无法拿 SDK 端 tool_use_id(SDK 不透传)——
+                // 我们用一个进程内自增 counter 生成 key,作为幂等键传给 handler
+                const toolUseId = `mcp-${name}-${++mcpCallCounter}`
+                const result = await handler(toolUseId, args)
+                // CallToolResult 形态:content 是 MCP 内容块数组
+                return {
+                  content: [
+                    {
+                      type: 'text' as const,
+                      text: JSON.stringify(result),
+                    },
+                  ],
+                }
+              },
+            ),
+          ),
+        })
+        sdkOptions['mcpServers'] = { analysis: mcpServer }
+
+        const stream = q({ prompt: input.prompt, options: sdkOptions })
+        let sawResult = false
+        let lastError: string | null = null
+        for await (const raw of stream) {
+          const m = raw as Record<string, unknown>
+          input.onEvent({ kind: 'raw', raw: m })
+          if (m['type'] === 'result') {
+            sawResult = true
+            const subtype = m['subtype'] as string | undefined
+            if (subtype && subtype !== 'success') {
+              lastError = subtype
+            }
+          }
+          if (m['type'] === 'error') {
+            const errField = m['error']
+            lastError =
+              typeof errField === 'string'
+                ? errField
+                : String((errField as Record<string, unknown> | undefined)?.['message'] ?? 'SDK error')
+          }
+        }
+        if (!sawResult) {
+          return { ok: false, error: 'SDK stream closed without result envelope' }
+        }
+        if (lastError) {
+          return { ok: false, error: lastError }
+        }
+        return { ok: true }
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        }
+      }
+    }) as AIProvider['runAnalysisQuery'],
 
     async createSession(reqId: string, createOpts: CreateSessionOptions): Promise<IAISession> {
       // Task 7:ResumeManager / spike route 传入稳定 localSid;未传时由 Provider 生成 UUID

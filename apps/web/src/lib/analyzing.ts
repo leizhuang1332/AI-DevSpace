@@ -31,6 +31,7 @@ import {
   DEFAULT_ADMISSION_DIMENSIONS,
   type AdmissionDimensionId,
   type AnalysisSkillMeta as AnalysisSkillMetaT,
+  type AnalysisRunMeta,
   type AssetMeta,
   type AuxFile,
 } from '@ai-devspace/shared'
@@ -836,6 +837,14 @@ export interface AnalyzingData {
    * 4) 都不可用 → 空字符串(页面走"无可用 Skill"明确状态)
    */
   selectedSkillName: string
+  /**
+   * 当前 Requirement 已有 Analysis Run 列表(issue 02 · ADR-0021)。
+   *
+   * 按 created_at 倒序(最新在前);空数组 = 首次使用 / 无 Run。
+   * 列表来自 `<root>/requirements/<id>/analysis/runs/` 目录扫描 +
+   * meta.yaml 解析,SSR 期间一次读出。
+   */
+  runs: AnalysisRunMeta[]
 }
 
 // ---------------------------------------------------------------------------
@@ -906,6 +915,8 @@ export function emptyAnalyzing(requirementId: string): AnalyzingData {
     // 空态默认空集合 + 空选择,由 `getAnalyzingData()` SSR 注入时再覆盖
     availableSkills: [],
     selectedSkillName: '',
+    // issue 02 · ADR-0021:Analysis Run 列表(SSR 注入;空态 → 空数组)
+    runs: [],
   }
 }
 
