@@ -330,6 +330,23 @@ export const REFUND_ANALYZING: Omit<AnalyzingData, 'requirementId'> = {
       mime: 'image/png',
     },
   ],
+  // issue 01 · ADR-0021:Analysis Skill 集合 + per-Requirement 已选项
+  // fixture 默认给 2 个 reserved Skill,选中 prd-completeness
+  availableSkills: [
+    {
+      name: 'implementation-readiness',
+      description: '检查实施准备度',
+      version: '1.0.0',
+      is_reserved: true,
+    },
+    {
+      name: 'prd-completeness',
+      description: '检查 PRD 完整性与清晰度',
+      version: '1.0.0',
+      is_reserved: true,
+    },
+  ],
+  selectedSkillName: 'prd-completeness',
 }
 
 /**

@@ -15,6 +15,8 @@ import { reposRoutes } from './routes/repos.js'
 import { bootstrapRoutes } from './routes/bootstrap.js'
 import { analysisRoutes } from './routes/analysis.js'
 import { spikeRoutes } from './routes/spike.js'
+import { analysisSkillRoutes } from './routes/analysis-skill.js'
+import { AnalysisSkillService } from './analysis-skill/AnalysisSkillService.js'
 import { createWorktreeManager, createDefaultGitExec } from './worktree/WorktreeManager.js'
 import { RequirementService } from './services/RequirementService.js'
 import { createSseHub, type SseHub } from './sse/SseHub.js'
@@ -149,6 +151,31 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     throw err
   }
 
+  // 5a. Analysis Skill 初始化(issue 01 · ADR-0021)
+  //     - 确保 `<root>/analysis-skills/` 存在
+  //     - reserved 名称缺失 → 用系统版本写入
+  //     - reserved 名称已存在但内容漂移 → 升级覆盖
+  //     - 其他名称 → 保留
+  const analysisSkillService = new AnalysisSkillService(workspaceRoot)
+  try {
+    const initResult = analysisSkillService.init()
+    fastify.log.info(
+      {
+        seeded: initResult.seededReserved,
+        upgraded: initResult.upgradedReserved,
+        finalCount: initResult.finalCount,
+        dir: analysisSkillService.skillsDir,
+      },
+      'analysis skills initialized',
+    )
+  } catch (err) {
+    fastify.log.error(
+      { err, dir: analysisSkillService.skillsDir },
+      'analysis skills init failed',
+    )
+    throw err
+  }
+
   // 5b. CcSwitchClient (Q9) + AIProvider (Q2)
   // —— 若 db 缺失/解析失败,降级为空 client (无 provider),不影响其他模块启动
   let ccSwitch: CcSwitchClient
@@ -264,6 +291,8 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   await fastify.register(requirementRoutes, { requirementService, sseHub: hub })
 
   await fastify.register(analysisRoutes, { hub, workspaceRoot, provider })
+  // issue 01 (ADR-0021):Analysis Skill catalog + per-requirement selection endpoints
+  await fastify.register(analysisSkillRoutes, { workspaceRoot })
   await fastify.register(spikeRoutes, { hub, provider, ccSwitch, store: sessionStore, mirror: messagesMirror, registry: sessionStateRegistry })
   await fastify.register(bootstrapRoutes, { tokenManager, apiBase: 'http://localhost:7777' })
   // P4 · Task 4:retry route —— UI 点重试时调;GET/sessions/:sid 是 GET,POST /retry 是 action

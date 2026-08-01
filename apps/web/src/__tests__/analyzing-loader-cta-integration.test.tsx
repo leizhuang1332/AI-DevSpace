@@ -53,7 +53,7 @@ function seedChunks(id: string, sessionId: string, rows: Record<string, unknown>
   )
 }
 
-describe('真实 loader → CTA(audit #1)', () => {
+describe('真实 loader → CTA(audit #1 · issue 01 改造)', () => {
   it('有 requirement.md、无任何 session → 主区渲染且「开始分析」按钮可见', async () => {
     const id = 'req-cta-first-visit'
     seedRequirementOnly(id)
@@ -62,14 +62,15 @@ describe('真实 loader → CTA(audit #1)', () => {
     // loader 契约:phase active + 真正的空 sessions
     expect(data.phase).toBe('active')
     expect(data.sessions).toEqual([])
-    expect(data.admission.dimensions.every((d) => d.count === 0)).toBe(true)
 
     render(<AnalyzingZone data={data} />)
-    const dashboard = screen.getByTestId('admission-dashboard')
-    expect(dashboard.getAttribute('data-phase')).toBe('empty_armed')
+    // issue 01 改造:AdmissionDashboard → AnalysisSkillSelector
+    // 注意:tmpdir 没 analysis-skills 目录,SSR 返空集合 → 渲染"无可用 Skill"空态 + 禁用按钮
+    expect(screen.getByTestId('analysis-skill-selector-empty')).toBeInTheDocument()
     const btn = screen.getByTestId('admission-start-btn')
     expect(btn).toBeInTheDocument()
     expect(btn.getAttribute('data-state')).toBe('idle')
+    expect(btn).toBeDisabled()
   })
 
   it('无 requirement.md → 走 DRAFTING 引导空态,不显示「开始分析」', async () => {
@@ -80,10 +81,10 @@ describe('真实 loader → CTA(audit #1)', () => {
     expect(screen.queryByTestId('admission-start-btn')).toBeNull()
   })
 
-  it('已有 session + admission chunks → CTA 仍可见(常驻),五维卡 count 全部 > 0', async () => {
-    // ticket 08 (ADR-0020 D2/D9 修订):按钮常驻显示,即使已有 session +
-    // admission chunks 跑完也仍可见(再点 = 再开一轮新分析)。data-phase 仍
-    // 切到 active(因为 dimensions.every(count===0) 不再成立)。
+  it('已有 session + admission chunks → CTA 仍可见(常驻)', async () => {
+    // issue 01 改造:AdmissionDashboard → AnalysisSkillSelector
+    // 按钮常驻语义保留(再点 = 再开一轮新分析);五维卡 / data-phase 概念
+    // 已废弃(被 Analysis Skill 单选器替代),相关断言不再适用。
     const id = 'req-cta-analyzed'
     seedRequirementOnly(id)
     const dims = [
@@ -115,21 +116,16 @@ describe('真实 loader → CTA(audit #1)', () => {
     ])
 
     const data = await getAnalyzingData(id, { requirementsRoot: root })
-    // SSR 派生:五维卡 count 全部 1,verdict / 待裁决数来自 [VERDICT] 块
+    // 旧:五维卡 count / verdict / 待裁决数派生(issue 01 仍 SSR 注入但 UI 不再展示)
     expect(data.admission.dimensions.map((d) => d.count)).toEqual([1, 1, 1, 1, 1])
     expect(data.admission.verdict).toBe('pending')
     expect(data.admission.pendingAdjudicationCount).toBe(3)
 
     render(<AnalyzingZone data={data} />)
-    // ticket 08:按钮常驻 → 即使已有 chunks 也可见
+    // ticket 08 语义保留:按钮常驻 → 即使已有 chunks 也可见
     expect(screen.getByTestId('admission-start-btn')).toBeInTheDocument()
-    // data-phase 切到 active(因为 count 全部 > 0)
-    expect(screen.getByTestId('admission-dashboard').getAttribute('data-phase')).toBe(
-      'active',
-    )
-    for (const dim of dims) {
-      expect(screen.getByTestId(`admission-dim-${dim}`).getAttribute('data-count')).toBe('1')
-    }
+    // issue 01:tmpdir 没 analysis-skills → 空态(无 Skill 不可启动)
+    expect(screen.getByTestId('analysis-skill-selector-empty')).toBeInTheDocument()
   })
 })
 

@@ -29,6 +29,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import yaml from 'yaml'
 import type {
   AdmissionChunkMeta,
   AnalysisSession,
@@ -51,7 +52,14 @@ import { loadTechBrief, loadModules } from './tech-brief.server'
 import type { TechBriefModulesFile } from './tech-brief'
 import { resolveRequirementsRoot } from './requirements-root.server'
 import { stripQuotes } from './yaml.server'
-import { extensionToImageMime } from '@ai-devspace/shared'
+import {
+  extensionToImageMime,
+  AnalysisSkillMetaSchema,
+  isReservedAnalysisSkillName,
+  parseMinimalFrontmatter,
+  splitSkillMarkdown,
+  type AnalysisSkillMeta,
+} from '@ai-devspace/shared'
 import type { AssetMeta, AuxFile, UsageTag } from '@ai-devspace/shared'
 
 // ---------------------------------------------------------------------------
@@ -475,6 +483,135 @@ function extractPrdAssetRefs(prdMarkdown: string): Set<string> {
 }
 
 // ---------------------------------------------------------------------------
+// Analysis Skill SSR 装载(issue 01 · ADR-0021)
+//
+// 数据源:`<workspaceRoot>/analysis-skills/<name>/SKILL.md`
+// 与 Agent `AnalysisSkillService.listAllSkills()` 同形态 ——
+// SSR 直接读 fs,绕过 HTTP;Zod 二次校验(与 `repos` 端点同款)。
+// 容错:目录不存在 / IO 错 / 非法 Skill → 跳过,不阻断 SSR。
+// ---------------------------------------------------------------------------
+
+/**
+ * SSR 装载可用 Analysis Skill 列表 + 该 Requirement 已选择 Skill。
+ *
+ * - `availableSkills` 按 name 字典序排序(展示稳定)
+ * - `selectedSkillName` 解析顺序:
+ *   1) 读 `<root>/requirements/<id>/analysis/selected-skill.yaml`
+ *   2) 解析出的 `skill_name` 仍在 availableSkills → 沿用
+ *   3) 否则 → 回退到 availableSkills 首项
+ *   4) 都不可用 → 空字符串(页面走"无可用 Skill"明确状态)
+ *
+ * 任一 fs 步骤失败(目录不存在 / 解析失败)→ 该步空集合 / 空字符串,
+ * 不抛错 —— SSR 容错优于抛错(老契约)。
+ */
+export function loadAnalysisSkillsBundle(
+  workspaceRoot: string,
+  requirementId: string,
+): { availableSkills: AnalysisSkillMeta[]; selectedSkillName: string } {
+  // 1) 读所有可用 Skill
+  const skillsDir = join(workspaceRoot, 'analysis-skills')
+  const availableSkills = readAnalysisSkillsDir(skillsDir)
+  // 2) 读已选择
+  const selectionFile = join(
+    workspaceRoot,
+    'requirements',
+    requirementId,
+    'analysis',
+    'selected-skill.yaml',
+  )
+  const persistedName = readSelectedSkillName(selectionFile)
+  // 3) resolve
+  let selectedSkillName: string
+  if (
+    persistedName &&
+    availableSkills.some((s) => s.name === persistedName)
+  ) {
+    selectedSkillName = persistedName
+  } else if (availableSkills.length > 0) {
+    selectedSkillName = availableSkills[0].name
+  } else {
+    selectedSkillName = ''
+  }
+  return { availableSkills, selectedSkillName }
+}
+
+/**
+ * 单点扫描 `<dir>` 子目录,读取每个子目录的 `SKILL.md`,校验
+ * 通过 `AnalysisSkillMetaSchema` 的入列表;非法 Skill 跳过。
+ *
+ * 与 Agent 端 `AnalysisSkillService.listAllSkills()` 行为一致 —— SSR
+ * 必须与 HTTP 响应同形态(否则页面 / 测试会出现"列表不一致"灵异 bug)。
+ */
+function readAnalysisSkillsDir(dir: string): AnalysisSkillMeta[] {
+  if (!existsSync(dir)) return []
+  let entries: { name: string; isDir: boolean }[]
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => ({ name: d.name, isDir: true }))
+  } catch {
+    return []
+  }
+  const out: AnalysisSkillMeta[] = []
+  for (const entry of entries) {
+    const meta = readOneAnalysisSkill(join(dir, entry.name), entry.name)
+    if (meta) out.push(meta)
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name))
+  return out
+}
+
+/** 读单个 Skill。失败 / 非法 → null(不抛错,跳过)。 */
+function readOneAnalysisSkill(
+  skillDir: string,
+  dirName: string,
+): AnalysisSkillMeta | null {
+  const file = join(skillDir, 'SKILL.md')
+  if (!existsSync(file)) return null
+  let raw: string
+  try {
+    raw = readFileSync(file, 'utf8')
+  } catch {
+    return null
+  }
+  const split = splitSkillMarkdown(raw)
+  if (!split) return null
+  const fm = parseMinimalFrontmatter(split.frontmatterText)
+  const candidate = {
+    name: fm.name ?? dirName,
+    description: fm.description ?? '',
+    version: fm.version ?? '',
+    is_reserved: isReservedAnalysisSkillName(fm.name ?? dirName),
+  }
+  const parsed = AnalysisSkillMetaSchema.safeParse(candidate)
+  if (!parsed.success) return null
+  // body 非空校验:避免"只有 frontmatter,没规则正文"的空 Skill
+  if (split.body.trim().length === 0) return null
+  return parsed.data
+}
+
+/** 读 selection YAML,仅取 `skill_name` 字段;容错:任何失败 → 空串。 */
+function readSelectedSkillName(file: string): string {
+  if (!existsSync(file)) return ''
+  try {
+    const raw = readFileSync(file, 'utf8')
+    const parsed = yaml.parse(raw) as unknown
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
+      typeof (parsed as { skill_name?: unknown }).skill_name === 'string'
+    ) {
+      const name = (parsed as { skill_name: string }).skill_name.trim()
+      if (name.length > 0) return name
+    }
+  } catch {
+    /* fall through */
+  }
+  return ''
+}
+
+// ---------------------------------------------------------------------------
 // RSC 数据入口
 //
 // ticket 03 改造:删去 `requirementId === 'req-001'` 的硬短路分支。
@@ -668,6 +805,10 @@ function emptyAnalyzingWithOptions(
   const hasRequirementMd = existsRequirementMd(requirementsRoot, requirementId)
   // ADR-0017 D5 · SSR 注入 PRD / AuxFile / Asset —— 容错读 fs,任何环节异常返回空
   const docs = loadAnalyzingDocs(requirementsRoot, requirementId)
+  // issue 01 · ADR-0021:Analysis Skill 集合 + per-Requirement 已选项
+  // SSR 直接读 fs(workspaceRoot 来自 requirementsRoot,与 agent 端同源)
+  // —— 与 HTTP list/selection 端点行为一致(都走 fs + Zod 校验)
+  const analysisSkills = loadAnalysisSkillsBundle(requirementsRoot, requirementId)
 
   // 二路分支(顺序敏感)
   // 1. requirement.md 不存在 → 引导去 DRAFTING(老 empty 路径)
@@ -682,6 +823,9 @@ function emptyAnalyzingWithOptions(
       prdMarkdown: docs.prdMarkdown,
       auxFiles: docs.auxFiles,
       assetList: docs.assetList,
+      // issue 01 · ADR-0021:即使 empty 态也试着注入 Skill 集合(容错回退)
+      availableSkills: analysisSkills.availableSkills,
+      selectedSkillName: analysisSkills.selectedSkillName,
       empty: true,
       phase: 'empty',
     }
@@ -710,6 +854,9 @@ function emptyAnalyzingWithOptions(
     prdMarkdown: docs.prdMarkdown,
     auxFiles: docs.auxFiles,
     assetList: docs.assetList,
+    // issue 01 · ADR-0021
+    availableSkills: analysisSkills.availableSkills,
+    selectedSkillName: analysisSkills.selectedSkillName,
   }
 }
 

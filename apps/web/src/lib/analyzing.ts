@@ -30,6 +30,7 @@ import {
   ADMISSION_DIMENSION_META,
   DEFAULT_ADMISSION_DIMENSIONS,
   type AdmissionDimensionId,
+  type AnalysisSkillMeta as AnalysisSkillMetaT,
   type AssetMeta,
   type AuxFile,
 } from '@ai-devspace/shared'
@@ -816,6 +817,25 @@ export interface AnalyzingData {
    * (`{name, url, path, size, mime}`),`url` 可直接给前端 fetcher 使用。
    */
   assetList: AssetMeta[]
+  /**
+   * 可用 Analysis Skill 列表(issue 01 · ADR-0021)。
+   *
+   * SSR 期由 `getAnalyzingData()` 从 `<workspaceRoot>/analysis-skills/`
+   * 扫描读取(沿用 repos loader 的 readdir 模式);非法 Skill 跳过,不进列表。
+   * 与旧的 `admission.dimensions` 列表数据源不同:此处只列 Analysis Skill,
+   * 不混入全局/个人/项目 Skill。
+   */
+  availableSkills: ReadonlyArray<AnalysisSkillMetaT>
+  /**
+   * 当前 Requirement 已选择 Skill 名称(issue 01 · ADR-0021)。
+   *
+   * 服务端解析顺序:
+   * 1) 读 `<root>/requirements/<id>/analysis/selected-skill.yaml`
+   * 2) 解析出的 `skill_name` 若仍在 `availableSkills` → 沿用
+   * 3) 否则 → 回退到 `availableSkills` 字典序首项
+   * 4) 都不可用 → 空字符串(页面走"无可用 Skill"明确状态)
+   */
+  selectedSkillName: string
 }
 
 // ---------------------------------------------------------------------------
@@ -882,6 +902,10 @@ export function emptyAnalyzing(requirementId: string): AnalyzingData {
     prdMarkdown: '',
     auxFiles: [],
     assetList: [],
+    // issue 01 · ADR-0021:Analysis Skill 集合 + 选择
+    // 空态默认空集合 + 空选择,由 `getAnalyzingData()` SSR 注入时再覆盖
+    availableSkills: [],
+    selectedSkillName: '',
   }
 }
 

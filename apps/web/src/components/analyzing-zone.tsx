@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   deriveProducts,
-  deriveAdmissionData,
   countCitationsByDoc,
   collectCitationRefs,
   ANALYSIS_SESSION_ANGLE_META,
@@ -13,7 +12,6 @@ import {
   type AnalyzingData,
   type AnalyzingProductGroup,
   type AnalyzingStats,
-  type AdmissionVerdict,
   type SourceRef,
 } from '@/lib/analyzing'
 import type { ProductChange } from '@/lib/products'
@@ -22,8 +20,7 @@ import { useMediaQuery } from '@/lib/use-media-query'
 // 注:ThinkingStream 组件本身已不再导入(ADR-0017 D1 · ticket 02):
 // 左栏"思考流"UI 删,phase state machine 内部状态保留(供未来 StatusBar/插话)。
 import { EmptyState } from './empty-state'
-import { AdmissionDashboard } from './admission-dashboard'
-import type { AdmissionStartState } from './admission-dashboard'
+import { AnalysisSkillSelector } from './analysis-skill-selector'
 import { SessionTabs } from './session-tabs'
 import type { ThinkingPhase } from './thinking-stream'
 import { ProductList, type CitationSourceOption } from './product-list'
@@ -39,6 +36,16 @@ import {
   StartAnalysisError,
   type StartAnalysisSuccess,
 } from '@/lib/analysis-start'
+
+/**
+ * 「开始分析」按钮流式状态(issue 01 · ADR-0021 改造):在父组件
+ * AnalyzingZone 维护,传给按钮组件。
+ *
+ *   idle     → 「▶ 开始分析」可点击
+ *   starting → POST 在路上;切"分析中…",disabled 防重
+ *   running  → POST 201 已返,SSE 在推;disabled(等 analysis_done 事件复位)
+ */
+type StartAnalysisState = 'idle' | 'starting' | 'running'
 
 /**
  * ANALYZING 工位组件(ADR-0011 §6 ANALYZING 布局 · issue 19)
@@ -205,9 +212,10 @@ function EmptyAnalyzing({ data }: { data: AnalyzingData }) {
 
 function AnalyzingContent({ data }: { data: AnalyzingData }) {
   const [phase, setPhase] = useState<ThinkingPhase>({ kind: 'idle' })
-  // 客户端 verdict 覆盖(issue 19a VS1:[接受风险] 按钮 → fail → pending)
-  // TODO VS6:接入 server action(POST /analysis/adjudicate)
-  const [verdictOverride, setVerdictOverride] = useState<AdmissionVerdict | null>(null)
+  // issue 01 · ADR-0021:已删除旧"verdictOverride" + "接受风险"按钮
+  // —— ANALYZING 工位不再表达"准入通过/待裁决/失败"verdict;
+  // Analysis Run 的状态由 Run 自身 status (running / succeeded / failed) 表达,
+  // 本 issue 仅引入 Analysis Skill 单选器,verdict 状态机待 ticket 02+ 改造。
 
   // -------------------------------------------------------------------------
   // 多会话状态(issue 19c VS3 · ADR-0013 D7)
@@ -304,28 +312,41 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   }, [])
 
   // -------------------------------------------------------------------------
-  // 「开始分析」状态机(ticket 05 · ADR-0020 D9 · ticket 08 修订 · 2026-07-28)
-  // - startState: 'idle' | 'starting' | 'running'(传给 AdmissionDashboard)
+  // 「开始分析」状态机(issue 01 · ADR-0021 改造)
+  // - startState: 'idle' | 'starting' | 'running'
   //   - idle     → 「▶ 开始分析」可点击
-  //   - starting → POST 在路上;切 running 文案,disabled 防重
+  //   - starting → POST 在路上;切"分析中…",disabled 防重
   //   - running  → POST 201 已返,SSE 在推;disabled(等 analysis_done 事件复位)
   //
-  // ticket 08 调整:按钮从「空态 CTA」改为「常驻」(D2/D9 修订);handleStart
-  // 不再因"按钮自然消失"而被迫变成一次性 — 加幂等守卫 `startState !== 'idle'`
-  // 直接 return,确保流式期间/并发点击不重复 POST;running → idle 由下方 SSE
-  // EventSource 监听 `'analysis_done'` 命名事件触发(agent 端 turn-done 时
-  // publish,见 apps/agent/src/routes/analysis.ts runTurn 末尾)。
-  //
-  // 「再次点击」语义:已存在 sessions 时点按钮 = 再开一轮新分析(POST start
-  // → 乐观追加新 session → 切过去),与首次点击完全对称;不再有"空 sessions
-  // 兜底"前提 — 父组件永远传 showStartButton。
+  // 幂等守卫 `startState !== 'idle'` 直接 return,确保流式期间/并发点击
+  // 不重复 POST;running → idle 由下方 SSE EventSource 监听
+  // `'analysis_done'` 命名事件触发(agent 端 turn-done 时 publish)。
   // -------------------------------------------------------------------------
-  const [startState, setStartState] = useState<AdmissionStartState>('idle')
+  const [startState, setStartState] = useState<StartAnalysisState>('idle')
+
+  // 当前选中的 Skill(issue 01 · ADR-0021)
+  // - 初始值 = SSR 注入的 selectedSkillName
+  // - 用户点选 → AnalysisSkillSelector 乐观切 + PUT 写盘
+  // - handleStart 读这里得到本次 run 用的 Skill 名(issue 01 PRD §9 待续:
+  //   ticket 02+ 会把 skill_name 传给 start handler;本期为最小实现,先
+  //   保留本地 state,作为未来调用方的入参源)
+  const [currentSelectedSkill, setCurrentSelectedSkill] = useState<string>(
+    data.selectedSkillName,
+  )
+  // 同步 SSR 注入值(切需求时 props.selectedSkillName 变化)
+  if (currentSelectedSkill !== data.selectedSkillName && startState === 'idle') {
+    setCurrentSelectedSkill(data.selectedSkillName)
+  }
 
   const handleStart = useCallback(async () => {
     // ticket 08 幂等守卫:流式期间 disabled 是主防线,但 onClick 仍可能被
     // 键盘回车 / dev HMR 瞬态 disabled 丢失触发;提前 return 保安全。
     if (startState !== 'idle') return
+    // 校验:无可用 Skill(issue 01 acceptance 8:不允许用非法 Skill 启动)
+    if (data.availableSkills.length === 0 || currentSelectedSkill === '') {
+      pushToast('暂无可用 Analysis Skill,无法开始分析', 'err')
+      return
+    }
     setStartState('starting')
     // 默认首个会话 = 架构(ticket 05 spec 默认;UI 层暂无角度选择 — 产品层
     // 后续 PR 由产品决定是否暴露角度选择)。label 派生自
@@ -378,7 +399,13 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
     setLastSessionCookie(newSession.id)
     // 标记 running;按钮 disabled 至 SSE analysis_done 事件触发复位
     setStartState('running')
-  }, [data.requirementId, pushToast, startState])
+  }, [
+    data.requirementId,
+    data.availableSkills.length,
+    currentSelectedSkill,
+    pushToast,
+    startState,
+  ])
 
   // 主区滚动位置持久化已删(ADR-0019 D4):analyzing-main 改为 overflow-hidden 后
   // 外层不再滚动,mainScrollRef / scrollStorageKey / sessionStorage 全部为死代码。
@@ -465,33 +492,10 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       auxId: aux.id,
     })),
   ]
-  // AdmissionDashboard 数据(ADR-0020 D8 · audit-2026-07-26 #2)
-  //
-  // 五维卡 count / 总体 verdict / 待裁决数由**当前会话的 chunks** 实时派生 ——
-  // SSE 每推一条带 `admission` 的 chunk,对应维度卡的 count 就 +1,徽章随
-  // `[VERDICT]` 块更新。之前这里只是 spread `data.admission`(SSR 快照),
-  // 分析过程中仪表板纹丝不动。
-  //
-  // - `dimensions` 取 SSR 装配结果(Skill frontmatter 决定维度集合与顺序)
-  // - fallback 用 SSR 值:chunks 里还没有 admission 信息时(刚进页面 / 老数据)
-  //   保持与服务端一致,不会闪烁
-  // - `verdictOverride` 是用户点「接受风险」的本地覆盖,优先级最高
-  const derivedAdmission = useMemo(
-    () =>
-      deriveAdmissionData(chunks, {
-        dimensions: data.admission.dimensions.map((d) => d.id),
-        fallbackCounts: Object.fromEntries(
-          data.admission.dimensions.map((d) => [d.id, d.count]),
-        ),
-        fallbackVerdict: data.admission.verdict,
-        fallbackPendingCount: data.admission.pendingAdjudicationCount,
-      }),
-    [chunks, data.admission],
-  )
-  const currentAdmission = {
-    ...derivedAdmission,
-    verdict: verdictOverride ?? derivedAdmission.verdict,
-  }
+  // AdmissionDashboard / 五维卡 / verdict 派生已删除(issue 01 · ADR-0021)
+  // —— ANALYZING 工位不再表达"准入通过/待裁决/失败"verdict。
+  // 旧的 `derivedAdmission` / `currentAdmission` 已被 Analysis Skill 单选器替代。
+  // 若 ticket 02+ 仍需要从 chunks 派生 verdict,再以 useMemo 形式按需复活。
 
   // -------------------------------------------------------------------------
   // 点击右栏产物卡片 → 联动左栏(ticket 03 · ADR-0017 D4)
@@ -769,23 +773,27 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
         revealedCount={revealedCount}
         isStreaming={data.streamMeta.isStreaming}
       />
-      {/* issue 19a VS1 — 准入仪表板(顶部 5 维度卡 + verdict 徽章 + 待裁决 N · 全局共享)
-          ticket 05 (ADR-0020 D9):原空态时右端渲染「开始分析」按钮 →
-            sessions.length === 0 && admission.dimensions.every(d => d.count === 0)
-          ticket 08 (ADR-0020 D2/D9 修订 · 2026-07-28):按钮常驻,父组件永远传
-            showStartButton;已存在 sessions 时点按钮 = 再开一轮新分析
-            (handleStart 现状就是 POST start → 追加新 session)。AdmissionDashboard
-            自身的 data-phase 仍由 dimensions.every(count===0) 派生,仅作为
-            "空/有产物"视觉区分,与按钮渲染门解耦。 */}
-      <div className="px-6 pt-4">
-        <AdmissionDashboard
-          admission={currentAdmission}
-          onAcceptRisk={() => setVerdictOverride('pending')}
-          showStartButton
-          onStart={() => {
-            void handleStart()
-          }}
-          startState={startState}
+      {/* issue 01 · ADR-0021:原 Admission Dashboard(五维卡 + verdict + 待裁决)
+          被 Analysis Skill 单选器替代,只展示名称 / 功能简介 / 选中状态。
+          「开始分析」按钮常驻,availableSkills.length === 0 时禁用(issue 01
+          acceptance 8:不允许用非法 Skill 启动)。 */}
+      <div className="px-6 pt-4 flex items-start gap-3">
+        <div className="flex-1 min-w-0">
+          <AnalysisSkillSelector
+            requirementId={data.requirementId}
+            availableSkills={data.availableSkills}
+            selectedSkillName={data.selectedSkillName}
+            onSelectionChange={(name) => {
+              // 同步到顶层 state,以便 handleStart 拿最新值
+              setCurrentSelectedSkill(name)
+            }}
+            onError={(message) => pushToast(message, 'err')}
+          />
+        </div>
+        <StartAnalysisButton
+          state={startState}
+          disabled={data.availableSkills.length === 0}
+          onClick={handleStart}
         />
       </div>
       {/* issue 19c VS3 — 多会话 Tab(横向浏览器风格,主区按 activeSessionId 切换)
@@ -1091,6 +1099,74 @@ function StageStrip({
         </span>
       </div>
     </div>
+  )
+}
+
+// ============================================================================
+// StartAnalysisButton(issue 01 · ADR-0021)
+//
+// 「开始分析」按钮 —— ticket 08 调整后改为常驻显示;
+// issue 01 进一步把按钮从 AdmissionDashboard 抽出,放到 AnalysisSkillSelector
+// 右侧(同 h-7 行内),与 Skill 单选器并排。
+//
+// 视觉:与 Skill selector 同高(h-7 ~ 28px,text-xs);brand 主色填充。
+//
+// 状态机(StartAnalysisState):
+//   idle      → 「▶ 开始分析」,可点击
+//   starting  → 「分析中…」(等待 POST 返回);disabled 防重
+//   running   → 「分析中…」(POST 已返回,SSE 推 chunks);disabled(等
+//                agent 端 turn-done publish `analysis_done` 命名事件 →
+//                AnalyzingZone 监听 → setStartState('idle'))
+//
+// `disabled` prop:可由父组件控制(issue 01 acceptance 8:无可用 Skill 时
+// 禁用 + toast 提示)。
+//
+// 幂等防线:starting/running → 按钮 disabled,onClick 不触发;
+// AnalyzingZone.handleStart 内部另有 `startState !== 'idle'` 守卫。
+// ============================================================================
+
+function StartAnalysisButton({
+  state,
+  disabled,
+  onClick,
+}: {
+  state: StartAnalysisState
+  disabled?: boolean
+  onClick?: () => void
+}) {
+  const isStreaming = state !== 'idle'
+  const isDisabled = isStreaming || disabled
+  return (
+    <button
+      type="button"
+      data-testid="admission-start-btn"
+      data-state={state}
+      data-disabled={disabled ? 'no_skills' : 'ok'}
+      onClick={isDisabled ? undefined : onClick}
+      disabled={isDisabled}
+      aria-disabled={isDisabled}
+      className={`inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-semibold transition-colors flex-shrink-0 ${
+        isDisabled
+          ? 'bg-brand/50 text-white cursor-not-allowed'
+          : 'bg-brand text-white hover:bg-brand-600'
+      }`}
+    >
+      {isStreaming ? (
+        <>
+          <span
+            aria-hidden
+            data-testid="admission-start-spinner"
+            className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"
+          />
+          分析中…
+        </>
+      ) : (
+        <>
+          <span aria-hidden>▶</span>
+          开始分析
+        </>
+      )}
+    </button>
   )
 }
 

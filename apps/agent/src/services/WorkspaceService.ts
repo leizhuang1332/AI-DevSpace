@@ -17,7 +17,7 @@ import {
   type ConfigPatch,
 } from '@ai-devspace/shared'
 
-const SUBDIRS = ['requirements', 'repos', 'knowledge', 'skills', 'logs'] as const
+const SUBDIRS = ['requirements', 'repos', 'knowledge', 'skills', 'analysis-skills', 'logs'] as const
 
 const GITIGNORE_CONTENT = [
   '# AI DevSpace workspace',

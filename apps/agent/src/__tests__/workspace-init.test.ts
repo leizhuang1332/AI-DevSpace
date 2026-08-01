@@ -17,12 +17,19 @@ afterEach(() => {
 })
 
 describe('initWorkspace - slice 3: 子目录创建', () => {
-  it('全新场景创建 5 个子目录', async () => {
+  it('全新场景创建 6 个子目录', async () => {
     const r = await ws.initWorkspace()
-    for (const d of ['requirements', 'repos', 'knowledge', 'skills', 'logs']) {
+    for (const d of [
+      'requirements',
+      'repos',
+      'knowledge',
+      'skills',
+      'analysis-skills',
+      'logs',
+    ]) {
       expect(existsSync(join(tmpRoot, d))).toBe(true)
     }
-    expect(r.createdDirs.length).toBeGreaterThanOrEqual(5)
+    expect(r.createdDirs.length).toBeGreaterThanOrEqual(6)
     expect(r.existedDirs).toHaveLength(0)
   })
 
@@ -30,7 +37,7 @@ describe('initWorkspace - slice 3: 子目录创建', () => {
     await ws.initWorkspace()
     const r = await ws.initWorkspace()
     expect(r.createdDirs).toHaveLength(0)
-    expect(r.existedDirs.length).toBeGreaterThanOrEqual(5)
+    expect(r.existedDirs.length).toBeGreaterThanOrEqual(6)
   })
 
   it('部分子目录已存在时只补缺失', async () => {
@@ -43,6 +50,7 @@ describe('initWorkspace - slice 3: 子目录创建', () => {
     expect(r.createdDirs).toContain('repos')
     expect(r.createdDirs).toContain('knowledge')
     expect(r.createdDirs).toContain('skills')
+    expect(r.createdDirs).toContain('analysis-skills')
   })
 })
 

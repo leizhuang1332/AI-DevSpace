@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { render, screen, cleanup, act, fireEvent } from '@testing-library/react'
+import { render, screen, cleanup, act, fireEvent, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { AnalyzingZone } from '@/components/analyzing-zone'
 import {
   emptyAnalyzing,
@@ -170,42 +171,66 @@ describe('AnalyzingZone · 满数据渲染(ticket 02 · ADR-0017 D1)', () => {
 })
 
 // ============================================================================
-// ticket 05 (ADR-0020 D9) · ticket 08 (ADR-0020 D2/D9 修订 · 2026-07-28) ·
-// 「开始分析」按钮常驻显示
+// issue 01 · ADR-0021:Analysis Skill 单选器替代 Admission Dimension 卡片
 //
-// ticket 08:父组件 AnalyzingContent 现在**永远传** `showStartButton` 给
-// AdmissionDashboard(按钮常驻);data-phase 属性独立派生自
-// `dimensions.every(count===0)`,仅反映"是否有产物",与按钮渲染门解耦。
-// 这里覆盖父组件的两条独立派生:
-//   - 按钮渲染门:永远 true(sessions / count 都不影响,只是不再 hide)
-//   - data-phase:基于 dimensions.every(count===0)
-// AdmissionDashboard 自身的单测只覆盖 prop 渲染分支
-// (见 analyzing-admission-dashboard.test.tsx);这里覆盖父组件的条件组合。
-// ============================================================================
-
-describe('AnalyzingZone · 「开始分析」按钮常驻 + data-phase 派生(ticket 08)', () => {
-  it('空 sessions + 默认 0 count → 按钮渲染 + section data-phase=empty_armed', () => {
-    const data: AnalyzingData = {
-      ...emptyAnalyzing('req-empty'),
+// 旧 ticket 08 「开始分析」按钮常驻 + data-phase 派生 验收:
+//  - 按钮常驻:不再受 sessions / dimensions count 影响
+//  - data-phase:由 `dimensions.every(count===0)` 派生
+//
+// 本测试改写为:
+/**
+ * issue 01 (ADR-0021) 改造说明:
+ *
+ * 旧 ticket 08 测试原 AdmissionDashboard 的"按钮常驻 + data-phase 派生"
+ * 行为。该组件已被 AnalysisSkillSelector 替代,本 describe 改为验证:
+ *  - 「开始分析」按钮在可用 Skill 非空时常驻(在 SkillSelector 旁)
+ *  - availableSkills.length === 0 时按钮 disabled + 显示空态 selector
+ *  - SkillSelector 与「开始分析」按钮同位置渲染(顶层,不受桌面/窄视口影响)
+ *  - 选中状态:默认 first-by-name = "implementation-readiness"(字典序)
+ *  - 切换 Skill → 乐观切中 + PUT 写盘 + 服务端确认
+ */
+describe('AnalyzingZone · Analysis Skill 单选器 + 「开始分析」按钮常驻(issue 01)', () => {
+  function makeData(overrides: Partial<AnalyzingData> = {}): AnalyzingData {
+    return {
+      ...emptyAnalyzing('req-001'),
       empty: false,
       phase: 'active',
-      // sessions 默认 [] + admission 默认全 0 → 按钮常驻可见,空态 data-phase
+      availableSkills: [
+        {
+          name: 'implementation-readiness',
+          description: '检查实施准备度',
+          version: '1.0.0',
+          is_reserved: true,
+        },
+        {
+          name: 'prd-completeness',
+          description: '检查 PRD 完整性与清晰度',
+          version: '1.0.0',
+          is_reserved: true,
+        },
+      ],
+      selectedSkillName: 'implementation-readiness',
+      ...overrides,
     }
-    render(<AnalyzingZone data={data} />)
+  }
+
+  it('有可用 Skill → 按钮渲染 + 单选器渲染 + 默认选中字典序首项', () => {
+    render(<AnalyzingZone data={makeData()} />)
     expect(screen.getByTestId('admission-start-btn')).toBeInTheDocument()
-    expect(screen.getByTestId('admission-dashboard').getAttribute('data-phase')).toBe(
-      'empty_armed',
+    expect(screen.getByTestId('analysis-skill-selector')).toBeInTheDocument()
+
+    // 默认选中 = 字典序首项 = "implementation-readiness"
+    // testid 通用,按 data-skill-name 区分
+    const options = screen.getAllByTestId('analysis-skill-option')
+    const first = options.find(
+      (el) => el.getAttribute('data-skill-name') === 'implementation-readiness',
     )
+    expect(first).toBeDefined()
+    expect(first?.getAttribute('data-selected')).toBe('true')
   })
 
-  it('有 sessions(至少 1)→ 按钮仍渲染 + section data-phase=active', () => {
-    // ticket 08:常驻按钮后,已有 sessions 时按钮应仍可见(再次点击 = 再开一轮
-    // 新分析);data-phase 因 dimensions.every(count===0) 仍可能为 active 或
-    // empty_armed 取决于 admission chunks,这里强制 dimensions 有 count > 0
-    const data: AnalyzingData = {
-      ...emptyAnalyzing('req-with-sess'),
-      empty: false,
-      phase: 'active',
+  it('有 sessions + 已选 Skill → 按钮常驻 + 选中态保持', () => {
+    const data = makeData({
       sessions: [
         {
           id: 'sess-arch',
@@ -216,64 +241,53 @@ describe('AnalyzingZone · 「开始分析」按钮常驻 + data-phase 派生(ti
         },
       ],
       activeSessionId: 'sess-arch',
-      admission: {
-        ...emptyAnalyzing('req-with-sess').admission,
-        dimensions: emptyAnalyzing('req-with-sess').admission.dimensions.map(
-          (d) => ({ ...d, count: 1 }),
-        ),
-      },
-    }
+      selectedSkillName: 'prd-completeness',
+    })
     render(<AnalyzingZone data={data} />)
     expect(screen.getByTestId('admission-start-btn')).toBeInTheDocument()
-    expect(screen.getByTestId('admission-dashboard').getAttribute('data-phase')).toBe(
-      'active',
+    const options = screen.getAllByTestId('analysis-skill-option')
+    const second = options.find(
+      (el) => el.getAttribute('data-skill-name') === 'prd-completeness',
     )
+    expect(second?.getAttribute('data-selected')).toBe('true')
   })
 
-  it('空 sessions + 至少一个维度 count > 0 → 按钮仍渲染 + section data-phase=active', () => {
-    // ticket 08:data-phase 派生自 dimensions.every(count===0),与 sessions
-    // 是否为空无关 —— 此处即使 sessions 为空,有维度 count > 0 也会解除
-    // empty_armed 视觉态;按钮仍常驻可见
-    const data: AnalyzingData = {
-      ...emptyAnalyzing('req-warm'),
-      empty: false,
-      phase: 'active',
-      sessions: [],
-      admission: {
-        ...emptyAnalyzing('req-warm').admission,
-        dimensions: [
-          {
-            id: 'loss_prevention',
-            label: '资损安全',
-            icon: '🔴',
-            severity: 'red',
-            count: 3,
-          },
-          ...emptyAnalyzing('req-warm').admission.dimensions.slice(1),
-        ],
-      },
-    }
-    render(<AnalyzingZone data={data} />)
-    expect(screen.getByTestId('admission-start-btn')).toBeInTheDocument()
-    expect(screen.getByTestId('admission-dashboard').getAttribute('data-phase')).toBe(
-      'active',
+  it('无可用 Skill → 按钮 disabled + 单选器显示空态', () => {
+    // issue 01 acceptance 8:无有效 Skill 时按钮不允许启动
+    render(
+      <AnalyzingZone
+        data={makeData({ availableSkills: [], selectedSkillName: '' })}
+      />,
     )
+    const btn = screen.getByTestId('admission-start-btn')
+    expect(btn).toBeDisabled()
+    expect(btn.getAttribute('data-disabled')).toBe('no_skills')
+    expect(screen.getByTestId('analysis-skill-selector-empty')).toBeInTheDocument()
   })
 
-  it('AdmissionDashboard 是全局共享:窄视口 / 桌面视口都同位置渲染', () => {
-    // ticket 05 spec 第 7 项验收:窄视口形态(<1024px,NarrowLayout)同样适用。
-    // AdmissionDashboard 实际挂在 AnalyzingContent 顶层(isDesktop 之上),
-    // 不在桌面 / 窄屏分支内;此断言守护这一契约不被未来的重构搬进窄屏分支。
-    const data: AnalyzingData = {
-      ...emptyAnalyzing('req-shared'),
-      empty: false,
-      phase: 'active',
-    }
-    render(<AnalyzingZone data={data} />)
+  it('AnalysisSkillSelector 与「开始分析」按钮同位置渲染:顶层、不在 analyzing-grid/analyzing-narrow-tabs 内', () => {
+    // 与 analyzing-main 同级(analyzing-stage-strip 旁),不受桌面/窄视口分支影响
+    render(<AnalyzingZone data={makeData()} />)
+    const sel = screen.getByTestId('analysis-skill-selector')
+    expect(
+      sel.compareDocumentPosition(screen.getByTestId('analyzing-main')) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
 
-    // 与 analyzing-main 同级(analyzing-stage-strip 旁),不在 analyzing-grid/analyzing-narrow-tabs 内
-    const dash = screen.getByTestId('admission-dashboard')
-    expect(dash.compareDocumentPosition(screen.getByTestId('analyzing-main')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  it('点选 Skill → 乐观切中(data-selected=true)', async () => {
+    const user = userEvent.setup()
+    render(<AnalyzingZone data={makeData()} />)
+    // 默认 implementation-readiness 选中;点击 prd-completeness
+    const options = screen.getAllByTestId('analysis-skill-option')
+    const target = options.find(
+      (el) => el.getAttribute('data-skill-name') === 'prd-completeness',
+    )
+    expect(target).toBeDefined()
+    await user.click(target!)
+    await waitFor(() => {
+      expect(target?.getAttribute('data-selected')).toBe('true')
+    })
   })
 })
 
