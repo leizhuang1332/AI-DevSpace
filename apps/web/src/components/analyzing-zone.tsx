@@ -42,6 +42,7 @@ import {
   StartAnalysisRunError,
   type StartAnalysisRunSuccess,
 } from '@/lib/analysis-run-start'
+import { AnalysisIssueList } from './analysis-issue-list'
 
 /**
  * 「开始分析」按钮流式状态(issue 01 · ADR-0021 改造):在父组件
@@ -362,6 +363,47 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   })
   const [currentRunIssues, setCurrentRunIssues] = useState<AnalysisIssue[]>([])
   const currentRun = runs.find((r) => r.run_id === currentRunId) ?? null
+
+  // -------------------------------------------------------------------------
+  // SSR 初始装载当前 Run 的 Issue(issue 03 · ADR-0021)
+  //
+  // 当 currentRunId 在 SSR 注入阶段已经有值(用户刷新页面或切到历史 Run)时,
+  // 通过 `GET /api/requirements/<id>/analysis/runs/<runId>` 拉取 Issue + Log。
+  // handleStart 创建的新 Run 不走此路径(SSE 推送会即时追加 Issue)。
+  //
+  // 简化:本 effect 只依赖 currentRunId 变化;数据合法性由 AnalysisRunDetailResponseSchema
+  // 在 server route 处兜底(决策 22)。
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    if (!currentRunId) {
+      setCurrentRunIssues([])
+      return
+    }
+    // 跳过"刚启动的新 Run"(没有 issue_count 但 SSE 还在推;handleStart 已设 issues=[])
+    // 通过 currentRun.issue_count === 0 且 status === 'running' → 跳过 fetch
+    const target = runs.find((r) => r.run_id === currentRunId)
+    if (target && target.status === 'running' && target.issue_count === 0) {
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/requirements/${encodeURIComponent(data.requirementId)}/analysis/runs/${encodeURIComponent(currentRunId)}`,
+        )
+        if (!res.ok) return
+        const json = (await res.json()) as { issues?: AnalysisIssue[] }
+        if (cancelled) return
+        const issues = Array.isArray(json.issues) ? json.issues : []
+        setCurrentRunIssues(issues)
+      } catch {
+        /* 网络错误 / 解析失败 → 保持空 Issue,不阻断 UI */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [currentRunId, runs, data.requirementId])
 
   const handleStart = useCallback(async () => {
     // 幂等守卫:流式期间 disabled 是主防线,但 onClick 仍可能被
@@ -720,6 +762,49 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
     [chunks],
   )
 
+  // -------------------------------------------------------------------------
+  // Analysis Issue 的 SourceRef 点击联动(issue 03 · ADR-0021)
+  // - AnalysisIssueList 的 SourceRef chip 点击 → 触发 DocumentReaderPane 切 Tab +
+  //   滚 + pulse
+  // - 接收的是 shared 包 SourceRef(requirement / repository / aux / asset);
+  //   本路径只走 requirement / aux / asset(可定位的种类);
+  //   repository 当前在阅读器外 → 调用方先做缺失判定,这里再防御性 no-op
+  // -------------------------------------------------------------------------
+  const handleIssueSourceRefClick = useCallback(
+    (ref: import('@ai-devspace/shared').SourceRef) => {
+      // 把 shared SourceRef 转成 web SourceRef 并通过 setActiveSourceRef / pulseRef
+      // 联动 DocumentReaderPane(与产品侧 handleItemClick 同款策略)
+      if (ref.kind === 'requirement') {
+        const lr = ref.line_range
+        if (!lr) return
+        setActiveSourceRef({ kind: 'prd', lineRange: lr })
+        setPulseRef({ tabId: PRD_TAB_ID, lineRange: lr })
+        if (pulseTimerRef.current !== null) window.clearTimeout(pulseTimerRef.current)
+        pulseTimerRef.current = window.setTimeout(() => setPulseRef(null), 1500)
+        if (!isDesktop) setNarrowTab('doc')
+        return
+      }
+      if (ref.kind === 'aux') {
+        const lr = ref.line_range
+        if (!lr) return
+        setActiveSourceRef({ kind: 'aux', auxId: ref.aux_id, lineRange: lr })
+        setPulseRef({ tabId: ref.aux_id, lineRange: lr })
+        if (pulseTimerRef.current !== null) window.clearTimeout(pulseTimerRef.current)
+        pulseTimerRef.current = window.setTimeout(() => setPulseRef(null), 1500)
+        if (!isDesktop) setNarrowTab('doc')
+        return
+      }
+      if (ref.kind === 'asset') {
+        // asset 无 line_range,只设 activeSourceRef 触发 asset 高亮(决策 27)
+        setActiveSourceRef({ kind: 'asset', assetId: ref.asset_id })
+        if (!isDesktop) setNarrowTab('doc')
+        return
+      }
+      // repository:不在阅读器内,无操作(本应在调用方已判定为缺失)
+    },
+    [isDesktop],
+  )
+
   // 卸载清 pulse 计时器
   useEffect(() => {
     return () => {
@@ -1003,6 +1088,15 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
               className="col-span-1 flex flex-col gap-5 min-h-0 overflow-hidden"
             >
               <Summary summary={data.summary} stats={data.stats} currentRun={currentRun} />
+              <div className="flex-[2] min-h-0">
+                <AnalysisIssueList
+                  issues={currentRunIssues}
+                  prdExists={data.prdMarkdown.trim().length > 0}
+                  auxFiles={data.auxFiles}
+                  assetList={data.assetList}
+                  onSourceRefClick={handleIssueSourceRefClick}
+                />
+              </div>
               <div className="flex-1 min-h-0">
                 <ProductList
                   products={products}
@@ -1032,6 +1126,8 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
             onAddSyntheticChunk={handleAddSyntheticChunk}
             narrowTab={narrowTab}
             onNarrowTabChange={setNarrowTab}
+            issues={currentRunIssues}
+            onIssueSourceRefClick={handleIssueSourceRefClick}
           />
         )}
         {productError && (
@@ -1090,6 +1186,10 @@ interface NarrowLayoutProps {
   onNarrowTabChange: (tab: 'doc' | 'products') => void
   /** issue 02 · ADR-0021:当前 Run 元数据(零 Issue 空态判断用) */
   currentRun?: AnalysisRunMeta | null
+  /** issue 03 · ADR-0021:当前 Run 的 Analysis Issue 列表 */
+  issues?: ReadonlyArray<AnalysisIssue>
+  /** issue 03 · ADR-0021:Analysis Issue 的 SourceRef 点击回调 */
+  onIssueSourceRefClick?: (ref: import('@ai-devspace/shared').SourceRef) => void
 }
 
 function NarrowLayout({
@@ -1106,6 +1206,8 @@ function NarrowLayout({
   narrowTab,
   onNarrowTabChange,
   currentRun,
+  issues,
+  onIssueSourceRefClick,
 }: NarrowLayoutProps) {
   return (
     <div
@@ -1186,6 +1288,15 @@ function NarrowLayout({
             className="flex flex-col gap-5 h-full min-h-0"
           >
             <Summary summary={data.summary} stats={data.stats} currentRun={currentRun} />
+            <div className="flex-[2] min-h-0">
+              <AnalysisIssueList
+                issues={issues ?? []}
+                prdExists={data.prdMarkdown.trim().length > 0}
+                auxFiles={data.auxFiles}
+                assetList={data.assetList}
+                onSourceRefClick={onIssueSourceRefClick}
+              />
+            </div>
             <div className="flex-1 min-h-0">
               <ProductList
                 products={products}

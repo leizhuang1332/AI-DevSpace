@@ -772,6 +772,160 @@ describe('AnalysisRunService(单运行约束 + Issue 幂等)', () => {
     const second = await service.createRun({ requirementId: 'req-relock', skillName: 'implementation-readiness' })
     expect(second.ok).toBe(true)
   })
+
+  // --------------------------------------------------------------------------
+  // issue 03 acceptance #2 / #13 / #14 / #15 — 多 Issue + 非法入参 + 缺类源
+  // --------------------------------------------------------------------------
+  it('issue 03:多条 Issue 提交 → ordinal 递增 + source_refs 原样落盘 + toolUseIndex 幂等', async () => {
+    const created = await service.createRun({ requirementId: 'req-multi', skillName: 'prd-completeness' })
+    if (!created.ok) throw new Error('setup failed')
+    const runId = created.run.run_id
+
+    const r1 = service.reportIssue({
+      requirementId: 'req-multi',
+      runId,
+      toolUseId: 'tu-1',
+      input: {
+        title: 'PRD 缺少验收标准',
+        description: '当前 PRD 没有给出"通过条件"',
+        sourceRefs: [{ kind: 'requirement', relative_path: 'requirement.md', line_range: [0, 5] }],
+        metadata: [['severity', 'high']],
+      },
+    })
+    expect(r1.ok).toBe(true)
+    if (!r1.ok) return
+    expect(r1.result.created).toBe(true)
+    expect(r1.result.issue.ordinal).toBe(1)
+    expect(r1.result.issue.title).toBe('PRD 缺少验收标准')
+    expect(r1.result.issue.source_refs).toHaveLength(1)
+    expect(r1.result.issue.metadata).toHaveLength(1)
+
+    const r2 = service.reportIssue({
+      requirementId: 'req-multi',
+      runId,
+      toolUseId: 'tu-2',
+      input: {
+        title: '接口契约模糊',
+        description: '入参响应未明确',
+        sourceRefs: [
+          { kind: 'aux', aux_id: 'aux-api', line_range: [0, 3] },
+          { kind: 'repository', repo_name: 'orders', relative_path: 'src/index.ts', line_range: [10, 20] },
+        ],
+      },
+    })
+    expect(r2.ok).toBe(true)
+    if (!r2.ok) return
+    expect(r2.result.created).toBe(true)
+    expect(r2.result.issue.ordinal).toBe(2)
+    expect(r2.result.issue.source_refs).toHaveLength(2)
+    expect(r2.result.issue.source_refs[0]?.kind).toBe('aux')
+    expect(r2.result.issue.source_refs[1]?.kind).toBe('repository')
+
+    // 元数据已落盘
+    expect(r1.result.issue.metadata[0]).toEqual(['severity', 'high'])
+
+    // 后续 readIssues 按 ordinal 升序
+    const all = service.readIssues('req-multi', runId)
+    expect(all).toHaveLength(2)
+    expect(all[0]?.ordinal).toBe(1)
+    expect(all[1]?.ordinal).toBe(2)
+  })
+
+  it('issue 03:缺类源(SourceRef 无 line_range)允许合法提交', async () => {
+    const created = await service.createRun({ requirementId: 'req-missing-class', skillName: 'prd-completeness' })
+    if (!created.ok) throw new Error('setup failed')
+    const runId = created.run.run_id
+
+    // decision 30:缺失类问题可省略 line_range
+    const r = service.reportIssue({
+      requirementId: 'req-missing-class',
+      runId,
+      toolUseId: 'tu-no-range',
+      input: {
+        title: 'API 文档缺失',
+        description: 'PRD 未指向任何 API 文档',
+        sourceRefs: [
+          // 缺 line_range 合法(决策 30 / schema optional)
+          { kind: 'requirement', relative_path: 'requirement.md' },
+        ],
+      },
+    })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.result.created).toBe(true)
+    expect(r.result.issue.source_refs[0]?.line_range).toBeUndefined()
+  })
+
+  it('issue 03:metadata 数组值(字符串数组)合法提交', async () => {
+    const created = await service.createRun({ requirementId: 'req-array-meta', skillName: 'prd-completeness' })
+    if (!created.ok) throw new Error('setup failed')
+    const runId = created.run.run_id
+
+    const r = service.reportIssue({
+      requirementId: 'req-array-meta',
+      runId,
+      toolUseId: 'tu-arr-meta',
+      input: {
+        title: '元数据数组',
+        description: 'metadata 是字符串数组',
+        sourceRefs: [{ kind: 'requirement', relative_path: 'requirement.md', line_range: [0, 1] }],
+        metadata: [['tags', ['ux', 'completeness', 'urgent']]],
+      },
+    })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.result.issue.metadata[0]?.[1]).toEqual(['ux', 'completeness', 'urgent'])
+  })
+
+  it('issue 03:完成工具接受后再次报 Issue → run_completed(决策 30)', async () => {
+    const created = await service.createRun({ requirementId: 'req-done', skillName: 'prd-completeness' })
+    if (!created.ok) throw new Error('setup failed')
+    const runId = created.run.run_id
+
+    service.requestCompletion('req-done', runId)
+    const r = service.reportIssue({
+      requirementId: 'req-done',
+      runId,
+      toolUseId: 'tu-late',
+      input: {
+        title: 'late issue',
+        description: 'after completion',
+        sourceRefs: [{ kind: 'requirement', relative_path: 'requirement.md', line_range: [0, 1] }],
+      },
+    })
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.code).toBe('run_completed')
+  })
+
+  it('issue 03:不同 tool_use_id 但相同标题/源 → 不合并,各自独立', async () => {
+    const created = await service.createRun({ requirementId: 'req-no-merge', skillName: 'prd-completeness' })
+    if (!created.ok) throw new Error('setup failed')
+    const runId = created.run.run_id
+
+    const shared = {
+      title: '相同标题',
+      description: '相同描述',
+      sourceRefs: [{ kind: 'requirement', relative_path: 'requirement.md', line_range: [0, 1] }],
+    }
+    const r1 = service.reportIssue({
+      requirementId: 'req-no-merge', runId, toolUseId: 'tu-a',
+      input: shared,
+    })
+    const r2 = service.reportIssue({
+      requirementId: 'req-no-merge', runId, toolUseId: 'tu-b',
+      input: shared,
+    })
+    expect(r1.ok).toBe(true)
+    expect(r2.ok).toBe(true)
+    if (!r1.ok || !r2.ok) return
+    expect(r1.result.created).toBe(true)
+    expect(r2.result.created).toBe(true)
+    // 不同 tool_use_id → 各自 ordinal 递增(决策 24)
+    expect(r1.result.issue.ordinal).toBe(1)
+    expect(r2.result.issue.ordinal).toBe(2)
+    expect(r2.result.issue.issue_id).not.toBe(r1.result.issue.issue_id)
+  })
 })
 
 // ============================================================================
