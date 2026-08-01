@@ -405,6 +405,29 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
     }
   }, [currentRunId, runs, data.requirementId])
 
+  // -------------------------------------------------------------------------
+  // Issue Response flush gate(issue 04 验收 8 / 9)
+  // - 每个 AnalysisIssueList 里的 IssueResponseEditor 注册 flush()
+  // - 开始分析前 → 全部 flush;任一失败 → 阻止启动
+  // - 状态机 error → 顶部 toast + 按钮保持可点(等用户重试)
+  // -------------------------------------------------------------------------
+  const responseFlushersRef = useRef<Map<string, () => Promise<void>>>(new Map())
+  const registerIssueResponseFlush = useCallback(
+    (issueId: string, flush: () => Promise<void>) => {
+      responseFlushersRef.current.set(issueId, flush)
+      return () => {
+        responseFlushersRef.current.delete(issueId)
+      }
+    },
+    [],
+  )
+  // Editor 保存失败 → 父组件 toast 提示;IssueResponseEditor 已通过
+  // onFlushFailed 自带 status='error' 触发 UI 横幅 + flush() 时阻断启动分析。
+  const onEditorError = useCallback((_issueId: string, _message: string) => {
+    /* 当前由 IssueResponseEditor 自身的 onFlushFailed 处理;
+       这里预留钩子供未来引入"持续 error 态禁用开始按钮"时接入。 */
+  }, [])
+
   const handleStart = useCallback(async () => {
     // 幂等守卫:流式期间 disabled 是主防线,但 onClick 仍可能被
     // 键盘回车 / dev HMR 瞬态 disabled 丢失触发;提前 return 保安全。
@@ -414,6 +437,27 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       pushToast('暂无可用 Analysis Skill,无法开始分析', 'err')
       return
     }
+
+    // issue 04 验收 8 + 9:开始分析前等待全部 IssueResponseEditor flush;
+    // 任一失败 → 阻止启动并提示重试。
+    if (responseFlushersRef.current.size > 0) {
+      pushToast('正在保存最新 Issue Response…', 'info')
+      const flushers = Array.from(responseFlushersRef.current.values())
+      const results = await Promise.allSettled(flushers.map((f) => f()))
+      const failures = results.filter((r) => r.status === 'rejected')
+      if (failures.length > 0) {
+        const first = failures[0]
+        const reason =
+          first && first.status === 'rejected'
+            ? first.reason instanceof Error
+              ? first.reason.message
+              : String(first.reason)
+            : 'unknown'
+        pushToast(`Issue Response 保存失败,无法启动分析:${reason}`, 'err')
+        return
+      }
+    }
+
     setStartState('starting')
 
     // issue 02 · ADR-0021:调用新 Analysis Run 端点
@@ -431,6 +475,11 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
           pushToast('PRD 未就绪,请先完成 DRAFTING 工位的需求文档', 'warn')
         } else if (err.code === 'analysis_run_already_running') {
           pushToast('已有运行中的 Analysis Run,请等待其结束', 'warn')
+        } else if (err.code === 'context_overflow') {
+          pushToast(
+            '历史已答复 Issue 超过上下文预算;请裁剪、删除或拆分后再启动',
+            'warn',
+          )
         } else {
           pushToast(`开始分析失败:${err.message}`, 'err')
         }
@@ -1097,6 +1146,10 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
                   auxFiles={data.auxFiles}
                   assetList={data.assetList}
                   onSourceRefClick={handleIssueSourceRefClick}
+                  requirementId={data.requirementId}
+                  runId={currentRunId}
+                  onEditorError={onEditorError}
+                  registerFlush={registerIssueResponseFlush}
                 />
               </div>
               <div className="flex-1 min-h-0">
@@ -1130,6 +1183,9 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
             onNarrowTabChange={setNarrowTab}
             issues={currentRunIssues}
             onIssueSourceRefClick={handleIssueSourceRefClick}
+            currentRunId={currentRunId}
+            onEditorError={onEditorError}
+            registerIssueResponseFlush={registerIssueResponseFlush}
           />
         )}
         {productError && (
@@ -1192,6 +1248,12 @@ interface NarrowLayoutProps {
   issues?: ReadonlyArray<AnalysisIssue>
   /** issue 03 · ADR-0021:Analysis Issue 的 SourceRef 点击回调 */
   onIssueSourceRefClick?: (ref: import('@ai-devspace/shared').SourceRef) => void
+  /** issue 04:当前 Run id(窄视口下挂 IssueResponseEditor 需要) */
+  currentRunId?: string
+  /** issue 04:Editor 保存失败回调 */
+  onEditorError?: (issueId: string, message: string) => void
+  /** issue 04:Editor flush 注册器 */
+  registerIssueResponseFlush?: (issueId: string, flush: () => Promise<void>) => () => void
 }
 
 function NarrowLayout({
@@ -1210,6 +1272,9 @@ function NarrowLayout({
   currentRun,
   issues,
   onIssueSourceRefClick,
+  currentRunId,
+  onEditorError,
+  registerIssueResponseFlush,
 }: NarrowLayoutProps) {
   return (
     <div
@@ -1297,6 +1362,10 @@ function NarrowLayout({
                 auxFiles={data.auxFiles}
                 assetList={data.assetList}
                 onSourceRefClick={onIssueSourceRefClick}
+                requirementId={data.requirementId}
+                runId={currentRunId}
+                onEditorError={onEditorError}
+                registerFlush={registerIssueResponseFlush}
               />
             </div>
             <div className="flex-1 min-h-0">

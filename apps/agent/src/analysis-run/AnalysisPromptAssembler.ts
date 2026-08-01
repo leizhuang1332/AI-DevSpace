@@ -32,6 +32,8 @@ import type { AnalysisSkillMeta } from '@ai-devspace/shared'
 export interface AnsweredIssueContext {
   /** 来源 Run id(便于追溯) */
   run_id: string
+  /** Issue 唯一 id(便于跨 Run 关联追踪) */
+  issue_id: string
   /** Issue 标题 */
   issue_title: string
   /** Issue 描述 */
@@ -116,8 +118,24 @@ export function assembleAnalysisSystemPrompt(input: AnalysisPromptInput): string
       '## 已答复需求上下文',
       '',
       '本节来自历史 Run 中**已答复**(Response 正文非空)的 Issue + Response。',
-      '按最后更新时间从旧到新排序,较新的 Response 事实优先;',
-      '未答复 Issue 不出现在本节,Run 不得把它们当作需求事实。',
+      '按最后更新时间从旧到新排序;同一时间按 Issue id 字典序稳定排序。',
+      '',
+      '### 解释与优先级规则(决策 14 · 51 · 52)',
+      '',
+      '- **平台不合并语义**:不在平台层做 Issue 去重或 Response 总结,原样注入。',
+      '- **较新 Response 优先**:若多条 Response 涉及同一事实,按本节顺序中"较后出现的"',
+      '  (即 last updated_at 较晚的)作为当前需求事实,允许覆盖早期说法。',
+      '- **默认不重报**:已被答复充分解决的问题(本节有对应 Issue + Response)',
+      '  不要重复报告。',
+      '- **允许关联重报**:仅当下列情况之一时,可调用 `report_analysis_issue`',
+      '  报告与本节 Issue 关联的新问题,并在 `description` 中说明触发原因:',
+      '    1. Response 内容明显不足(只回答了问题的一部分,仍留关键缺口)',
+      '    2. Response 与本节其它 Response / 当前 PRD 文本自相矛盾',
+      '    3. Response 与当前 Workspace 文件内容冲突(用户答复后代码 / 文档已变化)',
+      '- **未答复 Issue 不出现**:未填写 Response 的 Issue 不在本节,**不得当作',
+      '  需求事实** —— 平台不会注入,Assistant 也不应臆测其已被默认答复。',
+      '',
+      '### 已答复内容',
       '',
       answered_context.length === 0
         ? '_(尚无可引用的已答复需求上下文)_'
@@ -133,7 +151,7 @@ export function assembleAnalysisSystemPrompt(input: AnalysisPromptInput): string
                       .join('\n')
                   : '  _(无元数据)_'
               return [
-                `### 已答复 #${idx + 1}(来源 Run ${c.run_id},更新 ${c.updated_at})`,
+                `### 已答复 #${idx + 1}(来源 Run ${c.run_id},Issue ${c.issue_id},更新 ${c.updated_at})`,
                 '',
                 `- 标题:${c.issue_title}`,
                 `- 描述:${c.issue_description}`,

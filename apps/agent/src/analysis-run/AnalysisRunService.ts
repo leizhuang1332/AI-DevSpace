@@ -31,6 +31,8 @@ import {
   renameSync,
   writeFileSync,
   appendFileSync,
+  unlinkSync,
+  statSync,
 } from 'node:fs'
 import { open, mkdir as mkdirAsync, rm as rmAsync } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
@@ -40,9 +42,12 @@ import {
   type AnalysisRunMeta,
   type AnalysisIssue,
   type AnalysisLogEntry,
+  type IssueResponseMeta,
+  type IssueResponseGetResponse,
   AnalysisRunMetaSchema,
   AnalysisIssueSchema,
   AnalysisLogEntrySchema,
+  IssueResponseMetaSchema,
 } from '@ai-devspace/shared'
 
 /** Run 持久化目录路径(单点真相 —— service + route 共享) */
@@ -542,7 +547,324 @@ export class AnalysisRunService {
   isCompletionRequested(runId: string): boolean {
     return this.completionRequested.has(runId)
   }
+
+  // ---------------------------------------------------------------------------
+  // Issue Response(issue 04 · ADR-0021 决策 40)
+  //
+  // 落盘布局:
+  //   <runDir>/responses/<issue-id>.md       Markdown 正文
+  //   <runDir>/responses/<issue-id>.meta.yaml 单调编辑版本 + 时间
+  //
+  // 不做的事:
+  // - 不修改原始 Issue(决策 36 · 已由 readIssues 不暴露写路径保证)
+  // - 不做语义合并(决策 24)
+  // - 不自动总结 / 截断(决策 15)
+  // - 不依赖服务端缓存,每次读都重新 fs 读取 + YAML parse
+  // ---------------------------------------------------------------------------
+
+  /** Run 内 Issue Response 目录(单 Run 维度,issue 04 · ADR-0021 决策 43) */
+  responsesDirFor(requirementId: string, runId: string): string {
+    return join(this.runDirFor(requirementId, runId), 'responses')
+  }
+
+  /** 单 Issue Response Markdown 路径 */
+  private responseBodyPath(requirementId: string, runId: string, issueId: string): string {
+    return join(this.responsesDirFor(requirementId, runId), `${issueId}.md`)
+  }
+
+  /** 单 Issue Response 元数据路径 */
+  private responseMetaPath(requirementId: string, runId: string, issueId: string): string {
+    return join(this.responsesDirFor(requirementId, runId), `${issueId}.meta.yaml`)
+  }
+
+  /**
+   * 读单 Issue Response(issue 04 验收 1 + 3)。
+   *
+   * 返回:
+   * - 不存在(从未写过) → `{ ok: true, response: null }`
+   * - 存在但元数据 / 正文损坏 → `{ ok: false, code: 'response_corrupt', reason }`
+   * - 正常 → `{ ok: true, response: IssueResponseGetResponse }`
+   */
+  readResponse(
+    requirementId: string,
+    runId: string,
+    issueId: string,
+  ):
+    | { ok: true; response: IssueResponseGetResponse | null }
+    | { ok: false; code: 'response_corrupt'; reason: string } {
+    const metaPath = this.responseMetaPath(requirementId, runId, issueId)
+    if (!existsSync(metaPath)) return { ok: true, response: null }
+    let rawMeta: string
+    try {
+      rawMeta = readFileSync(metaPath, 'utf8')
+    } catch (err) {
+      return {
+        ok: false,
+        code: 'response_corrupt',
+        reason: err instanceof Error ? err.message : String(err),
+      }
+    }
+    let parsedMeta: unknown
+    try {
+      parsedMeta = yaml.parse(rawMeta)
+    } catch (err) {
+      return {
+        ok: false,
+        code: 'response_corrupt',
+        reason: `meta yaml parse failed: ${err instanceof Error ? err.message : String(err)}`,
+      }
+    }
+    const validated = IssueResponseMetaSchema.safeParse(parsedMeta)
+    if (!validated.success) {
+      return {
+        ok: false,
+        code: 'response_corrupt',
+        reason: `meta schema invalid: ${validated.error.message}`,
+      }
+    }
+    const bodyPath = this.responseBodyPath(requirementId, runId, issueId)
+    let body = ''
+    if (existsSync(bodyPath)) {
+      try {
+        body = readFileSync(bodyPath, 'utf8')
+      } catch (err) {
+        return {
+          ok: false,
+          code: 'response_corrupt',
+          reason: `body read failed: ${err instanceof Error ? err.message : String(err)}`,
+        }
+      }
+    }
+    const response: IssueResponseGetResponse = {
+      issue_id: issueId,
+      run_id: validated.data.run_id,
+      body,
+      created_at: validated.data.created_at,
+      updated_at: validated.data.updated_at,
+      edit_version: validated.data.edit_version,
+      answered: body.trim().length > 0,
+    }
+    return { ok: true, response }
+  }
+
+  /**
+   * 写 Issue Response(issue 04 验收 5 / 7)。
+   *
+   * 并发控制(决策 46):客户端 PUT 必须带 `base_edit_version`;服务端在 atomic
+   * 写之前 +1 写入(单调递增)。`base_edit_version` 与当前服务端版本不匹配 →
+   * 返 `{ ok: false, code: 'stale_response', current }`,客户端需要把本地
+   * 最新已 flush 的内容重新提交(较晚返回的旧请求不会覆盖更新正文)。
+   *
+   * 不修改原始 Issue(决策 36):本方法只写 responses/<issue-id>.{md,meta.yaml}。
+   */
+  writeResponse(
+    requirementId: string,
+    runId: string,
+    issueId: string,
+    body: string,
+    baseEditVersion: number,
+  ):
+    | { ok: true; result: { created_at: string; updated_at: string; edit_version: number; answered: boolean } }
+    | { ok: false; code: 'run_not_found' | 'issue_not_found' | 'stale_response' | 'response_corrupt'; reason?: string; current?: { edit_version: number; updated_at: string } } {
+    // 0. Run 必须存在(任意终态 / running 都允许写 Response —— 决策 39:任意
+    //    未删除历史 Run 的 Issue 都可新增或编辑 Response)
+    const meta = this.readMeta(requirementId, runId)
+    if (!meta) {
+      return { ok: false, code: 'run_not_found', reason: `${requirementId}/${runId} not found` }
+    }
+    // 1. Issue 必须存在(同一 Run 内;避免写入"孤儿"Response)
+    const issues = this.readIssues(requirementId, runId)
+    if (!issues.some((it) => it.issue_id === issueId)) {
+      return {
+        ok: false,
+        code: 'issue_not_found',
+        reason: `issue '${issueId}' not found in run '${runId}'`,
+      }
+    }
+
+    const dir = this.responsesDirFor(requirementId, runId)
+    mkdirSync(dir, { recursive: true })
+
+    const metaPath = this.responseMetaPath(requirementId, runId, issueId)
+    const bodyPath = this.responseBodyPath(requirementId, runId, issueId)
+
+    // 2. 读已有 meta(若有)→ 验证 base_edit_version
+    const existing = this.readResponse(requirementId, runId, issueId)
+    if (!existing.ok) {
+      // 元数据损坏 → 拒绝写入,要求 route 触发修复路径(本期不自动修复)
+      return existing
+    }
+    const currentVersion = existing.response?.edit_version ?? 0
+    if (existing.response && baseEditVersion !== currentVersion) {
+      return {
+        ok: false,
+        code: 'stale_response',
+        reason: `base_edit_version ${baseEditVersion} != current ${currentVersion}`,
+        current: {
+          edit_version: existing.response.edit_version,
+          updated_at: existing.response.updated_at,
+        },
+      }
+    }
+
+    const now = new Date().toISOString()
+    const newVersion = currentVersion + 1
+    const createdAt = existing.response?.created_at ?? now
+    const newMeta: IssueResponseMeta = {
+      issue_id: issueId,
+      run_id: runId,
+      created_at: createdAt,
+      updated_at: now,
+      edit_version: newVersion,
+    }
+
+    // 3. atomic 写(decision 36 + 服务端落盘契约):沿用 writeFileAtomic helper
+    //    确保写入失败时不会撕裂 YAML/JSONL(沿用 file 顶部 helper 的 tmp+rename)
+    try {
+      writeFileAtomic(bodyPath, body)
+      writeFileAtomic(metaPath, yaml.stringify(newMeta))
+    } catch (err) {
+      return {
+        ok: false,
+        code: 'response_corrupt',
+        reason: err instanceof Error ? err.message : String(err),
+      }
+    }
+
+    return {
+      ok: true,
+      result: {
+        created_at: createdAt,
+        updated_at: now,
+        edit_version: newVersion,
+        answered: body.trim().length > 0,
+      },
+    }
+  }
+
+  /**
+   * 列当前 Requirement 所有未删除 Run 的 Issue Response(issue 04 验收 11)。
+   *
+   * - 仅包含正文非空(trim 后非空 → 视为"已答复")
+   * - 按 Response 最后更新时间从旧到新稳定排序(决策 14)
+   * - 同一更新时间 → 按 Issue id 字典序稳定排序
+   * - Run Log 与未答复 Issue 不进入(决策 13)
+   * - 删除的 Run 自动级联消失(由 listRuns 决定)
+   */
+  listResponses(requirementId: string): IssueResponseGetResponse[] {
+    const out: IssueResponseGetResponse[] = []
+    for (const run of this.listRuns(requirementId)) {
+      // 防御:Run 元数据存在但 issues.jsonl 损坏 → 跳过该 Run 的响应
+      const issues = this.readIssues(requirementId, run.run_id)
+      if (issues.length === 0) continue
+      for (const issue of issues) {
+        const read = this.readResponse(requirementId, run.run_id, issue.issue_id)
+        if (!read.ok) continue
+        if (!read.response) continue
+        if (!read.response.answered) continue
+        out.push(read.response)
+      }
+    }
+    // 按 updated_at 升序稳定排序(决策 14:历史答复按最后更新时间从旧到新)
+    // 二次稳定排序:同一 updated_at → 按 issue_id 字典序
+    out.sort((a, b) => {
+      const t = a.updated_at.localeCompare(b.updated_at)
+      if (t !== 0) return t
+      return a.issue_id.localeCompare(b.issue_id)
+    })
+    return out
+  }
+
+  /**
+   * 装配下一 Run 的已答复上下文(issue 04 验收 11 / 12 / 13 / 14 / 15)。
+   *
+   * 契约:
+   * - 只加载未删除历史 Run 中**正文非空**的 Response(决策 13)
+   * - 同时携带原始 Issue 标题、描述、SourceRef、metadata 和 Response 更新时间
+   * - 不得注入未答复 Issue、Run Log 或旧 ANALYZING 产物(决策 13)
+   * - 按 Response 更新时间从旧到新稳定排序(决策 14)
+   *
+   * 上下文预算(决策 15):完整原文超过当前模型可接受预算 → 返
+   * `{ ok: false, code: 'context_overflow', totalChars, maxChars }`;
+   * 不得取最近 N 条、静默截断或自动总结。
+   *
+   * `maxChars` 由 route 注入(本期固定 `MAX_ANSWERED_CONTEXT_CHARS`,
+   * 后续按模型 / Provider 切换)。
+   */
+  assembleAnsweredContext(
+    requirementId: string,
+    maxChars: number,
+  ):
+    | { ok: true; items: AssembledAnsweredItem[]; totalChars: number }
+    | { ok: false; code: 'context_overflow'; totalChars: number; maxChars: number } {
+    const raw = this.listResponses(requirementId)
+    // 装配每条:(run_id, issue 元数据 + response 原文 + updated_at)
+    const items: AssembledAnsweredItem[] = []
+    for (const r of raw) {
+      const issues = this.readIssues(requirementId, r.run_id)
+      const issue = issues.find((it) => it.issue_id === r.issue_id)
+      if (!issue) continue
+      items.push({
+        run_id: r.run_id,
+        issue_id: r.issue_id,
+        issue_title: issue.title,
+        issue_description: issue.description,
+        source_refs: issue.source_refs,
+        metadata: issue.metadata,
+        updated_at: r.updated_at,
+        response: r.body,
+      })
+    }
+    // 稳定排序:updated_at 从旧到新(决策 14),同一时间按 issue_id 字典序
+    items.sort((a, b) => {
+      const t = a.updated_at.localeCompare(b.updated_at)
+      if (t !== 0) return t
+      return a.issue_id.localeCompare(b.issue_id)
+    })
+
+    // 计算总字符数(粗略;不切 token,因为 GPT/Claude 按字节而非字符的子序列算 token)
+    let totalChars = 0
+    for (const it of items) {
+      totalChars +=
+        it.issue_title.length +
+        it.issue_description.length +
+        it.response.length +
+        // 元数据 / source_refs 序列化估算
+        JSON.stringify(it.source_refs).length +
+        JSON.stringify(it.metadata).length +
+        // 结构固定开销
+        200
+    }
+    if (totalChars > maxChars) {
+      return { ok: false, code: 'context_overflow', totalChars, maxChars }
+    }
+    return { ok: true, items, totalChars }
+  }
 }
+
+/** Issue Response 装配后供 prompt 使用的结构(AnalysisPromptAssembler 同步消费) */
+export interface AssembledAnsweredItem {
+  run_id: string
+  issue_id: string
+  issue_title: string
+  issue_description: string
+  source_refs: ReadonlyArray<AnalysisIssue['source_refs'][number]>
+  metadata: ReadonlyArray<readonly [string, unknown]>
+  updated_at: string
+  response: string
+}
+
+/**
+ * 默认上下文预算上限(issue 04 验收 13):整套已答复原文允许的最大字符数。
+ *
+ * 决策依据(决策 15):Claude Agent SDK 当前默认 model 为 Sonnet 系列,
+ * 上下文窗口 200k token;层 8 答复原文 + 层 9 PRD 全文共同占用,这里给答复
+ * 一层预留 80k 字符 ≈ 25-30k token 的安全预算(不含元数据 / 结构开销),
+ * 留出充分余量给 PRD 全文 + Skill 正文 + 模型生成空间。
+ *
+ * 真实接 SDK 时由 route 根据模型 / Provider 注入更精确的预算。
+ */
+export const MAX_ANSWERED_CONTEXT_CHARS = 80_000
 
 /**
  * 生成 Run id:`run-<base36 timestamp>-<6 hex bytes>`。

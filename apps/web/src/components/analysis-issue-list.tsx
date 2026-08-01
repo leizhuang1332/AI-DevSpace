@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * AnalysisIssueList 组件 — ADR-0021 issue 03
+ * AnalysisIssueList 组件 — ADR-0021 issue 03 / issue 04
  *
  * 职责:渲染当前 Analysis Run 已提交的 Analysis Issue 列表,每条 Issue 卡片
  * 包含:
@@ -12,6 +12,8 @@
  *   - kind === 'aux' / 'asset' → 文档阅读器能定位的资源
  *   - 引用缺失(资源已删除 / AuxFile id 不匹配 / asset 名不在 PRD 内联引用)→
  *     显示「⚠️ 引用缺失」chip,且整体 Issue 卡片挂角标
+ * - IssueResponseEditor(issue 04):每条 Issue 末尾挂一个自动保存的 Markdown
+ *   编辑器;不修改原始 Issue。
  *
  * 与 DocumentReaderPane 联动:点击 SourceRef chip → onSourceRefClick(ref) →
  * 父组件 AnalyzingZone 切换阅读器 Tab + 滚到对应行 + pulse 1.5s。
@@ -23,7 +25,7 @@
  * - 不持久化 Issue,只读 `props.issues`
  */
 
-import { useCallback, useMemo, type Ref } from 'react'
+import { useCallback, useEffect, useMemo, useRef, type Ref } from 'react'
 import type { AnalysisIssue, IssueMetadata, SourceRef } from '@ai-devspace/shared'
 import type { AssetMeta, AuxFile } from '@ai-devspace/shared'
 import type {
@@ -31,6 +33,7 @@ import type {
   AuxSourceRef,
   AssetSourceRef,
 } from '@/lib/analyzing'
+import { IssueResponseEditor } from './issue-response-editor'
 
 // ---------------------------------------------------------------------------
 // Props
@@ -51,6 +54,14 @@ export interface AnalysisIssueListProps {
   containerRef?: Ref<HTMLDivElement>
   /** 空数据时的提示文案(默认"暂无 Issue") */
   emptyMessage?: string
+  /** 当前 Requirement id(传给 IssueResponseEditor · issue 04) */
+  requirementId?: string
+  /** 当前 Run id(传给 IssueResponseEditor · issue 04) */
+  runId?: string
+  /** issue 04:Editor 保存失败时回调(用于父组件禁用"开始分析"按钮) */
+  onEditorError?: (issueId: string, message: string) => void
+  /** issue 04:Editor flush() 引用注册器(用于父组件在开始分析前 flush 全部) */
+  registerFlush?: (issueId: string, flush: () => Promise<void>) => () => void
 }
 
 // ---------------------------------------------------------------------------
@@ -166,6 +177,10 @@ export function AnalysisIssueList({
   onSourceRefClick,
   containerRef,
   emptyMessage = '暂无 Analysis Issue',
+  requirementId,
+  runId,
+  onEditorError,
+  registerFlush,
 }: AnalysisIssueListProps) {
   // 派生每条 Issue 的缺失来源集合
   const ctx = useMemo(
@@ -230,6 +245,10 @@ export function AnalysisIssueList({
               missingIndices={missingIndices}
               allMissing={allMissing}
               onSourceRefClick={handleSourceRefClick}
+              requirementId={requirementId ?? ''}
+              runId={runId ?? ''}
+              onEditorError={onEditorError}
+              registerFlush={registerFlush}
             />
           )
         })}
@@ -247,12 +266,31 @@ function IssueCard({
   missingIndices,
   allMissing,
   onSourceRefClick,
+  requirementId,
+  runId,
+  onEditorError,
+  registerFlush,
 }: {
   issue: AnalysisIssue
   missingIndices: ReadonlySet<number>
   allMissing: boolean
   onSourceRefClick: (ref: SourceRef) => void
+  requirementId: string
+  runId: string
+  onEditorError?: (issueId: string, message: string) => void
+  registerFlush?: (issueId: string, flush: () => Promise<void>) => () => void
 }) {
+  // 内部 ref:把 editor 的 flush 暴露给父组件的 registerFlush
+  const editorFlushRef = useRef<(() => Promise<void>) | null>(null)
+  useEffect(() => {
+    if (!registerFlush) return
+    const unregister = registerFlush(issue.issue_id, () => {
+      const fn = editorFlushRef.current
+      if (!fn) return Promise.resolve()
+      return fn()
+    })
+    return unregister
+  }, [registerFlush, issue.issue_id])
   return (
     <article
       data-testid="analysis-issue-card"
@@ -336,6 +374,17 @@ function IssueCard({
           )
         })}
       </div>
+
+      {/* issue 04:Issue Response 编辑器(自动保存;不修改原始 Issue) */}
+      {requirementId && runId && (
+        <IssueResponseEditor
+          requirementId={requirementId}
+          runId={runId}
+          issueId={issue.issue_id}
+          onFlushFailed={(msg) => onEditorError?.(issue.issue_id, msg)}
+          flushRef={editorFlushRef}
+        />
+      )}
     </article>
   )
 }

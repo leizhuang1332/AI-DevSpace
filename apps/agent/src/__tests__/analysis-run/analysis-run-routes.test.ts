@@ -1015,4 +1015,40 @@ describe('AnalysisPromptAssembler 九层 system prompt', () => {
     expect(out).not.toContain('appendSystemPrompt')
     expect(out).not.toContain('preset')
   })
+
+  // issue 04:第 8 层已答复上下文必须包含明确的优先级 / 重报规则
+  it('issue 04:第 8 层含优先级 + 重报规则 + 不重报默认', async () => {
+    const { assembleAnalysisSystemPrompt } = await import(
+      '../../analysis-run/AnalysisPromptAssembler.js'
+    )
+    const out = assembleAnalysisSystemPrompt({
+      skill: { name: 'prd-completeness', description: '检查 PRD', version: '1.0.0' },
+      skill_body: '检查规则',
+      answered_context: [
+        {
+          run_id: 'r1',
+          issue_id: 'iss-r1-0001',
+          issue_title: 't',
+          issue_description: 'd',
+          source_refs: [{ kind: 'requirement', relative_path: 'r.md' }],
+          metadata: [],
+          updated_at: '2026-08-01T00:00:00Z',
+          response: '答复内容',
+        },
+      ],
+      scope: { requirement_id: 'req-002', repo_names: [], prd_markdown: '# PRD' },
+    })
+    // 决策 14:按更新时间从旧到新排序
+    expect(out).toMatch(/按最后更新时间从旧到新/)
+    // 决策 51:默认不重报
+    expect(out).toMatch(/已被答复充分解决的问题/)
+    // 决策 52:仅当答复不足 / 矛盾 / 冲突时允许关联重报
+    expect(out).toMatch(/内容明显不足/)
+    expect(out).toMatch(/自相矛盾/)
+    expect(out).toMatch(/冲突/)
+    // 未答复 Issue 不出现
+    expect(out).toMatch(/未答复 Issue 不出现/)
+    // issue_id 出现在 layer 8
+    expect(out).toContain('iss-r1-0001')
+  })
 })

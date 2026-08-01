@@ -208,6 +208,90 @@ export type AnalysisRunDetailResponse = z.infer<
 >
 
 // ---------------------------------------------------------------------------
+// Issue Response 契约(issue 04 · ADR-0021 决策 40)
+//
+// 每条 Analysis Issue 最多关联一份 Markdown Response;正文 trim 后非空即视为
+// 已答复。Response 与原始 Issue 分离保存 —— 编辑答复不改变 Run 的原始结果。
+//
+// 落盘布局:`<workspaceRoot>/requirements/<req-id>/analysis/runs/<run-id>/responses/<issue-id>.md`
+// 旁挂同名的 `<issue-id>.meta.yaml` 保存 created_at / updated_at / edit_version。
+//
+// 并发保存:客户端每次 PUT 带 `base_edit_version`(必须等于当前服务端版本),
+// 服务端在 atomic 写之前 +1 写入;若 base 不匹配 → 409 stale_response,
+// 客户端需要把本地最新已 flush 的内容重新提交(单调编辑版本,较晚返回的旧请求
+// 不会覆盖更新正文 —— issue 04 验收 7)。
+// ---------------------------------------------------------------------------
+
+export const IssueResponseBodySchema = z.string()
+/** trim 后非空即"已答复";由 route 在响应层做 trim 校验 */
+export const IssueResponseMetaSchema = z.object({
+  /** Issue id(与文件名一致) */
+  issue_id: z.string().min(1),
+  /** Run id(用于路由校验 + 历史追溯) */
+  run_id: z.string().min(1),
+  /** 创建时间(ISO 8601);首次 PUT 时写入 */
+  created_at: z.string().min(1),
+  /** 最后更新时间(ISO 8601);每次成功 PUT 更新 */
+  updated_at: z.string().min(1),
+  /** 单调递增编辑版本;首次写为 1 */
+  edit_version: z.number().int().min(1),
+})
+export type IssueResponseMeta = z.infer<typeof IssueResponseMetaSchema>
+
+/** 读取 Issue Response(GET)响应契约 */
+export const IssueResponseGetResponseSchema = z.object({
+  /** Issue id */
+  issue_id: z.string().min(1),
+  /** Run id(便于追溯) */
+  run_id: z.string().min(1),
+  /** 完整 Markdown 原文(已 trim;trim 后空 → 空字符串) */
+  body: z.string(),
+  /** 创建时间(未填写时为空字符串) */
+  created_at: z.string(),
+  /** 最后更新时间(未填写时为空字符串) */
+  updated_at: z.string(),
+  /** 编辑版本(未填写时为 0) */
+  edit_version: z.number().int().min(0),
+  /** trim 后是否非空(issue 04 验收 3:非空即"已答复") */
+  answered: z.boolean(),
+})
+export type IssueResponseGetResponse = z.infer<typeof IssueResponseGetResponseSchema>
+
+/** 写入 Issue Response(PUT)请求契约 */
+export const IssueResponsePutBodySchema = z.object({
+  /** 完整 Markdown 原文(允许空串 / 纯空白;服务端 trim 后判定是否"已答复") */
+  body: z.string(),
+  /** 客户端用于乐观并发的 base 版本;首写 → 0;后续写 → 上次响应的 edit_version */
+  base_edit_version: z.number().int().min(0),
+})
+export type IssueResponsePutBody = z.infer<typeof IssueResponsePutBodySchema>
+
+/** 写入 Issue Response(PUT)成功响应 */
+export const IssueResponsePutResponseSchema = z.object({
+  issue_id: z.string().min(1),
+  run_id: z.string().min(1),
+  created_at: z.string().min(1),
+  updated_at: z.string().min(1),
+  /** 新版本号(单调递增;客户端用此值作为下一次 PUT 的 base_edit_version) */
+  edit_version: z.number().int().min(1),
+  /** trim 后是否非空 */
+  answered: z.boolean(),
+})
+export type IssueResponsePutResponse = z.infer<typeof IssueResponsePutResponseSchema>
+
+/**
+ * Issue Response 列表契约(GET /api/requirements/:id/analysis/responses)。
+ *
+ * 用于页面装载全部未删除 Run 的已答复列表;未答复的 Issue 不出现在本列表,
+ * 但仍会作为 Issue 一同返回(便于 UI 决定哪条 Issue 需要先填 Response)。
+ */
+export const IssueResponsesListResponseSchema = z.object({
+  /** 已答复的 Issue + Response(按 Response 更新时间从旧到新;决策 14) */
+  responses: z.array(IssueResponseGetResponseSchema),
+})
+export type IssueResponsesListResponse = z.infer<typeof IssueResponsesListResponseSchema>
+
+// ---------------------------------------------------------------------------
 // SSR bundle:`GET /api/requirements/:id/analysis` 增字段
 // ---------------------------------------------------------------------------
 

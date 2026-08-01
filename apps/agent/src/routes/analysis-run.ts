@@ -38,7 +38,11 @@ import {
 } from '@ai-devspace/shared'
 import type { SseHub } from '../sse/SseHub.js'
 import type { AIProvider } from '../providers/AIProvider.js'
-import { AnalysisRunService } from '../analysis-run/AnalysisRunService.js'
+import {
+  AnalysisRunService,
+  MAX_ANSWERED_CONTEXT_CHARS,
+} from '../analysis-run/AnalysisRunService.js'
+import type { AnsweredIssueContext } from '../analysis-run/AnalysisPromptAssembler.js'
 import { AnalysisSkillService } from '../analysis-skill/AnalysisSkillService.js'
 import { runAnalysisQuery } from '../analysis-run/AnalysisAgentRunner.js'
 
@@ -149,7 +153,23 @@ export const analysisRunRoutes: FastifyPluginAsync<AnalysisRunRouteDeps> = async
     }
     const skillMeta = skillEntry.meta
 
-    // 4. 单运行约束(issue 02 acceptance 3)—— 服务端原子拒绝
+    // 4. issue 04 · ADR-0021 决策 12 + 15 + 46:服务端在启动前重新读取已持久化
+    //    Response 并做上下文预算预检。浏览器未持久化草稿不属于服务端上下文
+    //    (决策 12),因此前端 flush 门禁是启动 UX 的必要组成。
+    //    完整原文超过预算 → 显式 409 context_overflow,阻止创建 Run(决策 15)。
+    //    预算预检必须在 createRun 之前 —— 避免失败 Run 留下孤儿目录/listRuns 项。
+    const assembled = runService.assembleAnsweredContext(id, MAX_ANSWERED_CONTEXT_CHARS)
+    if (!assembled.ok) {
+      return reply.code(409).send({
+        error: 'context_overflow',
+        reason:
+          '历史已答复 Issue + Response 超过上下文预算;请裁剪、删除或拆分历史答复后再启动分析',
+        total_chars: assembled.totalChars,
+        max_chars: assembled.maxChars,
+      })
+    }
+
+    // 5. 单运行约束(issue 02 acceptance 3)—— 服务端原子拒绝
     const createResult = await runService.createRun({
       requirementId: id,
       skillName,
@@ -162,6 +182,17 @@ export const analysisRunRoutes: FastifyPluginAsync<AnalysisRunRouteDeps> = async
       })
     }
     const { run, runDir } = createResult
+
+    const answeredContext: AnsweredIssueContext[] = assembled.items.map((it) => ({
+      run_id: it.run_id,
+      issue_id: it.issue_id,
+      issue_title: it.issue_title,
+      issue_description: it.issue_description,
+      source_refs: it.source_refs.map((r) => ({ ...r })) as Record<string, unknown>[],
+      metadata: it.metadata.map(([k, v]) => [k, v] as [string, unknown]),
+      updated_at: it.updated_at,
+      response: it.response,
+    }))
 
     // 5. publish `analysis_run_created`(issue 02 acceptance 4 · Web 端收到即渲染)
     hub.publish(id, {
@@ -195,7 +226,7 @@ export const analysisRunRoutes: FastifyPluginAsync<AnalysisRunRouteDeps> = async
           hub,
           skillBody: skillEntry.body,
           skillMeta,
-          answeredContext: [],
+          answeredContext,
           scope: {
             requirement_id: id,
             repo_names: [], // issue 04:关联 Repository 列表

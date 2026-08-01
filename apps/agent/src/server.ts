@@ -17,6 +17,8 @@ import { analysisRoutes } from './routes/analysis.js'
 import { spikeRoutes } from './routes/spike.js'
 import { analysisSkillRoutes } from './routes/analysis-skill.js'
 import { analysisRunRoutes } from './routes/analysis-run.js'
+import { analysisResponseRoutes } from './routes/analysis-response.js'
+import { AnalysisRunService } from './analysis-run/AnalysisRunService.js'
 import { AnalysisSkillService } from './analysis-skill/AnalysisSkillService.js'
 import { createWorktreeManager, createDefaultGitExec } from './worktree/WorktreeManager.js'
 import { RequirementService } from './services/RequirementService.js'
@@ -291,11 +293,17 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   // `requirement_created` 事件到新建 id 通道,Web 端 DRAFTING 据此切正常态 / 红色 banner
   await fastify.register(requirementRoutes, { requirementService, sseHub: hub })
 
+  // issue 02 + issue 04 (ADR-0021):同一 AnalysisRunService 实例供 Run start /
+  // Response CRUD 共享状态(进程级 toolUseIndex + 单运行约束 + response meta 索引)
+  const runService = new AnalysisRunService(workspaceRoot)
+
   await fastify.register(analysisRoutes, { hub, workspaceRoot, provider })
   // issue 01 (ADR-0021):Analysis Skill catalog + per-requirement selection endpoints
   await fastify.register(analysisSkillRoutes, { workspaceRoot })
   // issue 02 (ADR-0021):Analysis Run start / list / detail + SDK 集成
   await fastify.register(analysisRunRoutes, { hub, provider, workspaceRoot })
+  // issue 04 (ADR-0021):Issue Response CRUD + 已答复上下文装配预检
+  await fastify.register(analysisResponseRoutes, { workspaceRoot, runService })
   await fastify.register(spikeRoutes, { hub, provider, ccSwitch, store: sessionStore, mirror: messagesMirror, registry: sessionStateRegistry })
   await fastify.register(bootstrapRoutes, { tokenManager, apiBase: 'http://localhost:7777' })
   // P4 · Task 4:retry route —— UI 点重试时调;GET/sessions/:sid 是 GET,POST /retry 是 action
