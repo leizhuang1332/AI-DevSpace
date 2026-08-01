@@ -28,16 +28,8 @@ import { fileURLToPath } from 'node:url'
 import type { SseHub } from '../sse/SseHub.js'
 import type { AIProvider } from '../providers/AIProvider.js'
 import type { AIEvent } from '../providers/AIEvent.js'
-import {
-  createSystemPromptAssembler,
-  ADMISSION_SKILL_NAME,
-  type SystemPromptAssembler,
-} from '../prompt/SystemPromptAssembler.js'
+import { createSystemPromptAssembler, type SystemPromptAssembler } from '../prompt/SystemPromptAssembler.js'
 import { createSkillLoader, type Skill } from '../prompt/SkillLoader.js'
-import {
-  ensureBaselinePack,
-  type AdmissionLoader,
-} from '../admission/index.js'
 import {
   SESSION_SNAPSHOT_IDS,
   isSessionSnapshotId,
@@ -384,18 +376,8 @@ export const analysisRoutes: FastifyPluginAsync<AnalysisRoutesOptions> = async (
     })
 
     // 9. 构造 stateful dual-turn assembler —— turn-1 / turn-2 各装入对应 Skill body
-    //
-    // ticket 02 (ADR-0021 D6/D7):turn-1 admission 内容由 admissionLoader 驱动,不再由
-    // admission-check Skill body 拼入。loader 返 baseline pack → Assembler 渲染
-    // `## Admission Lenses` 段并抑制 admission-check Skill body;ticket 03 会改成
-    // 按 `pack_id` + enabled_packs 选 pack(本期先用 baseline-5dim 占位)。
-    const admissionLoader: AdmissionLoader = async () => {
-      const ensured = await ensureBaselinePack(root)
-      return ensured.pack
-    }
     const baseAssembler = createSystemPromptAssembler({
       skillsRoots: [resolveBuiltinSkillsDir(), resolveUserSkillsDir()],
-      admissionLoader,
     })
     const dualTurnAssembler = createDualTurnAssembler({ base: baseAssembler, skillsByName })
 
@@ -987,16 +969,15 @@ async function loadSkillsUnion(opts: {
 
 /** Stateful dual-turn assembler —— ADR-0020 D8。
  *
- *  行为:turn-1 setActiveSkill(ADMISSION_SKILL_NAME) → assembleBase 走 base assembler
- *  (admissionLoader 在 base 阶段已渲染 Admission Lenses 段,admission-check Skill body
- *  被抑制 —— ticket 02);turn-2 setActiveSkill('requirement-brainstorm') → 切到
- *  brainstorm body(仍走 Skill body 拼接)。AISession 内部对 `assembleBase` 按 session.id
- *  缓存,turn 间切换时**必须**调 `resetBaseCache()` 让 base 重算。
+ *  行为:turn-1 setActiveSkill('admission-check') → assembleBase 返回
+ *  `platformPhilosophy + admission-check body`;turn-2 setActiveSkill('requirement-brainstorm')
+ *  → 切到 brainstorm body。AISession 内部对 `assembleBase` 按 session.id 缓存,
+ *  turn 间切换时**必须**调 `resetBaseCache()` 让 base 重算。
  *
  *  `assembleDynamic` 透传 base assembler —— dynamic 段不随 Skill 切换。
  *
- *  Skill body 缺失(loader 未配置 admissionLoader,或 Skill 已被覆盖为空)→
- *  assembleBase 退化为仅 platform philosophy,handler 仍跑、turn 仍执行。
+ *  Skill body 缺失(本 PR 之前 ticket 02 才落 SKILL.md)→ assembleBase 退化为
+ *  仅 platform philosophy,handler 仍跑、turn 仍执行,只是 prompt 缺少 Skill 提示。
  */
 interface DualTurnAssembler extends SystemPromptAssembler {
   setActiveSkill(name: string | null): void
@@ -1012,11 +993,6 @@ function createDualTurnAssembler(opts: {
     async assembleBase(session) {
       const base = await opts.base.assembleBase(session)
       if (!activeSkillName) return base
-      // ticket 02 (ADR-0021 D7):admission-check Skill body 不再拼入 base —
-      // admission 内容由 admissionLoader 在 base assembler 渲染。base 端已
-      // 通过 admissionLoaderConfigured 抑制 Always-on 段中的 Skill body;
-      // 此处再守一道闸,避免 `skillsByName` 里残留老 body 时漏过滤。
-      if (activeSkillName === ADMISSION_SKILL_NAME) return base
       const skill = opts.skillsByName.get(activeSkillName)
       if (!skill || skill.body.length === 0) return base
       return `${base}\n\n### ${activeSkillName}\n${skill.body}`

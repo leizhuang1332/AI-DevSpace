@@ -4,7 +4,6 @@
  * 两段装配:
  *   assembleBase(session, deps)
  *     per-session base:平台哲学 + Always-on Skills 全文 + On-arming Skills 元数据
- *     + (可选)Admission Lenses
  *     不变,放 per-session 缓存
  *
  *   assembleDynamic(query, session, req, deps)
@@ -15,7 +14,6 @@
  *   ## Platform Philosophy
  *   ## Active Skills (Always-on)
  *   ## On-arming Skills
- *   ## Admission Lenses         ← ticket 02 (ADR-0021 D6):pack 驱动,有 loader 时渲染
  *   ## Current Context
  *   ## Skill Feedback
  *
@@ -31,16 +29,6 @@
  *  - **失败容错**:context 文件读不到 / Skill 解析失败 → 装配跳过,不让整个 send() 失败
  *  - **decision 48 反馈通道**:relevant Skill = 命中当前 query 关键词的 Skill;
  *    本期用最朴素的「Skill name 在 query 文本里出现」匹配,后续可换 fuzzy
- *
- * ticket 02 (ADR-0021 D6/D7) 装配行为变化:
- *  - AssemblerDeps 加 `admissionLoader?: AdmissionLoader` 字段
- *  - loader 返回 AdmissionPack → 渲染 `## Admission Lenses` 段,每个 unit
- *    `### N. <id> (<displayName> · <severityIcon>)` + admissionPrompt + `output_marker: '[DIM <id>]'`
- *  - loader 返回 null / 抛错 → 省略 admission section(降级,turn-1 仍跑)
- *  - loader 返回 pack 时,**从 Active Skills 段隐藏 admission-check Skill body**
- *    (turn-1 admission 内容由 pack 驱动,Skill body 不再拼入 —— ticket 07 正式退役)
- *  - 不传 admissionLoader → 行为与 ticket 01 完全一致(admission-check Skill body
- *    仍进 Always-on Skills 段,向下兼容尚未接入 pack 框架的 caller)
  */
 import { readFile } from 'node:fs/promises'
 import { join, isAbsolute } from 'node:path'
@@ -53,8 +41,6 @@ import {
   type SkillFrontmatter,
   type SkillLoader,
 } from './SkillLoader.js'
-import type { AdmissionLoader } from '../admission/index.js'
-import type { AdmissionPack } from '@ai-devspace/shared'
 
 /** session 元信息(Assembler 关心的最小集) */
 export interface AssemblerSession {
@@ -81,26 +67,7 @@ export interface AssemblerDeps {
   readFile?: (path: string) => Promise<string>
   /** 平台哲学原文;默认用内置常量 PLATFORM_PHILOSOPHY(避免依赖外部资源) */
   platformPhilosophy?: string
-  /**
-   * ticket 02 (ADR-0021 D6):admission pack 装载入口。
-   *
-   * - 返回 AdmissionPack → base prompt 追加 `## Admission Lenses` 段
-   * - 返回 null / 抛错 → 省略 admission section,但 admission-check Skill body 仍被抑制
-   *   (ticket line 13:"no Skill body fallback" —— admission 由 caller 接管后,Skill body 不再出现)
-   * - 不传 → 与 ticket 01 行为完全一致(admission-check Skill body 仍进 Always-on 段,
-   *   向下兼容未接入 pack 框架的 caller)
-   */
-  admissionLoader?: AdmissionLoader
 }
-
-/**
- * Admission Skill 名 —— ADR-0021 D7 / ticket 02 范围。
- *
- * 这是唯一被 admission pack 取代的 Skill(admission-check):pack 装载时,
- * 它的 body 不再进 Always-on 段(无论 pack 是否成功装载)。
- * ticket 07 正式退役 admission-check/SKILL.md 时,本常量可一并删除。
- */
-export const ADMISSION_SKILL_NAME = 'admission-check'
 
 /**
  * 平台哲学 —— 摘自 CONTEXT.md「AI 协作哲学」章节。
@@ -155,26 +122,7 @@ export function createSystemPromptAssembler(deps: AssemblerDeps): SystemPromptAs
     if (cached !== undefined) return cached
 
     const skills = await loadSkillsUnion(skillLoader, deps.skillsRoots)
-
-    // ticket 02 (ADR-0021 D6/D7):
-    // - `admissionLoaderConfigured` = caller 显式接管 admission(是否注入 loader)
-    //   配置后无论 loader 返 pack / null / 抛错,admission-check Skill body
-    //   都不再出现在 Always-on 段(ticket line 13 "no Skill body fallback"
-    //   —— admission 由 caller 接管,Skill body 不该再露面)
-    // - `admissionPack` = 实际拿到的 pack。loader 抛错或返 null → null,
-    //   `## Admission Lenses` 段省略,但 Skill body 抑制照常生效
-    const admissionLoaderConfigured = typeof deps.admissionLoader === 'function'
-    const admissionPack = admissionLoaderConfigured
-      ? await loadAdmissionPackSafe(deps.admissionLoader, session)
-      : null
-
-    const always = skills.filter((s) => {
-      if (getArming(s.frontmatter) !== 'always') return false
-      // admission 已由 admissionLoader 接管 → admission-check Skill body 抑制
-      // (无论 pack 是否装载成功 —— ticket line 13 "no Skill body fallback")
-      if (admissionLoaderConfigured && s.name === ADMISSION_SKILL_NAME) return false
-      return true
-    })
+    const always = skills.filter((s) => getArming(s.frontmatter) === 'always')
     const onArming = skills.filter((s) => getArming(s.frontmatter) === 'on-arming')
 
     const sections: string[] = []
@@ -199,11 +147,6 @@ export function createSystemPromptAssembler(deps: AssemblerDeps): SystemPromptAs
         const desc = s.frontmatter.description ?? '(no description)'
         sections.push(`- **${s.name}** — ${desc}`)
       }
-    }
-
-    // ticket 02:Admission Lenses 段 —— pack 装载成功时渲染
-    if (admissionPack) {
-      sections.push(renderAdmissionLensesSection(admissionPack))
     }
 
     const result = sections.join('\n\n')
@@ -354,54 +297,4 @@ async function safeReadFile(
 
 async function defaultReadFile(path: string): Promise<string> {
   return readFile(path, 'utf8')
-}
-
-/**
- * ticket 02 (ADR-0021 D6/D7):安全加载 admission pack。
- *
- * 失败模式:
- *   - loader 未提供 → null(向下兼容,既非 turn-1 admission 也无降级需求)
- *   - loader 抛错 → null(结构错 / 语义错,V-3 已在 loader 内部分级;
- *     这里再兜底吞掉,不让 base prompt 装配失败阻断 send)
- *   - loader 返 null → null(无 pack,跳过 admission section)
- *   - loader 返 pack → pack(由 renderAdmissionLensesSection 渲染)
- */
-async function loadAdmissionPackSafe(
-  loader: AdmissionLoader | undefined,
-  session: AssemblerSession,
-): Promise<AdmissionPack | null> {
-  if (!loader) return null
-  try {
-    const pack = await loader({ session: { id: session.id, reqId: session.reqId } })
-    return pack ?? null
-  } catch {
-    return null
-  }
-}
-
-/**
- * ticket 02 (ADR-0021 D6):`## Admission Lenses` 段渲染 —— 每个 unit 一段:
- *
- *   ### N. <id> (<displayName> · <severityIcon>)
- *   <admissionPrompt 多行内容>
- *   output_marker: '[DIM <id>]'
- *
- * 段间空行分隔 —— `output_marker` 行告诉模型"该 unit 应输出哪个 marker",与
- * AdmissionUnit.outputMarker 一一对应(loader 已校验跨 unit 无冲突,
- * 见 packLoader V-3 `output_marker_collision`)。
- *
- * 输出顺序与 `pack.units` 一致(loader 按 manifest 顺序装载);`N.` 为 1-based
- * 编号,与 ADR-0021 D6 "分段标号" 描述对齐。
- */
-function renderAdmissionLensesSection(pack: AdmissionPack): string {
-  const lines: string[] = ['## Admission Lenses']
-  pack.units.forEach((u, idx) => {
-    const n = idx + 1
-    lines.push(`### ${n}. ${u.id} (${u.displayName} · ${u.severityIcon})`)
-    lines.push(u.admissionPrompt)
-    lines.push('')
-    lines.push(`output_marker: '${u.outputMarker}'`)
-    lines.push('')
-  })
-  return lines.join('\n').trimEnd()
 }
