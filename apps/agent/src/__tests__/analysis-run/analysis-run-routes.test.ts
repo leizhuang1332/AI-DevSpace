@@ -926,6 +926,45 @@ describe('AnalysisRunService(单运行约束 + Issue 幂等)', () => {
     expect(r2.result.issue.ordinal).toBe(2)
     expect(r2.result.issue.issue_id).not.toBe(r1.result.issue.issue_id)
   })
+
+  // --------------------------------------------------------------------------
+  // issue 03 acceptance #13 · 非法输入 / Schema 拒绝路径(spec c 缺失覆盖)
+  // --------------------------------------------------------------------------
+  it('issue 03:trim 后空 title 报告 Issue → service 抛 schema 错误,不形成 Issue', async () => {
+    const created = await service.createRun({ requirementId: 'req-empty-title', skillName: 'prd-completeness' })
+    if (!created.ok) throw new Error('setup failed')
+    const runId = created.run.run_id
+
+    // service 层 title.trim() 后入库;纯空白 → 空字符串 → schema 失败
+    // 验收:抛错(Issue schema invalid)+ 该 Issue 不入库
+    expect(() =>
+      service.reportIssue({
+        requirementId: 'req-empty-title',
+        runId,
+        toolUseId: 'tu-empty',
+        input: {
+          title: '   ', // 纯空白 → trim 后为空 → schema 失败
+          description: 'desc',
+          sourceRefs: [{ kind: 'requirement', relative_path: 'requirement.md', line_range: [0, 1] }],
+        },
+      }),
+    ).toThrow(/Issue schema invalid/)
+    // 没有形成 Issue
+    const issues = service.readIssues('req-empty-title', runId)
+    expect(issues).toHaveLength(0)
+  })
+
+  it('issue 03:handler 层 parseReportIssueInputPublic 拒绝半截流参数(第一道防线)', async () => {
+    const { parseReportIssueInputPublic } = await import(
+      '../../analysis-run/AnalysisAgentRunner.js'
+    )
+    expect(parseReportIssueInputPublic({ title: '', description: 'd', sourceRefs: [{ kind: 'requirement', relative_path: 'r' }] })).toEqual({ ok: false, reason: 'title missing' })
+    expect(parseReportIssueInputPublic({ title: '   ', description: 'd', sourceRefs: [{ kind: 'requirement', relative_path: 'r' }] })).toEqual({ ok: false, reason: 'title missing' })
+    expect(parseReportIssueInputPublic({ title: 't', description: '', sourceRefs: [{ kind: 'requirement', relative_path: 'r' }] })).toEqual({ ok: false, reason: 'description missing' })
+    expect(parseReportIssueInputPublic({ title: 't', description: 'd', sourceRefs: [] })).toEqual({ ok: false, reason: 'sourceRefs missing' })
+    // 半截流参数:非对象
+    expect(parseReportIssueInputPublic(null)).toEqual({ ok: false, reason: 'input not object' })
+  })
 })
 
 // ============================================================================

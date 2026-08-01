@@ -47,7 +47,6 @@ function buildIssue(partial: Partial<AnalysisIssue> & { source_refs: SourceRef[]
     ordinal: 1,
     title: 'PRD 缺少验收标准',
     description: '当前 PRD 没有给出"通过条件"。',
-    source_refs: partial.source_refs,
     metadata: [],
     reported_at: '2026-08-01T00:00:00.000Z',
     ...partial,
@@ -366,5 +365,76 @@ describe('AnalysisIssueList 组件', () => {
     expect(chips).toHaveLength(1)
     expect(chips[0].getAttribute('data-missing')).toBe('true')
     expect(chips[0].getAttribute('data-source-kind')).toBe('repository')
+  })
+
+  // issue 03 review 反馈 · metadata 重复 key 不应静默覆盖
+  it('metadata 同名 key 重复 → 各自独立渲染(不静默覆盖)', () => {
+    const issue = buildIssue({
+      source_refs: [
+        { kind: 'requirement', relative_path: 'requirement.md', line_range: [0, 5] },
+      ],
+      metadata: [
+        ['severity', 'high'],
+        ['severity', 'low'], // 重复 key,以前会被 Record 静默覆盖
+      ] as AnalysisIssue['metadata'],
+    })
+    render(
+      <AnalysisIssueList
+        issues={[issue]}
+        prdExists
+        auxFiles={[]}
+        assetList={[]}
+      />,
+    )
+    const dl = screen.getByTestId('analysis-issue-metadata')
+    // 两个 dt 元素都存在(各自独立渲染)
+    expect(dl.querySelectorAll('dt')).toHaveLength(2)
+    expect(dl.textContent).toContain('high')
+    expect(dl.textContent).toContain('low')
+  })
+
+  // issue 03 review 反馈 · 来源漂移(AuxFile 删除后,前端不崩)
+  it('来源漂移:Issue 报告时 auxFiles 命中,渲染时 auxFile 已删除 → 标 missing,页面不崩', () => {
+    const issue = buildIssue({
+      source_refs: [
+        { kind: 'aux', aux_id: 'aux-deleted-later', line_range: [0, 3] },
+      ],
+    })
+    // 渲染时 auxFiles 已无 'aux-deleted-later'
+    render(
+      <AnalysisIssueList
+        issues={[issue]}
+        prdExists
+        auxFiles={[]} // 漂移:此 aux 已不存在
+        assetList={assetList}
+      />,
+    )
+    const card = screen.getByTestId('analysis-issue-card')
+    expect(card.getAttribute('data-all-sources-missing')).toBe('true')
+    expect(screen.getByTestId('analysis-issue-missing-badge')).toBeTruthy()
+    // chip 渲染为静态 span,无 button
+    const chips = screen.getAllByTestId('analysis-issue-source-ref')
+    expect(chips[0].tagName.toLowerCase()).toBe('span')
+    expect(chips[0].getAttribute('data-missing')).toBe('true')
+  })
+
+  // issue 03 review 反馈 · 来源漂移(asset 删除)
+  it('来源漂移:Issue 报告时 asset 命中,渲染时 asset 已不在 assetList → 标 missing', () => {
+    const issue = buildIssue({
+      source_refs: [
+        { kind: 'asset', asset_id: 'removed.png' },
+      ],
+    })
+    render(
+      <AnalysisIssueList
+        issues={[issue]}
+        prdExists
+        auxFiles={[]}
+        assetList={[]} // 漂移:asset 已不在
+      />,
+    )
+    const chips = screen.getAllByTestId('analysis-issue-source-ref')
+    expect(chips[0].getAttribute('data-missing')).toBe('true')
+    expect(chips[0].getAttribute('data-source-kind')).toBe('asset')
   })
 })

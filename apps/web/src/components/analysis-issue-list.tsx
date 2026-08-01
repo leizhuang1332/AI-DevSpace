@@ -137,17 +137,21 @@ function formatMetadataValue(value: unknown): string {
   return JSON.stringify(value)
 }
 
-/** metadata 数组 → 通用键值展示(对象形态) */
-function metadataToRecord(
-  metadata: ReadonlyArray<readonly [string, string | number | boolean | null | ReadonlyArray<string | number | boolean | null>]>,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = {}
-  for (const entry of metadata) {
-    const k = entry[0]
-    const v = entry[1]
-    out[k] = v
-  }
-  return out
+/**
+ * metadata 数组 → 通用键值展示。
+ *
+ * 直接遍历元组数组,保留所有 entries(包括重复 key,后到的渲染在后);不再构造
+ * 中间 `Record`,避免同名 key 静默覆盖导致数据丢失(spec: metadata 以通用
+ * 键值形式展示,平台不负责合并重复键)。
+ */
+type MetadataEntry = readonly [
+  string,
+  string | number | boolean | null | ReadonlyArray<string | number | boolean | null>,
+]
+function metadataEntries(
+  metadata: ReadonlyArray<MetadataEntry>,
+): ReadonlyArray<MetadataEntry> {
+  return metadata
 }
 
 // ---------------------------------------------------------------------------
@@ -210,13 +214,20 @@ export function AnalysisIssueList({
       </div>
       <div className="flex-1 overflow-auto px-4 py-3 flex flex-col gap-3">
         {issues.map((issue) => {
-          const missingRefs = issue.source_refs.filter((r) => isSourceRefMissing(r, ctx))
-          const allMissing = missingRefs.length === issue.source_refs.length
+          // 派生每条 SourceRef 的缺失索引集合(原始下标,O(n) 一次扫描)
+          const missingIndices = new Set<number>()
+          for (let i = 0; i < issue.source_refs.length; i++) {
+            const r = issue.source_refs[i]
+            if (r && isSourceRefMissing(r, ctx)) missingIndices.add(i)
+          }
+          const allMissing =
+            missingIndices.size === issue.source_refs.length &&
+            issue.source_refs.length > 0
           return (
             <IssueCard
               key={issue.issue_id}
               issue={issue}
-              missingRefs={missingRefs}
+              missingIndices={missingIndices}
               allMissing={allMissing}
               onSourceRefClick={handleSourceRefClick}
             />
@@ -233,12 +244,12 @@ export function AnalysisIssueList({
 
 function IssueCard({
   issue,
-  missingRefs,
+  missingIndices,
   allMissing,
   onSourceRefClick,
 }: {
   issue: AnalysisIssue
-  missingRefs: SourceRef[]
+  missingIndices: ReadonlySet<number>
   allMissing: boolean
   onSourceRefClick: (ref: SourceRef) => void
 }) {
@@ -292,12 +303,17 @@ function IssueCard({
           data-testid="analysis-issue-metadata"
           className="text-xs grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 border-t border-border pt-2"
         >
-          {Object.entries(metadataToRecord(issue.metadata)).map(([k, v]) => (
-            <div key={k} className="contents">
-              <dt className="text-text-3 font-mono">{k}</dt>
-              <dd className="text-text-2 break-words">{formatMetadataValue(v)}</dd>
-            </div>
-          ))}
+          {metadataEntries(issue.metadata).map((entry, idx) => {
+            // idx + key 复合 key,保证重复 key 都能独立渲染(不静默覆盖)
+            const k = entry[0]
+            const v = entry[1]
+            return (
+              <div key={`${k}-${idx}`} className="contents">
+                <dt className="text-text-3 font-mono">{k}</dt>
+                <dd className="text-text-2 break-words">{formatMetadataValue(v)}</dd>
+              </div>
+            )
+          })}
         </dl>
       )}
 
@@ -307,7 +323,7 @@ function IssueCard({
         className="flex flex-wrap gap-1.5 pt-1"
       >
         {issue.source_refs.map((ref, idx) => {
-          const missing = missingRefs.some((m) => isSameSourceRef(m, ref))
+          const missing = missingIndices.has(idx)
           return (
             <SourceRefChip
               key={`${issue.issue_id}-ref-${idx}`}
@@ -399,37 +415,4 @@ function formatSourceRefLabel(ref: SourceRef): string {
   }
   // asset
   return ref.asset_id
-}
-
-function isSameSourceRef(a: SourceRef, b: SourceRef): boolean {
-  if (a.kind !== b.kind) return false
-  if (a.kind === 'requirement' && b.kind === 'requirement') {
-    if (a.relative_path !== b.relative_path) return false
-    const alr = a.line_range
-    const blr = b.line_range
-    if (alr === undefined && blr === undefined) return true
-    if (alr === undefined || blr === undefined) return false
-    return alr[0] === blr[0] && alr[1] === blr[1]
-  }
-  if (a.kind === 'repository' && b.kind === 'repository') {
-    if (a.repo_name !== b.repo_name) return false
-    if (a.relative_path !== b.relative_path) return false
-    const alr = a.line_range
-    const blr = b.line_range
-    if (alr === undefined && blr === undefined) return true
-    if (alr === undefined || blr === undefined) return false
-    return alr[0] === blr[0] && alr[1] === blr[1]
-  }
-  if (a.kind === 'aux' && b.kind === 'aux') {
-    if (a.aux_id !== b.aux_id) return false
-    const alr = a.line_range
-    const blr = b.line_range
-    if (alr === undefined && blr === undefined) return true
-    if (alr === undefined || blr === undefined) return false
-    return alr[0] === blr[0] && alr[1] === blr[1]
-  }
-  if (a.kind === 'asset' && b.kind === 'asset') {
-    return a.asset_id === b.asset_id
-  }
-  return false
 }

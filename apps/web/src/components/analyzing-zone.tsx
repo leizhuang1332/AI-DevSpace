@@ -769,6 +769,10 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   // - 接收的是 shared 包 SourceRef(requirement / repository / aux / asset);
   //   本路径只走 requirement / aux / asset(可定位的种类);
   //   repository 当前在阅读器外 → 调用方先做缺失判定,这里再防御性 no-op
+  // - 缺行范围时(spec #6 / #15):仍切到对应 Tab 展示文件/章节,不伪造行号;
+  //   用 [0, 0] 作为 pulseRef.lineRange 占位,DocumentReaderPane 的 effect 会切
+  //   Tab,但 scrollIntoView 找不到 [data-line-start="0"] 的高亮 span → 行级
+  //   pulse 静默 no-op(避免误把"无具体行"渲染成"第 0 行高亮")。
   // -------------------------------------------------------------------------
   const handleIssueSourceRefClick = useCallback(
     (ref: import('@ai-devspace/shared').SourceRef) => {
@@ -776,9 +780,8 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       // 联动 DocumentReaderPane(与产品侧 handleItemClick 同款策略)
       if (ref.kind === 'requirement') {
         const lr = ref.line_range
-        if (!lr) return
-        setActiveSourceRef({ kind: 'prd', lineRange: lr })
-        setPulseRef({ tabId: PRD_TAB_ID, lineRange: lr })
+        setActiveSourceRef(lr ? { kind: 'prd', lineRange: lr } : null)
+        setPulseRef({ tabId: PRD_TAB_ID, lineRange: lr ?? [0, 0] })
         if (pulseTimerRef.current !== null) window.clearTimeout(pulseTimerRef.current)
         pulseTimerRef.current = window.setTimeout(() => setPulseRef(null), 1500)
         if (!isDesktop) setNarrowTab('doc')
@@ -786,9 +789,8 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       }
       if (ref.kind === 'aux') {
         const lr = ref.line_range
-        if (!lr) return
-        setActiveSourceRef({ kind: 'aux', auxId: ref.aux_id, lineRange: lr })
-        setPulseRef({ tabId: ref.aux_id, lineRange: lr })
+        setActiveSourceRef(lr ? { kind: 'aux', auxId: ref.aux_id, lineRange: lr } : null)
+        setPulseRef({ tabId: ref.aux_id, lineRange: lr ?? [0, 0] })
         if (pulseTimerRef.current !== null) window.clearTimeout(pulseTimerRef.current)
         pulseTimerRef.current = window.setTimeout(() => setPulseRef(null), 1500)
         if (!isDesktop) setNarrowTab('doc')
