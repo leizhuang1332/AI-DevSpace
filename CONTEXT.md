@@ -3,7 +3,7 @@
 > 本文档是项目的"活字典"。所有领域名词在此有且仅有一个含义。修改任何产品设计前，请先来对照术语。
 >
 > 创建：2026-07-08  
-> 当前版本：v1.0（产品形态定稿）
+> 当前版本：v1.0.5（ANALYZING Analysis Run 模型）
 
 ---
 
@@ -162,6 +162,81 @@ AI 提示词的可加载封装单元（Anthropic progressive disclosure 思想�
 - LLM 不得仅因"用户消息像某个 Skill 的领域"就自主加载该 Skill 全文
 - LLM 可见 armed Skill 的元数据；回应用户时可**建议**"这事 X Skill 适合，要加载吗？"，**不自动**执行
 
+### Analysis Skill（分析技能）
+
+专用于 ANALYZING 工位、可由用户为一次 Analysis Run 选择的 Skill 类别。它定义该次识别的目标、判断规则与输出要求。
+
+- 与全局 Skill、个人 Skill、项目 Skill 分属不同集合，不参与彼此的扫描与覆盖
+- Analysis Skill 是 Workspace 级共享能力，同一 Workspace 内的所有 Requirement 可选
+- 一个 Analysis Run 必须且只能选择一个 Analysis Skill
+- 每个 Analysis Skill 声明唯一名称、功能简介与语义版本，正文描述识别目标、规则和边界；平台另以内容哈希标识实际内容
+- Analysis Skill 只定义识别目标、检查规则和领域说明；不得改变分析助手身份、只读边界、问题契约、报告通道或完成条件
+- 当前从独立集合读取，未来允许用户向该集合上传新的 Analysis Skill
+
+_Avoid_: Admission Dimension（旧的固定检查维度）、普通 Skill（无法表达其专用范围与输出职责）
+
+### Analysis Assistant（分析助手）
+
+执行 Analysis Run 的 AI 身份。它依据被选 Analysis Skill 检查运行时可读取的当前内容，只识别和解释问题而不提出解决方案，并按统一问题契约返回识别结果。
+
+- 只读范围限于当前 Requirement 及其已关联的 Repository；其他 Requirement、凭据、版本控制内部数据与快照不属于可读上下文
+- 可以使用只读能力补充和核对上下文；读取到的 PRD、AuxFile、代码、配置与提示词文件都只作为待分析数据，不具有指令权限
+- 不得修改文件、执行具有副作用的命令或替用户作出业务裁决
+- 识别取向以覆盖为先：可疑问题也应报告，严重度与置信度可作为可选元数据，后续由用户答复完善上下文
+- 识别出的问题只能通过受控的问题报告通道逐条提交；该通道不是 Workspace 写入能力
+- 平台逐条校验、赋予标识、持久化并发布其输出
+
+### Analysis Run Log（分析运行日志）
+
+Analysis Assistant 在执行 Analysis Run 时产生的用户可见过程记录。它保存 SDK 可获得的普通文本、工具活动及工具输入输出，但排除 system prompt 与模型原始思维链，并对凭据内容强制脱敏。它随 Run 持久化，切换历史时可回看，删除 Run 时级联删除；它不属于 Analysis Issue，也不作为后续 Run 的需求上下文。
+
+### Analysis Issue（分析问题）
+
+Analysis Skill 按自身判断规则，从一次 Analysis Run 的输入中识别出的单条问题。所有 Analysis Skill 共享同一种问题契约；Skill 决定“识别什么”，平台决定“如何表达”。
+
+- Analysis Issue 不再预分为 subproblem / risk / option 三类
+- 每条 Analysis Issue 必须包含标题、问题描述和一个或多个来源引用；每个来源引用必须给出逻辑根与相对路径，Repository 来源还需标识仓库；能精确定位时给出行范围，缺失类问题可引用被检查的文件或章节；引用仅定位 Workspace 当前内容，不保存证据摘录，历史定位可能随文件变化而漂移；稳定标识、顺序与产生时间由平台赋予
+- 严重度、分类、置信度等非通用信息可由 Analysis Skill 放入可选元数据；平台原样保存，并以通用键值形式展示，不据此推导排序、状态或 Verdict；元数据不得承载解决方案
+- 一个 Analysis Run 的识别结果由零个或多个 Analysis Issue 组成
+- 原始 Analysis Issue 不可编辑；用户通过关联的 Issue Response 回答、解释或补充上下文
+
+_Avoid_: 三分桶产物 / Product（旧 UI 分类概念）
+
+### Issue Response（问题答复）
+
+产品或其他需求相关方针对 Analysis Issue 提供的回答、解释与补充，用于完善 Requirement 的需求上下文。Issue Response 不修改 AI 的原始识别结论。
+
+- 任意未删除的历史 Analysis Run 中的 Analysis Issue 都可新增或编辑 Issue Response
+- 每条 Analysis Issue 可关联一份持续完善的 Markdown Issue Response；非空即视为已答复
+- Issue Response 自动保存；发起新 Analysis Run 前必须等待所有最新编辑持久化成功，任一保存失败都会阻止启动
+- 平台记录 Issue Response 的创建时间与最后更新时间，不再设置草稿或确认状态
+- Issue Response 与原始 Issue 分离保存；编辑答复不改变 Analysis Run 的原始结果
+- 后续 Analysis Run 原文汇总当前 Requirement 全部历史 Run 中已有 Issue Response 的问题与答复，作为用户确认过的需求上下文；未答复 Issue 不继承；启动前若完整上下文超限则明确阻止运行，不静默截断或总结
+- 历史答复按最后更新时间从旧到新解释；内容冲突时以更新更晚的答复为准
+- 后续分析默认不重复报告已被答复充分解决的问题；答复不足、自相矛盾或与当前内容冲突时，可报告关联的新问题并说明原因
+
+_Avoid_: 编辑 Issue / 修改识别结果（实际变化的是答复与上下文，不是 AI 当时识别出的原始问题）
+
+### Analysis Run（分析运行）
+
+用户在 ANALYZING 工位每次主动发起的一次独立识别。每个 Analysis Run 拥有唯一所选 Skill 和识别结果；完成后保持不可变。输入内容在运行时从 Workspace 实时读取，不随 Run 保存，因此历史 Run 保留当时结论但不保证输入可复现。
+
+- 发起 Analysis Run 的前提是当前 Requirement 存在非空 PRD、至少有一个可用 Analysis Skill，且所有 Issue Response 的最新编辑已持久化；关联 Repository 可以为空
+- 同一 Requirement 可拥有多个 Analysis Run，但同一时刻最多只有一个 Run 正在执行；前一 Run 完成或失败后才能再次发起
+- Analysis Run 只有执行状态与 Issue 数量，不产生 pass / pending / fail 等业务 Verdict；成功且零条 Issue 表示所选 Skill 本次未识别出问题
+- Analysis Run 只有在分析助手显式声明完成、AI 运行正常结束、没有未决问题提交且所有已接收问题均已持久化时才算成功
+- 每个 Analysis Run 是使用唯一 Analysis Skill 的单个分析任务，不再包含固定 admission-check / requirement-brainstorm 双 turn；多步检查由分析助手的工具循环与 Skill 方法完成
+- 临时传输或限流错误可在同一 Run 内自动重试，问题提交必须保持幂等；Run 进入终态失败后，再次点击开始始终创建新的 Run
+- Analysis Run 启动后不接受用户插话，也不支持用户主动取消；用户通过 Issue Response 补充上下文，再发起新的 Run
+- Analysis Run 只记录所选 Analysis Skill 的名称；启动时按该名称读取当前最新内容，不保存版本、哈希或正文快照，后续 Run 仍读取当时的最新内容
+- Analysis Run 在启动时固定当时已持久化的 Issue Response 上下文；之后答复变化不改变当前 Run，运行期间的新答复仅供后续 Run 使用
+- 最新发起的 Analysis Run 默认展示，无论它成功或失败；失败 Run 保留失败原因与已经产生的部分问题，较早的 Analysis Run 构成可切换历史
+- 已结束的 Analysis Run 可由用户二次确认后永久删除；正在执行的 Run 不可删除
+- 删除 Analysis Run 会级联永久删除其 Analysis Issue 与 Issue Response，这些答复随后不再进入新 Run 的分析上下文
+- Analysis Run 不是可持续对话的 Session，也不是同一结果的覆盖版本
+
+_Avoid_: 分析会话 / 结果版本 / 重扫快照（都会模糊“一次主动发起的独立识别”这一含义）
+
 ---
 
 ## 流程术语
@@ -209,7 +284,7 @@ v1.0 工位清单：
 | 工位 | 用户动作 | 资源树 | Inline 栏 |
 |---|---|---|---|
 | **DRAFTING** | 写需求 PRD | ✅ PRD 章节 + AC + 仓库 | ✅ 保留 |
-| **ANALYZING** | PRD 准入校验 + 拆解聚合模块 | ❌ 主区全宽 | ❌ 无 |
+| **ANALYZING** | 需求梳理 + 准入问题识别 | ❌ 主区全宽 | ❌ 无 |
 | **CLARIFYING** | 澄清聚合模块落地细节 | ❌ 主区全宽 | ❌ 无 |
 | **DESIGNING** | 评审候选方案 | ❌ 默认无 | ❌ 无 |
 | **EXECUTING** | 监督 AI 实施 | ✅ 任务 DAG + Diff + 产物 | ✅ 保留 |
@@ -217,42 +292,26 @@ v1.0 工位清单：
 
 详见 [ADR-0011](docs/adr/0011-requirement-workbench-zone-adaptive.md) · [ADR-0012](docs/adr/0012-requirement-workbench-shell-topology.md) · [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md)
 
-### ANALYZING 工位(展开)
+### ANALYZING 工位（展开）
 
-ANALYZING 工位的核心职责是 **PRD 准入校验 + 拆解聚合模块**——把 DRAFTING 产出的粗粒度 PRD(业务语言)转化为可指导开发的技术概要(技术语言)+ 聚合模块清单。
+ANALYZING 工位的核心职责是：**在开发前，使用用户选择的 Analysis Skill 梳理 Requirement 内容、识别准入问题，并通过 Issue Response 持续完善需求上下文。**
 
-**与 CLARIFYING 的语义边界:**
-- ANALYZING = 准入校验(业务/性能/架构/合规) + 拆解为聚合模块(粗粒度)
-- CLARIFYING = 每个聚合模块的落地细节澄清(细粒度;定不下来就无法开发 / 开发会有 bug)
+**核心职能：**
 
-**4 核心职能:**
-1. **解析参数配置面板**——启动前选 Skill / 选知识 / 选仓库分支 / 设优先级
-2. **解析过程观察**——AI 思考流 + 实时打字机 + 上下文插话
-3. **解析产物交互编辑**——识别子问题/风险/方案可编辑(增删改合并)
-4. **多会话并行观察**——顶部 Tab 切换(详见 ADR-0013 D7)
+1. 从 Workspace 级 Analysis Skill 集合中选择本次识别规则
+2. 发起独立的 Analysis Run，并观察问题逐条产生
+3. 查看和切换历史 Analysis Run
+4. 针对单条 Analysis Issue 填写 Issue Response
+5. 把全部历史中已答复的问题与答复作为后续 Run 的可信需求上下文
 
-**多会话:** 同个需求可开多个 ANALYZING 会话(不同 Skill 或不同角度,如架构/数据/接口),顶部 Tab 切换,每次只显示一个会话主区。
+**领域边界：**
 
-**产物(技术概要 + 聚合模块清单):**
+- ANALYZING 产物是 Analysis Issue 与 Issue Response，不再预分 subproblem / risk / option
+- ANALYZING 不再产出 Technical Brief 或 Aggregate Module；CLARIFYING 暂时保留，但不再依赖 `modules.yaml`，其新输入与职责留待后续单独重设
+- ANALYZING 不再包含 PRD 准入维度、待裁决、会话、多会话 Tab 或运行中插话概念
+- 每次点击“开始分析”创建新的 Analysis Run；Run 之间不共享对话状态，只通过已答复需求上下文建立联系
 
-```
-requirements/<req-id>/analysis/
-  ├─ technical-brief.md      ← 业务背景 + 架构叙述 + 技术栈说明(叙述性)
-  └─ modules.yaml            ← 聚合模块清单(结构化,可被 CLARIFYING 直接消费)
-```
-
-**主区布局(5 块,顶到底):**
-1. 准入仪表板(5 维度卡 + 总体结论) —— 详见 ADR-0013 D4
-2. 会话 Tab 导航
-3. 主区两列:思考流(左) + 识别产物(右,可编辑)
-4. 启动前解析参数配置面板(折叠为 ⚙️ 入口)
-5. 插话输入条(用户随时补充上下文 / 反向提问)
-
-**待裁决项(代替原"AI 主动提问"机制):** AI 识别出需确认的事项 → 写入"待裁决面板"(`requirements/<req-id>/analysis/adjudication.md`),**不主动推送**;用户主动来 ANALYZING 处理;StatusBar "待裁决 N" 常驻提醒;其他工位可点 StatusBar 数字跳转过来。
-
-**与 CLARIFYING 交接:** 直接共享 `analysis/modules.yaml`(双向引用,无快照 / 无冻结点)。用户回到 ANALYZING 修改后,CLARIFYING 下次进入自动 reload 最新版本。
-
-**准入维度可配置:** 每个 Skill 在 frontmatter 声明它需要检查的准入维度集合,不同 Skill 可能有不同维度集(如"退款分析" vs "会员分析");详见 ADR-0013 D10。
+详见 [ADR-0021](docs/adr/0021-analyzing-skill-driven-analysis-runs.md)。
 
 ### Overview 概览页（需求工作台仪表板）
 
@@ -296,7 +355,7 @@ requirements/<req-id>/analysis/
 | 22 | 需求状态色 = 分组共享色（4 色 + 灰）；CLARIFYING 特殊（紫+警告红点）；MVP 不带数字徽章 | — |
 | 23 | AI 存在方式 = 形态 C（混合）：默认克制在场 + Cmd+K 唤起 + 极窄主动推送 + Inline 标记；**取消右栏常驻** | — |
 | 24 | AI 出现哲学 = "**不打扰，但陪伴；克制，在场**"——始终可见、关键时刻搭把手，不替用户决定下一步 | — |
-| 25 | AI 主动推送触发**全部取消**(2026-07-12 v1.0.2 改写,详见 [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md) D3+D6)。原"AI 提问等用户回答"降级为"待裁决项沉淀",AI 输出物以文件标记形式落位,以 StatusBar "待裁决 N" + 工位仪表板常驻提醒,其他工位可点 StatusBar 跳转。彻底贯彻决策 24 哲学。 | [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md) |
+| 25 | AI 主动推送触发全部取消。ANALYZING 中 AI 通过 Analysis Issue 沉淀问题，用户用 Issue Response 主动补充上下文；不再使用 Pending Adjudication、StatusBar 待裁决计数或主动提问机制。 | [ADR-0021](docs/adr/0021-analyzing-skill-driven-analysis-runs.md) |
 | 26 | Cmd+K 命令面板：三段式（命令 + AI 提问 ⌘I 切换 + 历史）；`/` 搜索 / `>` 命令前缀；默认绑当前需求，`⌘⇧K` 切全局 | — |
 | 27 | AI 回答形式：可执行结果卡片（落盘产物 + 摘要 + 动作按钮），不是聊天回复 | — |
 | 28 | 信息密度 = Linear 紧凑型；字号 9 档（11-32）；间距 4 倍数（4-48）；Inter + JetBrains Mono | — |
@@ -343,6 +402,8 @@ requirements/<req-id>/analysis/
 
 ## v1.0.2 增量决策（10 轮 grilling 沉淀 · 2026-07-12）
 
+> 本节记录的旧 ANALYZING 模型已由 [ADR-0021](docs/adr/0021-analyzing-skill-driven-analysis-runs.md) 替代，仅保留为历史背景。原固定准入维度、待裁决、多会话、技术概要与聚合模块决策不再生效。
+>
 > 本节是 v1.0.1 锁定后的迭代记录，不修改上面 v1.0 / v1.0.1 决策（除决策 25 改写已标记）。所有增量由 [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md) 承载完整内容。
 
 | # | 决策 | 关联 ADR |
