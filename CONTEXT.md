@@ -3,7 +3,7 @@
 > 本文档是项目的"活字典"。所有领域名词在此有且仅有一个含义。修改任何产品设计前，请先来对照术语。
 >
 > 创建：2026-07-08  
-> 当前版本：v1.0.6（Silent Session Admission UX · 沉默多 session + AdmissionDashboard 极简化）
+> 当前版本：v1.0.5（产品形态定稿 + Admission Pack Framework 落地）
 
 ---
 
@@ -231,7 +231,7 @@ ANALYZING 工位的核心职责是 **PRD 准入校验 + 拆解聚合模块**—�
 3. **解析产物交互编辑**——识别子问题/风险/方案可编辑(增删改合并)
 4. **多会话并行观察**——顶部 Tab 切换(详见 ADR-0013 D7)
 
-**多会话:** v1.0.5 之前 = 同个需求可开多个 ANALYZING 会话(不同 Skill 或不同角度,如架构/数据/接口),顶部 Tab 切换,每次只显示一个会话主区。**v1.0.6 起沉默化** —— 决策 104:`<SessionTabs>` 不挂载,后端 `_index.yaml` + `sessions/<sid>/chunks.jsonl` 多份并存仅供 `/history` 历史回看;Pack 选择器承担"按 Pack 选 session"职责,不再双层入口。
+**多会话:** 同个需求可开多个 ANALYZING 会话(不同 Skill 或不同角度,如架构/数据/接口),顶部 Tab 切换,每次只显示一个会话主区。
 
 **产物(技术概要 + 聚合模块清单):**
 
@@ -241,18 +241,14 @@ requirements/<req-id>/analysis/
   └─ modules.yaml            ← 聚合模块清单(结构化,可被 CLARIFYING 直接消费)
 ```
 
-> **v1.0.6 起搁置(决策 109)** —— `technical-brief.md` / `modules.yaml` 不再被任何代码主动写;`generate-brief` 端点改返 410 Gone。文件目录允许存在(v1.1 复用时不重写)。详见 [ADR-0022](docs/adr/0022-silent-session-admission-ux.md) D7。
-
 **主区布局(5 块,顶到底):**
-1. 准入仪表板(5 维度卡 + 总体结论 + 顶部 Pack dropdown) —— 详见 ADR-0013 D4 + [ADR-0022](docs/adr/0022-silent-session-admission-ux.md) D4
-2. ~~会话 Tab 导航~~ —— **v1.0.6 起不挂载**(决策 104)
+1. 准入仪表板(5 维度卡 + 总体结论) —— 详见 ADR-0013 D4
+2. 会话 Tab 导航
 3. 主区两列:思考流(左) + 识别产物(右,可编辑)
 4. 启动前解析参数配置面板(折叠为 ⚙️ 入口)
 5. 插话输入条(用户随时补充上下文 / 反向提问)
 
 **待裁决项(代替原"AI 主动提问"机制):** AI 识别出需确认的事项 → 写入"待裁决面板"(`requirements/<req-id>/analysis/adjudication.md`),**不主动推送**;用户主动来 ANALYZING 处理;StatusBar "待裁决 N" 常驻提醒;其他工位可点 StatusBar 数字跳转过来。
-
-> **v1.0.6 起 verdict override 搁置(决策 109)** —— AdmissionDashboard「⚠ 待裁决」按钮 + 已裁决折叠区不再挂载;`adjudication.md` 不再被代码主动写;verdict 仅信息展示(✅ / ⚠️ / ❌),不进入 override 交互。详见 [ADR-0022](docs/adr/0022-silent-session-admission-ux.md) D7。
 
 **与 CLARIFYING 交接:** 直接共享 `analysis/modules.yaml`(双向引用,无快照 / 无冻结点)。用户回到 ANALYZING 修改后,CLARIFYING 下次进入自动 reload 最新版本。
 
@@ -516,24 +512,6 @@ workspace 级别的"用户已启用" pack 列表。
 | 100 | **enabled_packs + 本地目录 / Git URL 导入**（CLI 底层 + Web UI 调 CLI）；导入的 pack 与 built-in 同目录；built-in 不在 app bundle，首启自动生成 `baseline-5dim` | [ADR-0021](docs/adr/0021-admission-pack-framework.md) D13 |
 | 101 | **装载校验 = V-3** 结构 fail-fast（YAML 错 / 缺字段 / 文件缺失 / outputMarker 冲突）/ 语义降级 warning（algorithm 表达式 syntax 错 / 规则重复） | [ADR-0021](docs/adr/0021-admission-pack-framework.md) D14 |
 | 102 | **评估包 ID 冲突 = 显式禁止已 enabled 覆盖**：导入与已 enabled 同 id 的 pack → 拒绝，提示先 disable 旧 pack | [ADR-0021](docs/adr/0021-admission-pack-framework.md) D15 |
-
----
-
-## v1.0.6 增量决策（11 轮 grilling 沉淀 · 2026-07-31）
-
-> 本节是 v1.0.5 锁定后的迭代记录，不修改上面 v1.0 / v1.0.1 / v1.0.2 / v1.0.3 / v1.0.4 / v1.0.5 决策。所有增量由 [ADR-0022](docs/adr/0022-silent-session-admission-ux.md) 承载完整内容；本节仅沉淀决策号 + 一句话。
-
-| # | 决策 | 关联 ADR |
-| --- | ------ | ---------- |
-| 103 | **ANALYZING 入口范围 = 删 [+ 新建] 按钮 + 「新建分析会话」弹窗 + d 入参(会话名 / 分析角度 / session_id)**；保留 AdmissionDashboard 顶栏右端「▶ 开始分析」 | [ADR-0022](docs/adr/0022-silent-session-admission-ux.md) D1 |
-| 104 | **产物组织 = 沉默多 session**：后端 `_index.yaml` + `sessions/<sid>/chunks.jsonl` 完全保留；前端**不挂载** `<SessionTabs>`（组件代码保留，v1.1 重启时再用） | [ADR-0022](docs/adr/0022-silent-session-admission-ux.md) D2 |
-| 105 | **session × pack 对应 = 按一次 = 1 session**；session_id 格式 `sess-<packId>-<Date.now().toString(36)>`；「重扫」= 再按一次「▶ 开始分析」= 创建新 session，无需独立按钮 | [ADR-0022](docs/adr/0022-silent-session-admission-ux.md) D3 |
-| 106 | **Pack 选择器位置 = AdmissionDashboard 顶栏 dropdown**（5 维卡片上方一行）；形态 A 顶部 dropdown | [ADR-0022](docs/adr/0022-silent-session-admission-ux.md) D4 |
-| 107 | **dropdown 默认值 = PRD 上次用的 pack**（localStorage `aidevspace:<reqId>:lastPack`）；fallback 链：localStorage → enabled_packs[0] → baseline-5dim | [ADR-0022](docs/adr/0022-silent-session-admission-ux.md) D5 |
-| 108 | **默认展示哪个 session = dropdown 当前 pack 的最新 session**（SSR 读 `_index.yaml` 过滤 pack_id）；fallback 链：dropdown pack → enabled_packs[0] pack → 空态 | [ADR-0022](docs/adr/0022-silent-session-admission-ux.md) D6 |
-| 109 | **AdmissionDashboard 按钮 = 只剩「▶ 开始分析」**；删 [+ 新建] /「生成技术概要」/「重扫」/「⚠ 待裁决」；tech-brief（ADR-0013 D8 / ADR-0020 D14）+ verdict override（ADR-0013 D11 / D15）整条线搁置，`generate-brief` 端点改返 410 Gone | [ADR-0022](docs/adr/0022-silent-session-admission-ux.md) D7 |
-| 110 | **历史 session 回看 = /history 新增"分析会话历史"分区 + 跳 `/analyzing?session=<sid>`**；/history 改造 mock 接入读真实 `_index.yaml`；/analyzing 路由支持 `?session=<sid>` query 参数 SSR override D6 链 | [ADR-0022](docs/adr/0022-silent-session-admission-ux.md) D8 |
-| 111 | **「▶ 开始分析」按下去 = dropdown 当前值**；POST body `{ pack_id: dropdown.value }`；同步写 localStorage lastPack；后端严格校验 enabled_packs（沿用 ADR-0021 D10） | [ADR-0022](docs/adr/0022-silent-session-admission-ux.md) D9 |
 
 ---
 
