@@ -43,5 +43,10 @@ export async function agentFetch<T>(path: string, init?: RequestInit): Promise<T
     const body = await res.json().catch(() => null)
     throw new AgentError(res.status, body)
   }
+  // 204 No Content / 205 Reset Content 没有 body → 不要尝试 res.json()(会抛
+  // SyntaxError,jsdom 与真实浏览器均如此)。调用方按需把响应类型声明为 void。
+  if (res.status === 204 || res.status === 205) {
+    return undefined as T
+  }
   return (await res.json()) as T
 }

@@ -298,4 +298,55 @@ export const analysisRunRoutes: FastifyPluginAsync<AnalysisRunRouteDeps> = async
     }
     return reply.code(200).send(AnalysisRunDetailResponseSchema.parse(response))
   })
+
+  // -------------------------------------------------------------------------
+  // DELETE /api/requirements/:id/analysis/runs/:runId —— 永久删除 Run
+  //
+  // 契约(issue 05 验收 8 / 9 / 10 / 11):
+  // - 401 未鉴权
+  // - 404 run_not_found
+  // - 409 run_still_running(running 时拒绝)
+  // - 204 No Content + publish `analysis_run_deleted` SSE 事件
+  //
+  // 删除是物理级联:整个 runs/<runId>/ 目录被 rm -rf。
+  // listRuns / listResponses / assembleAnsweredContext 通过 readdirSync
+  // 自动排除已删除 Run —— 无需在上层做"已删除"特判。
+  // -------------------------------------------------------------------------
+  fastify.delete<{
+    Params: DetailParams
+  }>('/api/requirements/:id/analysis/runs/:runId', async (req, reply) => {
+    const { id, runId } = req.params
+    const result = runService.deleteRun(id, runId)
+    if (!result.ok) {
+      if (result.code === 'run_not_found') {
+        return reply.code(404).send({
+          error: 'analysis_run_not_found',
+          reason: result.reason,
+        })
+      }
+      if (result.code === 'run_still_running') {
+        return reply.code(409).send({
+          error: 'analysis_run_still_running',
+          reason: result.reason,
+          run: result.run ?? null,
+        })
+      }
+      // delete_failed → fs 出错(权限 / 磁盘只读 / 并发删除等)
+      return reply.code(500).send({
+        error: 'analysis_run_delete_failed',
+        reason: result.reason,
+      })
+    }
+    // 通知 SSE 订阅者(其他标签页 / 已打开的列表)刷新历史
+    hub.publish(id, {
+      type: 'analysis_run_deleted',
+      reqId: id,
+      runId,
+      ts: Date.now(),
+      deletedAt: new Date().toISOString(),
+      skillName: result.run.skill_name,
+      issueCount: result.run.issue_count,
+    })
+    return reply.code(204).send()
+  })
 }

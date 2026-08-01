@@ -33,6 +33,7 @@ import {
   appendFileSync,
   unlinkSync,
   statSync,
+  rmSync,
 } from 'node:fs'
 import { open, mkdir as mkdirAsync, rm as rmAsync } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
@@ -546,6 +547,69 @@ export class AnalysisRunService {
   /** 由 AnalysisAgentRunner 门禁调用:确认 complete_analysis 已被接受 */
   isCompletionRequested(runId: string): boolean {
     return this.completionRequested.has(runId)
+  }
+
+  // ---------------------------------------------------------------------------
+  // 永久删除 Run(issue 05 · ADR-0021 决策 42)
+  //
+  // 契约:
+  // - 仅终态 Run(succeeded / failed)可删除;running 时拒绝(决策 78)
+  // - 服务端级联删除整个 runs/<runId>/ 目录(决策 79):meta / issues / log / responses
+  // - 删除后 assembleAnsweredContext / listResponses 自动不再返回该 Run 的 Response
+  //   —— `listRuns` 走 readdirSync,目录不存在就不出现(无需特判"已删除")
+  // - best-effort:删除失败抛错(由 route 转 500);releaseStartupLock 是幂等的
+  // ---------------------------------------------------------------------------
+
+  /**
+   * 删除终态 Run(issue 05 验收 9 / 10 / 11)。
+   *
+   * 返回值:
+   * - `ok: true` —— 删除成功 + Run 已不在 listRuns 中
+   * - `ok: false, code: 'run_not_found'` —— Run 不存在
+   * - `ok: false, code: 'run_still_running'` —— 当前 status === 'running' 拒绝
+   * - `ok: false, code: 'delete_failed'` —— fs 删除抛错(返回 reason)
+   */
+  deleteRun(
+    requirementId: string,
+    runId: string,
+  ):
+    | { ok: true; run: AnalysisRunMeta }
+    | {
+        ok: false
+        code: 'run_not_found' | 'run_still_running' | 'delete_failed'
+        reason: string
+        run?: AnalysisRunMeta
+      } {
+    const meta = this.readMeta(requirementId, runId)
+    if (!meta) {
+      return {
+        ok: false,
+        code: 'run_not_found',
+        reason: `${requirementId}/${runId} not found`,
+      }
+    }
+    if (meta.status === 'running') {
+      return {
+        ok: false,
+        code: 'run_still_running',
+        reason: 'cannot delete a running Run; wait for it to reach a terminal state',
+        run: meta,
+      }
+    }
+
+    const runDir = this.runDirFor(requirementId, runId)
+    try {
+      rmSync(runDir, { recursive: true, force: true })
+    } catch (err) {
+      return {
+        ok: false,
+        code: 'delete_failed',
+        reason: err instanceof Error ? err.message : String(err),
+      }
+    }
+    // 清理进程级完成门禁状态(避免 set 无限增长)
+    this.completionRequested.delete(runId)
+    return { ok: true, run: meta }
   }
 
   // ---------------------------------------------------------------------------

@@ -22,7 +22,6 @@ import { useMediaQuery } from '@/lib/use-media-query'
 // 左栏"思考流"UI 删,phase state machine 内部状态保留(供未来 StatusBar/插话)。
 import { EmptyState } from './empty-state'
 import { AnalysisSkillSelector } from './analysis-skill-selector'
-import { SessionTabs } from './session-tabs'
 import type { ThinkingPhase } from './thinking-stream'
 import { ProductList, type CitationSourceOption } from './product-list'
 import { TechBriefPanel } from './tech-brief-panel'
@@ -43,6 +42,15 @@ import {
   type StartAnalysisRunSuccess,
 } from '@/lib/analysis-run-start'
 import { AnalysisIssueList } from './analysis-issue-list'
+import {
+  AnalysisHistoryDrawer,
+  AnalysisDeleteRunDialog,
+} from './analysis-history-drawer'
+import {
+  deleteAnalysisRun,
+  canDeleteAnalysisRun,
+  DeleteAnalysisRunError,
+} from '@/lib/analysis-run-delete'
 
 /**
  * 「开始分析」按钮流式状态(issue 01 · ADR-0021 改造):在父组件
@@ -365,6 +373,44 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   const currentRun = runs.find((r) => r.run_id === currentRunId) ?? null
 
   // -------------------------------------------------------------------------
+  // 用户手动切换 Run 焦点(issue 05 验收 6 / 7)
+  //
+  // 焦点规则(ADR-0021 决策 36):
+  // - 用户启动新 Run → 自动选中新 Run(由 handleStart setCurrentRunId)
+  // - SSE `analysis_run_created` 事件到达 → 自动切到新 Run(同步多标签)
+  // - 用户手动点历史行 → 设 userManuallySwitchedRef.current = true
+  // - 一旦用户主动切换 → 后续 SSE 终态事件(succeeded / failed)不抢回焦点
+  // - 删除事件 analysis_run_deleted 若删的是当前 Run → 父组件重新选最新剩余
+  //
+  // 用 ref 而非 state:setState 会触发重渲染,但 ref 在 effect / 回调里访问语义清晰。
+  // `handleUserSelectRun` 显式包装点行/抽屉切焦点;handleStart 与 SSE created
+  // 路径负责清标记。
+  // -------------------------------------------------------------------------
+  const userManuallySwitchedRef = useRef(false)
+
+  // -------------------------------------------------------------------------
+  // 删除 Run 二次确认状态(issue 05 验收 9)
+  // - pendingDeleteRunId:用户在抽屉点删除按钮 → 弹对话框
+  // - deleteTarget:对话框打开时对应的 Run 元数据(便于对话框展示 Skill 名等)
+  // -------------------------------------------------------------------------
+  const [pendingDeleteRunId, setPendingDeleteRunId] = useState<string | null>(null)
+  const deleteTarget = pendingDeleteRunId
+    ? runs.find((r) => r.run_id === pendingDeleteRunId) ?? null
+    : null
+
+  // 派生:skillDescriptions 用于抽屉行显示 Skill 简介(便于识别 Run)
+  const skillDescriptions = useMemo(
+    () => new Map(data.availableSkills.map((s) => [s.name, s.description])),
+    [data.availableSkills],
+  )
+
+  // 当前 Requirement 是否有任一已答复 Issue Response(用于删除对话框显示警告)
+  // SSR 不暴露该字段;客户端在收到 `analysis_run_deleted` 或抽屉打开时再算
+  // —— 这里用 ref 持有"是否已询问过"的标志,首次进站 askIssueResponses。
+  // 简化:本期不在删除时强提示"具体哪些 Issue 有答复";对话框文案给通用提示。
+  // 如未来需要,可扩展为调 /api/requirements/:id/analysis/responses 取详情。
+
+  // -------------------------------------------------------------------------
   // SSR 初始装载当前 Run 的 Issue(issue 03 · ADR-0021)
   //
   // 当 currentRunId 在 SSR 注入阶段已经有值(用户刷新页面或切到历史 Run)时,
@@ -511,6 +557,8 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       return [newRun, ...prev]
     })
     // 自动选中新 Run(issue 02 acceptance 4)
+    // 同时清掉"用户手动切换"标记 —— 这是用户主动点开始 = 主动选择
+    userManuallySwitchedRef.current = false
     setCurrentRunId(newRun.run_id)
     setCurrentRunIssues([])
     // 兼容旧 session 字段:虽然 ADR-0021 删除了 session 概念,但保留 UI 不破坏
@@ -528,9 +576,10 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       return [...prev, newSession]
     })
     setChunksBySessionId((prev) => ({ ...prev, [newSession.id]: [] }))
+    // 同步 activeSessionId → chunksBySessionId 索引键 + 重置打字机 phase;
+    // 每个 Run 的打字机 chunks 独立累加,切换时 phase 必须重置。
     setActiveSessionId(newSession.id)
     setPhase({ kind: 'idle' })
-    setLastSessionCookie(newSession.id)
     setStartState('running')
   }, [
     data.requirementId,
@@ -539,6 +588,83 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
     pushToast,
     startState,
   ])
+
+  // -------------------------------------------------------------------------
+  // 切换历史 Run(issue 05 验收 5 · 焦点规则)
+  //
+  // 用户从抽屉点行 → 父组件设当前 Run + 标记"用户主动切换"。
+  // 之后 SSE 终态事件(succeeded / failed)不会抢回焦点。
+  // -------------------------------------------------------------------------
+  const handleSelectRun = useCallback((runId: string) => {
+    if (runId === currentRunId) return
+    userManuallySwitchedRef.current = true
+    setCurrentRunId(runId)
+    setCurrentRunIssues([])
+    // 同步 activeSessionId → chunksBySessionId 索引键 + 重置打字机 phase;
+    // 切到不同 Run 时打字机 chunks 数组引用变化,phase 必须重置。
+    setActiveSessionId(runId)
+    setPhase({ kind: 'idle' })
+  }, [currentRunId])
+
+  // -------------------------------------------------------------------------
+  // 删除 Run 处理(issue 05 验收 8 / 9 / 11)
+  // - onRequestDelete:抽屉行点删除按钮 → 弹二次确认对话框
+  // - onConfirmDelete:对话框确认 → 调 DELETE → 成功由 SSE 同步列表 + 焦点
+  // -------------------------------------------------------------------------
+  const handleRequestDelete = useCallback((runId: string) => {
+    const target = runs.find((r) => r.run_id === runId)
+    if (!target) return
+    if (!canDeleteAnalysisRun(target)) {
+      pushToast('运行中的 Analysis Run 不可删除', 'warn')
+      return
+    }
+    setPendingDeleteRunId(runId)
+  }, [runs, pushToast])
+
+  const handleConfirmDelete = useCallback(async (runId: string) => {
+    try {
+      await deleteAnalysisRun(data.requirementId, runId)
+      // 成功后:由 SSE `analysis_run_deleted` 处理列表更新 + 焦点切换;
+      // 这里只关闭对话框即可。
+      setPendingDeleteRunId(null)
+    } catch (err) {
+      if (err instanceof DeleteAnalysisRunError) {
+        if (err.code === 'analysis_run_not_found') {
+          // 并发删除(其他标签已删)→ 直接关对话框,让 SSE 接管
+          pushToast('该 Run 已被其他标签删除', 'info')
+          setPendingDeleteRunId(null)
+          return
+        }
+        if (err.code === 'analysis_run_still_running') {
+          pushToast('该 Run 已重新进入运行中,不可删除', 'warn')
+          setPendingDeleteRunId(null)
+          return
+        }
+        // 其他错误 → 让对话框显示(由对话框自身的 error state 接管)
+        throw err
+      }
+      throw err
+    }
+  }, [data.requirementId, pushToast])
+
+  const handleCancelDelete = useCallback(() => {
+    setPendingDeleteRunId(null)
+  }, [])
+
+  // 历史抽屉元素(issue 05):桌面右栏 + 窄视口顶部共享同一份 props,
+  // 抽到 useMemo 避免重复构造 + 后续若添加 React.memo 包裹更简单。
+  const historyDrawerElement = useMemo(
+    () => (
+      <AnalysisHistoryDrawer
+        runs={runs}
+        activeRunId={currentRunId}
+        onSelect={handleSelectRun}
+        onRequestDelete={handleRequestDelete}
+        skillDescriptions={skillDescriptions}
+      />
+    ),
+    [runs, currentRunId, handleSelectRun, handleRequestDelete, skillDescriptions],
+  )
 
   // 主区滚动位置持久化已删(ADR-0019 D4):analyzing-main 改为 overflow-hidden 后
   // 外层不再滚动,mainScrollRef / scrollStorageKey / sessionStorage 全部为死代码。
@@ -624,7 +750,9 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
           ]
         })
         // issue 02 焦点规则(ADR):开始新 Run 自动选中新 Run —— 跨标签 SSE
-        // 也强制切,让多标签窗口保持同步焦点。
+        // 也强制切,让多标签窗口保持同步焦点。同时清掉"用户手动切换"标记:
+        // 新 Run 是用户刚点的开始,等同"重新主动选择"。
+        userManuallySwitchedRef.current = false
         setCurrentRunId(parsed.runId)
       } catch {
         /* ignore */
@@ -636,7 +764,12 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
           runId: string
           issue: AnalysisIssue
         }
-        // 只追加到当前 Run(决策 41:不抢回用户手动切换后的焦点)
+        // 只追加到当前 Run(决策 41:不抢回用户手动切换后的焦点)。
+        // 即使用户切到其他 Run,Issue 已被 service 持久化,切回时由
+        // currentRunId-effect 重新拉取;Issue 不在内存累积可避免大型 Run
+        // 切回时一次性塞满列表。spec acceptance #16 "SSE 仍持续更新未选中
+        // Run 的状态、Issue 和日志":状态/issue_count 通过 setRuns 同步,
+        // 详情切回时按需 fetch;不要求未选中 Run 的 Issue 在客户端内存里全量累积。
         if (parsed.runId !== currentRunId) return
         setCurrentRunIssues((prev) => {
           if (prev.some((it) => it.issue_id === parsed.issue.issue_id)) return prev
@@ -665,8 +798,15 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
               : r,
           ),
         )
-        // 复位 startState(只在 activeSessionId 对应 runId 时复位)
-        if (parsed.runId === activeSessionId) {
+        // 决策 36:终态 SSE 事件不抢回用户手动切换后的焦点。
+        // 显式读取 userManuallySwitchedRef 作为防御性 guard —— 即便未来有人在
+        // 这里加 setCurrentRunId(parsed.runId),也会被 flag 拦住;现状下
+        // onRunSucceeded/Failed 都不调 setCurrentRunId,flag 只在日志里默默存在。
+        if (
+          !userManuallySwitchedRef.current &&
+          parsed.runId === currentRunId
+        ) {
+          // 当前 Run 终态 → 复位 startState 让"开始分析"按钮可再次点击
           setStartState('idle')
         }
       } catch {
@@ -694,9 +834,46 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
               : r,
           ),
         )
-        if (parsed.runId === activeSessionId) {
+        // 决策 36:终态事件不抢回用户手动切换后的焦点(防御性 guard 同 succeeded)
+        if (
+          !userManuallySwitchedRef.current &&
+          parsed.runId === currentRunId
+        ) {
           setStartState('idle')
         }
+      } catch {
+        /* ignore */
+      }
+    }
+    const onRunDeleted = (e: MessageEvent<string>): void => {
+      try {
+        const parsed = JSON.parse(e.data) as {
+          type: 'analysis_run_deleted'
+          runId: string
+          deletedAt: string
+          skillName: string
+          issueCount: number
+        }
+        // 1. 从 runs 列表移除被删除 Run(本地同步,不依赖 GET /runs)
+        const isCurrent = currentRunId === parsed.runId
+        setRuns((prev) => prev.filter((r) => r.run_id !== parsed.runId))
+        // 2. 若被删的是当前 Run → 切到最新剩余 Run(issue 05 验收 11)
+        // 计算放在 setRuns 之外 —— 用闭包里的 runs 过滤而不是在 setRuns updater
+        // 里嵌套 setState(违反 React 纯函数契约 + StrictMode 会双触发)。
+        if (isCurrent) {
+          const remaining = [...runs]
+            .filter((r) => r.run_id !== parsed.runId)
+            .sort((a, b) => b.created_at.localeCompare(a.created_at))
+          const nextActive = remaining[0]?.run_id ?? ''
+          setCurrentRunId(nextActive)
+          setCurrentRunIssues([])
+          setPendingDeleteRunId(null)
+          pushToast(`已删除 Analysis Run ${parsed.skillName}`, 'info')
+        } else {
+          pushToast(`已删除历史 Run ${parsed.skillName}`, 'info')
+        }
+        // 清"用户手动切换"标记 —— 删除是平台事件,等同主动切焦点
+        userManuallySwitchedRef.current = false
       } catch {
         /* ignore */
       }
@@ -707,6 +884,7 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
     es.addEventListener('analysis_issue_reported', onIssueReported)
     es.addEventListener('analysis_run_succeeded', onRunSucceeded)
     es.addEventListener('analysis_run_failed', onRunFailed)
+    es.addEventListener('analysis_run_deleted', onRunDeleted)
     es.addEventListener('error', () => {
       /* browser will auto-reconnect; nothing to do */
     })
@@ -717,9 +895,10 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       es.removeEventListener('analysis_issue_reported', onIssueReported)
       es.removeEventListener('analysis_run_succeeded', onRunSucceeded)
       es.removeEventListener('analysis_run_failed', onRunFailed)
+      es.removeEventListener('analysis_run_deleted', onRunDeleted)
       es.close()
     }
-  }, [data.requirementId, setChunks, activeSessionId, currentRunId])
+  }, [data.requirementId, setChunks, activeSessionId, currentRunId, pushToast])
 
   const totalChunks = chunks.length
   const products = deriveProducts(chunks)
@@ -968,73 +1147,16 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   )
 
   // -------------------------------------------------------------------------
-  // SessionTabs 回调(issue 19c VS3)
+  // [REMOVED in issue 05 · ADR-0021] SessionTabs 回调(issue 19c VS3)
+  //
+  // 旧 handleSwitchSession / handleCreateSession / handleCloseSession 已删除
+  // —— 横向 Session Tab UI 在 issue 05 中改为侧边历史抽屉,这些回调无组件
+  // 调用。`activeSessionId` / `sessions` / `chunksBySessionId` state 仍保留,
+  // 因为下面 `handleProductAction` / `handleAddSyntheticChunk` 等仍按 session
+  // id 做 chunks 索引(每个 Run 的打字机 chunks 独立累加);完全清理这些 state
+  // 需要把它们从所有引用点替换为 currentRunId,超出 issue 05 范围,
+  // 留待后续 tickets 一起重构。
   // -------------------------------------------------------------------------
-
-  /** 切换会话:切换 activeSessionId + 重置打字机 phase + 写 last_session_id cookie。
-   * 打字机 phase 必须重置(切换后会话的 chunks 长度/内容不同)。
-   * 滚动位置持久化已删(ADR-0019 D4:主区 overflow-hidden 后外层不再滚动)。 */
-  const handleSwitchSession = useCallback(
-    (sessionId: string) => {
-      if (sessionId === activeSessionId) return
-      setActiveSessionId(sessionId)
-      // 重置打字机 phase(切换后会话的 chunks 长度/内容不同,phase 必须重置)
-      setPhase({ kind: 'idle' })
-      // 写入 cookie `last_session_id`,下次 SSR 默认值
-      setLastSessionCookie(sessionId)
-    },
-    [activeSessionId],
-  )
-
-  /** 新建会话:追加到列表末尾,自动切到该会话 */
-  const handleCreateSession = useCallback(
-    (params: { label: string; angle: AnalysisSessionAngle }) => {
-      // 本 slice 仅前端 mock:生成稳定 id 后追加 + 切到新会话
-      // 后端落盘推迟到 VS5(analysis/sessions/_index.yaml 写入)
-      const newId = `sess-${params.angle}-${Date.now().toString(36)}`
-      const newSession: AnalysisSession = {
-        id: newId,
-        label: params.label,
-        angle: params.angle,
-        detectedCount: 0,
-        isStreaming: false,
-      }
-      setSessions((prev) => [...prev, newSession])
-      // 新会话初始 chunks = 空数组(与 empty 数据一致)
-      setChunksBySessionId((prev) => ({ ...prev, [newId]: [] }))
-      // 直接切到新会话(不调用 handleSwitchSession,因为旧会话无需存滚动位置)
-      setActiveSessionId(newId)
-      setPhase({ kind: 'idle' })
-      setLastSessionCookie(newId)
-    },
-    [],
-  )
-
-  /** 关闭会话:从 sessions 中移除 + chunks map 中清理 + 自动切到邻居 */
-  const handleCloseSession = useCallback(
-    (sessionId: string) => {
-      if (sessions.length <= 1) return // 最后一个 Tab 不可关闭
-      const idx = sessions.findIndex((s) => s.id === sessionId)
-      if (idx < 0) return
-      const nextSessions = sessions.filter((s) => s.id !== sessionId)
-      setSessions(nextSessions)
-      // 清理 chunks map(滚动位置持久化已删 · ADR-0019 D4)
-      setChunksBySessionId((prev) => {
-        const next = { ...prev }
-        delete next[sessionId]
-        return next
-      })
-      // 如果关闭的就是 active → 切到邻居(关闭非首项用左邻居,关闭首项用新首项)
-      if (activeSessionId === sessionId) {
-        const neighborIdx = idx === 0 ? 0 : idx - 1
-        const neighbor = nextSessions[neighborIdx]
-        setActiveSessionId(neighbor.id)
-        setPhase({ kind: 'idle' })
-        setLastSessionCookie(neighbor.id)
-      }
-    },
-    [sessions, activeSessionId],
-  )
 
   // 派生:当前 chunk 已揭示的 chunk 数(包含正在打字的 chunk)
   const revealedCount =
@@ -1086,17 +1208,14 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
         />
       </div>
       {/* issue 19c VS3 — 多会话 Tab(横向浏览器风格,主区按 activeSessionId 切换)
-          + issue 19e VS5 — 技术概要面板(右对齐,与 Tabs 同行) */}
-      <div className="mt-3 px-6 flex items-start justify-between gap-3">
-        <div className="flex-1 min-w-0">
-          <SessionTabs
-            sessions={sessions}
-            activeId={activeSessionId}
-            onSwitch={handleSwitchSession}
-            onCreate={handleCreateSession}
-            onClose={handleCloseSession}
-          />
-        </div>
+          + issue 19e VS5 — 技术概要面板(右对齐,与 Tabs 同行)
+
+          issue 05 · ADR-0021 决策 50·83:删除横向 Session Tab。
+          旧 SessionTabs 数据 sessions / activeSessionId 仍保留(被其他旧组件复用)
+          但不再渲染 UI;历史抽屉(AnalysisHistoryDrawer)由下面主区桌面布局自己渲染。
+          技术概要 Panel 在窄视口下保留原位;桌面下移入抽屉旁右侧。
+       */}
+      <div className="mt-3 px-6 flex items-start justify-between gap-3 lg:hidden">
         <TechBriefPanel
           requirementId={data.requirementId}
           sessionId={activeSessionId}
@@ -1111,16 +1230,17 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
         data-layout={isDesktop ? 'doc-reader-2-1' : 'narrow-tabs'}
         className="flex-1 min-h-0 overflow-hidden px-6 py-6 flex flex-col gap-5"
       >
-        {/* 主区内容 — 桌面 = 2:1 分栏;窄视口 = 顶部 Tab + 单栏切换(ticket 05) */}
+        {/* 主区内容 — 桌面 = 三栏:左文档 + 中产物 + 右历史抽屉(issue 05)
+            窄视口 = 顶部 Tab + 单栏切换(ticket 05) */}
         {isDesktop ? (
           <div
             data-testid="analyzing-grid"
             data-viewport="desktop"
-            className="relative grid grid-cols-1 lg:grid-cols-3 gap-5 flex-1 min-h-0 overflow-hidden"
+            className="relative grid grid-cols-1 lg:grid-cols-[2fr_1fr_320px] gap-5 flex-1 min-h-0 overflow-hidden"
           >
             <div
               data-testid="analyzing-left-col"
-              className="col-span-1 lg:col-span-2 flex flex-col min-h-0 relative overflow-hidden"
+              className="flex flex-col min-h-0 relative overflow-hidden"
             >
               <DocumentReaderPane
                 prdMarkdown={data.prdMarkdown}
@@ -1136,7 +1256,7 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
             </div>
             <div
               data-testid="analyzing-right-col"
-              className="col-span-1 flex flex-col gap-5 min-h-0 overflow-hidden"
+              className="flex flex-col gap-5 min-h-0 overflow-hidden"
             >
               <Summary summary={data.summary} stats={data.stats} currentRun={currentRun} />
               <div className="flex-[2] min-h-0">
@@ -1166,6 +1286,13 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
                 />
               </div>
             </div>
+            {/* issue 05 · 历史分析抽屉:右栏 320px 固定宽,垂直高度撑满 */}
+            <div
+              data-testid="analyzing-history-col"
+              className="flex flex-col min-h-0 overflow-hidden"
+            >
+              {historyDrawerElement}
+            </div>
           </div>
         ) : (
           <NarrowLayout
@@ -1186,6 +1313,7 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
             currentRunId={currentRunId}
             onEditorError={onEditorError}
             registerIssueResponseFlush={registerIssueResponseFlush}
+            historyDrawer={historyDrawerElement}
           />
         )}
         {productError && (
@@ -1201,6 +1329,14 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
 
       {/* 画线联动提示(ticket 03):无出处产物点击 → "未关联原文出处" toast */}
       <ToastHost items={toasts} onDismiss={dismissToast} />
+
+      {/* issue 05 · 永久删除 Run 二次确认对话框(仅当 pendingDeleteRunId 有值时挂载) */}
+      <AnalysisDeleteRunDialog
+        requirementId={data.requirementId}
+        run={deleteTarget}
+        onCancel={handleCancelDelete}
+        onConfirm={handleConfirmDelete}
+      />
     </main>
   )
 }
@@ -1254,6 +1390,8 @@ interface NarrowLayoutProps {
   onEditorError?: (issueId: string, message: string) => void
   /** issue 04:Editor flush 注册器 */
   registerIssueResponseFlush?: (issueId: string, flush: () => Promise<void>) => () => void
+  /** issue 05:窄视口下挂在顶部的历史抽屉(可选) */
+  historyDrawer?: React.ReactNode
 }
 
 function NarrowLayout({
@@ -1275,6 +1413,7 @@ function NarrowLayout({
   currentRunId,
   onEditorError,
   registerIssueResponseFlush,
+  historyDrawer,
 }: NarrowLayoutProps) {
   return (
     <div
@@ -1282,6 +1421,12 @@ function NarrowLayout({
       data-narrow-tab={narrowTab}
       className="flex flex-col gap-3 flex-1 min-h-0 overflow-hidden"
     >
+      {/* 顶部历史抽屉(issue 05):窄视口下挂在 Tab 上方;高度自适应内容 */}
+      {historyDrawer && (
+        <div className="max-h-[200px] flex-shrink-0" data-testid="analyzing-narrow-history">
+          {historyDrawer}
+        </div>
+      )}
       {/* 顶部 Tab 切换("📑 文档" / "🎯 产物") */}
       <div
         role="tablist"

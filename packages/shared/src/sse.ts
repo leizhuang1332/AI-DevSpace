@@ -359,5 +359,26 @@ export type SseEvent =
       error: string
       issueCount: number
     }
+  /**
+   * Run 永久删除(issue 05 · 决策 42)。Agent 在 DELETE 端点确认
+   * 物理级联删除成功后 publish 一次;Web 端据此刷新历史列表 / 焦点回收
+   * (详见 `apps/web/src/components/analyzing-zone.tsx` 的 onRunDeleted 处理)。
+   *
+   * 携带 `skillName` / `issueCount` / `deletedAt` 是为了支持 Web 端 toast
+   * 与跨标签 UI 反馈(无 toast 时,Web 端需要再发一次 GET /runs 才能拿到
+   * 被删 Skill 名 —— 浪费一次 round-trip)。该事件**只在成功删除后**推送,
+   * 失败的删除请求由 HTTP 响应表达,不污染 SSE。
+   */
+  | {
+      type: 'analysis_run_deleted'
+      reqId: string
+      runId: string
+      ts: number
+      deletedAt: string
+      /** 被删除 Run 当时所选 Analysis Skill 名称(用于历史 UI 残留 toast) */
+      skillName: string
+      /** 被删除 Run 当时的 Issue 数(用于 toast / 跨标签反馈) */
+      issueCount: number
+    }
 
 export const SSE_HEARTBEAT_MS = 30_000
