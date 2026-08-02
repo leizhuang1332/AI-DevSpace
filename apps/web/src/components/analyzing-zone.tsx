@@ -55,6 +55,8 @@ import {
   canDeleteAnalysisRun,
   DeleteAnalysisRunError,
 } from '@/lib/analysis-run-delete'
+import { agentFetch, AgentError } from '@/lib/agent-client'
+import type { AnalysisRunDetailResponse } from '@ai-devspace/shared'
 
 // ---------------------------------------------------------------------------
 // 「开始分析」状态机(issue 02 · ADR-0021)
@@ -218,18 +220,20 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
     let cancelled = false
     void (async () => {
       try {
-        const res = await fetch(
+        // 必须走 agentFetch(走 getAgentBase() → 真正 agent 端口 + cookie 鉴权)
+        // 不能用裸 fetch + 相对路径:会打到 Next.js dev server,Next.js 没这条
+        // API route → 返 404 HTML 页(参 issue 复盘:analyzing-zone.tsx:221)
+        const json = await agentFetch<AnalysisRunDetailResponse>(
           `/api/requirements/${encodeURIComponent(data.requirementId)}/analysis/runs/${encodeURIComponent(currentRunId)}`,
         )
-        if (!res.ok) return
-        const json = (await res.json()) as {
-          issues?: AnalysisIssue[]
-          log?: AnalysisLogEntry[]
-        }
         if (cancelled) return
         setCurrentRunIssues(Array.isArray(json.issues) ? json.issues : [])
         setCurrentRunLog(Array.isArray(json.log) ? json.log : [])
-      } catch {
+      } catch (err) {
+        // 404(analysis_run_not_found):Run 已被并发流程删/收拢,保持当前 UI,
+        // 不弹 toast 干扰用户;其他错误(sse/网络/5xx)静默吞,保持空 Issue,
+        // 仍可依赖 SSE 后续推 analysis_run_succeeded/failed 收敛。
+        if (err instanceof AgentError && err.status === 404) return
         /* 网络错误 / 解析失败 → 保持空 Issue,不阻断 UI */
       }
     })()
