@@ -380,5 +380,28 @@ export type SseEvent =
       /** 被删除 Run 当时的 Issue 数(用于 toast / 跨标签反馈) */
       issueCount: number
     }
+  /**
+   * Run 重试进度(issue 07 验收 1)。Agent 在 SDK 临时错误(网络/限流/
+   * 5xx)后,延迟重试前 publish 一次;Web 端可显示"正在重试第 N 次"提示。
+   *
+   * 不写入 `log.jsonl`(决策 37:retrying 不入 Run Log,只对前端可见);
+   * 携带 `category` 便于 UI 决定是否静默 / 提示。
+   */
+  | {
+      type: 'analysis_run_retrying'
+      reqId: string
+      runId: string
+      ts: number
+      /** 第几次 attempt(1-based);本事件发出后即将进行第 attempt+1 次尝试 */
+      attempt: number
+      /** 错误分类;A=API transient,D=network,C=process;B/E/cancelled 不发本事件 */
+      category: 'A' | 'C' | 'D'
+      /** 分类层判定的可重试标志(冗余于 category,便于客户端快速判断) */
+      retryable: boolean
+      /** 本次重试前的退避时长(毫秒) */
+      delayMs: number
+      /** 错误原因原样(由 SDK 透传,前端可降级显示) */
+      error: string
+    }
 
 export const SSE_HEARTBEAT_MS = 30_000

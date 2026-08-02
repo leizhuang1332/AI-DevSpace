@@ -38,6 +38,10 @@ import type { AnalysisRunService } from './AnalysisRunService.js'
 import type { AnalysisPromptInput } from './AnalysisPromptAssembler.js'
 import { assembleAnalysisSystemPrompt } from './AnalysisPromptAssembler.js'
 import { redactLogEntry } from './runLogRedaction.js'
+import {
+  runAnalysisQueryWithRetry,
+  type RunAnalysisQueryOutcome,
+} from './runAnalysisQueryWithRetry.js'
 
 /** 业务工具 name 常量 —— SDK MCP server 注册 / handler dispatch 共同使用 */
 export const TOOL_REPORT_ISSUE = 'report_analysis_issue'
@@ -64,6 +68,11 @@ export interface AnalysisRunnerDeps {
   runId: string
   /** SDK session topic(注入到 AISession / SDK) */
   topic: string
+  /**
+   * issue 07:取消信号(可选)。当前 agent 不暴露取消端点,但接口预留;
+   * `runAnalysisQueryWithRetry` 在 `aborted` 时会抛 AbortError 终止重试循环。
+   */
+  signal?: AbortSignal
 }
 
 /** Issue 报告工具输入(平台校验) */
@@ -115,6 +124,7 @@ export async function runAnalysisQuery(deps: AnalysisRunnerDeps): Promise<
     requirementId,
     runId,
     topic,
+    signal,
   } = deps
 
   const systemPrompt = assembleAnalysisSystemPrompt({
@@ -163,7 +173,11 @@ export async function runAnalysisQuery(deps: AnalysisRunnerDeps): Promise<
   // 这里用本 Run 的局部 Map,Run 结束随 runner 销毁,不跨 Run 共享)
   const toolNameByUseId = new Map<string, string>()
 
-  const sdkResult = await provider.runAnalysisQuery({
+  // issue 07:把 provider.runAnalysisQuery 包成 rawRun(每次 attempt 调一次)
+  // - 同 runId 不变(由调用方 route 决定,不在此处重写)
+  // - 临时错误自动重试(最多 4 次 attempt,3 次重试)
+  // - 永久错误立即终止
+  const queryInput: import('../providers/AIProvider.js').AnalysisQueryInput = {
     prompt: buildRunQueryPrompt({ scope }),
     systemPrompt,
     cwd,
@@ -189,14 +203,50 @@ export async function runAnalysisQuery(deps: AnalysisRunnerDeps): Promise<
       [TOOL_REPORT_ISSUE]: reportIssueHandler,
       [TOOL_COMPLETE_ANALYSIS]: completeHandler,
     },
-  })
+  }
+
+  const sdkResult = await runAnalysisQueryWithRetry(
+    (attempt: number): Promise<RunAnalysisQueryOutcome> =>
+      // issue_count 当前由 AnalysisAgentRunner 在成功后从 meta 读,
+      // 不在 provider 返回里;这里固定返 0,后续由 transitionToSucceeded
+      // 拿 meta.issue_count(decision 31)
+      provider.runAnalysisQuery!(queryInput).then(
+        (r): RunAnalysisQueryOutcome =>
+          r.ok
+            ? { ok: true, issue_count: 0 }
+            : { ok: false, error: r.error },
+      ),
+    {
+      signal,
+      onRetry: ({ classification, attempt: retryAttempt, delayMs, error }) => {
+        // 退避前发布 SSE 事件;Web 端可显示"正在重试第 N 次"提示
+        // narrowing:onRetry 只在 retryable=true 时触发(RetryStrategy 契约),
+        // 可重试分类是 A/C/D,故 category 在此分支是 'A' | 'C' | 'D' 之一。
+        // 通过 assertNever 把 B/E/cancelled 拒在编译期外。
+        const retryCategory = toRetryCategory(classification.category)
+        hub.publish(requirementId, {
+          type: 'analysis_run_retrying',
+          reqId: requirementId,
+          runId,
+          ts: Date.now(),
+          attempt: retryAttempt,
+          category: retryCategory,
+          retryable: classification.retryable,
+          delayMs,
+          error,
+        })
+      },
+    },
+  )
 
   // 关闭 session(本期分析路径不再依赖 AISession,保留兼容钩子)
   // No-op:Analysis Run 路径不持有 AISession,无需清理。
 
-  if (!sdkResult.ok) {
-    // SDK 终态失败 → transitionToFailed + publish + 释放 startup lock
-    const failureReason = sdkResult.error ?? 'SDK execution failed'
+  // issue 07:把 SDK 终态失败 + 持久化失败等"throw"路径统一在 runner 内
+  // 转 transitionToFailed 兜底。避免 route 层 catch 重复兜底(可能在
+  // transitionToSucceeded 已执行后再次 transitionToFailed 失败造成竞态)。
+  const failFast = (reason: string) => {
+    const failureReason = reason
     const failedResult = runService.transitionToFailed(requirementId, runId, failureReason)
     if (failedResult.ok) {
       hub.publish(requirementId, {
@@ -209,43 +259,55 @@ export async function runAnalysisQuery(deps: AnalysisRunnerDeps): Promise<
         issueCount: failedResult.run.issue_count,
       })
     }
-    await runService.releaseStartupLock(requirementId)
-    return { ok: false, error: failureReason }
+    void runService.releaseStartupLock(requirementId).catch(() => {})
+  }
+
+  if (!sdkResult.ok) {
+    // SDK 终态失败 → transitionToFailed + publish + 释放 startup lock
+    failFast(sdkResult.error ?? 'SDK execution failed')
+    return { ok: false, error: sdkResult.error ?? 'SDK execution failed' }
   }
 
   // SDK 成功 → 检查完成门禁:已 requestCompletion?否则视为失败
   // (decision 31:必须显式完成工具调用 + SDK 成功 + 持久化完成 才算 succeeded)
-  const meta = runService.readMeta(requirementId, runId)
+  let meta: ReturnType<typeof runService.readMeta>
+  try {
+    meta = runService.readMeta(requirementId, runId)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    failFast(`run meta read failed: ${message}`)
+    return { ok: false, error: message }
+  }
   if (!meta) {
-    return { ok: false, error: 'run meta disappeared' }
+    const reason = 'run meta disappeared'
+    failFast(reason)
+    return { ok: false, error: reason }
   }
   if (meta.status !== 'running') {
     // 可能在 SDK 错误路径已转换(理论上不应在此分支)
-    return { ok: false, error: `unexpected status=${meta.status}` }
+    const reason = `unexpected status=${meta.status}`
+    failFast(reason)
+    return { ok: false, error: reason }
   }
   // 检查是否已 requestCompletion —— 通过查询分析服务内部状态
   if (!runService.isCompletionRequested(runId)) {
     const reason = 'SDK returned success but complete_analysis was not called'
-    const failed = runService.transitionToFailed(requirementId, runId, reason)
-    if (failed.ok) {
-      hub.publish(requirementId, {
-        type: 'analysis_run_failed',
-        reqId: requirementId,
-        runId,
-        ts: Date.now(),
-        finishedAt: failed.run.finished_at ?? new Date().toISOString(),
-        error: reason,
-        issueCount: failed.run.issue_count,
-      })
-    }
-    await runService.releaseStartupLock(requirementId)
+    failFast(reason)
     return { ok: false, error: reason }
   }
 
   // 持久化已完成(appendFileSync 即时 fsync) → 切换 succeeded + 释放 startup lock
-  const succeeded = runService.transitionToSucceeded(requirementId, runId)
+  // try/catch 包住 transitionToSucceeded 自身抛错的极端情况(原子写失败等)
+  let succeeded: ReturnType<typeof runService.transitionToSucceeded>
+  try {
+    succeeded = runService.transitionToSucceeded(requirementId, runId)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    failFast(`transitionToSucceeded persist failed: ${message}`)
+    return { ok: false, error: message }
+  }
   if (!succeeded.ok) {
-    await runService.releaseStartupLock(requirementId)
+    void runService.releaseStartupLock(requirementId).catch(() => {})
     return { ok: false, error: succeeded.reason }
   }
   hub.publish(requirementId, {
@@ -625,4 +687,19 @@ declare module './AnalysisRunService.js' {
   interface AnalysisRunService {
     isCompletionRequested(runId: string): boolean
   }
+}
+
+/**
+ * Narrow `ErrorCategory` 到 SSE 事件允许的 'A' | 'C' | 'D'。
+ *
+ * `runAnalysisQueryWithRetry.onRetry` 只在 `classification.retryable=true` 时
+ * 触发,而 retryable=true 的分类是 A/C/D(由 classifyProviderError 决定)。
+ * 这里在编译期把 B/E/cancelled 拒掉,代替 unsafe `as` cast。
+ */
+function toRetryCategory(category: import('../error/ErrorClassifier.js').ErrorCategory): 'A' | 'C' | 'D' {
+  if (category === 'A' || category === 'C' || category === 'D') return category
+  throw new Error(
+    `toRetryCategory: expected A|C|D, got ${String(category)} ` +
+      `(this should be unreachable; onRetry only fires for retryable classifications)`,
+  )
 }
