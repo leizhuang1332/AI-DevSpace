@@ -382,6 +382,18 @@ function buildRunQueryPrompt(input: { scope: AnalysisPromptInput['scope'] }): st
 // 业务工具 handler 工厂
 // ============================================================================
 
+/**
+ * PR-2 (ticket 10):handler 工厂 export —— e2e 测试 (analysis-run-mcp-e2e.test.ts)
+ * 需要在真 ClaudeCodeProvider 之外构造业务工具 handler(不走 runAnalysisQuery
+ * 全流程),以验证 wrapper 透传 args 后整条 parse → report → write 链是否成立。
+ *
+ * 不影响生产路径:AnalysisAgentRunner.runAnalysisQuery 内部仍走非 export 的
+ * makeReportIssueHandler 引用,此 export 仅作测试 seam。
+ */
+export { makeReportIssueHandler, makeCompleteAnalysisHandler }
+
+
+
 /** report_analysis_issue 工具 handler —— 同步接受 + 持久化 + SSE publish */
 function makeReportIssueHandler(ctx: {
   runService: AnalysisRunService
