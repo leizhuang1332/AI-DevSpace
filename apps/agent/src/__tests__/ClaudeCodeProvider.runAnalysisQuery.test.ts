@@ -8,7 +8,8 @@
  *
  * 通过 mock queryFn 捕获 SDK options,断言:
  * - systemPrompt 字段被设置(平台九层 system prompt 字符串)
- * - allowedTools = ['Read', 'Glob', 'Grep'](只读宿主白名单)
+ * - allowedTools = ['Read', 'Glob', 'Grep', 'mcp__analysis__report_analysis_issue',
+ *   'mcp__analysis__complete_analysis'](宿主只读工具 + 业务 MCP 工具全限定名)
  * - disallowedTools 包含 'Bash' / 'Write' / 'Edit' 等危险工具
  * - mcpServers['analysis'] 是 SDK 业务 MCP server,内含
  *   'report_analysis_issue' + 'complete_analysis' 两个工具
@@ -91,7 +92,13 @@ async function setupAndCapture(
     prompt: '',
     systemPrompt,
     cwd: '/tmp',
-    allowedTools: ['Read', 'Glob', 'Grep'],
+    allowedTools: [
+      'Read',
+      'Glob',
+      'Grep',
+      'mcp__analysis__report_analysis_issue',
+      'mcp__analysis__complete_analysis',
+    ],
     businessTools,
     onEvent: () => {},
     ...overrides,
@@ -114,14 +121,20 @@ describe('ClaudeCodeProvider.runAnalysisQuery 契约(issue 09)', () => {
     expect(capture.options?.['systemPrompt']).toContain('## 身份与任务')
   })
 
-  it('allowedTools = 只读宿主白名单(Read/Glob/Grep),不包含业务工具', async () => {
+  it('allowedTools = 宿主只读工具(Read/Glob/Grep) + 业务 MCP 工具全限定名', async () => {
     const { capture } = await setupAndCapture('p')
 
     const allowedTools = capture.options?.['allowedTools'] as ReadonlyArray<string>
-    expect(allowedTools).toEqual(['Read', 'Glob', 'Grep'])
-    // 业务工具(通过 mcpServers 注入)不应出现在 allowedTools
-    expect(allowedTools).not.toContain('report_analysis_issue')
-    expect(allowedTools).not.toContain('complete_analysis')
+    // SDK 0.3.206 把 MCP 工具按 `mcp__<server-key>__<tool>` 全限定名纳入
+    // allowedTools 白名单管控 —— 这里 server-key = 'analysis',tool = 'report_analysis_issue'/'complete_analysis'。
+    // 不在白名单的 MCP 工具模型看不到,会导致 SDK 报 success 但模型不调业务工具。
+    expect(allowedTools).toEqual([
+      'Read',
+      'Glob',
+      'Grep',
+      'mcp__analysis__report_analysis_issue',
+      'mcp__analysis__complete_analysis',
+    ])
   })
 
   it('disallowedTools 包含 Bash/Write/Edit/NotebookEdit/WebSearch/WebFetch(显式禁止危险工具)', async () => {

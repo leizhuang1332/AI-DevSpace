@@ -197,8 +197,20 @@ export async function runAnalysisQuery(deps: AnalysisRunnerDeps): Promise<
         toolNameByUseId,
       })
     },
-    // SDK 工具注册:业务工具通过 MCP server 注入,Allowed tools = Read/Glob/Grep
-    allowedTools: ['Read', 'Glob', 'Grep'],
+    // SDK 工具注册:宿主只读工具(Read/Glob/Grep) + 业务 MCP 工具(全限定名)。
+    // 业务工具通过 in-process MCP server `analysis` 注入(见
+    // ClaudeCodeProvider.runAnalysisQuery:`sdkOptions['mcpServers'] = { analysis: mcpServer }`),
+    // SDK 0.3.206 把 MCP 工具按 `mcp__<server-key>__<tool>` 全限定名纳入
+    // allowedTools 白名单管控 —— 不在白名单的 MCP 工具模型看不到、也调不到。
+    // 历史上只列了宿主只读工具,导致模型知道业务工具存在但拿不到调用权,
+    // 纯文本 end_turn 触发 `SDK returned success but complete_analysis was not called`。
+    allowedTools: [
+      'Read',
+      'Glob',
+      'Grep',
+      'mcp__analysis__report_analysis_issue',
+      'mcp__analysis__complete_analysis',
+    ],
     businessTools: {
       [TOOL_REPORT_ISSUE]: reportIssueHandler,
       [TOOL_COMPLETE_ANALYSIS]: completeHandler,
