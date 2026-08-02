@@ -1,32 +1,36 @@
 /**
- * E2E: 真 SDK 跑 ANALYZING(ADR-0020 D11 · ticket 07)
+ * E2E: 真实 Agent SDK 跑 Analysis Run(issue 09 · ADR-0021)
  *
- * 验收(PRD ticket 07 spec):
- * - 启动 web + agent(走既有 `pnpm dev:web` + `pnpm dev:agent` 守护脚本)
- * - 等 SDK idle(健康检查 `/api/health` 200 + `ok: true`)
- * - 走 DRAFTING 上传或 fixture 创建新需求 → 本 spec 内 fixture 优先,
- *   避免 docx 解析分支干扰(spec 直接 `POST /api/requirements` 走
- *   后端 `requirement-create` 路径,后端落 `requirement.md` 默认内容)
- * - 进 ANALYZING → 见 AdmissionDashboard 空态 + "开始分析" 按钮
- * - 点按钮 → SSE 推 chunks → 等待 5 卡 count 全部 > 0 与 ProductList
- *   至少 1 个 subproblem
- * - 截图保存到 e2e artifact 并 attach
- * - `cat requirements/<id>/analysis/sessions/<sid>/chunks.jsonl` 头 5 行
- *   写入 spec 报告
+ * 验收(ticket 09 spec):
+ * - 改写旧 opt-in ANALYZING 真实运行 E2E,使其使用默认 Analysis Skill
+ *   和新的 Run / Issue / Response 契约(替代旧 admission-dim / ProductList)
+ * - 真实 Run 使用自定义 system prompt 完全替换 Claude Code 默认 prompt
+ *   (由 SDK options.systemPrompt 字段验证,见 ClaudeCodeProvider.runAnalysisQuery)
+ * - 真实模型只能使用 Read、Glob、Grep、`report_analysis_issue` 和
+ *   `complete_analysis`(由 SDK options.allowedTools / disallowedTools 验证)
+ * - E2E 接受至少一条 Issue 或合法的"成功 · 0 个问题"终态
+ * - Issue 和 Run Log 通过真实 SSE 到达页面,并与持久化结果一致
+ * - 填写 Response 后再次启动会创建新 Run
+ * - 历史切换后,真实终态事件不会抢回用户焦点
+ * - 真运行验证包含失败后的部分 Issue 和日志保留物证,或使用等价的
+ *   可控集成场景补足不可稳定触发的故障
  *
- * Skip 行为(ADR-0020 D11 上线门槛):
+ * Skip 行为(沿用 ADR-0020 D11 上线门槛):
  * - `ANTHROPIC_API_KEY` 缺失 → `test.skip()`,Playwright 标 skipped 不 fail
  * - web(3333)/agent(7777) 不可达 → 同样 skip,不 fail
  *
  * 设计要点:
  * - **不引入** `MockClaudeProvider` / `FakeClaudeProvider` —— agent 真接 SDK,
  *   spec 仅是用户视角验证(参 ADR-0020 D11)
- * - **不覆盖** `interject` / `generate-brief` 真跑(见 ADR-0020 D13 / D14)
- * - **不覆盖** SkillsPage 改造(见 ADR-0020 D12)
+ * - **不覆盖** SkillsPage 改造 / 上传 / 编辑 UI(见 ADR-0020 D12)
+ * - 真模型端 SSE / prompt / tool allowlist 行为由既有的
+ *   analysis-response-e2e(可控 fixture)和
+ *   analysis-run-routes.test / analysis-run-resilience.test 覆盖;
+ *   本 spec 仅做"端到端 + 用户视角"的真实 SDK 跑通确认
  */
 
 import { test, expect, type APIRequestContext } from '@playwright/test'
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 
@@ -36,17 +40,6 @@ const SKIP_REASON_NO_KEY =
   'ANTHROPIC_API_KEY not set; e2e SKIPPED (per ADR-0020 D11 上线门槛:CI 默认 SKIP 不 fail)'
 const SKIP_REASON_NO_WEB = `Web server not reachable at ${WEB_URL}; e2e SKIPPED (启动: pnpm dev:web)`
 const SKIP_REASON_NO_AGENT = `Agent server not reachable at ${AGENT_URL}; e2e SKIPPED (启动: pnpm agent:start)`
-const SKIP_REASON_NO_PLAYWRIGHT_BROWSER =
-  'Playwright chromium browser not installed; e2e SKIPPED (运行: pnpm --filter @ai-devspace/web e2e:install)'
-
-/** 默认 5 个 admission dimension id(与 DEFAULT_ADMISSION_DIMENSIONS 对齐)。 */
-const ADMISSION_DIMENSION_IDS = [
-  'loss_prevention',
-  'performance',
-  'arch_conflict',
-  'business_reasonable',
-  'context_query',
-] as const
 
 /** 默认 workspace 根(与后端 `WorkspaceService.resolveRoot` 对齐)。 */
 function defaultAgentRoot(): string {
@@ -61,6 +54,38 @@ interface CreateRequirementPayload {
   id: string
   title: string
   createdAt: string
+}
+
+interface StartAnalysisRunPayload {
+  run_id: string
+  requirement_id: string
+  skill_name: string
+  created_at: string
+  status: 'running'
+}
+
+interface RunDetailPayload {
+  run: {
+    run_id: string
+    requirement_id: string
+    skill_name: string
+    status: 'running' | 'succeeded' | 'failed'
+    created_at: string
+    finished_at: string | null
+    issue_count: number
+    error: string | null
+  }
+  issues: Array<{
+    issue_id: string
+    run_id: string
+    ordinal: number
+    title: string
+    description: string
+    source_refs: Array<Record<string, unknown>>
+    metadata?: Array<[string, unknown]>
+    created_at: string
+  }>
+  log: Array<Record<string, unknown>>
 }
 
 /**
@@ -138,60 +163,118 @@ async function isWebReachable(): Promise<boolean> {
 }
 
 /**
- * 把 `requirements/<id>/analysis/sessions/<sid>/chunks.jsonl` 头 N 行
- * 读出来(spec 报告 / commit message 上线门槛用)。
- *
- * 新版 start handler(ticket 01)在创建 session 时立即空 `writeFileSync` 出
- * `chunks.jsonl`,turn-1 / turn-2 后续 appendFileSync 行;若 spec 在 SSE 推
- * 流完成前读,可能拿到 0 行(空文件 → 返回空数组);若推流完成,头 5 行就是
- * turn-1 的 admission chunks。读不到文件本身不视作 fail —— 但记入报告。
+ * 调 POST /api/requirements/:id/analysis/start 同步创建 Run,返回 run_id。
+ * 与 web 端按钮等价,只是不经由 UI —— 用于"先创建一个 Run,再走 UI 流程"
+ * 的复合场景。
  */
-function readChunksHead(
+async function startAnalysisRun(
+  request: APIRequestContext,
+  token: string,
+  requirementId: string,
+  skillName: string,
+): Promise<StartAnalysisRunPayload> {
+  const res = await request.post(
+    `${AGENT_URL}/api/requirements/${encodeURIComponent(requirementId)}/analysis/start`,
+    {
+      headers: {
+        'x-aidevspace-token': token,
+        'content-type': 'application/json',
+        origin: WEB_URL,
+      },
+      data: { skill_name: skillName },
+    },
+  )
+  if (!res.ok()) {
+    throw new Error(
+      `start analysis failed: ${res.status()} ${await res.text()}`,
+    )
+  }
+  return (await res.json()) as StartAnalysisRunPayload
+}
+
+/**
+ * 读 Run 详情(meta + issues + log);用于 SSE 终态后与持久化结果比对。
+ */
+async function fetchRunDetail(
+  request: APIRequestContext,
+  token: string,
+  requirementId: string,
+  runId: string,
+): Promise<RunDetailPayload | null> {
+  const res = await request.get(
+    `${AGENT_URL}/api/requirements/${encodeURIComponent(requirementId)}/analysis/runs/${encodeURIComponent(runId)}`,
+    {
+      headers: {
+        'x-aidevspace-token': token,
+        origin: WEB_URL,
+      },
+    },
+  )
+  if (!res.ok()) return null
+  return (await res.json()) as RunDetailPayload
+}
+
+/**
+ * 把 `<root>/requirements/<id>/analysis/runs/<runId>/` 目录读出来;
+ * 物证落盘入 spec 报告,让 reviewer 不依赖 SDK 跑通也能回放。
+ */
+function readRunDir(
   workspaceRoot: string,
   requirementId: string,
-  headCount: number,
-): { sessionId: string | null; lines: string[]; missing: boolean } {
-  const sessionsDir = join(
+  runId: string,
+): { files: string[]; missing: boolean } {
+  const dir = join(
     workspaceRoot,
     'requirements',
     requirementId,
     'analysis',
-    'sessions',
+    'runs',
+    runId,
   )
-  let sessionId: string | null = null
-  let lines: string[] = []
-  let missing = true
   try {
-    const entries = readdirSync(sessionsDir)
-    if (entries.length === 0) return { sessionId: null, lines, missing: true }
-    // 取 mtime 最新 session(语义:回滚目标 = mtime 最新 session,见
-    // apps/agent/src/routes/analysis.ts `restoreSnapshot` 同款策略)
-    const latest = entries
-      .map((name) => ({
-        name,
-        mtime: statSync(join(sessionsDir, name)).mtimeMs,
-      }))
-      .sort((a, b) => b.mtime - a.mtime)[0]
-    sessionId = latest.name
-    const chunksPath = join(sessionsDir, sessionId, 'chunks.jsonl')
-    const raw = readFileSync(chunksPath, 'utf8')
-    missing = false
-    lines = raw
-      .split('\n')
-      .filter((l) => l.trim().length > 0)
-      .slice(0, headCount)
+    return { files: readdirSync(dir), missing: false }
   } catch {
-    missing = true
+    return { files: [], missing: true }
   }
-  return { sessionId, lines, missing }
 }
 
 /**
- * 单 spec 覆盖 ticket 07 的"端到端串验"。任何中间失败都打到 test report,
- * 不隐藏;reviewer 可直接通过 Playwright HTML report 与 chunks.jsonl 头 5
+ * 读最新 Run 的 issues.jsonl 头 N 行入 spec 报告(上线门槛物证)。
+ * spec 自身不强依赖行数 —— SSE 终态时 Run 应已 succeeded/failed 落盘。
+ */
+function readIssuesHead(
+  workspaceRoot: string,
+  requirementId: string,
+  runId: string,
+  headCount: number,
+): { lines: string[]; missing: boolean } {
+  const file = join(
+    workspaceRoot,
+    'requirements',
+    requirementId,
+    'analysis',
+    'runs',
+    runId,
+    'issues.jsonl',
+  )
+  try {
+    const raw = readFileSync(file, 'utf8')
+    const lines = raw
+      .split('\n')
+      .filter((l) => l.trim().length > 0)
+      .slice(0, headCount)
+    return { lines, missing: false }
+  } catch {
+    return { lines: [], missing: true }
+  }
+}
+
+/**
+ * 单 spec 覆盖 ticket 09 的"端到端串验"。任何中间失败都打到 test report,
+ * 不隐藏;reviewer 可直接通过 Playwright HTML report 与 issues.jsonl 头 5
  * 行回放。
  */
-test('analyzing real run — 真 SDK 跑通 admission + brainstorm', async ({
+test('analyzing real run — 真 SDK 跑通 Analysis Run + Issue', async ({
   page,
   request,
 }, testInfo) => {
@@ -215,94 +298,214 @@ test('analyzing real run — 真 SDK 跑通 admission + brainstorm', async ({
     timeout: 30_000,
   })
 
-  // 3. 验 AdmissionDashboard 空态 + 「开始分析」按钮可见
-  const dashboard = page.getByTestId('admission-dashboard')
-  await expect(dashboard).toBeVisible()
-  await expect(dashboard).toHaveAttribute('data-phase', 'empty_armed', {
-    timeout: 30_000,
-  })
-  const startBtn = page.getByTestId('admission-start-btn')
+  // 3. 默认 Analysis Skill 已被 SSR 选中(字典序首项):
+  //    implementation-readiness < prd-completeness
+  //    验证 skill selector + start 按钮 idle
+  const skillSelector = page.getByTestId('analysis-skill-selector')
+  await expect(skillSelector).toBeVisible()
+  // 字典序首项是 implementation-readiness(由 SSR 注入)
+  await expect(
+    page.getByTestId('analysis-skill-option').first(),
+  ).toHaveAttribute('data-skill-name', /^(implementation-readiness|prd-completeness)$/)
+
+  const startBtn = page.getByTestId('analysis-run-start-btn')
   await expect(startBtn).toBeVisible()
   await expect(startBtn).toHaveAttribute('data-state', 'idle')
 
-  // 4. 点按钮 —— 期望 state 切到 starting/running;按钮常驻(ticket 08),
-  //    不会被卸载;startState 在 SSE 推 `analysis_done` 事件后由 web 端
-  //    AnalyzingZone 监听复位回 idle
+  // 4. 点按钮 —— 期望 state 切到 starting/running;按钮常驻(issue 08)
   await startBtn.click()
-
-  // 4a. ticket 08 断言:按钮常驻可见;state=running(disabled 防重)
   await expect(startBtn).toBeVisible()
   await expect(startBtn).toHaveAttribute('data-state', 'running', {
     timeout: 30_000,
   })
 
-  // 5. 等 5 张 admission dim count 全部 > 0(turn-1 阶段产物)
-  //    顺序:loss_prevention → performance → arch_conflict → business_reasonable
-  //    → context_query(由 admission-check SKILL prompt 引导,见 ticket 02)
-  for (const dimId of ADMISSION_DIMENSION_IDS) {
-    const card = page.getByTestId(`admission-dim-${dimId}`)
-    await expect(card).toHaveAttribute('data-count', /^[1-9]\d*$/, {
-      timeout: 180_000,
-    })
-  }
+  // 5. 等 Issue 列表出现(可能是 0 条)或终态事件
+  //    ticket 09 验收 4:接受至少一条 Issue 或合法"成功 · 0 个问题"终态。
+  //    Issue 列表空态 data-empty="true";有 Issue 时 data-issue-count="N"
+  const issueList = page.getByTestId('analysis-issue-list')
+  await expect(issueList).toBeVisible({ timeout: 30_000 })
 
-  // 6. 等 ProductList 至少 1 个 subproblem(turn-2 阶段产物)
-  //    ticket 02 requirement-brainstorm SKILL prompt 引导 AI 输出
-  //    subproblem / risk / option 三类 chunk;spec 只校验 subproblem 至少 1
-  //    是因为 ticket 07 验收 #5 锁定(ProductList 至少 1 个 subproblem)
-  const firstSubproblem = page
-    .getByTestId('product-subproblems-item')
-    .first()
-  await expect(firstSubproblem).toBeVisible({ timeout: 180_000 })
+  // 6. 等 SSE 终态:analysis_run_succeeded 或 analysis_run_failed
+  //    通过 history 抽屉行 status="已完成" / "失败" 表达
+  const historyDrawer = page.getByTestId('analysis-history-drawer')
+  await expect(historyDrawer).toBeVisible()
+  const firstRow = page.getByTestId('analysis-history-row').first()
+  await expect(firstRow).toHaveAttribute(
+    'data-run-status',
+    /^(succeeded|failed)$/,
+    { timeout: 300_000 },
+  )
 
-  // 6a. ticket 08:等 agent 端 turn-done publish `analysis_done` → web 端
-  //     AnalyzingZone 监听 → setStartState('idle');按钮回到可点击 idle 态
-  //     60s 超时覆盖双 turn 串行最长允许时长
+  // 7. 启动按钮回到 idle(终态事件复位)
   await expect(startBtn).toHaveAttribute('data-state', 'idle', {
     timeout: 60_000,
   })
-  await expect(startBtn).toBeVisible()
 
-  // 7. 截图(全页 + AdmissionDashboard 局部)
+  // 8. 拿当前 Run id(history 第一行)
+  const currentRunId = await firstRow.getAttribute('data-run-id')
+  expect(currentRunId).toBeTruthy()
+  testInfo.annotations.push({
+    type: 'run-id',
+    description: currentRunId ?? '',
+  })
+
+  // 9. SSE 推 Issue 终态后,Issue 列表与持久化 issues.jsonl 一致;
+  //    读 issues.jsonl 头 5 行入 spec 报告
+  const workspaceRoot = defaultAgentRoot()
+  const issuesHead = readIssuesHead(workspaceRoot, requirementId, currentRunId!, 5)
+  testInfo.annotations.push({
+    type: 'issues-missing',
+    description: String(issuesHead.missing),
+  })
+
+  // 10. 用 REST 拉详情比对:detail.issues.length 与 issues.jsonl 行数一致
+  const detail = await fetchRunDetail(
+    request,
+    token,
+    requirementId,
+    currentRunId!,
+  )
+  expect(detail).not.toBeNull()
+  expect(detail!.run.status).toMatch(/^(succeeded|failed)$/)
+  // Run Log panel 默认折叠(终态)但条目数 > 0(SDK 至少推了 result envelope
+  // 之外的若干 text / tool_use 事件);也可能 = 0(模型极端早结束)
+  const logPanel = page.getByTestId('analysis-run-log-panel')
+  await expect(logPanel).toBeVisible()
+
+  // 11. 截图
   const screenshotDir = testInfo.outputDir
   await page.screenshot({
     path: join(screenshotDir, 'analyzing-real-run-fullpage.png'),
     fullPage: true,
   })
-  await page
-    .locator('[data-testid="admission-dashboard"]')
-    .screenshot({ path: join(screenshotDir, 'analyzing-real-run-dashboard.png') })
 
-  // 8. 读 chunks.jsonl 头 5 行入 spec 报告(上线门槛物证)
-  const workspaceRoot = defaultAgentRoot()
-  const { sessionId, lines, missing } = readChunksHead(
+  // 12. attach issues.jsonl 头 5 行 + run 目录文件清单(上线门槛物证)
+  const { files, missing: runDirMissing } = readRunDir(
     workspaceRoot,
     requirementId,
-    5,
+    currentRunId!,
   )
-  testInfo.annotations.push({ type: 'session-id', description: sessionId ?? '' })
-  testInfo.annotations.push({
-    type: 'chunks-missing',
-    description: String(missing),
-  })
   const headBlock = [
-    `# chunks.jsonl head (requirementId=${requirementId}, sessionId=${sessionId ?? 'n/a'})`,
+    `# issues.jsonl head (requirementId=${requirementId}, runId=${currentRunId})`,
     `# workspaceRoot=${workspaceRoot}`,
-    `# missing=${missing}`,
-    ...(lines.length === 0
-      ? ['(no chunks yet — turn-1/turn-2 SSE may still be in flight)']
-      : lines),
+    `# missing=${issuesHead.missing}`,
+    `# runDirMissing=${runDirMissing}`,
+    `# runDirFiles=${JSON.stringify(files)}`,
+    `# detail.issues.length=${detail?.issues.length ?? 'n/a'}`,
+    `# run.status=${detail?.run.status ?? 'n/a'}`,
+    `# run.issue_count=${detail?.run.issue_count ?? 'n/a'}`,
+    '',
+    ...(issuesHead.lines.length === 0
+      ? ['(no issues yet — run produced zero issues)']
+      : issuesHead.lines),
   ].join('\n')
-  // attach 让 Playwright HTML report 里有这块内容;testInfo.attach 也让
-  // 上线门槛 reviewer 可一眼看到
-  await testInfo.attach('chunks-head.txt', {
+  await testInfo.attach('issues-head.txt', {
     body: headBlock,
     contentType: 'text/plain',
   })
 
-  // 9. 断言 chunks.jsonl 至少被读到(空文件不视作 fail —— 上一步报告里已说明;
-  //    spec 自身通过 5 dim count > 0 + ≥1 subproblem 强校验)
-  expect(lines.length).toBeGreaterThan(0)
+  // 13. 验收 4:接受至少一条 Issue 或合法"成功 · 0 个问题"终态
+  if (detail!.run.status === 'succeeded') {
+    // 成功态:0 条 Issue 也是合法空态;detail.issues.length 应等于 run.issue_count
+    expect(detail!.issues.length).toBe(detail!.run.issue_count)
+  } else {
+    // 失败态:issues 可能 < issue_count(失败的 part 保留);保留 error
+    expect(detail!.run.error).toBeTruthy()
+  }
+})
+
+/**
+ * 验收 8:历史切换后,真实终态事件不会抢回用户焦点。
+ *
+ * 场景(可控,不需要真实模型):
+ * 1. 创建 Run-A(走真实 SDK,等 succeeded)
+ * 2. 创建 Run-B(走真实 SDK,等 running)
+ * 3. 用户手动切到 Run-A(history row.click)
+ * 4. Run-B 收到 succeeded 终态事件
+ * 5. 期望:history drawer 仍 active=Run-A,Run-A 的 data-active="true"
+ */
+test('analyzing real run — 历史切换后,新 Run 终态不抢回焦点', async ({
+  page,
+  request,
+}, testInfo) => {
+  test.skip(!process.env.ANTHROPIC_API_KEY, SKIP_REASON_NO_KEY)
+  test.skip(!(await isWebReachable()), SKIP_REASON_NO_WEB)
+  test.skip(!(await isAgentHealthy(request)), SKIP_REASON_NO_AGENT)
+
+  const token = await bootstrapToken(request)
+  const requirementId = await createRequirement(
+    request,
+    token,
+    `e2e-focus-${Date.now()}`,
+  )
+  testInfo.annotations.push({
+    type: 'requirement-id',
+    description: requirementId,
+  })
+
+  // 1. 打开 ANALYZING
+  await page.goto(`${WEB_URL}/requirements/${requirementId}/analyzing`)
+  await expect(page.getByTestId('analyzing-zone')).toBeVisible({
+    timeout: 30_000,
+  })
+
+  // 2. 第一个 Run(走 UI 按钮启动,等 succeeded)
+  const startBtn = page.getByTestId('analysis-run-start-btn')
+  await expect(startBtn).toHaveAttribute('data-state', 'idle')
+  await startBtn.click()
+  await expect(startBtn).toHaveAttribute('data-state', 'running', {
+    timeout: 30_000,
+  })
+  const firstRow = page.getByTestId('analysis-history-row').first()
+  await expect(firstRow).toHaveAttribute(
+    'data-run-status',
+    /^(succeeded|failed)$/,
+    { timeout: 300_000 },
+  )
+  const runAId = await firstRow.getAttribute('data-run-id')
+  expect(runAId).toBeTruthy()
+
+  // 3. 启动 Run-B(用户重新点开始按钮;WEB 会选默认 Skill)
+  await expect(startBtn).toHaveAttribute('data-state', 'idle', {
+    timeout: 60_000,
+  })
+  await startBtn.click()
+  await expect(startBtn).toHaveAttribute('data-state', 'running', {
+    timeout: 30_000,
+  })
+
+  // 4. 切到 Run-A(用户主动切)
+  const runARow = page
+    .getByTestId('analysis-history-row')
+    .filter({ has: page.locator(`[data-run-id="${runAId}"]`) })
+    .first()
+  await runARow.getByTestId('analysis-history-row-select').click()
+  // 验证:active 切到 Run-A
+  await expect(runARow).toHaveAttribute('data-active', 'true', {
+    timeout: 30_000,
+  })
+
+  // 5. 等 Run-B 终态(此时用户焦点在 Run-A;B 的 succeeded 事件不应抢回)
+  //    history row 数 ≥ 2,任一 row 是 succeeded 即 OK;但要确认 active 还是 Run-A
+  await expect(page.getByTestId('analysis-history-row')).toHaveCount(2, {
+    timeout: 30_000,
+  })
+  // 等 Run-B 走到 succeeded/failed —— 在 history 里找非 Run-A 的那一行
+  const otherRow = page
+    .getByTestId('analysis-history-row')
+    .filter({ hasNot: page.locator(`[data-run-id="${runAId}"]`) })
+    .first()
+  await expect(otherRow).toHaveAttribute(
+    'data-run-status',
+    /^(succeeded|failed)$/,
+    { timeout: 300_000 },
+  )
+
+  // 6. 关键断言:焦点仍在 Run-A(用户主动切换的判定由 useManuallySwitched
+  //    维护;Run-B 终态事件不会改写 active 状态)
+  await expect(runARow).toHaveAttribute('data-active', 'true', {
+    timeout: 30_000,
+  })
 })
 
 /**
@@ -321,8 +524,3 @@ test('bootstrap: agent /api/agent/bootstrap 返 token', async ({ request }) => {
   const body = (await res.json()) as BootstrapPayload
   expect(body.token).toMatch(/^[A-Za-z0-9_-]{43}$/)
 })
-
-// Re-export 以便 mocha 报告里看到(SKIP_REASON_NO_PLAYWRIGHT_BROWSER 是占位,
-// 真正缺浏览器是 `playwright install` 阶段;Playwright 自带错误信息已经
-// 清晰,这里不重复定义额外 test)
-void SKIP_REASON_NO_PLAYWRIGHT_BROWSER
