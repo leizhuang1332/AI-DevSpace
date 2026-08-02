@@ -250,6 +250,24 @@ export type SseEvent =
       issue: import('./analysis-run.js').AnalysisIssue
     }
   /**
+   * Issue 提交被拒(PR-1 / ticket 10)。Agent 在业务工具
+   * `report_analysis_issue` 因 parser 校验或 runService.reportIssue 门禁
+   * 失败时 publish 一次;携带 `reason`(parser reason 或 reportIssue code)
+   * 与 `inputKeys`(原始入参键名,便于定位模型传错字段)。
+   *
+   * 当前 Web 端不消费此事件(agent.log / Run Log 已能定位);
+   * 保留 SSE 通道便于后续 UI 提示"本次 Run 调用失败"或自动 retry。
+   */
+  | {
+      type: 'analysis_issue_rejected'
+      reqId: string
+      runId: string
+      ts: number
+      toolUseId: string
+      reason: string
+      inputKeys: string
+    }
+  /**
    * Run Log 增量(决策 37 · 38)。Agent 在 SDK 推到文本/工具事件时落
    * `log.jsonl` 后 publish;Web 端据此展开 Run Log 面板实时滚动。
    * 排除 system prompt 与模型原始思维链(决策 71 / 72)。

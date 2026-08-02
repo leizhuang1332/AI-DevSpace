@@ -89,6 +89,12 @@ export interface ReportIssueToolResult {
   issue_id: string
   ordinal: number
   duplicate?: boolean
+  /**
+   * PR-1:拒绝原因 —— accepted=false 时填具体 reason,
+   * 供 SSE / 工具结果 / stderr 排障。
+   * 字段新增不影响现有接受路径(accepted=true 不带)。
+   */
+  reason?: string
 }
 
 /** 完成工具结果 */
@@ -385,9 +391,29 @@ function makeReportIssueHandler(ctx: {
 }) {
   const { runService, hub, requirementId, runId } = ctx
   return (toolUseId: string, input: unknown): ReportIssueToolResult => {
+    // PR-1:把 input 形状也带上,排障时不用回头翻 log.jsonl
+    const inputKeys =
+      input && typeof input === 'object' && !Array.isArray(input)
+        ? Object.keys(input as Record<string, unknown>).join(',')
+        : `<${input === null ? 'null' : typeof input}>`
     const parsed = parseReportIssueInput(input)
     if (!parsed.ok) {
-      return { accepted: false, issue_id: '', ordinal: 0 }
+      // PR-1:把真实拒绝原因暴露到 stderr + tool_result content(SSE 透传),
+      // 便于从 agent.log / run log / Web 控制台三方同时定位。
+      const reason = parsed.reason
+      process.stderr.write(
+        `[analysis-run] report rejected runId=${runId} toolUseId=${toolUseId} reason=${reason} inputKeys=${inputKeys}\n`,
+      )
+      hub.publish(requirementId, {
+        type: 'analysis_issue_rejected',
+        reqId: requirementId,
+        runId,
+        ts: Date.now(),
+        toolUseId,
+        reason,
+        inputKeys,
+      })
+      return { accepted: false, issue_id: '', ordinal: 0, reason }
     }
     const result = runService.reportIssue({
       requirementId,
@@ -397,7 +423,20 @@ function makeReportIssueHandler(ctx: {
     })
     if (!result.ok) {
       // run_not_found / run_not_running / run_completed:模型侧应停止报告
-      return { accepted: false, issue_id: '', ordinal: 0 }
+      const reason = result.code
+      process.stderr.write(
+        `[analysis-run] reportIssue rejected runId=${runId} toolUseId=${toolUseId} code=${reason}\n`,
+      )
+      hub.publish(requirementId, {
+        type: 'analysis_issue_rejected',
+        reqId: requirementId,
+        runId,
+        ts: Date.now(),
+        toolUseId,
+        reason,
+        inputKeys,
+      })
+      return { accepted: false, issue_id: '', ordinal: 0, reason }
     }
     const { issue, created } = result.result
     if (created) {
