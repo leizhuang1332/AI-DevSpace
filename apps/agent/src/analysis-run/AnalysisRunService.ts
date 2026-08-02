@@ -50,6 +50,7 @@ import {
   AnalysisLogEntrySchema,
   IssueResponseMetaSchema,
 } from '@ai-devspace/shared'
+import { redactLogEntry } from './runLogRedaction.js'
 
 /** Run 持久化目录路径(单点真相 —— service + route 共享) */
 export function analysisRunsDirFor(
@@ -460,7 +461,12 @@ export class AnalysisRunService {
     return { ok: true, run: updated }
   }
 
-  /** 追加 Run Log entry(决策 37) */
+  /** 追加 Run Log entry(决策 37)
+   *
+   * issue 06 · 决策 38:落盘前统一脱敏(兜底层)。即便上游 AnalysisAgentRunner
+   * 没脱敏或 race 写入未脱敏,这里在写盘前再走一次,保证 log.jsonl 内
+   * 不出现 secret 原文。
+   */
   appendLogEntry(
     requirementId: string,
     runId: string,
@@ -468,7 +474,10 @@ export class AnalysisRunService {
   ): { ok: true } | { ok: false; code: 'run_not_found' | 'invalid_entry' } {
     const meta = this.readMeta(requirementId, runId)
     if (!meta) return { ok: false, code: 'run_not_found' }
-    const validated = AnalysisLogEntrySchema.safeParse(entry)
+    // 兜底脱敏(issue 06 · 决策 38):上游 AnalysisAgentRunner 已脱敏时 idempotent,
+    // 未脱敏时强制抹除。防止 race / 跨 Provider 漏脱敏。
+    const sanitized = redactLogEntry(entry)
+    const validated = AnalysisLogEntrySchema.safeParse(sanitized)
     if (!validated.success) return { ok: false, code: 'invalid_entry' }
     appendFileSync(
       join(this.runDirFor(requirementId, runId), 'log.jsonl'),
@@ -477,6 +486,9 @@ export class AnalysisRunService {
     )
     return { ok: true }
   }
+
+  // sanitizeLogEntryForPersistence 已抽到 runLogRedaction.redactLogEntry,
+  // appendLogEntry 直接调用,避免两文件实现漂移。
 
   /** 读 Run 所有 Issue(顺序追加读) */
   readIssues(requirementId: string, runId: string): AnalysisIssue[] {

@@ -622,6 +622,358 @@ describe('POST /api/requirements/:id/analysis/start (issue 02)', () => {
     expect(toolUses.length).toBeGreaterThanOrEqual(2)
     expect(toolResults.length).toBeGreaterThanOrEqual(1)
   })
+
+  // --------------------------------------------------------------------------
+  // 10. issue 06 验收 5+6:log 持久化前脱敏 —— secret 串不进入 log.jsonl
+  //     与 SSE 流
+  // --------------------------------------------------------------------------
+  it('issue 06:工具输入含 secret → log.jsonl 与 SSE 都被脱敏', async () => {
+    seedRequirement('req-redact')
+
+    const bearerToken = 'sk-prod-abcdefghijklmnop1234567890'
+    const akidSecret = 'AKID9876543210ZYXWVUTSRQPON'
+    providerHandle = createFakeAnalysisProvider({
+      messages: [
+        // 1) assistant 文本里含 Bearer token(模拟模型想复述 secret)
+        {
+          type: 'assistant',
+          message: {
+            content: [
+              {
+                type: 'text',
+                text: `I noticed an Authorization: Bearer ${bearerToken} header leaking in the logs`,
+              },
+            ],
+          },
+        },
+        // 2) tool_use input 含 secret(用 key=value 形式让脱敏规则能识别;
+        //    metadata 元组第二项作为裸 string 时无法用 key prefix 脱敏,
+        //    所以这里把 secret 放在 description 字段中,让"desc: secret"形态
+        //    命中 token= 类的脱敏规则)
+        {
+          type: 'content_block_start',
+          content_block: {
+            type: 'tool_use',
+            id: 'tu-secret-1',
+            name: 'report_analysis_issue',
+            input: {
+              title: 'config',
+              description: `token=${bearerToken}`,
+              sourceRefs: [{ kind: 'requirement', relative_path: 'requirement.md' }],
+              metadata: [['severity', 'high']],
+            },
+          },
+        },
+        // 3) tool_result output 含 PEM 私钥
+        {
+          type: 'user',
+          message: {
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'tu-secret-1',
+                content: `-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAxxxxxxx\n-----END RSA PRIVATE KEY-----`,
+              },
+            ],
+          },
+        },
+        // 4) 第二个 tool_use input 含 AKID
+        {
+          type: 'content_block_start',
+          content_block: {
+            type: 'tool_use',
+            id: 'tu-akid-1',
+            name: 'report_analysis_issue',
+            input: {
+              title: 'aliyun',
+              description: 'found AKID in src',
+              sourceRefs: [{ kind: 'requirement', relative_path: 'requirement.md' }],
+              metadata: [['key', akidSecret]],
+            },
+          },
+        },
+        // 5) complete_analysis
+        {
+          type: 'content_block_start',
+          content_block: {
+            type: 'tool_use',
+            id: 'tu-redact-complete',
+            name: 'complete_analysis',
+            input: {},
+          },
+        },
+      ],
+    })
+    await rebuildAppWithProvider(providerHandle.provider)
+
+    // 订阅 SSE 收集 analysis_run_log
+    const ssePromise = openSse('/api/requirement/req-redact/events', 2500)
+    await new Promise((r) => setImmediate(r))
+    await new Promise((r) => setImmediate(r))
+
+    const res = await authedJson(
+      'POST',
+      '/api/requirements/req-redact/analysis/start',
+      { skill_name: 'prd-completeness' },
+    )
+    expect(res.statusCode).toBe(201)
+    await new Promise((r) => setTimeout(r, 1500))
+
+    // 1) 持久化层脱敏:GET /runs/:runId 详情
+    const detail = await authedJson(
+      'GET',
+      `/api/requirements/req-redact/analysis/runs/${res.body.run_id}`,
+    )
+    expect(detail.statusCode).toBe(200)
+    const detailLog = detail.body.log as Array<Record<string, unknown>>
+    // 1.1) text entry:Bearer token 已脱敏
+    const firstText = detailLog.find((l) => l.kind === 'text')
+    expect(firstText).toBeDefined()
+    const detailText = String(firstText?.text ?? '')
+    expect(detailText).not.toContain(bearerToken)
+    // 1.2) tool_use entry:description 里的 token 已脱敏
+    const firstToolUse = detailLog.find(
+      (l) => l.kind === 'tool_use' && l.name === 'report_analysis_issue',
+    )
+    expect(firstToolUse).toBeDefined()
+    const tuInput = firstToolUse?.input as Record<string, unknown> | undefined
+    const tuDesc = String(tuInput?.description ?? '')
+    expect(tuDesc).not.toContain(bearerToken)
+    expect(tuDesc).toContain('[REDACTED]')
+    // 1.3) tool_result entry:PEM 已脱敏
+    const firstToolResult = detailLog.find((l) => l.kind === 'tool_result')
+    expect(firstToolResult).toBeDefined()
+    const trOutput = String(firstToolResult?.output ?? '')
+    expect(trOutput).not.toContain('MIIEowIBAAKCAQEAxxxxxxx')
+    // 1.4) 第二个 tool_use:AKID 已脱敏
+    const akidEntry = detailLog.find(
+      (l) => l.kind === 'tool_use' && l.tool_use_id === 'tu-akid-1',
+    )
+    expect(akidEntry).toBeDefined()
+    const akidInput = akidEntry?.input as Record<string, unknown> | undefined
+    const akidMeta = akidInput?.metadata as Array<[string, string]> | undefined
+    const akidKv = akidMeta?.find(([k]) => k === 'key')
+    expect(akidKv?.[1]).not.toBe(akidSecret)
+    expect(akidKv?.[1]).toBe('[REDACTED]')
+
+    // 2) 落盘文件脱敏:直接读 log.jsonl 验证
+    const runId = String(res.body.run_id)
+    const runDir = join(root, 'requirements', 'req-redact', 'analysis', 'runs', runId)
+    const logFile = join(runDir, 'log.jsonl')
+    expect(existsSync(logFile)).toBe(true)
+    const logText = readFileSync(logFile, 'utf8')
+    expect(logText).not.toContain(bearerToken)
+    expect(logText).not.toContain(akidSecret)
+    expect(logText).not.toContain('MIIEowIBAAKCAQEAxxxxxxx')
+
+    // 3) SSE 推送脱敏:抓 analysis_run_log event 数据
+    const sse = await ssePromise
+    expect(sse.statusCode).toBe(200)
+    // 提取 analysis_run_log event data
+    const sseLogBlocks = (sse.body.match(/event: analysis_run_log\ndata: ([\s\S]*?)\n\n/g) ?? [])
+      .map((m) => {
+        const dataLine = m.split('\n').find((l) => l.startsWith('data: '))
+        return dataLine ? dataLine.slice(6) : ''
+      })
+      .map((s) => {
+        try {
+          return JSON.parse(s) as { entry?: { text?: string; input?: unknown; output?: unknown } }
+        } catch {
+          return {}
+        }
+      })
+    const sseText = sseLogBlocks.map((b) => JSON.stringify(b)).join('\n')
+    expect(sseText).not.toContain(bearerToken)
+    expect(sseText).not.toContain(akidSecret)
+  })
+
+  // --------------------------------------------------------------------------
+  // 11. issue 06 验收 4:system prompt 与 thinking 不进入 Run Log
+  //
+  // 当前 AnalysisAgentRunner 拦截的 envelope 类型仅含 assistant / partial_assistant /
+  // content_block_start (tool_use) / user (tool_result),SDK system / thinking event
+  // 直接 return。本测试通过 fake provider 注入 type=system / type=thinking,
+  // 验证它们绝不进入 log.jsonl。
+  // --------------------------------------------------------------------------
+  it('issue 06:system / thinking envelope 永远不会进入 Run Log', async () => {
+    seedRequirement('req-system')
+
+    providerHandle = createFakeAnalysisProvider({
+      messages: [
+        // SDK system 事件:绝不能进 log
+        {
+          type: 'system',
+          message: {
+            content: 'system prompt leakage should never reach log',
+          },
+        },
+        // SDK thinking 事件:绝不能进 log
+        {
+          type: 'thinking',
+          text: 'internal chain-of-thought should never reach log',
+        },
+        // 真正合法事件:text + tool_use + complete
+        {
+          type: 'assistant',
+          message: {
+            content: [{ type: 'text', text: '正常文本' }],
+          },
+        },
+        {
+          type: 'content_block_start',
+          content_block: {
+            type: 'tool_use',
+            id: 'tu-system-1',
+            name: 'complete_analysis',
+            input: {},
+          },
+        },
+      ],
+    })
+    await rebuildAppWithProvider(providerHandle.provider)
+
+    const res = await authedJson(
+      'POST',
+      '/api/requirements/req-system/analysis/start',
+      { skill_name: 'prd-completeness' },
+    )
+    expect(res.statusCode).toBe(201)
+    await new Promise((r) => setTimeout(r, 1500))
+
+    const detail = await authedJson(
+      'GET',
+      `/api/requirements/req-system/analysis/runs/${res.body.run_id}`,
+    )
+    const detailLog = detail.body.log as Array<Record<string, unknown>>
+
+    // 1) log 里不应出现 system / thinking 字样的内容
+    const allLogJson = JSON.stringify(detailLog)
+    expect(allLogJson).not.toContain('system prompt leakage should never reach log')
+    expect(allLogJson).not.toContain('internal chain-of-thought should never reach log')
+
+    // 2) 合法事件依然进 log(确认拦截器没误杀)
+    const texts = detailLog.filter((l) => l.kind === 'text')
+    expect(texts.length).toBeGreaterThanOrEqual(1)
+    expect(String(texts[0]?.text ?? '')).toContain('正常文本')
+
+    // 3) 落盘文件也不含 system / thinking 内容
+    const runId = String(res.body.run_id)
+    const runDir = join(root, 'requirements', 'req-system', 'analysis', 'runs', runId)
+    const logFile = join(runDir, 'log.jsonl')
+    const logText = readFileSync(logFile, 'utf8')
+    expect(logText).not.toContain('system prompt leakage should never reach log')
+    expect(logText).not.toContain('internal chain-of-thought should never reach log')
+  })
+
+  // --------------------------------------------------------------------------
+  // 12. issue 06 验收 11:删除 Run 时 log 随聚合级联删除
+  // --------------------------------------------------------------------------
+  it('issue 06:删除 Run → 整个 runDir(含 log.jsonl)消失', async () => {
+    seedRequirement('req-del-log')
+
+    providerHandle = createFakeAnalysisProvider({
+      messages: [
+        {
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'logged' }] },
+        },
+        {
+          type: 'content_block_start',
+          content_block: {
+            type: 'tool_use',
+            id: 'tu-del-log',
+            name: 'complete_analysis',
+            input: {},
+          },
+        },
+      ],
+    })
+    await rebuildAppWithProvider(providerHandle.provider)
+
+    const res = await authedJson(
+      'POST',
+      '/api/requirements/req-del-log/analysis/start',
+      { skill_name: 'prd-completeness' },
+    )
+    expect(res.statusCode).toBe(201)
+    await new Promise((r) => setTimeout(r, 1500))
+
+    const runId = String(res.body.run_id)
+    const runDir = join(root, 'requirements', 'req-del-log', 'analysis', 'runs', runId)
+    expect(existsSync(join(runDir, 'log.jsonl'))).toBe(true)
+
+    // 显式用 app.inject 发起 DELETE —— authedJson helper 只支持 GET/POST
+    const del = await app.inject({
+      method: 'DELETE',
+      url: `/api/requirements/req-del-log/analysis/runs/${runId}`,
+      headers: { 'x-aidevspace-token': token },
+    })
+    expect(del.statusCode).toBe(204)
+    // 整个 runDir 被 rm -rf —— log.jsonl 消失
+    expect(existsSync(runDir)).toBe(false)
+  })
+
+  // --------------------------------------------------------------------------
+  // 13. issue 06 验收 7:tool_result entry 回填实际工具名(SDK tool_result block
+  //     不带 name,Runner 维护 tool_use_id → name 映射,在 tool_result 阶段查表)
+  // --------------------------------------------------------------------------
+  it('issue 06:tool_result entry 的 name 字段是实际工具名,不是字面 "tool_result"', async () => {
+    seedRequirement('req-tool-name')
+
+    providerHandle = createFakeAnalysisProvider({
+      messages: [
+        // 1) 业务工具 tool_use(已知 name=report_analysis_issue)
+        {
+          type: 'content_block_start',
+          content_block: {
+            type: 'tool_use',
+            id: 'tu-name-1',
+            name: 'report_analysis_issue',
+            input: {
+              title: '某 Issue',
+              description: '测试',
+              sourceRefs: [{ kind: 'requirement', relative_path: 'requirement.md' }],
+            },
+          },
+        },
+        // 2) fake provider 自动回灌 tool_result
+        // 3) 完成
+        {
+          type: 'content_block_start',
+          content_block: {
+            type: 'tool_use',
+            id: 'tu-name-complete',
+            name: 'complete_analysis',
+            input: {},
+          },
+        },
+      ],
+    })
+    await rebuildAppWithProvider(providerHandle.provider)
+
+    const res = await authedJson(
+      'POST',
+      '/api/requirements/req-tool-name/analysis/start',
+      { skill_name: 'prd-completeness' },
+    )
+    expect(res.statusCode).toBe(201)
+    await new Promise((r) => setTimeout(r, 1500))
+
+    const detail = await authedJson(
+      'GET',
+      `/api/requirements/req-tool-name/analysis/runs/${res.body.run_id}`,
+    )
+    const detailLog = detail.body.log as Array<Record<string, unknown>>
+    const toolResults = detailLog.filter((l) => l.kind === 'tool_result')
+    expect(toolResults.length).toBeGreaterThanOrEqual(1)
+    // 关键:tool_result 的 name 字段应是实际工具名(report_analysis_issue)
+    // 不是字面 'tool_result'(修复前是字面 'tool_result')
+    const reportIssueResult = toolResults.find(
+      (l) => l.tool_use_id === 'tu-name-1',
+    )
+    expect(reportIssueResult).toBeDefined()
+    expect(reportIssueResult?.name).toBe('report_analysis_issue')
+  })
 })
 
 // ============================================================================

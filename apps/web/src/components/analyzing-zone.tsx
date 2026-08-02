@@ -14,7 +14,7 @@ import {
   type AnalyzingStats,
   type SourceRef,
 } from '@/lib/analyzing'
-import type { AnalysisIssue, AnalysisRunMeta } from '@ai-devspace/shared'
+import type { AnalysisIssue, AnalysisLogEntry, AnalysisRunMeta } from '@ai-devspace/shared'
 import type { ProductChange } from '@/lib/products'
 import { updateProduct } from '@/lib/products-actions'
 import { useMediaQuery } from '@/lib/use-media-query'
@@ -42,6 +42,7 @@ import {
   type StartAnalysisRunSuccess,
 } from '@/lib/analysis-run-start'
 import { AnalysisIssueList } from './analysis-issue-list'
+import { AnalysisRunLogPanel } from './analysis-run-log-panel'
 import {
   AnalysisHistoryDrawer,
   AnalysisDeleteRunDialog,
@@ -370,6 +371,11 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
     return sorted[0]?.run_id ?? ''
   })
   const [currentRunIssues, setCurrentRunIssues] = useState<AnalysisIssue[]>([])
+  // issue 06:当前 Run Log(由 SSE analysis_run_log 累积 + GET 详情初始化)
+  // 折叠 / 展开仅 UI 状态(决策 39);不改 Run 数据
+  const [currentRunLog, setCurrentRunLog] = useState<AnalysisLogEntry[]>([])
+  // 用户手动展开 / 折叠(null = 走默认)
+  const [logPanelUserToggle, setLogPanelUserToggle] = useState<boolean | null>(null)
   const currentRun = runs.find((r) => r.run_id === currentRunId) ?? null
 
   // -------------------------------------------------------------------------
@@ -423,6 +429,7 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   useEffect(() => {
     if (!currentRunId) {
       setCurrentRunIssues([])
+      setCurrentRunLog([])
       return
     }
     // 跳过"刚启动的新 Run"(没有 issue_count 但 SSE 还在推;handleStart 已设 issues=[])
@@ -438,10 +445,18 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
           `/api/requirements/${encodeURIComponent(data.requirementId)}/analysis/runs/${encodeURIComponent(currentRunId)}`,
         )
         if (!res.ok) return
-        const json = (await res.json()) as { issues?: AnalysisIssue[] }
+        const json = (await res.json()) as {
+          issues?: AnalysisIssue[]
+          log?: AnalysisLogEntry[]
+        }
         if (cancelled) return
         const issues = Array.isArray(json.issues) ? json.issues : []
         setCurrentRunIssues(issues)
+        // issue 06:同时初始化 Log(终态 Run 的完整 log.jsonl 一次性拉回)
+        // —— 之前 SSE 没订阅的 Run 切回来时,这里补全。
+        // running Run 不会进入此分支(SSE 实时累积),所以不会覆盖 in-flight 增量。
+        const log = Array.isArray(json.log) ? json.log : []
+        setCurrentRunLog(log)
       } catch {
         /* 网络错误 / 解析失败 → 保持空 Issue,不阻断 UI */
       }
@@ -561,6 +576,9 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
     userManuallySwitchedRef.current = false
     setCurrentRunId(newRun.run_id)
     setCurrentRunIssues([])
+    // issue 06:新 Run 启动时清空 Log 状态(后续由 SSE 累积)
+    setCurrentRunLog([])
+    setLogPanelUserToggle(null)
     // 兼容旧 session 字段:虽然 ADR-0021 删除了 session 概念,但保留 UI 不破坏
     const startAngle: AnalysisSessionAngle = 'architecture'
     const startLabel = ANALYSIS_SESSION_ANGLE_META[startAngle].label
@@ -600,6 +618,10 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
     userManuallySwitchedRef.current = true
     setCurrentRunId(runId)
     setCurrentRunIssues([])
+    // issue 06:切 Run 时清空 Log(切回时由 currentRunId effect 拉详情补全)
+    setCurrentRunLog([])
+    // 用户主动切换 → 重置折叠状态由新 Run 的状态决定
+    setLogPanelUserToggle(null)
     // 同步 activeSessionId → chunksBySessionId 索引键 + 重置打字机 phase;
     // 切到不同 Run 时打字机 chunks 数组引用变化,phase 必须重置。
     setActiveSessionId(runId)
@@ -779,6 +801,36 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
         /* ignore */
       }
     }
+    // issue 06:分析 Run Log 增量(决策 37 + 39)
+    // - 只追加到当前 Run(同 issue 一样,切到其他 Run 时 SSE 继续推但本组件
+    //   不接收;切回时由 currentRunId effect 拉详情补全)
+    // - 用户手动切到不同 Run 时父组件 handleSelectRun 清 currentRunLog;
+    //   这里接收的 entry 一定属于当前 currentRunId
+    const onRunLog = (e: MessageEvent<string>): void => {
+      try {
+        const parsed = JSON.parse(e.data) as {
+          runId: string
+          entry: AnalysisLogEntry
+        }
+        if (parsed.runId !== currentRunId) return
+        setCurrentRunLog((prev) => {
+          // 去重:同 (kind, tool_use_id, ts) 不重复追加(SSE 偶发重发防御)
+          const dup = prev.some(
+            (it) =>
+              it.kind === parsed.entry.kind &&
+              it.ts === parsed.entry.ts &&
+              (it.kind === 'text'
+                ? false
+                : it.tool_use_id ===
+                  (parsed.entry as { tool_use_id?: string }).tool_use_id),
+          )
+          if (dup) return prev
+          return [...prev, parsed.entry]
+        })
+      } catch {
+        /* ignore */
+      }
+    }
     const onRunSucceeded = (e: MessageEvent<string>): void => {
       try {
         const parsed = JSON.parse(e.data) as {
@@ -867,6 +919,9 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
           const nextActive = remaining[0]?.run_id ?? ''
           setCurrentRunId(nextActive)
           setCurrentRunIssues([])
+          // issue 06:被删的 Run 是当前 Run → 同时清 log
+          setCurrentRunLog([])
+          setLogPanelUserToggle(null)
           setPendingDeleteRunId(null)
           pushToast(`已删除 Analysis Run ${parsed.skillName}`, 'info')
         } else {
@@ -882,6 +937,7 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
     es.addEventListener('analysis_done', onAnalysisDone)
     es.addEventListener('analysis_run_created', onRunCreated)
     es.addEventListener('analysis_issue_reported', onIssueReported)
+    es.addEventListener('analysis_run_log', onRunLog)
     es.addEventListener('analysis_run_succeeded', onRunSucceeded)
     es.addEventListener('analysis_run_failed', onRunFailed)
     es.addEventListener('analysis_run_deleted', onRunDeleted)
@@ -893,6 +949,7 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       es.removeEventListener('analysis_done', onAnalysisDone)
       es.removeEventListener('analysis_run_created', onRunCreated)
       es.removeEventListener('analysis_issue_reported', onIssueReported)
+      es.removeEventListener('analysis_run_log', onRunLog)
       es.removeEventListener('analysis_run_succeeded', onRunSucceeded)
       es.removeEventListener('analysis_run_failed', onRunFailed)
       es.removeEventListener('analysis_run_deleted', onRunDeleted)
@@ -1272,6 +1329,15 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
                   registerFlush={registerIssueResponseFlush}
                 />
               </div>
+              {/* issue 06 · ADR-0021 决策 37-39:Run Log 可折叠面板
+                  - 运行中默认展开,终态默认折叠
+                  - 用户手动展开/折叠优先于默认(决策 39) */}
+              <AnalysisRunLogPanel
+                entries={currentRunLog}
+                runStatus={currentRun?.status ?? 'succeeded'}
+                userToggle={logPanelUserToggle}
+                onToggle={setLogPanelUserToggle}
+              />
               <div className="flex-1 min-h-0">
                 <ProductList
                   products={products}
@@ -1314,6 +1380,9 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
             onEditorError={onEditorError}
             registerIssueResponseFlush={registerIssueResponseFlush}
             historyDrawer={historyDrawerElement}
+            runLog={currentRunLog}
+            logPanelUserToggle={logPanelUserToggle}
+            onLogPanelToggle={setLogPanelUserToggle}
           />
         )}
         {productError && (
@@ -1392,6 +1461,12 @@ interface NarrowLayoutProps {
   registerIssueResponseFlush?: (issueId: string, flush: () => Promise<void>) => () => void
   /** issue 05:窄视口下挂在顶部的历史抽屉(可选) */
   historyDrawer?: React.ReactNode
+  /** issue 06:当前 Run Log entries(由父组件订阅 SSE 累积 + 切 Run 时 fetch) */
+  runLog?: ReadonlyArray<AnalysisLogEntry>
+  /** issue 06:用户手动展开 / 折叠(null = 走默认) */
+  logPanelUserToggle?: boolean | null
+  /** issue 06:Log 面板 toggle 回调 */
+  onLogPanelToggle?: (next: boolean) => void
 }
 
 function NarrowLayout({
@@ -1414,6 +1489,9 @@ function NarrowLayout({
   onEditorError,
   registerIssueResponseFlush,
   historyDrawer,
+  runLog,
+  logPanelUserToggle,
+  onLogPanelToggle,
 }: NarrowLayoutProps) {
   return (
     <div
@@ -1522,6 +1600,13 @@ function NarrowLayout({
                 citationSources={citationSources}
               />
             </div>
+            {/* issue 06 · 窄视口下 Run Log 面板(默认折叠,信息更紧凑) */}
+            <AnalysisRunLogPanel
+              entries={runLog ?? []}
+              runStatus={currentRun?.status ?? 'succeeded'}
+              userToggle={logPanelUserToggle ?? null}
+              onToggle={onLogPanelToggle ?? (() => {})}
+            />
           </div>
         )}
       </div>

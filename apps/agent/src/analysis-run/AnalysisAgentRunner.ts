@@ -37,6 +37,7 @@ import type {
 import type { AnalysisRunService } from './AnalysisRunService.js'
 import type { AnalysisPromptInput } from './AnalysisPromptAssembler.js'
 import { assembleAnalysisSystemPrompt } from './AnalysisPromptAssembler.js'
+import { redactLogEntry } from './runLogRedaction.js'
 
 /** 业务工具 name 常量 —— SDK MCP server 注册 / handler dispatch 共同使用 */
 export const TOOL_REPORT_ISSUE = 'report_analysis_issue'
@@ -158,6 +159,9 @@ export async function runAnalysisQuery(deps: AnalysisRunnerDeps): Promise<
   })
 
   const logCtx = { requirementId, runId, hub, runService }
+  // tool_use_id → 工具名 反向映射(SDK 流顺序:tool_use 先到,tool_result 后到;
+  // 这里用本 Run 的局部 Map,Run 结束随 runner 销毁,不跨 Run 共享)
+  const toolNameByUseId = new Map<string, string>()
 
   const sdkResult = await provider.runAnalysisQuery({
     prompt: buildRunQueryPrompt({ scope }),
@@ -176,6 +180,7 @@ export async function runAnalysisQuery(deps: AnalysisRunnerDeps): Promise<
         logCtx,
         reportIssueHandler,
         completeHandler,
+        toolNameByUseId,
       })
     },
     // SDK 工具注册:业务工具通过 MCP server 注入,Allowed tools = Read/Glob/Grep
@@ -430,6 +435,13 @@ interface HandleCtx {
   logCtx: LogCtx
   reportIssueHandler: (toolUseId: string, input: unknown) => ReportIssueToolResult
   completeHandler: (toolUseId: string, input: unknown) => CompleteToolResult
+  /**
+   * tool_use_id → 工具名 映射(issue 06 决策 37 + 验收 7:tool_result entry
+   * 需要回填实际工具名,而不是写死 'tool_result',便于 UI / 审计查看哪个
+   * 工具产生了该结果)。SDK 流顺序先 tool_use 后 tool_result,所以
+   * tool_use 阶段填,tool_result 阶段读。
+   */
+  toolNameByUseId: Map<string, string>
 }
 
 /**
@@ -473,6 +485,8 @@ function handleSdkEnvelope(ctx: HandleCtx): void {
         const toolUseId = String(block['id'] ?? '')
         const name = String(block['name'] ?? '')
         const input = block['input'] ?? {}
+        // 记录 tool_use_id → name 映射,供 tool_result 阶段回填实际工具名
+        if (toolUseId) ctx.toolNameByUseId.set(toolUseId, name)
         const entry: AnalysisLogEntry = {
           kind: 'tool_use',
           ts,
@@ -499,11 +513,15 @@ function handleSdkEnvelope(ctx: HandleCtx): void {
       for (const block of content) {
         if (block['type'] !== 'tool_result') continue
         const toolUseId = String(block['tool_use_id'] ?? '')
+        // 回填实际工具名(SDK tool_result block 不带 name):从 tool_use 阶段
+        // 记录的反向映射查;查不到 → 退化为 'tool_result'(决策 37:保留可读性)
+        const resolvedName =
+          ctx.toolNameByUseId.get(toolUseId) ?? 'tool_result'
         const entry: AnalysisLogEntry = {
           kind: 'tool_result',
           ts,
           tool_use_id: toolUseId,
-          name: 'tool_result',
+          name: resolvedName,
           output: block['content'],
         }
         appendLog(ctx, entry)
@@ -529,6 +547,8 @@ function handleSdkEnvelope(ctx: HandleCtx): void {
       const toolUseId = String(envelope.tool_use_id ?? '')
       const name = String(envelope.tool_name ?? '')
       const input = envelope.tool_input
+      // 记录 tool_use_id → name 映射,供 tool_result 阶段回填实际工具名
+      if (toolUseId) ctx.toolNameByUseId.set(toolUseId, name)
       const entry: AnalysisLogEntry = {
         kind: 'tool_use',
         ts,
@@ -546,13 +566,18 @@ function handleSdkEnvelope(ctx: HandleCtx): void {
     }
     case 'tool_result': {
       const toolUseId = String(envelope.tool_use_id ?? '')
-      const name = String(envelope.tool_name ?? '')
+      // envelope 自带 tool_name 时直接用;否则查 tool_use 阶段记录的反向映射;
+      // 都查不到时退化为 'tool_result'(决策 37:保留可读性)
+      const resolvedName =
+        String(envelope.tool_name ?? '') ||
+        ctx.toolNameByUseId.get(toolUseId) ||
+        'tool_result'
       const output = envelope.tool_output
       const entry: AnalysisLogEntry = {
         kind: 'tool_result',
         ts,
         tool_use_id: toolUseId,
-        name,
+        name: resolvedName,
         output,
       }
       appendLog(ctx, entry)
@@ -564,10 +589,17 @@ function handleSdkEnvelope(ctx: HandleCtx): void {
 }
 
 function appendLog(ctx: HandleCtx, entry: AnalysisLogEntry): void {
+  // issue 06 · ADR-0021 决策 38:在落盘和 SSE 发布之前做统一脱敏。
+  // 入口脱敏确保 persistence 与 SSE 拿到的是同一份(决策 38:服务端
+  // 落盘前与 SSE 发布前使用同一份脱敏内容,不允许前端遮盖兜底)。
+  // 脱敏异常回退到原 entry → 写盘;AnalysisRunService.appendLogEntry 兜底
+  // 第二次脱敏。两次都失败的概率极低,但失败时 log.jsonl 内可能包含
+  // 未脱敏内容 —— 已在 services 层加 risk 注释;允许本期 best-effort。
+  const sanitized = redactLogEntry(entry)
   const result = ctx.logCtx.runService.appendLogEntry(
     ctx.requirementId,
     ctx.runId,
-    entry,
+    sanitized,
   )
   if (!result.ok) return
   ctx.logCtx.hub.publish(ctx.requirementId, {
@@ -575,7 +607,7 @@ function appendLog(ctx: HandleCtx, entry: AnalysisLogEntry): void {
     reqId: ctx.requirementId,
     runId: ctx.runId,
     ts: Date.now(),
-    entry,
+    entry: sanitized,
   })
 }
 
