@@ -51,81 +51,6 @@ export type SseEvent =
   | { type: 'heartbeat'; ts: number }
   | { type: 'placeholder'; message: string }
   /**
-   * 分析过程 chunk 推送(issue 19b · ADR-0013 D2 ②)
-   *
-   * Agent 在 ANALYZING 解析过程中(包括 admission-check Skill 运行 / 用户插话后)
-   * 通过 SseHub.publish(reqId, ...) 把新增 chunk 推到该 reqId 的所有订阅者;
-   * web 客户端 EventSource 收到后追加到打字机思考流末尾。
-   *
-   * - `reqId`: requirement id(冗余,便于 web 端直接 discard 跨事件)
-   * - `sessionId`: 当前会话 id;web 端可据此判断是否要追加(多会话场景,VS3)
-   * - `chunk`: 与 `AnalyzingChunk` 形态一致 — 这里只重复最小字段,
-   *   web 端读到后补全 stats / timestamp / id 即可
-   */
-  | {
-      type: 'analysis_chunk'
-      reqId: string
-      sessionId: string
-      ts: number
-      chunk: {
-        id: string
-        ts: string
-        label: string
-        kind: 'narration' | 'subproblem' | 'risk' | 'option'
-        tone: 'info' | 'success' | 'warn' | 'err'
-        text: string
-        /**
-         * ADR-0017 D3:可选的源出处引用;仅 subproblem/risk/option 类型
-         * 的 chunk 携带,narration 一律省略。形态契约见 web 端
-         * `apps/web/src/lib/analyzing.ts` 的 `SourceRef` discriminated
-         * union(agent 端内联定义镜像类型);此处只保留
-         * `readonly unknown[]` 弱类型 —— shared 包不应反向依赖
-         * web 端的 brand 标记,具体 narrow 由消费方按 `kind` 分支处理。
-         */
-        source_refs?: readonly unknown[]
-        /**
-         * ADR-0020 D8 / audit-2026-07-26 #2:准入侧信息。由 agent 的 SDK 文本
-         * 解析层(`analysis-chunk-parser.ts`)从 `admission-check` Skill 输出的
-         * `[DIM <id>]` / `[VERDICT]` 块解析而来;web 端 `deriveAdmissionData`
-         * 据此让 AdmissionDashboard 五维卡 count 与总体徽章随 SSE 实时上涨。
-         *
-         * - `dim` + `verdict`:一条 `[DIM <id>]` 块(单维度裁决)
-         * - `overall` + `pendingCount`:一条 `[VERDICT]` 块(总体结论)
-         * 两组互斥;narration 之外的 chunk(三桶)不携带本字段。
-         */
-        admission?: {
-          dim?: string
-          verdict?: 'pass' | 'warn' | 'fail'
-          overall?: 'pass' | 'pending' | 'fail'
-          pendingCount?: number
-        }
-      }
-    }
-  /**
-   * 分析 turn 流结束信号(ticket 08 · 2026-07-28 按钮常驻化)。
-   *
-   * Agent 在 `streamTurnEvents()` 的 SDK 流关闭处(=turn-done,ADR-0020 D8)
-   * 通过 `SseHub.publish(reqId, ...)` 推此 variant 到该 reqId 的所有订阅者;
-   * 每个 turn 完成各发一次(双 turn 即发两次),让 Web 端 `startState` 复位
-   * 回 idle 后用户可以再次触发新一轮分析。
-   *
-   * Web 端按 `sessionId` 与当前 active 会话匹配后再复位 —— 避免后台其它
-   * session 完成时误复位"最近一次点击"造成的 running 状态。
-   *
-   * - `turn: 1 | 2`:对应 ADR-0020 D8 的 admission-check / requirement-brainstorm
-   *   双 turn;如未来 turn 数变,扩展为字面量 union 即可。
-   * - 不携带 `chunk`:业务数据已在先前 `analysis_chunk` 事件里推完;本事件
-   *   仅做"流阶段结束"的进度信号,与下方 `query_succeeded` 不同(后者是
-   *   query 级终态,与 retry/失败语义绑定;本事件是 turn 级成功信号)。
-   */
-  | {
-      type: 'analysis_done'
-      reqId: string
-      sessionId: string
-      ts: number
-      turn: 1 | 2
-    }
-  /**
    * 权限请求(ADR-0010 Q6.3 + ADR-0009 第 3 层「亮」模态)。
    *
    * Agent 在 SDK PreToolUse hook 命中 5 类高危时,通过 SseHub.publish(reqId, ...)
@@ -379,6 +304,29 @@ export type SseEvent =
       skillName: string
       /** 被删除 Run 当时的 Issue 数(用于 toast / 跨标签反馈) */
       issueCount: number
+    }
+  /**
+   * Run 重试进度(issue 07 验收 1)。Agent 在 SDK 临时错误(网络/限流/
+   * 5xx)后,延迟重试前 publish 一次;Web 端可显示"正在重试第 N 次"提示。
+   *
+   * 不写入 `log.jsonl`(决策 37:retrying 不入 Run Log,只对前端可见);
+   * 携带 `category` 便于 UI 决定是否静默 / 提示。
+   */
+  | {
+      type: 'analysis_run_retrying'
+      reqId: string
+      runId: string
+      ts: number
+      /** 第几次 attempt(1-based);本事件发出后即将进行第 attempt+1 次尝试 */
+      attempt: number
+      /** 错误分类;A=API transient,D=network,C=process;B/E/cancelled 不发本事件 */
+      category: 'A' | 'C' | 'D'
+      /** 分类层判定的可重试标志(冗余于 category,便于客户端快速判断) */
+      retryable: boolean
+      /** 本次重试前的退避时长(毫秒) */
+      delayMs: number
+      /** 错误原因原样(由 SDK 透传,前端可降级显示) */
+      error: string
     }
 
 export const SSE_HEARTBEAT_MS = 30_000

@@ -12,7 +12,7 @@
  *   —— 应用升级时由 Agent 用系统版本强制覆盖;其他名称由 Workspace 保留
  * - 每次 list 实时 readdir,无缓存(沿用 decision 74 repos 模式)
  * - 非法 Skill(frontmatter 字段缺失或类型错)→ 跳过,不入列表(沿用
- *   skill-schema.ts 对 built-in Skill 的容错)
+ *   `splitSkillMarkdown` + `parseMinimalFrontmatter` 容错规则)
  * - 客户端 + 服务端均做 Zod 二次校验,防契约漂移
  */
 

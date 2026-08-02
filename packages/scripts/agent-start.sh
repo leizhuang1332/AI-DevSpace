@@ -41,13 +41,39 @@ APP_PID=$!
 echo "$APP_PID" > "$PID_FILE"
 echo "agent-start: pid=$APP_PID log=$LOG_FILE"
 
-# Wait briefly for port to come up
-for i in {1..20}; do
-  if (echo > /dev/tcp/127.0.0.1/"$PORT") 2>/dev/null; then
-    echo "agent-start: ready on :$PORT"
-    exit 0
+# Wait for the agent to actually serve /api/health on $PORT.
+# 历史上只用 /dev/tcp 探端口,会在端口被旧/占用进程抢走时误报 ready,
+# 实际 Agent 因 EADDRINUSE 立即崩溃,Web → Agent 全断。本次改用 HTTP 健康探针
+# + 进程存活双校验,失败时非零退出,留 30s 缓冲以兼容冷启动 SDK / cc-switch 初始化。
+HEALTH_URL="http://127.0.0.1:${PORT}/api/health"
+READY=0
+# 最多 30s 探测(60 * 0.5s)。测试时可经 AGENT_START_PROBE_TIMEOUT 缩短。
+PROBE_ITERS="${AGENT_START_PROBE_TIMEOUT:-60}"
+for ((i=0; i<PROBE_ITERS; i++)); do
+  if ! kill -0 "$APP_PID" 2>/dev/null; then
+    echo "agent-start: ERROR pid $APP_PID exited before becoming ready; see $LOG_FILE"
+    rm -f "$PID_FILE"
+    exit 1
+  fi
+  CODE="$(curl --max-time 1 -sS -o /dev/null -w '%{http_code}' "$HEALTH_URL" 2>/dev/null || true)"
+  if [[ "$CODE" == "200" ]]; then
+    READY=1
+    break
   fi
   sleep 0.5
 done
-echo "agent-start: WARNING port $PORT not ready within 10s; check $LOG_FILE"
+
+if [[ "$READY" -ne 1 ]]; then
+  echo "agent-start: ERROR $HEALTH_URL did not return 200 within 30s; see $LOG_FILE"
+  # 清理 PID 文件 + 杀掉仍在跑但无 HTTP 的子进程,避免下一轮启动撞 EADDRINUSE
+  if kill -0 "$APP_PID" 2>/dev/null; then
+    kill -TERM "$APP_PID" 2>/dev/null || true
+    sleep 0.5
+    kill -KILL "$APP_PID" 2>/dev/null || true
+  fi
+  rm -f "$PID_FILE"
+  exit 1
+fi
+
+echo "agent-start: ready on :$PORT (http /api/health)"
 exit 0

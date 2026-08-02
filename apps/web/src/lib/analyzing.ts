@@ -1,283 +1,96 @@
 /**
- * ANALYZING 工位数据层 — client-safe 部分(ADR-0011 §6 ANALYZING 布局 ·
- *   ADR-0013 工位重写 · issue 19)
+ * ANALYZING 工位数据层 — client-safe 部分(ADR-0021 · issue 08 契约收缩)
  *
- * 形态从"旁观 AI 解析"重写为"PRD 准入 + 技术概要协作工作台"。
+ * issue 08 之后,ANALYZING 工位的领域模型只剩:
+ * - Analysis Skill(workspace 集合 + per-Requirement 选择)
+ * - Analysis Run(每次"开始分析"的独立识别任务)
+ * - Analysis Issue(Run 内由模型报告的问题)
+ * - Issue Response(用户对 Issue 的 Markdown 答复)
+ * - Analysis Run Log(Run 期间的持久化运行记录)
  *
- * 顶层数据布局(issue 19a VS1):
- * - admission: 准入仪表板(5 维度 + verdict + 待裁决 N)
- * - sessions / session: 多会话(后续 slice 填充)
- * - techBriefPath / modulesYamlPath / adjudicationPath: 产物路径(后续 slice 填充)
- * - chunks / stats / summary / toolbar: 兼容原"观察屏"接口,本期不破坏
+ * 旧领域模型 **全部删除**:
+ * - Admission Dimension / Verdict / Pending Adjudication
+ * - subproblem / risk / option 三桶 Product
+ * - AnalysisSession + angle + Session Tabs + 创建对话框
+ * - Technical Brief + Aggregate Module(双产物)
+ * - 固定 admission-check / requirement-brainstorm 双 turn
+ * - 运行中 interject
  *
- * 数据形态(对应 SSE chunk):
- * - 每个 chunk = 一行思考产物(label + text + ts + tone)
- * - chunks 中含 kind: 'subproblem' | 'risk' | 'option' 的项目被计入顶部 stats
- * - isComplete = true 时,UI 弹"AI 分析完成,切到 CLARIFYING 吗?"提示
+ * 本文件仅保留支持文档阅读器联动所需的最小客户端辅助:
+ * - `SourceRef`(prd / aux / asset 三形态 —— 文档阅读器画线高亮所需)
+ * - `CitationSpan` / `CitationRefsByDoc` + 派生的 build / collect 函数
  *
- * 设计原则(沿用 EXECUTING/DRAFTING 工位):
- * - 纯函数 + 类型化,便于单元测试
- * - 显式标注 async 为后续接 agent API 时的接口稳定
- * - 数据由 server 注入,组件只关心渲染 + 客户端打字机控制
- *
- * 模块拆分说明(issue 19a/19b · Webpack `UnhandledSchemeError` 修复):
- * 本文件只保留 client-safe 内容(types / 纯函数 / mock 常量)。RSC 端的数据获取与
- * 文件 IO 已搬到 `./analyzing.server.ts`(详见该文件顶注)。client component
- * 只能引用本文件;引用 `./analyzing.server.ts` 会失败或越界到服务端代码。
+ * SSR 数据契约 `AnalyzingData` 是顶层类型,字段全部对齐新的 Analysis Skill /
+ * Run / Issue / Response 链路。
  */
 
-import {
-  ADMISSION_DIMENSION_META,
-  DEFAULT_ADMISSION_DIMENSIONS,
-  type AdmissionDimensionId,
-  type AnalysisSkillMeta as AnalysisSkillMetaT,
-  type AnalysisRunMeta,
-  type AssetMeta,
-  type AuxFile,
-} from '@ai-devspace/shared'
+import type { AssetMeta, AuxFile } from '@ai-devspace/shared'
+import type { AnalysisRunMeta } from '@ai-devspace/shared'
+import type { AnalysisSkillMeta } from '@ai-devspace/shared'
 
 // ---------------------------------------------------------------------------
-// 类型定义
-// ---------------------------------------------------------------------------
-
-/** 思考流单 chunk 标签:对应 SSE 推送事件类型 */
-export type AnalyzingChunkLabel =
-  | 'START'
-  | 'READ'
-  | 'SCAN'
-  | 'MATCH'
-  | 'DETECT'
-  | 'RISK'
-  | 'INFER'
-  | 'THINK'
-  | 'OPTION'
-  | 'COMPLETE'
-
-/** chunk 语义分类:决定被顶部 stats 计入哪一类 */
-export type AnalyzingChunkKind = 'narration' | 'subproblem' | 'risk' | 'option'
-
-/** chunk 视觉调色(info=brand 蓝,success=绿,warn=黄,err=红) */
-export type AnalyzingChunkTone = 'info' | 'success' | 'warn' | 'err'
-
-/**
- * AI 思考流单 chunk —— 一次 SSE 推送对应一条 chunk。
- *
- * - label: 步骤标签(START/READ/DETECT 等),UI 渲染为彩色徽章
- * - text:  这一步骤的描述文字
- * - ts:    时间戳(形如 "14:23:01")
- * - kind:  决定是否计入顶部 stats(subproblem/risk/option 三类计数)
- * - tone:  决定 label 徽章背景色与左侧 border 颜色
- * - source_refs: chunk 关联的源出处(ADR-0017 D3);**narration chunk 一律省略**,
- *   仅 `subproblem` / `risk` / `option` 类型的 chunk 可能携带。SSR / 持久化
- *   层写入前用 `isSourceRef` 校验,运行时通过 type guard 容错历史数据。
- * - synthetic:是否为 VS4 "用户手加 product" 合成的 chunk(ADR-0017 D6);落到
- *   chunks.jsonl 保留用户输入,重扫时 AI prompt 层过滤;本 ticket 01 仅声明
- *   字段,落地逻辑见 ticket 04
- */
-export interface AnalyzingChunk {
-  id: string
-  ts: string
-  label: AnalyzingChunkLabel
-  text: string
-  kind: AnalyzingChunkKind
-  tone: AnalyzingChunkTone
-  /** 可选:仅 kind !== 'narration' 时存在;JSONL 落盘时显式包含或省略,不写 null */
-  source_refs?: SourceRef[]
-  /** 可选:是否为合成的用户添加项(ADR-0017 D6 — 落地逻辑见 ticket 04) */
-  synthetic?: boolean
-  /**
-   * 可选:准入侧信息(ADR-0020 D8 · audit-2026-07-26 #2)。
-   *
-   * 由 agent 的 SDK 文本解析层从 `admission-check` Skill 输出的
-   * `[DIM <id>]` / `[VERDICT]` 块解析而来,随 SSE 推送并落 chunks.jsonl。
-   * `deriveAdmissionData()` 据此让 AdmissionDashboard 五维卡 count 与总体
-   * 徽章随分析实时上涨(不再永远全 0)。
-   *
-   * 仅 narration chunk 携带(三桶 chunk 走 source_refs 通道)。
-   */
-  admission?: AdmissionChunkMeta
-}
-
-/** chunk 上的准入侧信息(与 agent `analysis-chunk-parser.ts` 镜像) */
-export interface AdmissionChunkMeta {
-  /** 单维度块:维度 id(对应 AdmissionDimension.id) */
-  dim?: string
-  /** 单维度块:该维度裁决 */
-  verdict?: 'pass' | 'warn' | 'fail'
-  /** 总体块:`[VERDICT] result:` 派生 */
-  overall?: AdmissionVerdict
-  /** 总体块:`[VERDICT] pending_count:` 派生 */
-  pendingCount?: number
-}
-
-/** 顶部 stats 三档计数(对应原型 .summary-stat 三块) */
-export interface AnalyzingStats {
-  subproblems: number
-  risks: number
-  options: number
-  /** 三个数字之和(便于渲染 "5 + 3 + 2" 类提示) */
-  total: number
-}
-
-/** 思考流元数据 */
-export interface AnalyzingStreamMeta {
-  /** chunk 总数;UI 渲染 "X / Y" 进度 */
-  totalChunks: number
-  /** 流式是否仍在进行(false = 已全部到达,可弹完成提示) */
-  isStreaming: boolean
-  /** 流式开始时间(ISO);UI 渲染 "已运行 14s" */
-  startedAt: string
-  /** 流式结束时间(ISO);isStreaming=false 时存在 */
-  endedAt: string | null
-}
-
-/** Toolbar(面包屑 + 动作按钮) */
-export interface AnalyzingToolbarCrumb {
-  label: string
-  current?: boolean
-}
-
-/** Toolbar 按钮 —— 仅含 UI 决策(文案 + 样式),不绑定 ID。
- *  对齐 EXECUTING 样板的 `ToolbarAction` 设计;业务特定动作(如"复制思考产物")
- *  通过 variant 区分,本期不区分 ID。 */
-export interface AnalyzingToolbarAction {
-  label: string
-  variant: 'primary' | 'secondary' | 'danger' | 'ghost'
-}
-
-export interface AnalyzingToolbar {
-  crumb: AnalyzingToolbarCrumb[]
-  actions: AnalyzingToolbarAction[]
-}
-
-/** 顶部摘要(原型 .thinking-summary:大图标 + 标题 + 描述 + 三 stats) */
-export interface AnalyzingSummary {
-  icon: string
-  title: string
-  description: string
-}
-
-// ---------------------------------------------------------------------------
-// 源出处引用(ADR-0017 D3 · 本 ticket 01 落地)
+// SourceRef(本地视图类型 —— 与 shared SourceRef 镜像对齐)
 // ---------------------------------------------------------------------------
 
 /**
- * SourceRef 3 种子类型的 **brand 标记**(ADR-0017 D3 · ticket 01 验收)。
+ * 文档阅读器可定位的 SourceRef 子类型。
  *
- * 三种 kind 各自带 nominal brand:`PrdSourceRefBrand` / `AuxSourceRefBrand` /
- * `AssetSourceRefBrand`。TS 结构化类型默认不能区分三者(都是 `{kind: 'prd'|'aux'|'asset'}`),
- * 通过 brand 字段让它们在类型层不可互换 —— 调用方必须先经过 `isSourceRef`
- * narrow 出 kind 才能访问对应字段,杜绝把 `prd` 当 `aux` 之类混淆。
+ * 本地视图类型 = `@ai-devspace/shared` `SourceRef` 的子集(去掉 `repository`,
+ * 它不在阅读器内)。`kind === 'prd'` 在本地视图里映射到 `requirement` 来源,
+ * 渲染时按 PRD 处理。
  *
- * 实现形式:`unique symbol` 索引签名;brand 字段**可选**,允许外部字面量构造
- * (literal `{kind:'prd',...}` 不必写 brand;经过 `isSourceRef` 后的对象在 TS 视角
- * 等同已带 brand)。runtime 校验完全由 `isSourceRef` 按 kind 完成(symbol 在编译
- * 后被擦除,不影响 JSONL 序列化)。
+ * `lineRange` = `[start, end)` 0-based 半开区间;asset 没有行概念。
  */
-declare const PrdSourceRefBrand: unique symbol
-declare const AuxSourceRefBrand: unique symbol
-declare const AssetSourceRefBrand: unique symbol
 
-/**
- * PRD 源出处:指名 `requirement.md` 的 `[startLine, endLine)` 行范围
- * (lineRange 0-based 半开,对齐 `extractPrdAnchors` 的 `line` 约定);
- * `quote?` 可选存原文片段(SSR 兜底渲染 / lineRange 漂移时 sanity check)。
- */
-export type PrdSourceRef = {
+export interface PrdSourceRef {
   readonly kind: 'prd'
   readonly lineRange: readonly [number, number]
   readonly quote?: string
-  readonly [PrdSourceRefBrand]?: 'prd'
 }
 
-/**
- * AuxFile 源出处:指名某个 AuxFile(`auxId` 严格等于 `AuxFile.id`);
- * 行范围语义同 prd。
- */
-export type AuxSourceRef = {
+export interface AuxSourceRef {
   readonly kind: 'aux'
   readonly auxId: string
   readonly lineRange: readonly [number, number]
   readonly quote?: string
-  readonly [AuxSourceRefBrand]?: 'aux'
 }
 
-/**
- * Asset 源出处:指名某张 Asset(`assetId` 等于 `AssetMeta.name`);不带行范围
- * (资产无行概念)。
- */
-export type AssetSourceRef = {
+export interface AssetSourceRef {
   readonly kind: 'asset'
   readonly assetId: string
-  readonly [AssetSourceRefBrand]?: 'asset'
 }
 
-/**
- * `SourceRef` discriminated union(ADR-0017 D3)—— 三种 brand 子类型并集。
- *
- * 字段约束:
- * - kind ∈ {'prd'|'aux'|'asset'} 必填;`quote?` 可选存原文片段
- * - 仅出现在 `AnalyzingChunk.kind` 为 `subproblem` | `risk` | `option` 的 chunk 上,
- *   narration chunk 一律省略(由 SSE 推送层 + `loadSessionChunks` 运行时校验双重保证;
- *   若 narration chunk 在 JSONL 中带 source_refs,loader 会**丢弃** source_refs,
- *   不让"narration 不引用源"的契约被破坏)
- * - JSONL 持久化时显式包含数组(即使是空 `[]`)或省略字段;绝**不**写 `null`
- *   (体积优化,见 `serializeAnalyzingChunk`)
- */
 export type SourceRef = PrdSourceRef | AuxSourceRef | AssetSourceRef
 
 /**
- * 类型守卫:校验一个 `unknown` 是否符合 `SourceRef` 形态。
+ * 校验 `unknown` 是否符合本地 SourceRef 形态。
  *
- * 设计要点:
- * - 单一入口:JSONL 解析 / SSE 推送 / 任意来源数据都用此函数做窄化,
- *   避免每个调用点重复写结构校验
- * - 校验粒度遵循 **ADR D3 契约**(不私自收紧):
- *   - `lineRange`:必须是恰好 2 元素的有限数字元组(NaN/Infinity/倒置区间 → 拒绝)
- *   - `quote`:可选 string,允许空串/纯空白;非 string 拒绝
- *   - `auxId` / `assetId`:必填**非空** string(downstream 用作 AuxFile.id / AssetMeta.name
- *     查找;空字符串会破坏匹配,故拒绝)
- * - 不可信输入(`unknown`)→ `false`,而不是抛错
- *
- * @example
- * isSourceRef({ kind: 'prd', lineRange: [10, 20] }) // → true
- * isSourceRef({ kind: 'asset', assetId: 'prd-1.png' }) // → true
- * isSourceRef({ kind: 'prd', lineRange: [10] }) // → false(lineRange 缺位)
- * isSourceRef(null) // → false
+ * - lineRange 必须是恰好 2 元素的有限数字元组(NaN / Infinity / 倒置 → 拒绝)
+ * - auxId / assetId 必须是非空字符串
+ * - quote 可选 string;非 string 拒绝
+ * - 不可信输入(unknown)→ false,不抛错
  */
 export function isSourceRef(value: unknown): value is SourceRef {
   if (!value || typeof value !== 'object') return false
   const v = value as Record<string, unknown>
   const kind = v.kind
   if (kind === 'prd' || kind === 'aux') {
-    // 校验 lineRange:[number, number] 恰好两元素 + 有限 + 非倒置
     if (!isLineRangePair(v.lineRange)) return false
-    // aux 必须有非空 auxId(downstream 用作 AuxFile.id 查找)
     if (
       kind === 'aux' &&
       (typeof v.auxId !== 'string' || v.auxId.length === 0)
     ) {
       return false
     }
-    // quote 允许省略或任意 string;非 string 拒绝
     if (v.quote !== undefined && typeof v.quote !== 'string') return false
     return true
   }
   if (kind === 'asset') {
-    // assetId 是非空 string(downstream 用作 AssetMeta.name 查找)
     return typeof v.assetId === 'string' && v.assetId.length > 0
   }
   return false
 }
 
-/**
- * 校验 `unknown` 是否为 `[number, number]` 形态(lineRange 半开区间)。
- *
- * - 数组长度恰好为 2;两元素必须是有限数字(`Number.isFinite` 拒绝 NaN/Infinity)
- * - 起点必须 ≤ 终点(若倒置则区间无意义,本期保守拒绝)
- *
- * 不导出(预留为 internal helper;若以后要给 SSE 层复用再 `export`)。
- */
 function isLineRangePair(value: unknown): value is readonly [number, number] {
   if (!Array.isArray(value) || value.length !== 2) return false
   const a = value[0]
@@ -288,89 +101,19 @@ function isLineRangePair(value: unknown): value is readonly [number, number] {
   return true
 }
 
-/**
- * chunk → SSE / JSONL 序列化(ADR-0017 D3 · 体积优化约束):
- * - `source_refs`:**显式包含数组(即使是空 `[]`)或省略字段**;绝不写 `null`
- * - narration chunk 与 `source_refs` 不兼容:无论源数据是否含字段,
- *   输出里 narration chunk 一律不带 `source_refs`(契约的二次保障;`loadSessionChunks`
- *   在 JSONL 装载侧也做同样处理,防止历史脏数据漏出)
- * - `synthetic`:显式写 `true` / `false`;缺省时省略 —— `false` 不是"缺省"的别名
- *
- * 输出是 plain object,直接 `JSON.stringify(...)` 或经 SSE 编码层送线。
- *
- * @example
- * serializeAnalyzingChunk({id:'c-1', ..., kind:'subproblem', source_refs: []})
- *   // → {..., kind:'subproblem', source_refs: []}  // 空数组显式保留
- * serializeAnalyzingChunk({id:'n-1', ..., kind:'narration', source_refs: [...]})
- *   // → {..., kind:'narration'}  // 强制省略
- */
-export function serializeAnalyzingChunk(
-  chunk: AnalyzingChunk,
-): Record<string, unknown> {
-  // base 字段:始终写
-  const out: Record<string, unknown> = {
-    id: chunk.id,
-    ts: chunk.ts,
-    label: chunk.label,
-    text: chunk.text,
-    kind: chunk.kind,
-    tone: chunk.tone,
-  }
-  // narration 不写 source_refs(契约二次保障)
-  if (chunk.kind !== 'narration' && chunk.source_refs !== undefined) {
-    out.source_refs = chunk.source_refs
-  }
-  // synthetic:false 也写(显式声明非合成)
-  if (chunk.synthetic !== undefined) {
-    out.synthetic = chunk.synthetic
-  }
-  return out
-}
-
 // ---------------------------------------------------------------------------
-// 画线关联(ADR-0017 D3 / D4 · ticket 03)
-//
-// 三个纯函数把 chunks 的 `source_refs` 派生为左栏阅读器需要的形态:
-// - `countCitationsByDoc`:每个文档被引用的**总次数**(Tab 标签 "🔗 N")
-// - `collectCitationRefs`:按文档分桶的 **原始 source_ref 列表**(供高亮渲染)
-// - `buildCitationSpans`:某文档全文 + 该文档 refs → **去重后的高亮 span**
-// - `countAssetCitations`:asset refs → 每张图被引用次数(图片角标 "🔗 N")
+// 文档阅读器画线高亮(ADR-0017 D4)
 // ---------------------------------------------------------------------------
 
-/**
- * 引用计数(ADR-0017 D2 Tab 标签)—— 遍历所有 chunk 的 `source_refs`,按 kind 分桶计数。
- *
- * - `prd`:kind === 'prd' 的总数
- * - `aux`:auxId → 次数(缺省 aux 不出现在 map 中)
- * - `asset`:kind === 'asset' 的总数
- *
- * 纯函数,便于单测。narration chunk 不带 source_refs(loader 侧已保证),无需二次校验。
- */
-export function countCitationsByDoc(chunks: readonly AnalyzingChunk[]): {
-  prd: number
-  aux: Record<string, number>
-  asset: number
-} {
-  // 复用 collectCitationRefs 的分桶结果 → 计数(避免重复 ref.kind 三分支遍历)
-  const grouped = collectCitationRefs(chunks)
-  const aux: Record<string, number> = {}
-  for (const auxId of Object.keys(grouped.aux)) {
-    aux[auxId] = grouped.aux[auxId].length
-  }
-  return { prd: grouped.prd.length, aux, asset: grouped.asset.length }
-}
-
-/** 高亮 span(去重后)—— 同一 lineRange 被 N 个产物引用 → 一条 span,refsCount=N */
 export interface CitationSpan {
-  /** 0-based 半开行区间 [start, end),对齐 SourceRef.lineRange */
+  /** 0-based 半开行区间 [start, end) */
   readonly lineRange: readonly [number, number]
-  /** 引用此 span 的产物数(≥ 1) */
+  /** 引用此 span 的 Issue 数(≥ 1) */
   readonly refsCount: number
-  /** quote 与 lineRange 处文本不一致(tooltip 显示 ⚠️,留 v2 修复)*/
+  /** quote 与 lineRange 处文本不一致(tooltip 显示 ⚠️,issue 03 留 v2 修复) */
   readonly quoteMismatch: boolean
 }
 
-/** 按文档分桶的原始 source_ref(供 `buildCitationSpans` / asset 角标使用) */
 export interface CitationRefsByDoc {
   prd: PrdSourceRef[]
   aux: Record<string, AuxSourceRef[]>
@@ -378,44 +121,83 @@ export interface CitationRefsByDoc {
 }
 
 /**
- * 按文档分桶收集 source_refs(ADR-0017 D4)。
+ * 收集 SourceRef 并按文档分桶。
  *
- * 与 `countCitationsByDoc` 的区别:此函数保留**原始 ref 对象**(含 lineRange / quote),
- * 供阅读器渲染高亮 span;计数函数只保留数字。narration chunk 无 source_refs。
+ * 入参 `sourceRefs` 允许任意带 source_refs 的形状 —— 我们只读 `kind` 与必要字段,
+ * 不强制形状是本地 SourceRef(也接受 shared SourceRef 的 subset)。
  */
 export function collectCitationRefs(
-  chunks: readonly AnalyzingChunk[],
+  sourceRefs: ReadonlyArray<{
+    kind?: unknown
+    lineRange?: unknown
+    auxId?: unknown
+    assetId?: unknown
+    quote?: unknown
+  }>,
 ): CitationRefsByDoc {
   const prd: PrdSourceRef[] = []
   const aux: Record<string, AuxSourceRef[]> = {}
   const asset: AssetSourceRef[] = []
-  for (const c of chunks) {
-    const refs = c.source_refs
-    if (!refs || refs.length === 0) continue
-    for (const ref of refs) {
-      if (ref.kind === 'prd') prd.push(ref)
-      else if (ref.kind === 'asset') asset.push(ref)
-      else if (ref.kind === 'aux') {
-        ;(aux[ref.auxId] ??= []).push(ref)
-      }
+  for (const ref of sourceRefs) {
+    if (!ref || typeof ref !== 'object') continue
+    if (ref.kind === 'prd' && isLineRangePair(ref.lineRange)) {
+      const out: PrdSourceRef = { kind: 'prd', lineRange: ref.lineRange }
+      if (typeof ref.quote === 'string') (out as { quote?: string }).quote = ref.quote
+      prd.push(out)
+    } else if (ref.kind === 'asset' && typeof ref.assetId === 'string' && ref.assetId.length > 0) {
+      asset.push({ kind: 'asset', assetId: ref.assetId })
+    } else if (
+      ref.kind === 'aux' &&
+      typeof ref.auxId === 'string' &&
+      ref.auxId.length > 0 &&
+      isLineRangePair(ref.lineRange)
+    ) {
+      const out: AuxSourceRef = { kind: 'aux', auxId: ref.auxId, lineRange: ref.lineRange }
+      if (typeof ref.quote === 'string') (out as { quote?: string }).quote = ref.quote
+      ;(aux[ref.auxId] ??= []).push(out)
     }
   }
   return { prd, aux, asset }
 }
 
 /**
- * 从文档全文 + 该文档的 source_refs 派生**去重后的高亮 span**(ADR-0017 D4)。
+ * 文档引用计数(Issue → 文档联动 Tab 标签 "🔗 N")。
  *
- * 规则:
+ * `prd` = PRD 引用总次数;`asset` = Asset 引用总次数;`aux` = 每个 AuxFile 的
+ * 引用次数(以 auxId 为键)。
+ */
+export function countCitationsByDoc(sourceRefs: CitationRefsByDoc): {
+  prd: number
+  aux: Record<string, number>
+  asset: number
+} {
+  const aux: Record<string, number> = {}
+  for (const auxId of Object.keys(sourceRefs.aux)) {
+    aux[auxId] = sourceRefs.aux[auxId].length
+  }
+  return { prd: sourceRefs.prd.length, aux, asset: sourceRefs.asset.length }
+}
+
+/** 统计每张 asset 被引用的次数(供图片角标 "🔗 N" 使用)。 */
+export function countAssetCitations(
+  refs: readonly AssetSourceRef[],
+): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const ref of refs) {
+    out[ref.assetId] = (out[ref.assetId] ?? 0) + 1
+  }
+  return out
+}
+
+/**
+ * 从文档全文 + 该文档的 SourceRef 派生**去重后的高亮 span**。
+ *
  * - 同一 `lineRange`(start:end 相同)的多个 ref → 合并成一条 span,`refsCount` 累加
- *   (对应"多产物引用同一 span → 同一高亮,不堆叠颜色")
- * - `lineRange` 越界(`start >= 文档行数` 或 `start < 0`)→ **跳过该 ref**(不报错;
- *   ADR-0017 风险缓解 "lineRange 漂移")
- * - `quote` 存在且非空,但与 `[start, end)` 处文本不含该 quote → `quoteMismatch = true`
- *   (tooltip 显示 ⚠️;本期不做 quote 兜底重定位,留 v2)
+ * - `lineRange` 越界(start >= 文档行数 或 start < 0)→ 跳过该 ref(不报错)
+ * - `quote` 与 `[start, end)` 处文本不一致 → `quoteMismatch = true`(tooltip ⚠️)
  * - 返回按 `start` 升序排序
  *
- * 纯函数,便于单测。空文档 / 空 refs → `[]`。
+ * 纯函数,便于单测;空文档 / 空 refs → `[]`。
  */
 export function buildCitationSpans(
   docText: string,
@@ -434,7 +216,6 @@ export function buildCitationSpans(
   const order: string[] = []
   for (const ref of refs) {
     const [start, end] = ref.lineRange
-    // 越界:start 超出文档行数(或负数)→ 跳过该 ref
     if (start < 0 || start >= lineCount) continue
     const key = `${start}:${end}`
     let entry = map.get(key)
@@ -463,629 +244,56 @@ export function buildCitationSpans(
     .sort((a, b) => a.lineRange[0] - b.lineRange[0])
 }
 
-/**
- * 统计每张 asset 被引用的次数(ADR-0017 D2 图片角标 "🔗 N")。
- * 键为 `assetId`(= `AssetMeta.name`);空数组 → `{}`。
- */
-export function countAssetCitations(
-  refs: readonly AssetSourceRef[],
-): Record<string, number> {
-  const out: Record<string, number> = {}
-  for (const ref of refs) {
-    out[ref.assetId] = (out[ref.assetId] ?? 0) + 1
-  }
-  return out
-}
-
 // ---------------------------------------------------------------------------
-// 识别产物(ADR-0013 D2 ③ · issue 19b VS2 只读视图)
+// AnalyzingData(SSR 数据契约)
 // ---------------------------------------------------------------------------
 
 /**
- * 识别产物单条 — 由 chunk.kind 派生
+ * ANALYZING 工位顶层数据(issue 08 收敛形态)。
  *
- * - title:chunk.text 第一行(行首是 Q1· / A · 之类前缀,UI 显示时保留)
- * - description:余下文字(若 text 含多行)
- * - severity:从 chunk.tone 反查
- * - source_refs:从源 chunk 透传(ADR-0017 D3);UI 据此显示 "🔗 N 处" 与联动高亮
- * - synthetic:是否为 VS4 "用户手加 product" 合成的 chunk(ADR-0017 D6);
- *   `true` 时 UI 显示 "⚠️ 无出处" 角标(若 source_refs 缺失)
- */
-export interface AnalyzingProductItem {
-  id: string
-  title: string
-  description?: string
-  severity: 'red' | 'orange' | 'yellow' | 'green' | 'blue'
-  /** 可选:从 chunk.source_refs 透传;UI 据此联动左栏阅读器 */
-  source_refs?: SourceRef[]
-  /** 可选:是否为合成的用户添加项(ADR-0017 D6 — 落地逻辑见 ticket 04) */
-  synthetic?: boolean
-}
-
-/** 三类产物的分组(对应原型 .identified-item 三类) */
-export interface AnalyzingProductGroup {
-  /** 📌 子问题(Q1 · 退款金额上限?...)*/
-  subproblems: AnalyzingProductItem[]
-  /** ⚠️ 风险点(高并发退款重复创建...)*/
-  risks: AnalyzingProductItem[]
-  /** 🎨 方案方向(A · 同步单阶段...)*/
-  options: AnalyzingProductItem[]
-}
-
-/** chunk.tone → 产品 severity 映射(issue 19b · 与 admission 维度同色系) */
-const TONE_TO_SEVERITY: Record<AnalyzingChunkTone, AnalyzingProductItem['severity']> = {
-  info: 'blue',
-  success: 'green',
-  warn: 'orange',
-  err: 'red',
-}
-
-/**
- * 派生识别产物:扫描 chunks 按 kind 分类,生成 ProductList 只读视图。
+ * 字段全部围绕 Analysis Skill / Run / Issue / Response 链路:
+ * - `requirementId`:`req-NNN-<slug>`
+ * - `prdMarkdown` / `auxFiles` / `assetList`:文档阅读器依赖的当前 Requirement 内容
+ * - `availableSkills` / `selectedSkillName`:Analysis Skill 单选器
+ * - `runs`:该 Requirement 已有 Analysis Run 元数据(按 created_at 倒序)
+ * - `empty`:老契约空态标志(requirement.md 不存在 → 引导去 DRAFTING)
  *
- * 设计要点:
- * - 纯函数,便于单测
- * - text 第一行作为 title;剩余行(若有)作为 description
- * - severity 从 chunk.tone 反查,保证视觉一致
- * - **透传 source_refs / synthetic**(ADR-0017 D3 / D6):派生不修改这两个字段,
- *   由 chunk 落到 product;UI 据此渲染 "🔗 N 处" 角标与联动左栏高亮
- */
-export function deriveProducts(chunks: readonly AnalyzingChunk[]): AnalyzingProductGroup {
-  const subproblems: AnalyzingProductItem[] = []
-  const risks: AnalyzingProductItem[] = []
-  const options: AnalyzingProductItem[] = []
-
-  for (const c of chunks) {
-    if (c.kind === 'subproblem' || c.kind === 'risk' || c.kind === 'option') {
-      const item = chunkToProduct(c)
-      if (c.kind === 'subproblem') subproblems.push(item)
-      else if (c.kind === 'risk') risks.push(item)
-      else options.push(item)
-    }
-  }
-  return { subproblems, risks, options }
-}
-
-/** 单 chunk → product item 转换(text 第一行作为 title) */
-function chunkToProduct(chunk: AnalyzingChunk): AnalyzingProductItem {
-  const lines = chunk.text.split('\n')
-  const title = lines[0] ?? chunk.text
-  const description = lines.length > 1 ? lines.slice(1).join('\n').trim() : undefined
-  const item: AnalyzingProductItem = {
-    id: chunk.id,
-    title,
-    description: description && description.length > 0 ? description : undefined,
-    severity: TONE_TO_SEVERITY[chunk.tone],
-  }
-  // 透传 source_refs:undefined 不写字段(保持 JSONL 一致性 + UI 简化空值判断)
-  if (chunk.source_refs !== undefined) {
-    item.source_refs = chunk.source_refs
-  }
-  // 透传 synthetic:undefined 不写字段
-  if (chunk.synthetic !== undefined) {
-    item.synthetic = chunk.synthetic
-  }
-  return item
-}
-
-// ---------------------------------------------------------------------------
-// Synthetic chunk 合成(ADR-0017 D6 · ticket 04 落地)
-// ---------------------------------------------------------------------------
-
-/**
- * ProductList kind(用户在右栏加 product 时的分类)。
- *
- * 结构上等同 `products.ts` 的 `ProductKind`(= `keyof AnalyzingProductGroup`),
- * 但此处直接用 `keyof AnalyzingProductGroup` 避免 `analyzing.ts ↔ products.ts`
- * 循环 import(products.ts 反向依赖本文件)。
- */
-type SyntheticProductKind = keyof AnalyzingProductGroup
-
-/** SyntheticProductKind → chunk.label 映射 */
-const SYNTHETIC_KIND_TO_LABEL: Record<SyntheticProductKind, AnalyzingChunkLabel> = {
-  subproblems: 'DETECT',
-  risks: 'RISK',
-  options: 'OPTION',
-}
-
-/** SyntheticProductKind → chunk.kind 映射 */
-const SYNTHETIC_KIND_TO_CHUNK_KIND: Record<SyntheticProductKind, AnalyzingChunkKind> = {
-  subproblems: 'subproblem',
-  risks: 'risk',
-  options: 'option',
-}
-
-/**
- * 合成一个 "用户手动添加 product" 的 synthetic chunk(ADR-0017 D6)。
- *
- * 用户在右栏 ProductList 点 "+ 新增子问题 / 风险 / 方案" 提交时,除了走既有
- * `onAction({action:'add'})` 落 products.yaml 外,**同步**合成一条 `synthetic: true`
- * 的占位 chunk,保证 chunks.jsonl 作为单一真相源(重扫时 AI prompt 层过滤 —— 见
- * 独立 ticket)。
- *
- * 设计要点:
- * - 纯函数(除 id 生成外无副作用),便于单测
- * - id 前缀 `user-added-` + UUID,保证与 AI 产出的 chunk id 不冲突且互相唯一
- * - `tone: 'info'`(用户输入无严重度语义,统一蓝色)
- * - `source_refs`:传入则透传(可为空数组);**未传则省略字段**(保持 JSONL 一致性,
- *   下游 UI 据 "synthetic && 无 source_refs" 显示 "⚠️ 无出处" 角标)
- * - `synthetic: true` 必带
- *
- * 派生 `AnalyzingProductItem`:此 chunk 经 `deriveProducts()` 会透传
- * id / title / source_refs / synthetic 到 product,无需额外转换。
- *
- * @example
- * buildSyntheticChunk({ kind: 'risks', title: '用户加的风险', ts: '14:30:00' })
- *   // → { id:'user-added-...', label:'RISK', kind:'risk', tone:'info', synthetic:true, text:'用户加的风险' }
- */
-export function buildSyntheticChunk(params: {
-  kind: SyntheticProductKind
-  title: string
-  sourceRefs?: SourceRef[]
-  ts: string
-}): AnalyzingChunk {
-  const chunk: AnalyzingChunk = {
-    id: `user-added-${generateSyntheticId()}`,
-    ts: params.ts,
-    label: SYNTHETIC_KIND_TO_LABEL[params.kind],
-    text: params.title,
-    kind: SYNTHETIC_KIND_TO_CHUNK_KIND[params.kind],
-    tone: 'info',
-    synthetic: true,
-  }
-  // source_refs:传入则透传(含空数组);未传省略字段(JSONL 一致性 + UI 角标判断)
-  if (params.sourceRefs !== undefined) {
-    chunk.source_refs = params.sourceRefs
-  }
-  return chunk
-}
-
-/**
- * 生成 synthetic chunk id 的随机后缀。
- *
- * 优先 `crypto.randomUUID`(浏览器 + Node 19+);缺失时回退到 timestamp + random
- * (SSR / 极旧运行时兜底,仍保证足够唯一)。
- */
-function generateSyntheticId(): string {
-  if (
-    typeof globalThis.crypto !== 'undefined' &&
-    typeof globalThis.crypto.randomUUID === 'function'
-  ) {
-    return globalThis.crypto.randomUUID()
-  }
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
-}
-
-// ---------------------------------------------------------------------------
-// 准入仪表板(ADR-0013 D4 / D10 · issue 19a VS1)
-// ---------------------------------------------------------------------------
-
-/** 准入维度(SSR 数据 — 由 Skill frontmatter 装配) */
-export interface AdmissionDimension {
-  /** 维度 id;默认 5 维度来自 AdmissionDimensionIdSchema,Skill add 的可自由 string */
-  id: string
-  /** 中文标签(资损安全 / 性能 / ...) */
-  label: string
-  /** 维度图标 emoji(🔴 🟠 🟡 🟢 💬 等) */
-  icon: string
-  /** 严重度(决定卡片左侧 border 颜色) */
-  severity: 'red' | 'orange' | 'yellow' | 'green' | 'blue'
-  /** 当前激活项数(由 AI 识别产物聚合) */
-  count: number
-}
-
-/** 总体结论(仪表板右端徽章) */
-export type AdmissionVerdict = 'pass' | 'pending' | 'fail'
-
-/** 准入仪表板数据段 */
-export interface AdmissionData {
-  /** 当前激活的维度列表(顺序由 Skill 装配决定) */
-  dimensions: AdmissionDimension[]
-  /** 总体结论 */
-  verdict: AdmissionVerdict
-  /** 待裁决项数(由 analysis/adjudication.md 解析,applied: false 计数) */
-  pendingAdjudicationCount: number
-}
-
-/** Skill frontmatter 的 admission 段(SSR 解析结果,可选) */
-export interface SkillAdmissionFrontmatter {
-  admission_dimensions?: string[]
-  admission_override?: {
-    add?: string[]
-    skip?: string[]
-  }
-}
-
-// ---------------------------------------------------------------------------
-// 多会话(ADR-0013 D7 · issue 19c VS3)
-// ---------------------------------------------------------------------------
-
-/** 会话分析角度(决定 SessionTabs 默认标签 / icon) */
-export type AnalysisSessionAngle = 'architecture' | 'data' | 'interface' | 'custom'
-
-/**
- * ANALYZING 工位二态阶段(issue 重构 · 直接进入主区)。
- *
- * - 'empty':  requirement.md 不存在 → 走 <EmptyAnalyzing> 引导去 DRAFTING
- * - 'active': requirement.md 存在 → 走主区(SessionTabs + 打字机 / 思考流 / 插话),
- *             即使 fs 上还没有 sessions 也走主区(主区容错空 chunks / sessions)
- *
- * 与 `empty` 字段保持等价关系:`empty === true ⟺ phase === 'empty'`。
- */
-export type AnalyzingPhase = 'empty' | 'active'
-
-/**
- * ANALYZING 单个会话(对应 SessionTabs 的一个 Tab)
- *
- * - id:会话唯一标识(对应 `analysis/sessions/<id>/chunks.jsonl`)
- * - label:用户可见的会话名(默认按 angle 给出:"架构" / "数据" / "接口";自定义会话 = 用户输入)
- * - angle:分析角度,影响默认 icon 与排序
- * - detectedCount:已识别子问题数(Tab 数字徽章)
- * - isStreaming:会话是否仍在流式生成(决定徽章上的 "运行中" 标识)
- */
-export interface AnalysisSession {
-  id: string
-  label: string
-  angle: AnalysisSessionAngle
-  detectedCount: number
-  isStreaming: boolean
-}
-
-/** 会话角度默认元数据(issue 19c · 给 SessionTabs 用作 icon) */
-export const ANALYSIS_SESSION_ANGLE_META: Record<
-  AnalysisSessionAngle,
-  { label: string; icon: string }
-> = {
-  architecture: { label: '架构', icon: '📐' },
-  data: { label: '数据', icon: '💾' },
-  interface: { label: '接口', icon: '🔌' },
-  custom: { label: '自定义', icon: '✨' },
-}
-
-/**
- * ANALYZING 工位顶层数据
- *
- * ADR-0013 D2 ① / D4 / D7 对齐:
- * - admission(19a VS1 准入仪表板 5 维度)
- * - sessions / activeSessionId(19c VS3 多会话 Tab)
- * - chunks(当前 active 会话思考流,VS2 打字机)
- *
- * ADR-0017 D5 落地:prdMarkdown / auxFiles / assetList 由 SSR 一次性读 + 注入,
- * 客户端切换 Tab 不触发网络。
- *
- * 不破坏原"观察屏"接口(chunks / stats / summary / toolbar)——下游组件改造
- * 内部实现即可,数据契约向后兼容。
+ * 不再包含:admission / sessions / activeSessionId / techBriefPreview /
+ * modulesPreview / briefGeneratedAt / canGenerateBrief / stats / summary /
+ * toolbar / streamMeta / chunks。
  */
 export interface AnalyzingData {
   requirementId: string
-  toolbar: AnalyzingToolbar
-  summary: AnalyzingSummary
-  chunks: AnalyzingChunk[]
-  streamMeta: AnalyzingStreamMeta
-  /** 顶部 stats(chunks 派生 —— 也可由调用方预聚合) */
-  stats: AnalyzingStats
-  /** 空数据(无需求 / 新建需求);UI 渲染引导去 DRAFTING */
+  /** 空数据(无 PRD / 新建需求);UI 渲染引导去 DRAFTING */
   empty: boolean
-  /**
-   * 二态阶段(issue 重构 · 直接进入主区):
-   * - 'empty':  requirement.md 不存在 → 走 <EmptyAnalyzing> 引导去 DRAFTING
-   * - 'active': requirement.md 存在 → 走主区;fs 上是否有 sessions 都直接进,
-   *             主区组件对 chunks=[] / sessions=[] 已做容错(显示"暂无思考流"等)
-   *
-   * 与 `empty` 字段保持等价关系:`empty === true ⟺ phase === 'empty'`。
-   */
-  phase: AnalyzingPhase
-  /** 准入仪表板(issue 19a VS1 新增) */
-  admission: AdmissionData
-  /** 多会话列表(issue 19c VS3 新增,Tab 切换的数据源) */
-  sessions: AnalysisSession[]
-  /** 当前 active 会话 id(issue 19c VS3 新增,主区按此过滤) */
-  activeSessionId: string
-  /** 是否可生成技术概要(issue 19e VS5 · ADR-0013 D8 · 始终 true,verdict 不限制) */
-  canGenerateBrief: boolean
-  /** 技术概要 markdown 全文(双产物都不存在 → null) */
-  techBriefPreview: string | null
-  /** modules.yaml 解析后的结构(双产物都不存在 → null) */
-  modulesPreview: import('./tech-brief').TechBriefModulesFile | null
-  /** 最近生成时间 ISO 8601(由 mtime 派生;无产物 → null) */
-  briefGeneratedAt: string | null
-  /**
-   * PRD Markdown 全文(ADR-0017 D5)。
-   *
-   * SSR 期由 `getAnalyzingData()` 从 `<requirementsRoot>/requirements/<id>/requirement.md`
-   * 读出;requirement.md 不存在 → 空字符串。客户端左栏阅读器渲染与"🔗 N 处"高亮都据此字段。
-   * 资产内联 `![](assets/<name>)` 由 `<MarkdownPreview>` 自然渲染(不需独立 Tab)。
-   */
+  /** PRD Markdown 全文;requirement.md 不存在 → 空字符串 */
   prdMarkdown: string
-  /**
-   * 辅助文件列表(ADR-0017 D5)。
-   *
-   * SSR 期扫描 `<requirementsRoot>/requirements/<id>/aux/` 子目录(每个子目录 = 一个
-   * AuxFile),按 `usage_tag` 6 类排序;空目录 / 不存在 → `[]`。本 ticket 01 不解析
-   * `meta.yaml`(由 drafting 子系统维护),只读最简字段:`id / filename / body / usage_tag`
-   * (其他字段 usage_detail 等在 ticket 02 + 后续 SSR 注入时再补)。
-   */
+  /** 辅助文件列表(已按 usage_tag 排序) */
   auxFiles: AuxFile[]
-  /**
-   * PRD 引用的 Asset 列表(ADR-0017 D5)。
-   *
-   * SSR 期两步:
-   * 1) 解析 `requirement.md` 内 `![](assets/<name>)` 引用 → 收集 name 集合
-   * 2) 与磁盘 `requirements/<id>/assets/` readdir 比对 → 仅返回实际存在的 asset
-   * 孤儿 asset(磁盘有但 PRD 未引用)忽略;引用了不存在的 asset 不报错(忽略)。
-   *
-   * 字段对齐 `@ai-devspace/shared` 的 `AssetMeta` —— ADR-0015 D5 落地形态
-   * (`{name, url, path, size, mime}`),`url` 可直接给前端 fetcher 使用。
-   */
+  /** PRD 引用的 Asset 列表(已比对磁盘 + 引用集合) */
   assetList: AssetMeta[]
-  /**
-   * 可用 Analysis Skill 列表(issue 01 · ADR-0021)。
-   *
-   * SSR 期由 `getAnalyzingData()` 从 `<workspaceRoot>/analysis-skills/`
-   * 扫描读取(沿用 repos loader 的 readdir 模式);非法 Skill 跳过,不进列表。
-   * 与旧的 `admission.dimensions` 列表数据源不同:此处只列 Analysis Skill,
-   * 不混入全局/个人/项目 Skill。
-   */
-  availableSkills: ReadonlyArray<AnalysisSkillMetaT>
-  /**
-   * 当前 Requirement 已选择 Skill 名称(issue 01 · ADR-0021)。
-   *
-   * 服务端解析顺序:
-   * 1) 读 `<root>/requirements/<id>/analysis/selected-skill.yaml`
-   * 2) 解析出的 `skill_name` 若仍在 `availableSkills` → 沿用
-   * 3) 否则 → 回退到 `availableSkills` 字典序首项
-   * 4) 都不可用 → 空字符串(页面走"无可用 Skill"明确状态)
-   */
+  /** 可用 Analysis Skill 列表(workspace 集合) */
+  availableSkills: ReadonlyArray<AnalysisSkillMeta>
+  /** 当前 Requirement 已选择 Skill 名称;无选择 → 回退首项;都不可用 → '' */
   selectedSkillName: string
-  /**
-   * 当前 Requirement 已有 Analysis Run 列表(issue 02 · ADR-0021)。
-   *
-   * 按 created_at 倒序(最新在前);空数组 = 首次使用 / 无 Run。
-   * 列表来自 `<root>/requirements/<id>/analysis/runs/` 目录扫描 +
-   * meta.yaml 解析,SSR 期间一次读出。
-   */
-  runs: AnalysisRunMeta[]
+  /** 该 Requirement 已有 Analysis Run 列表(按 created_at 倒序) */
+  runs: ReadonlyArray<AnalysisRunMeta>
 }
 
-// ---------------------------------------------------------------------------
-// 纯函数:从 chunks 聚合 stats
-// ---------------------------------------------------------------------------
-
 /**
- * 聚合 stats:扫描 chunks 计数 kind === 'subproblem' / 'risk' / 'option'。
- * 纯函数,组件渲染前预计算 + 测试可独立验证。
- */
-export function summarizeAnalyzingStats(
-  chunks: readonly AnalyzingChunk[],
-): AnalyzingStats {
-  let subproblems = 0
-  let risks = 0
-  let options = 0
-  for (const c of chunks) {
-    if (c.kind === 'subproblem') subproblems++
-    else if (c.kind === 'risk') risks++
-    else if (c.kind === 'option') options++
-  }
-  return {
-    subproblems,
-    risks,
-    options,
-    total: subproblems + risks + options,
-  }
-}
-
-// ---------------------------------------------------------------------------
-// 空数据(新建需求 / 未知 id)
-// ---------------------------------------------------------------------------
-
-/**
- * 空状态 ANALYZING 工位数据。
- * UI 渲染时若 data.empty === true → 走空态引导(去 DRAFTING 写 PRD)。
+ * 空状态 ANALYZING 工位数据(未知 id / 新建需求)。
  *
- * ADR-0017 D5:SSR 注入 `prdMarkdown` / `auxFiles` / `assetList` 三字段,
- * 空态时给到容错默认值(空字符串 / `[]` / `[]`)。左栏阅读器对空态显示"暂无文档"占位。
+ * UI 渲染时若 `data.empty === true` → 走空态引导(去 DRAFTING 写 PRD)。
  */
 export function emptyAnalyzing(requirementId: string): AnalyzingData {
   return {
     requirementId,
-    toolbar: { crumb: [], actions: [] },
-    summary: { icon: '', title: '', description: '' },
-    chunks: [],
-    streamMeta: {
-      totalChunks: 0,
-      isStreaming: false,
-      startedAt: '',
-      endedAt: null,
-    },
-    stats: { subproblems: 0, risks: 0, options: 0, total: 0 },
-    admission: buildAdmissionData({}),
     empty: true,
-    phase: 'empty',
-    sessions: [],
-    activeSessionId: '',
-    canGenerateBrief: true,
-    techBriefPreview: null,
-    modulesPreview: null,
-    briefGeneratedAt: null,
-    // ADR-0017 D5 SSR 注入字段 —— 空态默认值
     prdMarkdown: '',
     auxFiles: [],
     assetList: [],
-    // issue 01 · ADR-0021:Analysis Skill 集合 + 选择
-    // 空态默认空集合 + 空选择,由 `getAnalyzingData()` SSR 注入时再覆盖
     availableSkills: [],
     selectedSkillName: '',
-    // issue 02 · ADR-0021:Analysis Run 列表(SSR 注入;空态 → 空数组)
     runs: [],
   }
 }
-
-/**
- * admission 段构造器。
- *
- * - `dimensions`: 维度 id 列表(顺序固定,缺省时取默认 5 维度)
- * - `counts`: 每维度 count,缺省视为 0(可只传部分维度,未传维度按 0 处理)
- * - `pendingAdjudicationCount`: 仪表板右端徽章数(由 adjudication.md 计数)
- * - `verdict`: pass / pending / fail(根据维度 severity 与 counts 派生)
- */
-export function buildAdmissionData(params: {
-  dimensions?: readonly string[]
-  counts?: Record<string, number>
-  pendingAdjudicationCount?: number
-  verdict?: AdmissionVerdict
-}): AdmissionData {
-  const ids =
-    params.dimensions && params.dimensions.length > 0
-      ? params.dimensions
-      : DEFAULT_ADMISSION_DIMENSIONS
-  const counts = params.counts ?? {}
-  const dimensions = ids.map((id) => {
-    const meta = ADMISSION_DIMENSION_META[id as AdmissionDimensionId]
-    if (meta) {
-      return {
-        id,
-        label: meta.label,
-        icon: meta.icon,
-        severity: meta.severity,
-        count: counts[id] ?? 0,
-      }
-    }
-    // Skill add 的自定义维度(没有 meta)→ 用占位
-    return { id, label: id, icon: '🔵', severity: 'blue' as const, count: counts[id] ?? 0 }
-  })
-  return {
-    dimensions,
-    verdict: params.verdict ?? 'pending',
-    pendingAdjudicationCount: params.pendingAdjudicationCount ?? 0,
-  }
-}
-
-// ---------------------------------------------------------------------------
-// chunks → AdmissionData 派生(ADR-0020 D8 · audit-2026-07-26 #2)
-// ---------------------------------------------------------------------------
-
-/**
- * 从 chunks 的 `admission` 侧信息派生五维卡 count / 总体 verdict / 待裁决数。
- *
- * 语义(与 `admission-check` SKILL.md 输出契约一一对应):
- * - **count**:该维度收到的 `[DIM <id>]` 块条数。**不区分 verdict** ——
- *   卡片上的数字表达"这个维度已被评估了几次"(重扫 / 插话会累加),
- *   而不是"有几个问题";颜色由 chunk.tone 表达严重度。这样五张卡在
- *   turn-1 跑完后都会 > 0(ticket 07 E2E 强断言依赖此语义)。
- *   某维度在 chunks 里**一次都没出现**时,回落到 `fallbackCounts[id]`
- *   —— 让"服务端/fixture 已算好 count 但 chunks 里没有 admission 元数据"
- *   的历史数据(以及组件单测的手工构造数据)继续正确渲染。
- * - **verdict**:取**最后一条**带 `overall` 的 chunk(重扫后以最新结论为准);
- *   没有则回落到 `fallbackVerdict`。
- * - **pendingAdjudicationCount**:同样取最后一条 `pendingCount`;没有则回落到
- *   `fallbackPendingCount`(来自 `adjudication.md` 计数)。
- *
- * 纯函数:SSR(读 chunks.jsonl)与客户端(SSE 追加)共用同一套派生,保证
- * "刷新页面前后仪表板一致"。
- *
- * @param dimensions 维度 id 列表(由 `resolveAdmissionDimensions` 装配);
- *                   chunk 里出现的未知维度 id 会被忽略(Skill 乱写不污染 UI)
- */
-export function deriveAdmissionData(
-  chunks: readonly AnalyzingChunk[],
-  params: {
-    dimensions: readonly string[]
-    fallbackCounts?: Readonly<Record<string, number>>
-    fallbackVerdict?: AdmissionVerdict
-    fallbackPendingCount?: number
-  },
-): AdmissionData {
-  const known = new Set(params.dimensions)
-  const counts: Record<string, number> = {}
-  let verdict: AdmissionVerdict | undefined
-  let pendingCount: number | undefined
-
-  for (const c of chunks) {
-    const a = c.admission
-    if (!a) continue
-    if (typeof a.dim === 'string' && known.has(a.dim)) {
-      counts[a.dim] = (counts[a.dim] ?? 0) + 1
-    }
-    if (a.overall === 'pass' || a.overall === 'pending' || a.overall === 'fail') {
-      verdict = a.overall
-    }
-    if (typeof a.pendingCount === 'number' && Number.isFinite(a.pendingCount) && a.pendingCount >= 0) {
-      pendingCount = Math.trunc(a.pendingCount)
-    }
-  }
-
-  const merged: Record<string, number> = { ...(params.fallbackCounts ?? {}) }
-  for (const [id, n] of Object.entries(counts)) merged[id] = n
-
-  return buildAdmissionData({
-    dimensions: params.dimensions,
-    counts: merged,
-    verdict: verdict ?? params.fallbackVerdict ?? 'pending',
-    pendingAdjudicationCount: pendingCount ?? params.fallbackPendingCount ?? 0,
-  })
-}
-
-// ---------------------------------------------------------------------------
-// Skill frontmatter 维度装配(ADR-0013 D10)
-// ---------------------------------------------------------------------------
-
-/**
- * 装配准入维度集合:
- * 1. 若 Skill 提供 admission_dimensions → 用它作为基底(子集化)
- * 2. 否则 → 默认 5 维度
- * 3. 应用 admission_override.add / .skip
- * 4. add 中重复项去重(保留首次出现位置)
- *
- * 返回最终维度 id 列表(顺序固定),与 ADMISSION_DIMENSION_META 配合使用。
- */
-export function resolveAdmissionDimensions(
-  frontmatter: SkillAdmissionFrontmatter | undefined,
-): string[] {
-  const base: readonly string[] =
-    frontmatter?.admission_dimensions && frontmatter.admission_dimensions.length > 0
-      ? frontmatter.admission_dimensions
-      : DEFAULT_ADMISSION_DIMENSIONS
-
-  const skip = new Set(frontmatter?.admission_override?.skip ?? [])
-  const filtered = base.filter((d) => !skip.has(d))
-
-  const adds = frontmatter?.admission_override?.add ?? []
-  const seen = new Set(filtered)
-  const dedupAdds: string[] = []
-  for (const id of adds) {
-    if (!seen.has(id)) {
-      seen.add(id)
-      dedupAdds.push(id)
-    }
-  }
-  return [...filtered, ...dedupAdds]
-}
-
-// ---------------------------------------------------------------------------
-// analysis/adjudication.md 计数(SSR 期 mock 路径由调用方注入)
-// 注:`countPendingAdjudications` 与 `countUnresolvedItems` 已搬到
-// `analyzing.server.ts`(本文件不再做文件 IO)。
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Mock 数据源 — 对应原型 11e ANALYZING(退款功能优化)
-//
-// ticket 03 改造:`REFUND_ANALYZING` 与内部 `REFUND_ANALYZING_CHUNKS` 已迁出
-// runtime,迁到测试 fixture `apps/web/src/__tests__/__fixtures__/analyzing-fixtures.ts`。
-// 原因:
-//   - ticket 01 之后 `getAnalyzingData('req-001')` 已经真接 SDK,运行时短路
-//     不再安全 —— 短路的副作用是"req-001 在磁盘空时也渲染 AdmissionDashboard
-//     满数据",与其它 id 行为不一致,会破坏 ticket 05 计划的"统一空态"
-//     UX(AdmissionDashboard 全 0 + ProductList 空骨架,引导用户点"开始分析")
-//   - mock 数据只服务于"组件渲染时给一份代表性的满数据",这是测试场景,
-//     不是生产路径 → 迁到 `__tests__/__fixtures__/`
-//
-// 不再 re-export:review 指出生产 runtime 反向依赖 `__tests__/__fixtures__/`
-// 构成循环依赖 + 打包风险(SPEC 与 STANDARDS 双轴都点出),且 4 个测试文件
-// 已全部直接 import fixture,re-export 在功能上是死路径。如未来真有第三方
-// 需要从 `@/lib/analyzing` 拿到 `REFUND_ANALYZING`,再加 re-export 不迟。
-// ---------------------------------------------------------------------------
-
-// 注:`getAnalyzingData` 与 `GetAnalyzingDataOptions` 已搬到 `analyzing.server.ts`。
-// 本文件只保留 client-safe 的纯函数与 mock 常量 —— 任何 client component
-// 不应触发 `getAnalyzingData`(数据应经由 RSC 注入 props)。

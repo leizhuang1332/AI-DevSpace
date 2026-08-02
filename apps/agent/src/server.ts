@@ -13,7 +13,6 @@ import { workspaceRoutes } from './routes/workspace.js'
 import { requirementRoutes } from './routes/requirement.js'
 import { reposRoutes } from './routes/repos.js'
 import { bootstrapRoutes } from './routes/bootstrap.js'
-import { analysisRoutes } from './routes/analysis.js'
 import { spikeRoutes } from './routes/spike.js'
 import { analysisSkillRoutes } from './routes/analysis-skill.js'
 import { analysisRunRoutes } from './routes/analysis-run.js'
@@ -297,7 +296,36 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   // Response CRUD 共享状态(进程级 toolUseIndex + 单运行约束 + response meta 索引)
   const runService = new AnalysisRunService(workspaceRoot)
 
-  await fastify.register(analysisRoutes, { hub, workspaceRoot, provider })
+  // issue 07 · 启动时收敛 orphan running Run
+  // 场景:Agent 异常退出(kill -9 / OOM)→ 残留 status=running Run + .startup.lock
+  // 新进程没有任何 in-flight runner 句柄可继续推进,必须把它们收敛为 failed
+  // 并释放单运行锁,让用户可以创建新 Run。当前设计下没有跨进程 in-flight 句柄
+  // 共享,传 null 把所有 running Run 都视为 orphan(issue 07 验收 9)。
+  try {
+    const reconcileResult = runService.reconcileRunningRuns(null)
+    if (reconcileResult.recovered.length > 0) {
+      fastify.log.warn(
+        {
+          count: reconcileResult.recovered.length,
+          runs: reconcileResult.recovered,
+        },
+        'analysis run: orphan running runs recovered on boot',
+      )
+    }
+    if (reconcileResult.skipped.length > 0) {
+      fastify.log.info(
+        {
+          count: reconcileResult.skipped.length,
+          runs: reconcileResult.skipped,
+        },
+        'analysis run: orphan recovery skipped some runs',
+      )
+    }
+  } catch (err) {
+    // 启动时 reconcile 失败不应阻断 agent 启动;仅记日志
+    fastify.log.error({ err }, 'analysis run: orphan recovery failed on boot')
+  }
+
   // issue 01 (ADR-0021):Analysis Skill catalog + per-requirement selection endpoints
   await fastify.register(analysisSkillRoutes, { workspaceRoot })
   // issue 02 (ADR-0021):Analysis Run start / list / detail + SDK 集成

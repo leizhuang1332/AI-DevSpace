@@ -38,6 +38,10 @@ import type { AnalysisRunService } from './AnalysisRunService.js'
 import type { AnalysisPromptInput } from './AnalysisPromptAssembler.js'
 import { assembleAnalysisSystemPrompt } from './AnalysisPromptAssembler.js'
 import { redactLogEntry } from './runLogRedaction.js'
+import {
+  runAnalysisQueryWithRetry,
+  type RunAnalysisQueryOutcome,
+} from './runAnalysisQueryWithRetry.js'
 
 /** 业务工具 name 常量 —— SDK MCP server 注册 / handler dispatch 共同使用 */
 export const TOOL_REPORT_ISSUE = 'report_analysis_issue'
@@ -64,6 +68,11 @@ export interface AnalysisRunnerDeps {
   runId: string
   /** SDK session topic(注入到 AISession / SDK) */
   topic: string
+  /**
+   * issue 07:取消信号(可选)。当前 agent 不暴露取消端点,但接口预留;
+   * `runAnalysisQueryWithRetry` 在 `aborted` 时会抛 AbortError 终止重试循环。
+   */
+  signal?: AbortSignal
 }
 
 /** Issue 报告工具输入(平台校验) */
@@ -115,6 +124,7 @@ export async function runAnalysisQuery(deps: AnalysisRunnerDeps): Promise<
     requirementId,
     runId,
     topic,
+    signal,
   } = deps
 
   const systemPrompt = assembleAnalysisSystemPrompt({
@@ -162,17 +172,33 @@ export async function runAnalysisQuery(deps: AnalysisRunnerDeps): Promise<
   // tool_use_id → 工具名 反向映射(SDK 流顺序:tool_use 先到,tool_result 后到;
   // 这里用本 Run 的局部 Map,Run 结束随 runner 销毁,不跨 Run 共享)
   const toolNameByUseId = new Map<string, string>()
+  // SDK 0.3.206 的 stream_event 形态需要按 content_block index 累积
+  // (text 增量 + tool_use input_json_delta),到 content_block_stop 才完成
+  const streamingBlocks: Map<number, StreamingBlock> = new Map()
+  // 已经落 log / 触发过业务 handler 的 tool_use_id,用于 `assistant` envelope
+  // 与 `stream_event` 重复时的去重
+  const emittedToolUseIds: Set<string> = new Set()
+  // 提前引用一次,既消 linter "declared but never read" 提示,又显式锁定
+  // "这两个容器是本 Run 的局部位"的意图
+  void streamingBlocks
+  void emittedToolUseIds
 
-  const sdkResult = await provider.runAnalysisQuery({
+  // issue 07:把 provider.runAnalysisQuery 包成 rawRun(每次 attempt 调一次)
+  // - 同 runId 不变(由调用方 route 决定,不在此处重写)
+  // - 临时错误自动重试(最多 4 次 attempt,3 次重试)
+  // - 永久错误立即终止
+  const queryInput: import('../providers/AIProvider.js').AnalysisQueryInput = {
     prompt: buildRunQueryPrompt({ scope }),
     systemPrompt,
     cwd,
     onEvent: (envelope: unknown) => {
-      const m = envelope as Record<string, unknown>
-      const wrapped: SdkMessageLike = {
-        kind: 'raw',
-        raw: m,
-      }
+      // ClaudeCodeProvider.runAnalysisQuery 透传 { kind: 'raw', raw: <SDKMessage> }
+      // 形态(见 ClaudeCodeProvider.ts:549);这里要 unwrap 拿到真正的 raw。
+      // 之前 bug:把整个 envelope 当 raw 再包一层,导致 raw.type 永远是 undefined,
+      // 所有 type 分支 miss → log/issues 永远 0 字节。
+      const outer = envelope as { kind?: unknown; raw?: unknown }
+      const realRaw = (outer?.raw ?? envelope) as Record<string, unknown>
+      const wrapped: SdkMessageLike = { kind: 'raw', raw: realRaw }
       handleSdkEnvelope({
         envelope: wrapped,
         requirementId,
@@ -181,22 +207,72 @@ export async function runAnalysisQuery(deps: AnalysisRunnerDeps): Promise<
         reportIssueHandler,
         completeHandler,
         toolNameByUseId,
+        streamingBlocks,
+        emittedToolUseIds,
       })
     },
-    // SDK 工具注册:业务工具通过 MCP server 注入,Allowed tools = Read/Glob/Grep
-    allowedTools: ['Read', 'Glob', 'Grep'],
+    // SDK 工具注册:宿主只读工具(Read/Glob/Grep) + 业务 MCP 工具(全限定名)。
+    // 业务工具通过 in-process MCP server `analysis` 注入(见
+    // ClaudeCodeProvider.runAnalysisQuery:`sdkOptions['mcpServers'] = { analysis: mcpServer }`),
+    // SDK 0.3.206 把 MCP 工具按 `mcp__<server-key>__<tool>` 全限定名纳入
+    // allowedTools 白名单管控 —— 不在白名单的 MCP 工具模型看不到、也调不到。
+    // 历史上只列了宿主只读工具,导致模型知道业务工具存在但拿不到调用权,
+    // 纯文本 end_turn 触发 `SDK returned success but complete_analysis was not called`。
+    allowedTools: [
+      'Read',
+      'Glob',
+      'Grep',
+      'mcp__analysis__report_analysis_issue',
+      'mcp__analysis__complete_analysis',
+    ],
     businessTools: {
       [TOOL_REPORT_ISSUE]: reportIssueHandler,
       [TOOL_COMPLETE_ANALYSIS]: completeHandler,
     },
-  })
+  }
+
+  const sdkResult = await runAnalysisQueryWithRetry(
+    (attempt: number): Promise<RunAnalysisQueryOutcome> =>
+      // issue_count 当前由 AnalysisAgentRunner 在成功后从 meta 读,
+      // 不在 provider 返回里;这里固定返 0,后续由 transitionToSucceeded
+      // 拿 meta.issue_count(decision 31)
+      provider.runAnalysisQuery!(queryInput).then(
+        (r): RunAnalysisQueryOutcome =>
+          r.ok
+            ? { ok: true, issue_count: 0 }
+            : { ok: false, error: r.error },
+      ),
+    {
+      signal,
+      onRetry: ({ classification, attempt: retryAttempt, delayMs, error }) => {
+        // 退避前发布 SSE 事件;Web 端可显示"正在重试第 N 次"提示
+        // narrowing:onRetry 只在 retryable=true 时触发(RetryStrategy 契约),
+        // 可重试分类是 A/C/D,故 category 在此分支是 'A' | 'C' | 'D' 之一。
+        // 通过 assertNever 把 B/E/cancelled 拒在编译期外。
+        const retryCategory = toRetryCategory(classification.category)
+        hub.publish(requirementId, {
+          type: 'analysis_run_retrying',
+          reqId: requirementId,
+          runId,
+          ts: Date.now(),
+          attempt: retryAttempt,
+          category: retryCategory,
+          retryable: classification.retryable,
+          delayMs,
+          error,
+        })
+      },
+    },
+  )
 
   // 关闭 session(本期分析路径不再依赖 AISession,保留兼容钩子)
   // No-op:Analysis Run 路径不持有 AISession,无需清理。
 
-  if (!sdkResult.ok) {
-    // SDK 终态失败 → transitionToFailed + publish + 释放 startup lock
-    const failureReason = sdkResult.error ?? 'SDK execution failed'
+  // issue 07:把 SDK 终态失败 + 持久化失败等"throw"路径统一在 runner 内
+  // 转 transitionToFailed 兜底。避免 route 层 catch 重复兜底(可能在
+  // transitionToSucceeded 已执行后再次 transitionToFailed 失败造成竞态)。
+  const failFast = (reason: string) => {
+    const failureReason = reason
     const failedResult = runService.transitionToFailed(requirementId, runId, failureReason)
     if (failedResult.ok) {
       hub.publish(requirementId, {
@@ -209,43 +285,55 @@ export async function runAnalysisQuery(deps: AnalysisRunnerDeps): Promise<
         issueCount: failedResult.run.issue_count,
       })
     }
-    await runService.releaseStartupLock(requirementId)
-    return { ok: false, error: failureReason }
+    void runService.releaseStartupLock(requirementId).catch(() => {})
+  }
+
+  if (!sdkResult.ok) {
+    // SDK 终态失败 → transitionToFailed + publish + 释放 startup lock
+    failFast(sdkResult.error ?? 'SDK execution failed')
+    return { ok: false, error: sdkResult.error ?? 'SDK execution failed' }
   }
 
   // SDK 成功 → 检查完成门禁:已 requestCompletion?否则视为失败
   // (decision 31:必须显式完成工具调用 + SDK 成功 + 持久化完成 才算 succeeded)
-  const meta = runService.readMeta(requirementId, runId)
+  let meta: ReturnType<typeof runService.readMeta>
+  try {
+    meta = runService.readMeta(requirementId, runId)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    failFast(`run meta read failed: ${message}`)
+    return { ok: false, error: message }
+  }
   if (!meta) {
-    return { ok: false, error: 'run meta disappeared' }
+    const reason = 'run meta disappeared'
+    failFast(reason)
+    return { ok: false, error: reason }
   }
   if (meta.status !== 'running') {
     // 可能在 SDK 错误路径已转换(理论上不应在此分支)
-    return { ok: false, error: `unexpected status=${meta.status}` }
+    const reason = `unexpected status=${meta.status}`
+    failFast(reason)
+    return { ok: false, error: reason }
   }
   // 检查是否已 requestCompletion —— 通过查询分析服务内部状态
   if (!runService.isCompletionRequested(runId)) {
     const reason = 'SDK returned success but complete_analysis was not called'
-    const failed = runService.transitionToFailed(requirementId, runId, reason)
-    if (failed.ok) {
-      hub.publish(requirementId, {
-        type: 'analysis_run_failed',
-        reqId: requirementId,
-        runId,
-        ts: Date.now(),
-        finishedAt: failed.run.finished_at ?? new Date().toISOString(),
-        error: reason,
-        issueCount: failed.run.issue_count,
-      })
-    }
-    await runService.releaseStartupLock(requirementId)
+    failFast(reason)
     return { ok: false, error: reason }
   }
 
   // 持久化已完成(appendFileSync 即时 fsync) → 切换 succeeded + 释放 startup lock
-  const succeeded = runService.transitionToSucceeded(requirementId, runId)
+  // try/catch 包住 transitionToSucceeded 自身抛错的极端情况(原子写失败等)
+  let succeeded: ReturnType<typeof runService.transitionToSucceeded>
+  try {
+    succeeded = runService.transitionToSucceeded(requirementId, runId)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    failFast(`transitionToSucceeded persist failed: ${message}`)
+    return { ok: false, error: message }
+  }
   if (!succeeded.ok) {
-    await runService.releaseStartupLock(requirementId)
+    void runService.releaseStartupLock(requirementId).catch(() => {})
     return { ok: false, error: succeeded.reason }
   }
   hub.publish(requirementId, {
@@ -386,19 +474,39 @@ function parseReportIssueInput(
   if (typeof o.description !== 'string' || o.description.trim().length === 0) {
     return { ok: false, reason: 'description missing' }
   }
-  if (!Array.isArray(o.sourceRefs) || o.sourceRefs.length === 0) {
-    return { ok: false, reason: 'sourceRefs missing' }
+  // 字段名契约:模型通过 SDK MCP 工具调用,Claude Agent SDK 默认透传 snake_case
+  // (Anthropic tool 约定);system prompt(AnalysisPromptAssembler.ts:42)、shared schema
+  // (`@ai-devspace/shared` `source_refs`)、持久化 issues.jsonl 全部统一 snake_case。
+  // 历史上 parser 读 camelCase `sourceRefs`,导致 23 次真实模型调用全部
+  // `accepted: false`(log 显示 "所有 report_analysis_issue 调用都被拒绝");
+  // 这里以 snake_case 为主、camelCase 兜底兼容 —— 内部返回值仍是 camelCase
+  // (`runService.reportIssue` 入参契约不动,避免下游接口破裂)。
+  const rawSourceRefs = o.source_refs ?? o.sourceRefs
+  if (!Array.isArray(rawSourceRefs) || rawSourceRefs.length === 0) {
+    return { ok: false, reason: 'source_refs missing' }
   }
   // sourceRefs 形态严格按 SourceRefSchema;此处只做最浅校验(由 shared schema 兜底)
   const sourceRefs: SourceRef[] = []
-  for (const r of o.sourceRefs) {
+  for (const r of rawSourceRefs) {
     if (!r || typeof r !== 'object') return { ok: false, reason: 'bad sourceRef' }
     sourceRefs.push(r as SourceRef)
   }
   let metadata: IssueMetadata | undefined
   if (o.metadata !== undefined) {
-    if (!Array.isArray(o.metadata)) return { ok: false, reason: 'metadata not array' }
-    metadata = o.metadata as IssueMetadata
+    // 元数据形态契约不一致:
+    // - system prompt(L5_ISSUE_REPORTING_PROTOCOL / AnalysisPromptAssembler.ts:266)
+    //   教模型"字符串键 → JSON 基础值或基础值数组",即对象形态
+    //   `Record<string, primitive | primitive[]>`;
+    // - shared schema(IssueMetadataSchema = z.array(z.tuple([string, primitive])))
+    //   与 storage 期望元组数组形态 `Array<[string, primitive]>`。
+    //
+    // 历史 parser 严格 `Array.isArray`,碰到对象形态(模型真实输出)即 reject,
+    // 导致所有 `report_analysis_issue` 调用 `accepted: false`(实测 log
+    // 显示 21+ 次全部失败)。这里 parser 作为契约边界,同时接受两种形态并归一
+    // 到 shared schema 的元组数组形态喂给 `runService.reportIssue`。
+    const normalized = normalizeMetadata(o.metadata)
+    if (!normalized.ok) return { ok: false, reason: normalized.reason }
+    metadata = normalized.value
   }
   return {
     ok: true,
@@ -409,6 +517,76 @@ function parseReportIssueInput(
       metadata,
     },
   }
+}
+
+/**
+ * 把 MCP 工具入参的 metadata 归一到 shared schema 的元组数组形态
+ * `IssueMetadata = Array<[string, primitive | primitive[]]>`。
+ *
+ * 接受两种入参形态:
+ * - **对象形态**(`Record<string, primitive | primitive[]>`):system prompt 教的形态,
+ *   模型实测输出 `{ severity: 'warn', dimension: '...' }`。归一到元组数组。
+ * - **元组数组形态**(`Array<[string, primitive | primitive[]]>`):shared schema 与
+ *   storage 入参契约。校验形态后原样通过。
+ *
+ * 元组内第二项必须是基础值(string / number / boolean / null)或基础值数组
+ * (与 `IssueMetadataValueSchema` 对齐);不接受嵌套对象。
+ *
+ * 出参:`{ ok: true, value: IssueMetadata }` 或 `{ ok: false, reason }`。
+ */
+function normalizeMetadata(
+  raw: unknown,
+): { ok: true; value: IssueMetadata } | { ok: false; reason: string } {
+  // 元组数组形态:每个 entry 必须是 `[string, primitive | primitive[]]`
+  if (Array.isArray(raw)) {
+    const out: Array<[string, string | number | boolean | null | ReadonlyArray<string | number | boolean | null>]> = []
+    for (const entry of raw) {
+      if (!Array.isArray(entry) || entry.length !== 2) {
+        return { ok: false, reason: 'metadata entry must be [key, value] tuple' }
+      }
+      const [k, v] = entry
+      if (typeof k !== 'string' || k.length === 0) {
+        return { ok: false, reason: 'metadata key must be non-empty string' }
+      }
+      const valueCheck = isMetadataValue(v)
+      if (!valueCheck.ok) return valueCheck
+      // valueCheck 已校验 v 是 primitive | primitive[];此处向 IssueMetadata 兼容形态 cast
+      out.push([k, v] as [string, string | number | boolean | null | ReadonlyArray<string | number | boolean | null>])
+    }
+    return { ok: true, value: out as unknown as IssueMetadata }
+  }
+  // 对象形态:键必须是非空字符串,值必须是基础值或基础值数组
+  if (raw && typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>
+    const out: Array<[string, string | number | boolean | null | ReadonlyArray<string | number | boolean | null>]> = []
+    for (const [k, v] of Object.entries(obj)) {
+      if (k.length === 0) return { ok: false, reason: 'metadata key must be non-empty string' }
+      const valueCheck = isMetadataValue(v)
+      if (!valueCheck.ok) return valueCheck
+      out.push([k, v] as [string, string | number | boolean | null | ReadonlyArray<string | number | boolean | null>])
+    }
+    return { ok: true, value: out as unknown as IssueMetadata }
+  }
+  return { ok: false, reason: 'metadata must be object or array' }
+}
+
+/**
+ * 校验元组数组第二项是否符合 `IssueMetadataValueSchema` —— 基础值或基础值数组。
+ */
+function isMetadataValue(
+  v: unknown,
+): { ok: true } | { ok: false; reason: string } {
+  if (v === null) return { ok: true }
+  const t = typeof v
+  if (t === 'string' || t === 'number' || t === 'boolean') return { ok: true }
+  if (Array.isArray(v)) {
+    for (const item of v) {
+      const itemCheck = isMetadataValue(item)
+      if (!itemCheck.ok) return itemCheck
+    }
+    return { ok: true }
+  }
+  return { ok: false, reason: 'metadata value must be primitive or primitive array' }
 }
 
 // ============================================================================
@@ -442,50 +620,192 @@ interface HandleCtx {
    * tool_use 阶段填,tool_result 阶段读。
    */
   toolNameByUseId: Map<string, string>
+  /**
+   * 流式累积中的 block 状态(SDK 0.3.206 的 `stream_event` 形态需要按
+   * content_block index 累积 text 增量 / tool_use input_json_delta,
+   * 到 content_block_stop 时才完成。key = content_block index,value
+   * 区分 text 与 tool_use 两类)。
+   */
+  streamingBlocks: Map<number, StreamingBlock>
+  /**
+   * 已经落 log / 触发过业务 handler 的 tool_use_id 集合,用于 `assistant`
+   * envelope 与 `stream_event` 重复时的去重(SDK 0.3.206 通常不重复,但保险)。
+   */
+  emittedToolUseIds: Set<string>
 }
+
+/** 流式累积中的 block 状态 */
+type StreamingBlock =
+  | { type: 'text'; text: string }
+  | {
+      type: 'tool_use'
+      tool_use_id: string
+      name: string
+      inputChunks: string[]
+    }
 
 /**
  * 把 SDK 流事件分派到:
  * - log.jsonl 持久化(text / tool_use / tool_result)
  * - 业务工具拦截(report_analysis_issue / complete_analysis)
  *
- * 注意:SDK 顺序可能先发 tool_use 后发 tool_result;
- * 业务工具 handler 在 tool_use 阶段同步执行,tool_result 阶段只落日志。
+ * SDK 0.3.206 的 envelope 形态:
+ * 1. `type: 'stream_event'` —— 流式分片,event 字段是 `BetaRawMessageStreamEvent`,
+ *    真实 type 在 `event.type`(`content_block_start` / `content_block_delta` /
+ *    `content_block_stop` / `message_start` / `message_delta` / `message_stop`)。
+ *    **关键**:tool_use 块在 `content_block_start` 时 input 还是空,
+ *    需要用 `content_block_delta.input_json_delta` 累积,
+ *    到 `content_block_stop` 时才完整。本函数通过 `streamingBlocks` 维护累积态。
+ * 2. `type: 'assistant'` —— 整段 assistant message(包含完整 text / tool_use 块),
+ *    用于流结束后追溯;**与 stream_event 可能重复**(SDK 通常不重复,但保险起见用
+ *    emittedToolUseIds 跳过已落 log 的 tool_use_id)。
+ * 3. `type: 'user'` —— 包含 tool_result 块(`message.content[].type === 'tool_result'`)。
+ *    tool_result 块不带 name,通过 tool_use 阶段填的 `toolNameByUseId` 反向映射回填。
+ *
+ * 业务工具 handler 在 tool_use 阶段(content_block_stop 或 assistant envelope)
+ * 同步执行,tool_result 阶段只落日志。
  */
 function handleSdkEnvelope(ctx: HandleCtx): void {
   const { envelope } = ctx
   const ts = new Date().toISOString()
 
   // ClaudeCodeProvider.runAnalysisQuery 透传 {kind:'raw', raw:<SDKMessage>}
-  // 我们在这里 narrow 出文本 / 工具事件
   if (envelope.kind === 'raw') {
     const raw = (envelope.raw as Record<string, unknown>) ?? {}
     const type = raw['type'] as string | undefined
 
-    // 文本:assistant / partial_assistant
-    if (type === 'assistant' || type === 'partial_assistant') {
-      const message = raw['message'] as Record<string, unknown> | undefined
-      const content = Array.isArray(message?.['content'])
-        ? (message!['content'] as Array<Record<string, unknown>>)
-        : []
-      const text = content
-        .filter((b) => b['type'] === 'text')
-        .map((b) => String(b['text'] ?? ''))
-        .join('')
-      if (text.length === 0) return
-      const entry: AnalysisLogEntry = { kind: 'text', ts, text }
-      appendLog(ctx, entry)
-      return
-    }
-
-    // 工具调用:content_block_delta with tool_use 或顶层 tool_use block
+    // ── 1) 顶层 content_block_start(直接形态,fake provider 模拟 SDK 完整块) ─
+    // 真实 SDK 0.3.206 走 stream_event 包裹,见分支 2);fake provider 与
+    // 历史 envelope 形态直接发 type=content_block_start,这里保留兼容。
     if (type === 'content_block_start') {
       const block = raw['content_block'] as Record<string, unknown> | undefined
       if (block && block['type'] === 'tool_use') {
         const toolUseId = String(block['id'] ?? '')
         const name = String(block['name'] ?? '')
         const input = block['input'] ?? {}
-        // 记录 tool_use_id → name 映射,供 tool_result 阶段回填实际工具名
+        if (toolUseId) ctx.toolNameByUseId.set(toolUseId, name)
+        if (toolUseId) ctx.emittedToolUseIds.add(toolUseId)
+        const entry: AnalysisLogEntry = {
+          kind: 'tool_use',
+          ts,
+          tool_use_id: toolUseId,
+          name,
+          input,
+        }
+        appendLog(ctx, entry)
+        if (name === TOOL_REPORT_ISSUE) {
+          ctx.reportIssueHandler(toolUseId, input)
+        } else if (name === TOOL_COMPLETE_ANALYSIS) {
+          ctx.completeHandler(toolUseId, input)
+        }
+      }
+      return
+    }
+
+    // ── 2) stream_event —— 流式分片(SDK 0.3.206 主流) ──────────────
+    if (type === 'stream_event') {
+      const event = (raw['event'] as Record<string, unknown> | undefined) ?? {}
+      const eventType = event['type'] as string | undefined
+      if (eventType === 'content_block_start') {
+        const block = event['content_block'] as Record<string, unknown> | undefined
+        const index = Number(event['index'] ?? -1)
+        if (block && block['type'] === 'tool_use' && index >= 0) {
+          // 开新 tool_use 块:记录 id / name,初始化空 input buffer
+          ctx.streamingBlocks.set(index, {
+            type: 'tool_use',
+            tool_use_id: String(block['id'] ?? ''),
+            name: String(block['name'] ?? ''),
+            inputChunks: [],
+          })
+        } else if (block && block['type'] === 'text' && index >= 0) {
+          ctx.streamingBlocks.set(index, {
+            type: 'text',
+            text: '',
+          })
+        }
+        return
+      }
+      if (eventType === 'content_block_delta') {
+        const index = Number(event['index'] ?? -1)
+        const block = ctx.streamingBlocks.get(index)
+        if (!block) return
+        const delta = (event['delta'] as Record<string, unknown> | undefined) ?? {}
+        if (block.type === 'text' && delta['type'] === 'text_delta') {
+          block.text += String(delta['text'] ?? '')
+        } else if (block.type === 'tool_use' && delta['type'] === 'input_json_delta') {
+          block.inputChunks.push(String(delta['partial_json'] ?? ''))
+        }
+        return
+      }
+      if (eventType === 'content_block_stop') {
+        const index = Number(event['index'] ?? -1)
+        const block = ctx.streamingBlocks.get(index)
+        if (!block) return
+        ctx.streamingBlocks.delete(index)
+        if (block.type === 'text') {
+          if (block.text.length === 0) return
+          const entry: AnalysisLogEntry = { kind: 'text', ts, text: block.text }
+          appendLog(ctx, entry)
+          return
+        }
+        // tool_use 块:解析累积的 input JSON,分发业务 handler + 落 log
+        const inputRaw = block.inputChunks.join('')
+        let parsed: unknown = {}
+        if (inputRaw.length > 0) {
+          try {
+            parsed = JSON.parse(inputRaw)
+          } catch {
+            // 部分 JSON 解析失败:用原始字符串占位(避免整条 log 丢)
+            parsed = { __raw: inputRaw }
+          }
+        }
+        const toolUseId = block.tool_use_id
+        const name = block.name
+        if (toolUseId) ctx.toolNameByUseId.set(toolUseId, name)
+        if (toolUseId) ctx.emittedToolUseIds.add(toolUseId)
+        const entry: AnalysisLogEntry = {
+          kind: 'tool_use',
+          ts,
+          tool_use_id: toolUseId,
+          name,
+          input: parsed,
+        }
+        appendLog(ctx, entry)
+        if (name === TOOL_REPORT_ISSUE) {
+          ctx.reportIssueHandler(toolUseId, parsed)
+        } else if (name === TOOL_COMPLETE_ANALYSIS) {
+          ctx.completeHandler(toolUseId, parsed)
+        }
+        return
+      }
+      // message_start / message_delta / message_stop —— 不落 log
+      return
+    }
+
+    // ── 3) assistant envelope(完整 message;fake provider 走此路径) ─
+    if (type === 'assistant') {
+      const message = raw['message'] as Record<string, unknown> | undefined
+      const content = Array.isArray(message?.['content'])
+        ? (message!['content'] as Array<Record<string, unknown>>)
+        : []
+      for (const block of content) {
+        if (block['type'] === 'text') {
+          // text 块无 id,无法去重;SDK 真实流会同时发 assistant + stream_event,
+          // 会出现重复 text 落 log。本期先用"长 text 不重复"的假设(SDK 实际
+          // 不重复发);后续如发现重复,再加 ts+text 指纹去重。
+          const text = String(block['text'] ?? '')
+          if (text.length === 0) continue
+          const entry: AnalysisLogEntry = { kind: 'text', ts, text }
+          appendLog(ctx, entry)
+          continue
+        }
+        if (block['type'] !== 'tool_use') continue
+        const toolUseId = String(block['id'] ?? '')
+        const name = String(block['name'] ?? '')
+        // 跳过 stream_event / 顶层 content_block_start 已处理的
+        if (toolUseId && ctx.emittedToolUseIds.has(toolUseId)) continue
+        if (toolUseId) ctx.emittedToolUseIds.add(toolUseId)
+        const input = block['input'] ?? {}
         if (toolUseId) ctx.toolNameByUseId.set(toolUseId, name)
         const entry: AnalysisLogEntry = {
           kind: 'tool_use',
@@ -504,8 +824,8 @@ function handleSdkEnvelope(ctx: HandleCtx): void {
       return
     }
 
-    // 工具结果:SDK 直接推 mcp 工具的 tool_result(无独立 envelope)
-    if (type === 'user' || type === 'tool_result') {
+    // ── 3) user envelope —— tool_result 块 ──────────────────────
+    if (type === 'user') {
       const message = raw['message'] as Record<string, unknown> | undefined
       const content = Array.isArray(message?.['content'])
         ? (message!['content'] as Array<Record<string, unknown>>)
@@ -529,7 +849,7 @@ function handleSdkEnvelope(ctx: HandleCtx): void {
       return
     }
 
-    // 其他类型(result / error / system / retrying)不落 log(decision 37)
+    // 其他类型(result / error / system / retrying / status / ...)不落 log(decision 37)
     return
   }
 
@@ -625,4 +945,19 @@ declare module './AnalysisRunService.js' {
   interface AnalysisRunService {
     isCompletionRequested(runId: string): boolean
   }
+}
+
+/**
+ * Narrow `ErrorCategory` 到 SSE 事件允许的 'A' | 'C' | 'D'。
+ *
+ * `runAnalysisQueryWithRetry.onRetry` 只在 `classification.retryable=true` 时
+ * 触发,而 retryable=true 的分类是 A/C/D(由 classifyProviderError 决定)。
+ * 这里在编译期把 B/E/cancelled 拒掉,代替 unsafe `as` cast。
+ */
+function toRetryCategory(category: import('../error/ErrorClassifier.js').ErrorCategory): 'A' | 'C' | 'D' {
+  if (category === 'A' || category === 'C' || category === 'D') return category
+  throw new Error(
+    `toRetryCategory: expected A|C|D, got ${String(category)} ` +
+      `(this should be unreachable; onRetry only fires for retryable classifications)`,
+  )
 }

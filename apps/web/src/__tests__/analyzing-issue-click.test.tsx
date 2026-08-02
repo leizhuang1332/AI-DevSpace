@@ -19,6 +19,26 @@ import {
   type AnalyzingData,
 } from '@/lib/analyzing'
 
+// 整体 mock 客户端 agent helper —— useEffect 拉 Run 详情改走 agentFetch
+// (从 issue 404 复盘修起),这里拦截 agentFetch 注入测试用 issues。
+// 早期版本 mock global.fetch;现 fixture 改用 agentFetch 路径。
+vi.mock('@/lib/agent-client', () => {
+  class AgentError extends Error {
+    status: number
+    body: unknown
+    constructor(status: number, body: unknown) {
+      super(`Agent ${status}`)
+      this.status = status
+      this.body = body
+    }
+  }
+  return {
+    agentFetch: vi.fn(),
+    AgentError,
+  }
+})
+import { agentFetch } from '@/lib/agent-client'
+
 afterEach(() => {
   cleanup()
   vi.useRealTimers()
@@ -44,13 +64,11 @@ afterEach(() => {
  */
 
 function makeData(issues: AnalysisIssue[]): AnalyzingData {
-  // 用空 AnalyzedData + 标记 data.runs 有一条 succeeded 的 Run,
-  // 我们的 fixture 让 fixture.runs[0].status='succeeded',issue_count=issues.length
-  // 让 useEffect 触发 fetch;在测试里 vi.mock fetch 直接返回 issues。
+  // issue 08 · ADR-0021 契约收缩后,AnalyzingData 不再有 `phase` / `chunks` /
+  // `sessions` 等旧字段;Analysis Issue 通过 SSE / fetch 由父组件累积。
   return {
     ...emptyAnalyzing('req-issue-click'),
     empty: false,
-    phase: 'active',
     prdMarkdown: '# 测试 PRD\n\n业务描述。\n',
     auxFiles: [
       {
@@ -100,12 +118,12 @@ describe('AnalyzingZone · Analysis Issue SourceRef 点击联动(issue 03 review
       reported_at: '2026-08-01T00:00:00.000Z',
     }
     const data = makeData([issue])
-    // mock fetch /runs/:runId → 返回我们的 issue
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ issues: [issue], log: [], run: data.runs[0] }),
+    // mock agentFetch 走 Run 详情端点 → 返回我们的 issue
+    vi.mocked(agentFetch).mockResolvedValueOnce({
+      issues: [issue],
+      log: [],
+      run: data.runs[0],
     })
-    vi.stubGlobal('fetch', fetchMock)
 
     render(<AnalyzingZone data={data} />)
 
@@ -134,11 +152,11 @@ describe('AnalyzingZone · Analysis Issue SourceRef 点击联动(issue 03 review
       reported_at: '2026-08-01T00:00:00.000Z',
     }
     const data = makeData([issue])
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ issues: [issue], log: [], run: data.runs[0] }),
+    vi.mocked(agentFetch).mockResolvedValueOnce({
+      issues: [issue],
+      log: [],
+      run: data.runs[0],
     })
-    vi.stubGlobal('fetch', fetchMock)
 
     render(<AnalyzingZone data={data} />)
 
@@ -166,11 +184,11 @@ describe('AnalyzingZone · Analysis Issue SourceRef 点击联动(issue 03 review
       reported_at: '2026-08-01T00:00:00.000Z',
     }
     const data = makeData([issue])
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ issues: [issue], log: [], run: data.runs[0] }),
+    vi.mocked(agentFetch).mockResolvedValueOnce({
+      issues: [issue],
+      log: [],
+      run: data.runs[0],
     })
-    vi.stubGlobal('fetch', fetchMock)
 
     render(<AnalyzingZone data={data} />)
 
@@ -197,11 +215,11 @@ describe('AnalyzingZone · Analysis Issue SourceRef 点击联动(issue 03 review
     }
     // 渲染时 auxFiles 不包含 aux-deleted
     const data = makeData([issue])
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ issues: [issue], log: [], run: data.runs[0] }),
+    vi.mocked(agentFetch).mockResolvedValueOnce({
+      issues: [issue],
+      log: [],
+      run: data.runs[0],
     })
-    vi.stubGlobal('fetch', fetchMock)
 
     render(<AnalyzingZone data={data} />)
 

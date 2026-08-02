@@ -553,6 +553,76 @@ export class AnalysisRunService {
     return runs
   }
 
+  /**
+   * 启动时收敛 orphan running Run(issue 07 验收 9)。
+   *
+   * 场景:Agent 进程异常退出 / kill -9 / OOM → 残留
+   * `<root>/requirements/<id>/analysis/runs/<runId>/meta.yaml`(status=running)
+   * 与 `.startup.lock` 目录。新进程启动时,这些 Run 没有任何 in-flight
+   * runner 句柄可继续推进,必须收敛为 `failed`,释放单运行锁,使用户可以
+   * 重新创建新 Run。
+   *
+   * 契约:
+   * - `aliveRunIds === null` → 假定所有 `status=running` 的 Run 均为
+   *   orphan(进程级启动时用最直观;当前没有跨 in-flight 句柄共享需求)
+   * - `aliveRunIds: Set<runId>` → 仅把不在 alive 集合中的 running Run 收敛
+   *   (留作将来多 agent 协同的扩展点)
+   * - **不**删除 issues.jsonl / log.jsonl:保留已完成的 Issue / Response / Log
+   * - meta.error 固定为 `'agent_restart_orphan_recovery'` 字符串,便于 UI 区分
+   * - 调 `transitionToFailed` 触发自动 releaseStartupLock(issue 02)
+   * - **best-effort**:单个 Run 转换失败不阻断其他 Run 的收敛
+   */
+  reconcileRunningRuns(aliveRunIds: ReadonlySet<string> | null): {
+    recovered: Array<{ requirementId: string; runId: string; reason: string }>
+    skipped: Array<{ requirementId: string; runId: string; reason: string }>
+  } {
+    const recovered: Array<{ requirementId: string; runId: string; reason: string }> = []
+    const skipped: Array<{ requirementId: string; runId: string; reason: string }> = []
+
+    // 扫描所有 Requirement 的 runs/ 目录
+    const reqRoot = join(this.workspaceRoot, 'requirements')
+    if (!existsSync(reqRoot)) {
+      return { recovered, skipped }
+    }
+    let reqEntries: string[]
+    try {
+      reqEntries = readdirSync(reqRoot, { withFileTypes: true })
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name)
+    } catch {
+      return { recovered, skipped }
+    }
+
+    const reason = 'agent_restart_orphan_recovery'
+    for (const reqId of reqEntries) {
+      const runs = this.listRuns(reqId)
+      for (const run of runs) {
+        if (run.status !== 'running') continue
+        // aliveRunIds === null → 全部 running 视为 orphan
+        // aliveRunIds 提供 → 集合内的视为仍 alive,跳过
+        if (aliveRunIds !== null && aliveRunIds.has(run.run_id)) {
+          skipped.push({
+            requirementId: reqId,
+            runId: run.run_id,
+            reason: 'alive_in_current_process',
+          })
+          continue
+        }
+        const result = this.transitionToFailed(reqId, run.run_id, reason)
+        if (result.ok) {
+          recovered.push({ requirementId: reqId, runId: run.run_id, reason })
+        } else {
+          skipped.push({
+            requirementId: reqId,
+            runId: run.run_id,
+            reason: result.reason,
+          })
+        }
+      }
+    }
+    return { recovered, skipped }
+  }
+
   /** 进程级完成请求状态(决策 30 内部门禁;重启即失效) */
   private completionRequested = new Set<string>()
 

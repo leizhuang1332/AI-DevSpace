@@ -1,279 +1,65 @@
 /**
- * ANALYZING 工位 — server-only 数据层
+ * ANALYZING 工位 — server-only 数据层(issue 08 · ADR-0021 契约收缩)
  *
- * 设计动机(issue 19a/19b · Webpack `UnhandledSchemeError` 修复):
+ * 设计动机:
+ * - `analyzing.ts` 只保留 client-safe 内容(types + 纯函数)
+ * - 本文件专存 server-only IO + 数据获取,通过 `.server.ts` 命名约定标记
+ * - 客户端 component 不应 import 本文件(避免 node:fs / yaml 污染 client bundle)
  *
- * `analyzing.ts` 同时被两类消费者引用:
- * 1. server component(RSC,例如 `app/(workspace)/requirements/[id]/[zone]/page.tsx`)
- *    — 通过 `getAnalyzingData(reqId)` 拉 server 端数据
- * 2. client component(`'use client'`,例如 `components/analyzing-zone.tsx`)
- *    — 通过 `deriveProducts(chunks)` 在客户端实时派生识别产物
+ * 领域模型(issue 08 之后):
+ * - Analysis Skill(workspace 集合 + per-Requirement 选择)
+ * - Analysis Run(Run 元数据列表,按 created_at 倒序)
+ * - Analysis Issue / Issue Response / Analysis Run Log 由 SSE 事件实时推送,
+ *   本文件**不**预加载 —— SSR 仅负责 Run 元数据骨架,Issue / Response / Log
+ *   在用户切到具体 Run 后由前端调 GET 详情 + 订阅 SSE 累积
  *
- * 当两类代码都从同一个文件 `import` 时,Next.js/webpack 会把整个模块拉进
- * *所有* 引用方的 bundle。`getAnalyzingData` 内部用 `node:fs` 读
- * `analysis/sessions/<id>/chunks.jsonl` 走文件系统 IO —— 这部分代码一旦误入
- * 客户端 bundle,webpack 会抛:
- *   `UnhandledSchemeError: Reading from "node:fs" is not handled by plugins`
+ * 不再加载:
+ * - chunks.jsonl(旧 Session 思考流) → 旧 analyzing 域删
+ * - analysis/sessions/_index.yaml → 多会话 Tab 已删除
+ * - analysis/adjudication.md → Pending Adjudication 已删除
+ * - analysis/technical-brief.md / modules.yaml → Technical Brief / Aggregate
+ *   Module 已删除
  *
- * 修复方案(本文件):
- *
- * - `analyzing.ts` 只留 types + 纯函数 + mock 数据(纯函数可被客户端与 SSR 共用)
- * - 本文件专存 server-only IO + 数据获取,通过 Next.js `.server.ts` 命名约定
- *   标记(项目当前未安装 `server-only` npm 包;若以后装了,把 `import 'server-only'`
- *   放文件顶部即可获得编译期越界保护)
- * - 仅被 RSC(`page.tsx`)和 vitest(同进程 Node.js)引用;client component 不应
- *   import 本文件
- * - 本文件 `import type { ... } from './analyzing'` 仅带类型,TS 编译后是零字节,
- *   不会触发 webpack 模块解析,不会泄露 client 数据
+ * 仍保留:
+ * - PRD / AuxFile / Asset SSR 装载(供 DocumentReaderPane 渲染画线高亮)
+ * - Analysis Skill / selected-skill.yaml SSR 装载
+ * - Analysis Run / runs/<run-id>/meta.yaml SSR 装载
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import yaml from 'yaml'
-import type {
-  AdmissionChunkMeta,
-  AnalysisSession,
-  AnalysisSessionAngle,
-  AnalyzingChunk,
-  AnalyzingData,
-  SkillAdmissionFrontmatter,
-  SourceRef,
-} from './analyzing'
+import type { AssetMeta, AuxFile, UsageTag } from '@ai-devspace/shared'
 import {
-  ANALYSIS_SESSION_ANGLE_META,
-  buildAdmissionData,
-  deriveAdmissionData,
-  emptyAnalyzing,
-  isSourceRef,
-  resolveAdmissionDimensions,
-  summarizeAnalyzingStats,
-} from './analyzing'
-import { loadTechBrief, loadModules } from './tech-brief.server'
-import type { TechBriefModulesFile } from './tech-brief'
-import { resolveRequirementsRoot } from './requirements-root.server'
-import { stripQuotes } from './yaml.server'
-import {
-  extensionToImageMime,
-  AnalysisSkillMetaSchema,
   AnalysisRunMetaSchema,
+  AnalysisSkillMetaSchema,
   isReservedAnalysisSkillName,
   parseMinimalFrontmatter,
   splitSkillMarkdown,
-  type AnalysisSkillMeta,
   type AnalysisRunMeta,
+  type AnalysisSkillMeta,
 } from '@ai-devspace/shared'
-import type { AssetMeta, AuxFile, UsageTag } from '@ai-devspace/shared'
+import { emptyAnalyzing, type AnalyzingData } from './analyzing'
+import { resolveRequirementsRoot } from './requirements-root.server'
+import { stripQuotes } from './yaml.server'
+
+export { resolveRequirementsRoot } from './requirements-root.server'
 
 // ---------------------------------------------------------------------------
-// analysis/sessions/<session-id>/chunks.jsonl 数据源(issue 19b · 验收 #12)
-// ---------------------------------------------------------------------------
-
-/**
- * 从 `analysis/sessions/<session-id>/chunks.jsonl` 加载会话思考流。
- *
- * 文件格式:每行一个 JSON 对象,字段 `{ id, ts, label, tone, text, session_id,
- * source_refs?, synthetic? }`,按写入顺序追加(新 chunk 写在末尾 → 自然成为打字机下一条)。
- *
- * 设计要点:
- * - 文件不存在 / 解析失败 → 返回 `[]`(容错)
- * - 单行 JSON 解析失败 → 跳过该行,继续读后续(避免 1 行损坏毁全文件)
- * - 缺关键字段的 chunk → 跳过该行
- * - **JSONL 兼容**(ADR-0017 D3 · ticket 01):历史 chunk 无 `source_refs` /
- *   `synthetic` 字段 → 默认 `undefined`,行为不变;若 `source_refs` 是数组,
- *   用 `isSourceRef` 逐项校验,无效项丢弃(避免脏数据污染下游)
- * - `synthetic` 字段类型必须是 boolean;非 boolean → 视为 false(忽略)
- * - 与 `getAnalyzingData` 解耦:`getAnalyzingData` 负责顶层数据契约,本函数专注单文件加载
- */
-export function loadSessionChunks(
-  analysisSessionsDir: string,
-  sessionId: string,
-): AnalyzingChunk[] {
-  const file = join(analysisSessionsDir, sessionId, 'chunks.jsonl')
-  if (!existsSync(file)) return []
-  let raw: string
-  try {
-    raw = readFileSync(file, 'utf8')
-  } catch {
-    return []
-  }
-  const result: AnalyzingChunk[] = []
-  for (const line of raw.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    try {
-      const obj = JSON.parse(trimmed) as Record<string, unknown>
-      // 校验最小字段集(避免脏行污染下游)
-      if (
-        typeof obj.id === 'string' &&
-        typeof obj.ts === 'string' &&
-        typeof obj.label === 'string' &&
-        typeof obj.text === 'string' &&
-        typeof obj.kind === 'string' &&
-        typeof obj.tone === 'string'
-      ) {
-        const kind = obj.kind as AnalyzingChunk['kind']
-        const chunk: AnalyzingChunk = {
-          id: obj.id,
-          ts: obj.ts,
-          label: obj.label as AnalyzingChunk['label'],
-          text: obj.text,
-          kind,
-          tone: obj.tone as AnalyzingChunk['tone'],
-        }
-        // source_refs 兼容(ADR-0017 D3):
-        // 1. narration chunk 强制不带(契约二次保障,即使磁盘里写了也丢)
-        // 2. 非 narration 才接受 source_refs;空数组 [] 保留以表达 "AI 明确不引用源"
-        // 3. 用 isSourceRef 逐项校验,无效项丢弃
-        if (kind !== 'narration') {
-          const refs = obj.source_refs
-          if (Array.isArray(refs)) {
-            const validated: SourceRef[] = []
-            for (const r of refs) {
-              if (isSourceRef(r)) validated.push(r)
-            }
-            chunk.source_refs = validated
-          }
-        }
-        // synthetic 字段:JSONL 显式写 true/false;类型必须是 boolean;非 boolean → 忽略
-        if (typeof obj.synthetic === 'boolean') {
-          chunk.synthetic = obj.synthetic
-        }
-        // admission 侧信息(ADR-0020 D8 · audit-2026-07-26 #2):
-        // 逐字段校验后写入 —— 脏值(未知 verdict / 负 pendingCount)整字段丢弃,
-        // 避免 AdmissionDashboard 拿到非法 verdict 渲染出未定义徽章。
-        const admission = parseAdmissionMeta(obj.admission)
-        if (admission) chunk.admission = admission
-        result.push(chunk)
-      }
-    } catch {
-      /* 单行损坏,跳过;继续读后续行 */
-    }
-  }
-  return result
-}
-
-/**
- * 校验并窄化 chunks.jsonl 行上的 `admission` 字段(ADR-0020 D8)。
- *
- * 逐字段白名单:未知 verdict / overall 取值、非有限或负 pendingCount 一律丢弃;
- * 全部字段都无效 → 返回 null(不写 `chunk.admission`,保持 JSONL 契约一致)。
- */
-function parseAdmissionMeta(raw: unknown): AdmissionChunkMeta | null {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
-  const o = raw as Record<string, unknown>
-  const meta: AdmissionChunkMeta = {}
-  if (typeof o.dim === 'string' && o.dim.length > 0) meta.dim = o.dim
-  if (o.verdict === 'pass' || o.verdict === 'warn' || o.verdict === 'fail') {
-    meta.verdict = o.verdict
-  }
-  if (o.overall === 'pass' || o.overall === 'pending' || o.overall === 'fail') {
-    meta.overall = o.overall
-  }
-  if (
-    typeof o.pendingCount === 'number' &&
-    Number.isFinite(o.pendingCount) &&
-    o.pendingCount >= 0
-  ) {
-    meta.pendingCount = Math.trunc(o.pendingCount)
-  }
-  return Object.keys(meta).length > 0 ? meta : null
-}
-
-// ---------------------------------------------------------------------------
-// analysis/adjudication.md 计数(SSR 期 mock 路径由调用方注入)
-// ---------------------------------------------------------------------------
-/**
- * 从 analysisDir 读 adjudication.md,计数未裁决项(`applied: false` 或未标 applied)。
- * 文件不存在 / 解析失败 → 0(容错)。
- */
-export function countPendingAdjudications(analysisDir: string): number {
-  try {
-    const file = join(analysisDir, 'adjudication.md')
-    if (!existsSync(file)) return 0
-    const text = readFileSync(file, 'utf8')
-    return countUnresolvedItems(text)
-  } catch {
-    return 0
-  }
-}
-
-/**
- * 纯函数:从 Markdown 文本里统计 `- item_id:` 起的 bullet,
- * 若该 bullet 内 `applied: false` 或无 `applied:` 字段 → 计 1(视为待裁决)。
- */
-export function countUnresolvedItems(text: string): number {
-  if (!text.trim()) return 0
-  let count = 0
-  // 按 bullet 行分割(- 开头,可能含 2 空格缩进)
-  const lines = text.split('\n')
-  let inItem = false
-  let hasAppliedFalse = false
-  let hasAppliedTrue = false
-  let hasAppliedField = false
-
-  const flush = () => {
-    if (inItem) {
-      // 保守策略:有 applied:true → 不计;其余(applied:false 或无 applied)→ 计
-      if (!hasAppliedTrue || hasAppliedFalse) {
-        count++
-      }
-    }
-    inItem = false
-    hasAppliedFalse = false
-    hasAppliedTrue = false
-    hasAppliedField = false
-  }
-
-  for (const line of lines) {
-    // bullet 起点
-    if (/^\s*-\s+item_id\s*:/.test(line)) {
-      flush()
-      inItem = true
-      hasAppliedFalse = false
-      hasAppliedTrue = false
-      hasAppliedField = false
-      continue
-    }
-    if (!inItem) continue
-
-    // bullet 内行
-    if (/^\s+applied\s*:\s*true\b/.test(line)) {
-      hasAppliedField = true
-      hasAppliedTrue = true
-    } else if (/^\s+applied\s*:\s*false\b/.test(line)) {
-      hasAppliedField = true
-      hasAppliedFalse = true
-    }
-  }
-  flush()
-  return count
-}
-
-// ---------------------------------------------------------------------------
-// PRD / AuxFiles / Assets SSR 装载(ADR-0017 D5 · issue ticket 01)
+// PRD / AuxFiles / Assets SSR 装载(ADR-0017 D5)
 // ---------------------------------------------------------------------------
 
 /**
  * SSR 一次性装载主区左栏文档阅读器所需的 3 段数据。
  *
  * - `prdMarkdown`:`requirement.md` 全文。文件不存在 → 空字符串(SSR 容错)
- * - `auxFiles`:扫描 `<reqDir>/aux/<aux-id>/` 子目录,每个子目录视为一个
- *   AuxFile(`<aux-id>/<filename>.md` 作为 body);按 `usage_tag` 6 类排序,
+ * - `auxFiles`:扫描 `<reqDir>/aux/<aux-id>/` 子目录,按 `usage_tag` 6 类排序,
  *   同 tag 按 `filename` 字典序
  * - `assetList`:解析 `requirement.md` 内 `![](assets/<name>)` 引用 + 与磁盘
- *   `<reqDir>/assets/` readdir 比对 → 仅返回实际存在的 asset。孤儿 asset
- *   (磁盘有但 PRD 未引用)忽略;引用了不存在的 asset 静默忽略(不报错)
+ *   `<reqDir>/assets/` readdir 比对 → 仅返回实际存在的 asset。
  *
- * 容错:
- * - 任何一个环节失败(目录不存在 / 文件不存在 / 读 IO 错)→ 该段返回默认值,
- *   其它段不受影响;不抛错(让上层走 emptyAnalyzing 容错路径)
- *
- * Asset 字段对齐 `@ai-devspace/shared` 的 `AssetMeta`(`{name, url, path, size, mime}`):
- * - `name`:磁盘文件名(如 `prd-1.png`)
- * - `url`:`/api/requirement/<id>/assets/<name>`(前端 fetcher 直接用)
- * - `path`:`requirements/<id>/assets/<name>`(agent 内部消费)
- * - `size`:`statSync` 拿实际磁盘字节数
- * - `mime`:从扩展名反查(沿用 `extensionToImageMime` —— 共用契约)
+ * 容错:任何一个环节失败(目录不存在 / 文件不存在 / 读 IO 错)→ 该段返回
+ * 默认值,其它段不受影响;不抛错(让上层走 emptyAnalyzing 容错路径)。
  */
 export function loadAnalyzingDocs(
   requirementsRoot: string,
@@ -287,12 +73,6 @@ export function loadAnalyzingDocs(
   }
 }
 
-/**
- * 读 `requirement.md` 全文;文件不存在 / 读 IO 错 → 空字符串(SSR 容错)。
- *
- * 容错优于抛错:本函数被 `loadAnalyzingDocs` 高频调用,任何 fs 异常不应阻断
- * SSR(上层 `emptyAnalyzing()` 已经能兜住数据形状)。
- */
 function loadPrdMarkdown(reqDir: string): string {
   const file = join(reqDir, 'requirement.md')
   if (!existsSync(file)) return ''
@@ -303,29 +83,6 @@ function loadPrdMarkdown(reqDir: string): string {
   }
 }
 
-/**
- * 扫描 `<reqDir>/aux/` 子目录,每个子目录视为一个 AuxFile。
- *
- * 目录 layout:
- * ```
- * requirements/<id>/aux/
- *   <aux-id>/        ← 子目录名 = auxId(直接当 AuxFile.id)
- *     任何 .md 文件  ← 首个 .md 作为 body;多文件场景本期取首个
- *     meta.yaml      ← 可选:含 usage_tag;缺失 → 落到 'other'
- * ```
- *
- * 排序:`usage_tag` 6 类固定顺序(api / data / research / sop / ui / other);
- * 同 tag 按 `filename` 字典序。
- *
- * 容错:
- * - `aux/` 目录不存在 → `[]`(不抛错)
- * - 子目录无 .md 文件 → 跳过该子目录
- * - 子目录无 meta.yaml → usage_tag 落到 'other'(保守)
- *
- * 不做的事:
- * - 不解析 source_format / converted_to_md(本期 SSR 直接给 'md' / false,
- *   由 drafting 子系统维护);后续 ticket 02 + SSR 注入时再补
- */
 function loadAuxFiles(reqDir: string): AuxFile[] {
   const auxDir = join(reqDir, 'aux')
   if (!existsSync(auxDir)) return []
@@ -343,7 +100,6 @@ function loadAuxFiles(reqDir: string): AuxFile[] {
     } catch {
       continue
     }
-    // 收集子目录下的 .md(首个非 YAML 的当作 body)
     let bodyFile: string | null = null
     let filename = ''
     let usageTag: UsageTag = 'other'
@@ -353,7 +109,6 @@ function loadAuxFiles(reqDir: string): AuxFile[] {
         if (f.toLowerCase().endsWith('.md') && bodyFile === null) {
           bodyFile = f
         } else if (f === 'meta.yaml') {
-          // 尝试解析 usage_tag
           usageTag = parseUsageTagFromMeta(join(subDir, f)) ?? 'other'
         }
       }
@@ -377,7 +132,6 @@ function loadAuxFiles(reqDir: string): AuxFile[] {
       converted_to_md: false,
     })
   }
-  // 排序:usage_tag → filename
   auxFiles.sort((a, b) => {
     if (a.usage_tag !== b.usage_tag) {
       return USAGE_TAG_ORDER.indexOf(a.usage_tag) - USAGE_TAG_ORDER.indexOf(b.usage_tag)
@@ -387,17 +141,8 @@ function loadAuxFiles(reqDir: string): AuxFile[] {
   return auxFiles
 }
 
-/** `UsageTag` 的固定展示顺序(对齐 drafting 子系统约定) */
 const USAGE_TAG_ORDER: UsageTag[] = ['api', 'data', 'research', 'sop', 'ui', 'other']
 
-/**
- * 从 aux 子目录的 `meta.yaml` 里尝试解析 `usage_tag` 字段。
- * 解析失败(文件不存在 / 格式错 / 字段缺失 / 值不在 union 内)→ 返 null,
- * 调用方落到 'other'。
- *
- * 极简解析:仅匹配 `usage_tag: api` 形式的单行,值经 stripQuotes 去引号。
- * 与 `_index.yaml` 解析策略保持一致 —— 都是受控极简格式,不引第三方依赖。
- */
 function parseUsageTagFromMeta(metaPath: string): UsageTag | null {
   let raw: string
   try {
@@ -412,16 +157,6 @@ function parseUsageTagFromMeta(metaPath: string): UsageTag | null {
   return (allowed as string[]).includes(value) ? (value as UsageTag) : null
 }
 
-/**
- * Asset 列表装载(对齐 ADR-0015 D5):
- * 1. 解析 prdMarkdown 内 `![](assets/<name>)` 引用 → 收集 name 集合
- * 2. 与磁盘 `<reqDir>/assets/` readdir 比对 → 仅保留实际命中的
- * 3. 用 `statSync` 拿 size + 用扩展名反查 mime(extensionToImageMime)
- *
- * 孤儿 asset(磁盘有但 PRD 未引用)忽略;
- * 引用了不存在的 asset 静默忽略(不报错;后者通过 PRD 引用直接说"被引用但没了"
- * —— UI 给"图片丢失"占位,本期不做)。
- */
 function loadAssetList(reqDir: string, requirementId: string): AssetMeta[] {
   const assetsDir = join(reqDir, 'assets')
   if (!existsSync(assetsDir)) return []
@@ -433,7 +168,6 @@ function loadAssetList(reqDir: string, requirementId: string): AssetMeta[] {
   } catch {
     return []
   }
-  // 防御性:命中集合里的扩展名(mime 反查)
   const out: AssetMeta[] = []
   for (const name of files) {
     if (!referenced.has(name)) continue
@@ -457,25 +191,11 @@ function loadAssetList(reqDir: string, requirementId: string): AssetMeta[] {
   return out
 }
 
-/** 匹配 `![](assets/<name>)` 形态:`name` 不含 `)` / 引号 / 空白 / `#`(防 markdown 链接变体) */
 const PRD_ASSET_REF_RE = /!\[[^\]]*\]\(\s*assets\/([^)\s"]+)\s*\)/g
 
-/**
- * 从 PRD Markdown 文本提取 `![](assets/<name>)` 引用集合。
- *
- * 简化 parser(仅做行扫描 + regex,不支持嵌套或转义边缘场景):
- * - 匹配 `![any](assets/<name>)` 形态
- * - `name` 不含 `)` / 引号 / 空白 / `#`(防 markdown 链接变体)
- * - 同一 name 出现多次 → 去重
- *
- * 复杂度:O(n) 行数;空输入 → 空集合。
- *
- * 注意:regex 在模块顶层 hoisted(避免热路径重复编译)。
- */
 function extractPrdAssetRefs(prdMarkdown: string): Set<string> {
   const refs = new Set<string>()
   if (!prdMarkdown) return refs
-  // `g` flag + exec:利用 lastIndex 自然推进循环
   PRD_ASSET_REF_RE.lastIndex = 0
   let m: RegExpExecArray | null
   while ((m = PRD_ASSET_REF_RE.exec(prdMarkdown))) {
@@ -484,19 +204,31 @@ function extractPrdAssetRefs(prdMarkdown: string): Set<string> {
   return refs
 }
 
+// Asset mime 反查(共用契约 — 见 packages/shared/src/drafting.ts)
+const IMAGE_EXT_TO_MIME: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  bmp: 'image/bmp',
+  ico: 'image/x-icon',
+}
+
+function extensionToImageMime(ext: string): string {
+  if (!ext) return 'application/octet-stream'
+  return IMAGE_EXT_TO_MIME[ext] ?? 'application/octet-stream'
+}
+
 // ---------------------------------------------------------------------------
 // Analysis Skill SSR 装载(issue 01 · ADR-0021)
-//
-// 数据源:`<workspaceRoot>/analysis-skills/<name>/SKILL.md`
-// 与 Agent `AnalysisSkillService.listAllSkills()` 同形态 ——
-// SSR 直接读 fs,绕过 HTTP;Zod 二次校验(与 `repos` 端点同款)。
-// 容错:目录不存在 / IO 错 / 非法 Skill → 跳过,不阻断 SSR。
 // ---------------------------------------------------------------------------
 
 /**
  * SSR 装载可用 Analysis Skill 列表 + 该 Requirement 已选择 Skill。
  *
- * - `availableSkills` 按 name 字典序排序(展示稳定)
+ * - `availableSkills` 按 name 字典序排序
  * - `selectedSkillName` 解析顺序:
  *   1) 读 `<root>/requirements/<id>/analysis/selected-skill.yaml`
  *   2) 解析出的 `skill_name` 仍在 availableSkills → 沿用
@@ -504,16 +236,14 @@ function extractPrdAssetRefs(prdMarkdown: string): Set<string> {
  *   4) 都不可用 → 空字符串(页面走"无可用 Skill"明确状态)
  *
  * 任一 fs 步骤失败(目录不存在 / 解析失败)→ 该步空集合 / 空字符串,
- * 不抛错 —— SSR 容错优于抛错(老契约)。
+ * 不抛错(SSR 容错优于抛错)。
  */
 export function loadAnalysisSkillsBundle(
   workspaceRoot: string,
   requirementId: string,
 ): { availableSkills: AnalysisSkillMeta[]; selectedSkillName: string } {
-  // 1) 读所有可用 Skill
   const skillsDir = join(workspaceRoot, 'analysis-skills')
   const availableSkills = readAnalysisSkillsDir(skillsDir)
-  // 2) 读已选择
   const selectionFile = join(
     workspaceRoot,
     'requirements',
@@ -522,7 +252,6 @@ export function loadAnalysisSkillsBundle(
     'selected-skill.yaml',
   )
   const persistedName = readSelectedSkillName(selectionFile)
-  // 3) resolve
   let selectedSkillName: string
   if (
     persistedName &&
@@ -537,13 +266,6 @@ export function loadAnalysisSkillsBundle(
   return { availableSkills, selectedSkillName }
 }
 
-/**
- * 单点扫描 `<dir>` 子目录,读取每个子目录的 `SKILL.md`,校验
- * 通过 `AnalysisSkillMetaSchema` 的入列表;非法 Skill 跳过。
- *
- * 与 Agent 端 `AnalysisSkillService.listAllSkills()` 行为一致 —— SSR
- * 必须与 HTTP 响应同形态(否则页面 / 测试会出现"列表不一致"灵异 bug)。
- */
 function readAnalysisSkillsDir(dir: string): AnalysisSkillMeta[] {
   if (!existsSync(dir)) return []
   let entries: { name: string; isDir: boolean }[]
@@ -563,7 +285,6 @@ function readAnalysisSkillsDir(dir: string): AnalysisSkillMeta[] {
   return out
 }
 
-/** 读单个 Skill。失败 / 非法 → null(不抛错,跳过)。 */
 function readOneAnalysisSkill(
   skillDir: string,
   dirName: string,
@@ -587,12 +308,10 @@ function readOneAnalysisSkill(
   }
   const parsed = AnalysisSkillMetaSchema.safeParse(candidate)
   if (!parsed.success) return null
-  // body 非空校验:避免"只有 frontmatter,没规则正文"的空 Skill
   if (split.body.trim().length === 0) return null
   return parsed.data
 }
 
-/** 读 selection YAML,仅取 `skill_name` 字段;容错:任何失败 → 空串。 */
 function readSelectedSkillName(file: string): string {
   if (!existsSync(file)) return ''
   try {
@@ -615,21 +334,15 @@ function readSelectedSkillName(file: string): string {
 
 // ---------------------------------------------------------------------------
 // Analysis Run SSR 装载(issue 02 · ADR-0021)
-//
-// 数据源:`<workspaceRoot>/requirements/<req-id>/analysis/runs/<run-id>/meta.yaml`
-// 与 Agent `AnalysisRunService.listRuns()` 行为一致 —— 实时 readdir,
-// 按 created_at 倒序,非法 Run 跳过不阻断 SSR。
 // ---------------------------------------------------------------------------
 
 /**
- * 扫描 `<root>/requirements/<req-id>/analysis/runs/<run-id>/` 子目录,读取
- * 每个子目录的 `meta.yaml`,校验通过 `AnalysisRunMetaSchema` 的入列表;
+ * 扫描 `<root>/requirements/<req-id>/analysis/runs/<run-id>/` 子目录,
+ * 读取每个子目录的 `meta.yaml`,校验通过 `AnalysisRunMetaSchema` 的入列表;
  * 非法 Run 跳过;按 created_at 倒序(最新在前)。
  *
  * 与 Agent 端 `AnalysisRunService.listRuns()` 行为一致 —— SSR 直接读 fs,
- * 绕过 HTTP;Zod 二次校验(与 `repos` 端点同款),防契约漂移。
- *
- * 容错:目录不存在 / 解析失败 / 子目录无 meta.yaml → 跳过,不阻断 SSR。
+ * 绕过 HTTP;Zod 二次校验防契约漂移。
  */
 export function loadAnalysisRuns(
   workspaceRoot: string,
@@ -670,576 +383,40 @@ export function loadAnalysisRuns(
 
 // ---------------------------------------------------------------------------
 // RSC 数据入口
-//
-// ticket 03 改造:删去 `requirementId === 'req-001'` 的硬短路分支。
-// 原短路副作用:"req-001 在磁盘空时也渲染 AdmissionDashboard 满数据",
-// 与其它 id 行为不一致;ticket 01 已把 start handler 真接 SDK,短路不再
-// 安全。现在 req-001 与其它 id 一视同仁 —— 走 `emptyAnalyzingWithOptions`,
-// fs 上有 requirement.md 就走 active,没有就走 empty 引导去 DRAFTING;
-// AdmissionDashboard 在 fs 空时自然落到 ticket 05 计划的"全 0 + 引导"空态。
-//
-// REFUND_ANALYZING 样例数据已迁到测试 fixture
-// `apps/web/src/__tests__/__fixtures__/analyzing-fixtures.ts`,此处不再 import。
-// 4 个测试文件(analyzing.test.ts / analyzing-data-fields.test.ts /
-// analyzing-zone.test.tsx / analyzing-designing-fs-loader.test.ts)改 import
-// fixture,样例数据契约(17 chunks / 5+3+2 / admission counts 等)继续被验证。
 // ---------------------------------------------------------------------------
 
 /**
- * 拉取 ANALYZING 工位数据(SSR 期 mock —— 后续替换为 `await fetch(...)`)。
+ * 拉取 ANALYZING 工位数据(SSR 装载文档 + Skill + Run 骨架)。
  *
- * 所有 id 一视同仁:若 caller 没传 `analysisDir` / `analysisSessionsDir`,
- * 自动按 `<requirementsRoot>/<reqId>/analysis[/sessions]` 注入;fs 缺产物时
- * 走 fallback(default 单会话 / 0 待裁决 / 5 维度 + pending verdict)。
+ * Phase 判定:
+ * - `requirement.md` 不存在 → `empty: true`,UI 引导去 DRAFTING
+ * - `requirement.md` 存在 → `empty: false`,主区渲染
  *
- * ticket 03 之前:`req-001` 走硬编码 mock 短路(ticket 01 改造 start handler
- * 之后此短路已不安全 —— req-001 既然真接 SDK,就不再该有"无条件渲染满数据"
- * 的特权)。现统一走 `emptyAnalyzingWithOptions`,与其它 id 行为一致。
+ * 不读旧领域文件:`analysis/sessions/_index.yaml` / `chunks.jsonl` /
+ * `analysis/adjudication.md` / `technical-brief.md` / `modules.yaml` 全部
+ * 忽略,即便磁盘上仍有历史遗留。
  *
- * options 用于接入真实数据源(后续 VS 接 server action):
- * - `skillFrontmatter`: Skill SKILL.md frontmatter(读 admission_dimensions + admission_override)
- * - `analysisDir`: 需求 analysis 目录(读 adjudication.md 计数);
- *   **缺省时**按 `requirementsRoot + reqId + analysis` 自动注入
- * - `analysisSessionsDir`: 读 _index.yaml + 各会话 chunks.jsonl;**缺省时**按
- *   `analysisDir + sessions` 自动注入
- * - `lastSessionId`: cookie 注入的 active session;**透传逻辑不变**
- * - `requirementsRoot`: 覆盖 dev 默认的 `<repo-root>/requirements/`(主要给
- *   测试用)
+ * options 仅为测试方便注入 `requirementsRoot`;生产路径不传 option,内部走
+ * `resolveRequirementsRoot()`(config.yaml / AIDEVSPACE_HOME / cwd 三层 fallback)。
  */
 export async function getAnalyzingData(
   requirementId: string,
-  options?: GetAnalyzingDataOptions,
+  options?: { requirementsRoot?: string },
 ): Promise<AnalyzingData> {
-  const resolved = resolveAnalysisPaths(requirementId, options)
-  return emptyAnalyzingWithOptions(requirementId, resolved)
-}
-
-/**
- * 把 options 中缺省的 `analysisDir` / `analysisSessionsDir` 解析为绝对路径。
- *
- * - caller 显式传入的字段保留原值(后续 agent API 仍可接管)
- * - 缺省字段按 `requirementsRoot + reqId + analysis[/sessions]` 拼:
- *   - `requirementsRoot` 缺省 → dev 默认 `<repo-root>/requirements/`
- *   - `analysisSessionsDir` 缺省且 `analysisDir` 已解析 → 拼 `<analysisDir>/sessions`
- *
- * 返回新对象,不动原 options(避免污染调用方)。
- */
-
-/**
- * 判定 `<requirementsRoot>/requirements/<id>/requirement.md` 是否存在。
- * SSR 期间决定 phase 是 'empty'(无 requirement.md)还是 'not_started' / 'active'。
- *
- * - 不存在 → 'empty'(引导去 DRAFTING)
- * - 存在 → 进一步看 fs 上是否有 sessions → 'not_started' / 'active'
- *
- * 注:拼接路径时使用 `requirementsRoot + requirements + <id>` 对齐后端
- * `RequirementService.root` 的目录结构(root 之外仍有一层 `requirements/`)。
- */
-function existsRequirementMd(
-  requirementsRoot: string,
-  requirementId: string,
-): boolean {
-  return existsSync(
-    resolve(requirementsRoot, 'requirements', requirementId, 'requirement.md'),
-  )
-}
-function resolveAnalysisPaths(
-  requirementId: string,
-  options: GetAnalyzingDataOptions | undefined,
-): GetAnalyzingDataOptions {
-  const requirementsRoot =
-    options?.requirementsRoot ?? defaultRequirementsRoot()
-  // 路径:`<root>/requirements/<reqId>/analysis`(对齐 ADR-0002 文件系统结构)
-  // root = workspace 根(由 `resolveRequirementsRoot()` 解析),所有 loader 统一
-  // 拼接 `requirements/<id>/...` 以跟后端 `RequirementService.root` 对齐。
-  const defaultAnalysisDir = resolve(
-    requirementsRoot,
-    'requirements',
-    requirementId,
-    'analysis',
-  )
-  const analysisDir = options?.analysisDir ?? defaultAnalysisDir
-  const analysisSessionsDir =
-    options?.analysisSessionsDir ?? resolve(analysisDir, 'sessions')
-  return {
-    ...options,
-    analysisDir,
-    analysisSessionsDir,
-  }
-}
-
-/** getAnalyzingData options —— 后续切 server action 时注入真实数据源 */
-export interface GetAnalyzingDataOptions {
-  skillFrontmatter?: SkillAdmissionFrontmatter
-  analysisDir?: string
-  /**
-   * 需求 analysis/sessions/ 目录(读 _index.yaml + 各会话 chunks.jsonl)。
-   * 不传 → 走 mock(默认 1 个"架构"会话)。
-   */
-  analysisSessionsDir?: string
-  /**
-   * 上次访问的 active session id(cookie 注入)—— 优先级高于 sessions[0].id。
-   * 不存在或不在 sessions 列表中 → 退回到 sessions[0].id。
-   */
-  lastSessionId?: string
-  /**
-   * requirements 根目录覆盖(主要为测试方便注入 fs 路径)。
-   * - 默认:dev 时 cwd = `<repo-root>/apps/web/`,即 `<repo-root>/requirements/`
-   * - 显式传入 → `analysisDir` / `analysisSessionsDir` 缺省时按
-   *   `<requirementsRoot>/<reqId>/analysis[/sessions]` 解析
-   * - 同时显式传 `analysisDir` / `analysisSessionsDir` 时,这两项优先生效
-   *   (本字段只影响未显式传入的字段)
-   */
-  requirementsRoot?: string
-}
-
-// ---------------------------------------------------------------------------
-// 默认路径解析(issue: zone-data-fidelity-fixes · 02 / ANALYZING 部分 · ticket 05 / D-6)
-//
-// 走 `resolveRequirementsRoot()` 三层 fallback
-// (config.yaml.workspaceRoot → AIDEVSPACE_HOME → cwd + ../..),与后端
-// `RequirementService.root` 在 dev/production 都对齐到 `~/.aidevspace`
-// (dev) 或 `AIDEVSPACE_HOME`(production)。前端 loader 不再硬编码
-// `cwd + ../../requirements`(PRD N-2 已废止)。
-// ---------------------------------------------------------------------------
-
-/** 默认 requirements 根:走 `resolveRequirementsRoot()` 三层 fallback(见 PRD D-6) */
-function defaultRequirementsRoot(): string {
-  return resolveRequirementsRoot()
-}
-
-/**
- * emptyAnalyzing 的"接装配"版本 —— 即使是空需求,维度也走 resolveAdmissionDimensions,
- * pendingAdjudicationCount 也走 countPendingAdjudications(容错返回 0)。
- *
- * 拆分函数而非 inline:让 getAnalyzingData 主线保持直白,装配逻辑单测容易。
- *
- * **二态 phase 判定(顺序敏感)**(issue 重构 · 直接进入主区):
- * 1. **phase === 'empty'**: `requirement.md` 不存在 → 引导去 DRAFTING。
- *    (空态 → 旧契约 `empty: true` 仍保持,行为不变)
- * 2. **phase === 'active'**: requirement.md 存在 → 走主区;fs 上是否有 sessions
- *    都直接进(主区对 chunks=[] / sessions=[] 已做容错,显示"暂无思考流"等)。
- *
- * 字段等价关系:
- * - `phase === 'empty'` ⟺ `empty === true`
- * - `phase === 'active'` ⟺ `empty === false`
- *
- * admission / sessions / techBrief 等"非空字段"按需装配 —— 即使 phase 是 'empty'
- * 也走 resolveAdmissionDimensions(渲染时 admission 可能仍展示"待裁决"提示)。
- */
-function emptyAnalyzingWithOptions(
-  requirementId: string,
-  options?: GetAnalyzingDataOptions,
-): AnalyzingData {
-  const dims = resolveAdmissionDimensions(options?.skillFrontmatter)
-  const pending = options?.analysisDir
-    ? countPendingAdjudications(options.analysisDir)
-    : 0
-  const sessionsBundle = loadZoneSessionsBundle(
-    options?.analysisSessionsDir,
-    options?.lastSessionId,
-  )
-  // SSR 装载 active session 的 chunks(zone-data-fidelity-fixes/04 — 修复 ticket 阶段
-  // 遗漏的 wiring:fs 路径下 ANALYZING 工位 chunks 永远是 [],真 AI 重启后查看历史 /
-  // mock 数据都无法进入 UI。本函数之前未调 `loadSessionChunks`,active session 的
-  // chunks 完全丢失,UI 渲染"暂无思考流"。补这一行后,active session 的 chunks
-  // 走 fs 真实装载;切到非 active Tab 仍由 SSR 简化版决定(ticket 后续补 client
-  // 切 Tab 重发请求,本期不修)。
-  const activeChunks =
-    options?.analysisSessionsDir && sessionsBundle.activeSessionId
-      ? loadSessionChunks(options.analysisSessionsDir, sessionsBundle.activeSessionId)
-      : []
-  // ADR-0020 D8 · audit-2026-07-26 #2:五维卡 count / 总体 verdict 由 chunks 的
-  // admission 侧信息派生 —— 之前恒为 `count: 0 + verdict: 'pending'`,刷新页面
-  // 后 AdmissionDashboard 永远归零。fallback 走 adjudication.md 计数。
-  const admission = deriveAdmissionData(activeChunks, {
-    dimensions: dims,
-    fallbackVerdict: 'pending',
-    fallbackPendingCount: pending,
-  })
-  const techBrief = options?.analysisDir ? loadTechBriefFromAnalysisDir(options.analysisDir) : null
-  const requirementsRoot = options?.requirementsRoot ?? defaultRequirementsRoot()
-  const hasRequirementMd = existsRequirementMd(requirementsRoot, requirementId)
-  // ADR-0017 D5 · SSR 注入 PRD / AuxFile / Asset —— 容错读 fs,任何环节异常返回空
+  const requirementsRoot = options?.requirementsRoot ?? resolveRequirementsRoot()
+  const reqDir = resolve(requirementsRoot, 'requirements', requirementId)
+  const hasRequirementMd = existsSync(join(reqDir, 'requirement.md'))
   const docs = loadAnalyzingDocs(requirementsRoot, requirementId)
-  // issue 01 · ADR-0021:Analysis Skill 集合 + per-Requirement 已选项
-  // SSR 直接读 fs(workspaceRoot 来自 requirementsRoot,与 agent 端同源)
-  // —— 与 HTTP list/selection 端点行为一致(都走 fs + Zod 校验)
   const analysisSkills = loadAnalysisSkillsBundle(requirementsRoot, requirementId)
-  // issue 02 · ADR-0021:Analysis Run 列表 SSR 装载(按 created_at 倒序)
   const analysisRuns = loadAnalysisRuns(requirementsRoot, requirementId)
-
-  // 二路分支(顺序敏感)
-  // 1. requirement.md 不存在 → 引导去 DRAFTING(老 empty 路径)
-  if (!hasRequirementMd) {
-    return {
-      ...emptyAnalyzing(requirementId),
-      admission,
-      sessions: sessionsBundle.sessions,
-      activeSessionId: sessionsBundle.activeSessionId,
-      ...techBrief,
-      // SSR 注入字段(ADR-0017 D5)—— 即使空态也试着读,fs 缺文件时落到空字符串/[]
-      prdMarkdown: docs.prdMarkdown,
-      auxFiles: docs.auxFiles,
-      assetList: docs.assetList,
-      // issue 01 · ADR-0021:即使 empty 态也试着注入 Skill 集合(容错回退)
-      availableSkills: analysisSkills.availableSkills,
-      selectedSkillName: analysisSkills.selectedSkillName,
-      // issue 02 · ADR-0021:Analysis Run 列表
-      runs: analysisRuns,
-      empty: true,
-      phase: 'empty',
-    }
-  }
-
-  // 2. requirement.md 存在 → 直接进主区(主区容错空 chunks / 空 sessions)
   return {
     ...emptyAnalyzing(requirementId),
-    empty: false,
-    phase: 'active',
-    admission,
-    sessions: sessionsBundle.sessions,
-    activeSessionId: sessionsBundle.activeSessionId,
-    // active session 的 chunks(zone-data-fidelity-fixes/04 修复;ticket 阶段
-    // 遗漏的 wiring,fs 路径下 chunks 永远是 [] → 真 AI 历史回看 / mock 数据
-    // 无法进入 UI)。empty 分支不显式注入,沿用 emptyAnalyzing() 默认 [],
-    // 符合"主区引导去 DRAFTING,不渲染思考流"的语义。
-    chunks: activeChunks,
-    // stats 联动(zone-data-fidelity-fixes/04 修复):顶部 stats 卡片读 data.stats,
-    // 之前 spread emptyAnalyzing() 默认 {0,0,0,0} → 即使 chunks 有产物,顶部
-    // stats 也显示 0,与右栏 deriveProducts(chunks) 派生列表不一致(列表算对,
-    // stats 卡片算错)。用 summarizeAnalyzingStats(activeChunks) 派生。
-    stats: summarizeAnalyzingStats(activeChunks),
-    ...techBrief,
-    // SSR 注入字段(ADR-0017 D5)
+    empty: !hasRequirementMd,
     prdMarkdown: docs.prdMarkdown,
     auxFiles: docs.auxFiles,
     assetList: docs.assetList,
-    // issue 01 · ADR-0021
     availableSkills: analysisSkills.availableSkills,
     selectedSkillName: analysisSkills.selectedSkillName,
-    // issue 02 · ADR-0021:Analysis Run 列表(按 created_at 倒序)
     runs: analysisRuns,
   }
-}
-
-/**
- * 判定 fs 是否真的有 sessions 内容(非默认单会话兜底):
- * - analysisSessionsDir 缺省 / `_index.yaml` 不存在 / 解析失败 → false
- * - 至少 1 个会话的 `chunks.jsonl` 非空 → true
- * - 否则 → false(仅有 sessions 元数据但没真实内容,仍算空)
- */
-function hasFsSessionContent(analysisSessionsDir: string | undefined): boolean {
-  if (!analysisSessionsDir) return false
-  const bundle = loadSessionsBundle(analysisSessionsDir, undefined)
-  // sessions 来自 fallback(id='default')说明 fs 没内容
-  if (bundle.sessions.length === 1 && bundle.sessions[0].id === 'default') {
-    return false
-  }
-  // 检查每个会话是否有 chunks.jsonl 内容
-  for (const session of bundle.sessions) {
-    const chunks = loadSessionChunks(analysisSessionsDir, session.id)
-    if (chunks.length > 0) return true
-  }
-  return false
-}
-
-/**
- * 从 analysisDir 加载技术概要产物(issue 19e VS5)。
- * - 双产物都存在 → 返回 { brief, modules, generatedAt }
- * - 缺一 → 返回 null(让顶层字段保持默认 null)
- */
-function loadTechBriefFromAnalysisDir(analysisDir: string): {
-  techBriefPreview: string
-  modulesPreview: TechBriefModulesFile
-  briefGeneratedAt: string
-} | null {
-  const brief = loadTechBrief(analysisDir)
-  if (brief === null) return null
-  const modules = loadModules(analysisDir)
-  // 派生 generatedAt:取两个文件 mtime 的较新者
-  let mtimeMs = 0
-  for (const name of ['technical-brief.md', 'modules.yaml']) {
-    const p = join(analysisDir, name)
-    if (existsSync(p)) {
-      try {
-        const st = statSync(p)
-        if (st.mtimeMs > mtimeMs) mtimeMs = st.mtimeMs
-      } catch {
-        /* ignore */
-      }
-    }
-  }
-  return {
-    techBriefPreview: brief,
-    modulesPreview: modules,
-    briefGeneratedAt: mtimeMs > 0 ? new Date(mtimeMs).toISOString() : new Date().toISOString(),
-  }
-}
-
-// ---------------------------------------------------------------------------
-// 多会话(ADR-0013 D7 · issue 19c VS3)
-// ---------------------------------------------------------------------------
-
-/**
- * 多会话加载结果:包含 sessions 列表 + 默认 activeSessionId。
- *
- * - 文件不存在 → 返回默认单会话 `{ id: 'default', label: '架构', angle: 'architecture', detectedCount: 0, isStreaming: false }`
- * - 解析失败 → 同上(容错)
- * - lastSessionId 命中 → activeSessionId = lastSessionId,否则 sessions[0].id
- */
-export interface SessionsBundle {
-  sessions: AnalysisSession[]
-  activeSessionId: string
-}
-
-/**
- * 默认单会话(issue 19c 验收 #13:文件不存在时返回 `{ id: 'default', label: '架构', ... }`)。
- */
-export function defaultSessionsBundle(): SessionsBundle {
-  return {
-    sessions: [
-      {
-        id: 'default',
-        label: '架构',
-        angle: 'architecture',
-        detectedCount: 0,
-        isStreaming: false,
-      },
-    ],
-    activeSessionId: 'default',
-  }
-}
-
-/**
- * 加载多会话数据:从 analysisSessionsDir/_index.yaml 读会话列表 + 解析默认 active。
- *
- * - sessionsDir 不存在 / _index.yaml 不存在 → 返回 defaultSessionsBundle()
- * - _index.yaml 解析失败 → 返回 defaultSessionsBundle()(容错)
- * - sessions 解析成功但数组为空 → 返回 defaultSessionsBundle()
- * - lastSessionId 命中 sessions 中某项 → activeSessionId = lastSessionId
- * - 否则 → activeSessionId = sessions[0].id
- */
-export function loadSessionsBundle(
-  sessionsDir: string | undefined,
-  lastSessionId: string | undefined,
-): SessionsBundle {
-  const fallback = defaultSessionsBundle()
-  if (!sessionsDir) return fallback
-
-  const indexFile = join(sessionsDir, '_index.yaml')
-  if (!existsSync(indexFile)) return fallback
-
-  let raw: string
-  try {
-    raw = readFileSync(indexFile, 'utf8')
-  } catch {
-    return fallback
-  }
-  const sessions = parseSessionsIndexYaml(raw)
-  if (sessions.length === 0) return fallback
-
-  const active =
-    (lastSessionId && sessions.some((s) => s.id === lastSessionId)
-      ? sessions.find((s) => s.id === lastSessionId)
-      : null) ?? sessions[0]
-
-  return { sessions, activeSessionId: active.id }
-}
-
-/**
- * ANALYZING 工位专用的会话装载(audit-2026-07-26 关键阻塞项 #1)。
- *
- * 与 `loadSessionsBundle()` 的区别 —— **磁盘上没有任何会话时返回真正的空数组**,
- * 而不是合成一个 `{ id: 'default' }` 占位会话。
- *
- * 为什么必须区分:ticket 05 的「▶ 开始分析」CTA 渲染条件是
- * `sessions.length === 0 && dimensions.every(d => d.count === 0)`。
- * 旧 loader 在 `_index.yaml` 不存在时返回 1 个默认会话,于是"有 requirement.md、
- * 还没跑过分析"的真实首次访问拿到 `sessions.length === 1` —— CTA 永远不显示,
- * 用户没有任何入口启动分析(既有单测用手工构造的 `sessions: []` 掩盖了这个缺口)。
- *
- * 三级判定(顺序敏感):
- * 1. `_index.yaml` 存在且解析出 ≥1 条 → 用它(权威来源,含 label / angle)
- * 2. `_index.yaml` 缺失/损坏,但 sessions/ 下有子目录 → 按目录名合成会话
- *    (start handler 崩在写 `_index.yaml` 之前时的自愈路径:chunks 还在,
- *     不该因为索引丢了就让用户看不到历史)
- * 3. 都没有 → `{ sessions: [], activeSessionId: '' }`(CTA 可达)
- *
- * `defaultSessionsBundle()` / `loadSessionsBundle()` 保持原语义不变(issue 19c
- * 验收 #13 仍由其单测守护),仅工位 loader 改用本函数。
- */
-export function loadZoneSessionsBundle(
-  sessionsDir: string | undefined,
-  lastSessionId: string | undefined,
-): SessionsBundle {
-  const empty: SessionsBundle = { sessions: [], activeSessionId: '' }
-  if (!sessionsDir) return empty
-
-  const pickActive = (sessions: AnalysisSession[]): SessionsBundle => {
-    const active =
-      (lastSessionId && sessions.some((s) => s.id === lastSessionId)
-        ? sessions.find((s) => s.id === lastSessionId)
-        : null) ?? sessions[0]
-    return { sessions, activeSessionId: active.id }
-  }
-
-  // 1. _index.yaml 权威来源
-  const indexFile = join(sessionsDir, '_index.yaml')
-  if (existsSync(indexFile)) {
-    try {
-      const sessions = parseSessionsIndexYaml(readFileSync(indexFile, 'utf8'))
-      if (sessions.length > 0) return pickActive(sessions)
-    } catch {
-      /* 落到目录扫描兜底 */
-    }
-  }
-
-  // 2. 目录扫描自愈:sessions/<id>/ 存在即视作一条会话
-  if (!existsSync(sessionsDir)) return empty
-  let dirs: string[]
-  try {
-    dirs = readdirSync(sessionsDir, { withFileTypes: true })
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name)
-      .sort()
-  } catch {
-    return empty
-  }
-  if (dirs.length === 0) return empty
-  return pickActive(
-    dirs.map((id) => ({
-      id,
-      label: id,
-      angle: 'custom' as const,
-      detectedCount: 0,
-      isStreaming: false,
-    })),
-  )
-}
-
-/**
- * 解析 analysis/sessions/_index.yaml —— 受限格式:
- *
- * ```yaml
- * sessions:
- *   - id: sess-default
- *     label: 架构
- *     angle: architecture
- *     detected_count: 3
- *     is_streaming: false
- *     created_at: 2026-07-12T14:00:00+08:00
- * ```
- *
- * 设计要点:
- * - 极简解析器(只为这个受控格式):不引第三方依赖,解析失败返回 []
- * - 字段缺失时给默认值(id 缺失 → 跳过该 entry;其他字段缺失 → 默认值)
- * - angle 受 ANALYSIS_SESSION_ANGLE_META 约束,未知值回落到 'custom'
- * - 单行解析失败 → 跳过该 entry,继续(避免一行脏数据毁全文件)
- *
- * 这是 constrcutive 的格式定义(由本仓库写入),不追求通用 YAML。
- */
-export function parseSessionsIndexYaml(text: string): AnalysisSession[] {
-  if (!text.trim()) return []
-  const lines = text.split('\n')
-  const result: AnalysisSession[] = []
-  let inSessions = false
-  let current: Partial<AnalysisSession> | null = null
-
-  const flush = () => {
-    if (current && typeof current.id === 'string') {
-      result.push({
-        id: current.id,
-        label: typeof current.label === 'string' ? current.label : current.id,
-        angle:
-          typeof current.angle === 'string' &&
-          current.angle in ANALYSIS_SESSION_ANGLE_META
-            ? (current.angle as AnalysisSessionAngle)
-            : 'custom',
-        detectedCount:
-          typeof current.detectedCount === 'number' ? current.detectedCount : 0,
-        isStreaming: Boolean(current.isStreaming),
-      })
-    }
-    current = null
-  }
-
-  for (const line of lines) {
-    // 去除尾注 + 注释
-    const cleaned = line.replace(/#.*$/, '')
-    if (!cleaned.trim()) continue
-
-    // top-level key: "sessions:"
-    const topMatch = /^([A-Za-z_][\w-]*)\s*:\s*$/.exec(cleaned)
-    if (topMatch) {
-      flush()
-      inSessions = topMatch[1] === 'sessions'
-      continue
-    }
-
-    // list 起点:"  - key: val" 或 "  - key: val"
-    const listStart = /^\s*-\s+/.exec(cleaned)
-    if (listStart && inSessions) {
-      flush()
-      // 可能同一行有首个 key
-      const afterDash = cleaned.slice(listStart[0].length).trim()
-      current = {}
-      if (afterDash) {
-        const kv = /^([A-Za-z_][\w-]*)\s*:\s*(.*)$/.exec(afterDash)
-        if (kv) assignField(current, kv[1], kv[2])
-      }
-      continue
-    }
-
-    // list 项内字段:"    key: val"
-    if (current && inSessions) {
-      const kv = /^\s+([A-Za-z_][\w-]*)\s*:\s*(.*)$/.exec(cleaned)
-      if (kv) {
-        assignField(current, kv[1], kv[2])
-        continue
-      }
-    }
-  }
-  flush()
-  return result
-}
-
-/**
- * 解析 `_index.yaml` 单字段 → 写入 current 对象。
- *
- * - `id` / `label` / `angle` → 字符串(去除引号)
- * - `detected_count` / `is_streaming` → 推断类型(detectedCount: number,isStreaming: bool)
- * - 其他字段(例如 `created_at`)→ 忽略(本 slice 不用)
- */
-function assignField(
-  current: Partial<AnalysisSession>,
-  key: string,
-  rawValue: string,
-): void {
-  const value = stripQuotes(rawValue.trim())
-  switch (key) {
-    case 'id':
-      current.id = value
-      return
-    case 'label':
-      current.label = value
-      return
-    case 'angle':
-      current.angle = value as AnalysisSessionAngle
-      return
-    case 'detected_count':
-      current.detectedCount = parseIntOr(value, 0)
-      return
-    case 'is_streaming':
-      current.isStreaming = value === 'true'
-      return
-    default:
-      return
-  }
-}
-
-/** 解析整数,失败 → fallback */
-function parseIntOr(s: string, fallback: number): number {
-  const n = Number(s)
-  return Number.isFinite(n) ? Math.trunc(n) : fallback
 }

@@ -387,7 +387,11 @@ describe('DocumentReaderPane · activeSourceRef / onSourceRefClick 接口位 + �
           auxFiles={[]}
           assetList={emptyAssets}
           citationCounts={makeCounts()}
-          activeSourceRef={{ kind: 'prd', lineRange: [0, 1] }}
+          activeSourceRef={{
+            kind: 'requirement',
+            relative_path: 'requirement.md',
+            line_range: [0, 1],
+          }}
         />,
       ),
     ).not.toThrow()
@@ -427,8 +431,9 @@ describe('DocumentReaderPane · activeSourceRef / onSourceRefClick 接口位 + �
     fireEvent.click(mark)
     expect(onClick).toHaveBeenCalledTimes(1)
     expect(onClick).toHaveBeenCalledWith({
-      kind: 'prd',
-      lineRange: [2, 3],
+      kind: 'requirement',
+      relative_path: 'requirement.md',
+      line_range: [2, 3],
     })
   })
 
@@ -454,8 +459,9 @@ describe('DocumentReaderPane · activeSourceRef / onSourceRefClick 接口位 + �
     fireEvent.click(mark)
     expect(onClick).toHaveBeenCalledTimes(1)
     expect(onClick).toHaveBeenCalledWith({
-      kind: 'prd',
-      lineRange: [2, 3],
+      kind: 'requirement',
+      relative_path: 'requirement.md',
+      line_range: [2, 3],
     })
   })
 

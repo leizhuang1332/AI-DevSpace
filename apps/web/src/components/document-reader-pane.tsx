@@ -39,18 +39,18 @@
  *   文件,高亮会失效(留 v2 接入 Asset 重命名监听)
  * - **反向联动未实装**:点左栏高亮 span → 不滚动右栏卡片(本期 D4 v2 候选);
  *   见 ADR-0017 D4 "本期不实现"
- * - **Synthetic chunk 不持久化**:用户在 ProductList "+ 新增" 路径合成的
- *   synthetic chunk 仅落到客户端 chunksBySessionId(本期不写 chunks.jsonl),
- *   刷新页面后丢失;UI 卡片已挂 ⚠️ 角标提示(详见 ticket 04 + ADR-0017 D6)
+ * - **Synthetic chunk 不持久化**:旧版本有 ProductList "+ 新增" 路径合成的
+ *   synthetic chunk 同步落 chunksBySessionId(本期不写 chunks.jsonl),刷新页面后
+ *   丢失;issue 08 删除 ProductList 后该路径已无 UI,本说明作为历史记录保留
+ *   一行,不作为新行为约束。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type Ref } from 'react'
-import type { AssetMeta, AuxFile } from '@ai-devspace/shared'
+import type { AssetMeta, AuxFile, SourceRef as SharedSourceRef } from '@ai-devspace/shared'
 import {
   buildCitationSpans,
   countAssetCitations,
   type CitationRefsByDoc,
-  type SourceRef,
 } from '@/lib/analyzing'
 import { MarkdownPreview } from './markdown-preview'
 
@@ -94,12 +94,11 @@ export interface DocumentReaderPaneProps {
    */
   pulseRef?:
     | { tabId: string; lineRange: readonly [number, number] }
-    | { productId: string }
     | null
   /** 当前激活的 source_ref(ticket 03 接入;保留接口位) */
-  activeSourceRef?: SourceRef | null
+  activeSourceRef?: SharedSourceRef | null
   /** source_ref 点击回调(保留接口位,本期高亮点击不联动右栏) */
-  onSourceRefClick?: (ref: SourceRef | null) => void
+  onSourceRefClick?: (ref: SharedSourceRef | null) => void
   /**
    * ticket 07(ADR-0018 D1/D2):父组件透传一个 ref,DocumentReaderPane 把它绑到
    * 根容器 div 上。ticket 09 撤回 CitationOverlay 后,本 ref **当前无外部消费者**
@@ -237,15 +236,10 @@ export function DocumentReaderPane({
   // - 设 pulseLine → 对应 <mark> 加 animate-pulse-brand
   // - 滚到该行对应元素(近似:citation-highlight 的 data-line-start 匹配)
   // - 1.5s 后清 pulseLine
-  // - ticket 07 扩展:pulseRef 类型扩展为 `{ productId } | { tabId, lineRange }`;
-  //   本组件只消费 `{ tabId, lineRange }` 分支(`{ productId }` 由 ProductList 处理)
   // 依赖 pulseRef 对象身份:父组件每次点击生成新对象(即使同 lineRange)→ effect 重跑
   // -------------------------------------------------------------------------
   useEffect(() => {
     if (!pulseRef) return
-    // 类型守卫:ticket 07 新增的 `{ productId }` 分支由 ProductList 消费,
-    // DocumentReaderPane 只处理 `{ tabId, lineRange }`(行级联动)
-    if (!('tabId' in pulseRef)) return
     if (pulseRef.tabId !== activeTabId) {
       setActiveTabId(pulseRef.tabId)
     }
@@ -306,7 +300,25 @@ export function DocumentReaderPane({
           r.lineRange[0] === startNum &&
           r.lineRange[1] === endNum,
       )
-      if (ref) onSourceRefClick(ref)
+      if (ref) {
+        // activeRefs 只包含 prd / aux(本期阅读器无 asset ref 渲染);
+        // 父组件期望 shared SourceRef,这里做窄化映射。
+        let sharedRef: SharedSourceRef
+        if (ref.kind === 'prd') {
+          sharedRef = {
+            kind: 'requirement',
+            relative_path: 'requirement.md',
+            line_range: [ref.lineRange[0], ref.lineRange[1]],
+          }
+        } else {
+          sharedRef = {
+            kind: 'aux',
+            aux_id: ref.auxId,
+            line_range: [ref.lineRange[0], ref.lineRange[1]],
+          }
+        }
+        onSourceRefClick(sharedRef)
+      }
     },
     [onSourceRefClick, activeRefs],
   )

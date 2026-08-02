@@ -100,10 +100,10 @@ function buildRun(partial: Partial<AnalysisRunMeta> & { run_id: string }): Analy
 }
 
 function buildData(runs: AnalysisRunMeta[]): AnalyzingData {
+  // issue 08 · ADR-0021:AnalyzingData 不再有 `phase` 字段
   return {
     ...emptyAnalyzing('req-focus'),
     empty: false,
-    phase: 'active',
     prdMarkdown: '# 测试 PRD\n',
     runs,
   }

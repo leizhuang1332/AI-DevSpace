@@ -1310,12 +1310,130 @@ describe('AnalysisRunService(单运行约束 + Issue 幂等)', () => {
     const { parseReportIssueInputPublic } = await import(
       '../../analysis-run/AnalysisAgentRunner.js'
     )
-    expect(parseReportIssueInputPublic({ title: '', description: 'd', sourceRefs: [{ kind: 'requirement', relative_path: 'r' }] })).toEqual({ ok: false, reason: 'title missing' })
-    expect(parseReportIssueInputPublic({ title: '   ', description: 'd', sourceRefs: [{ kind: 'requirement', relative_path: 'r' }] })).toEqual({ ok: false, reason: 'title missing' })
-    expect(parseReportIssueInputPublic({ title: 't', description: '', sourceRefs: [{ kind: 'requirement', relative_path: 'r' }] })).toEqual({ ok: false, reason: 'description missing' })
-    expect(parseReportIssueInputPublic({ title: 't', description: 'd', sourceRefs: [] })).toEqual({ ok: false, reason: 'sourceRefs missing' })
+    // 模型通过 SDK MCP 工具调用,字段名是 snake_case(Anthropic tool 约定);
+    // system prompt(AnalysisPromptAssembler)、shared schema、持久化 issues.jsonl
+    // 也都统一 snake_case `source_refs` —— 这里以 snake_case 模拟真实输入。
+    const validRef = [{ kind: 'requirement', relative_path: 'r' }]
+    expect(parseReportIssueInputPublic({ title: '', description: 'd', source_refs: validRef })).toEqual({ ok: false, reason: 'title missing' })
+    expect(parseReportIssueInputPublic({ title: '   ', description: 'd', source_refs: validRef })).toEqual({ ok: false, reason: 'title missing' })
+    expect(parseReportIssueInputPublic({ title: 't', description: '', source_refs: validRef })).toEqual({ ok: false, reason: 'description missing' })
+    expect(parseReportIssueInputPublic({ title: 't', description: 'd', source_refs: [] })).toEqual({ ok: false, reason: 'source_refs missing' })
     // 半截流参数:非对象
     expect(parseReportIssueInputPublic(null)).toEqual({ ok: false, reason: 'input not object' })
+  })
+
+  it('issue 10 复盘:snake_case `source_refs` 通过校验(camelCase 兜底兼容)', async () => {
+    const { parseReportIssueInputPublic } = await import(
+      '../../analysis-run/AnalysisAgentRunner.js'
+    )
+    // snake_case:模型真实输出形态(metadata 元组数组形态,shared schema 契约)
+    const snake = parseReportIssueInputPublic({
+      title: 't',
+      description: 'd',
+      source_refs: [{ kind: 'requirement', relative_path: 'r.md' }],
+      metadata: [['severity', 'P0']],
+    })
+    expect(snake.ok).toBe(true)
+    if (snake.ok) {
+      // 内部接口契约仍是 camelCase(`runService.reportIssue` 入参不变)
+      expect(snake.value.sourceRefs).toHaveLength(1)
+      expect(snake.value.sourceRefs[0]?.relative_path).toBe('r.md')
+      expect(snake.value.metadata).toEqual([['severity', 'P0']])
+    }
+    // camelCase:历史/外部 mock 兜底兼容
+    const camel = parseReportIssueInputPublic({
+      title: 't',
+      description: 'd',
+      sourceRefs: [{ kind: 'requirement', relative_path: 'r.md' }],
+    })
+    expect(camel.ok).toBe(true)
+    if (camel.ok) {
+      expect(camel.value.sourceRefs).toHaveLength(1)
+    }
+    // 两个都给时,snake_case 优先(snake 是 system prompt 教模型的形态)
+    const both = parseReportIssueInputPublic({
+      title: 't',
+      description: 'd',
+      source_refs: [{ kind: 'requirement', relative_path: 'snake.md' }],
+      sourceRefs: [{ kind: 'requirement', relative_path: 'camel.md' }],
+    })
+    expect(both.ok).toBe(true)
+    if (both.ok) {
+      expect(both.value.sourceRefs[0]?.relative_path).toBe('snake.md')
+    }
+  })
+
+  it('issue 11 复盘:metadata 接受对象形态 + 元组数组形态,统一归一到元组数组', async () => {
+    const { parseReportIssueInputPublic } = await import(
+      '../../analysis-run/AnalysisAgentRunner.js'
+    )
+    // 对象形态:system prompt 教的形态,模型实测输出
+    //   { severity: 'warn', dimension: '目标与背景' }
+    // parser 必须接受并归一到 shared schema 的元组数组形态
+    //   [['severity', 'warn'], ['dimension', '目标与背景']]
+    const obj = parseReportIssueInputPublic({
+      title: 't',
+      description: 'd',
+      source_refs: [{ kind: 'requirement', relative_path: 'r.md' }],
+      metadata: { severity: 'warn', dimension: '目标与背景' },
+    })
+    expect(obj.ok).toBe(true)
+    if (obj.ok) {
+      expect(obj.value.metadata).toEqual([
+        ['severity', 'warn'],
+        ['dimension', '目标与背景'],
+      ])
+    }
+
+    // 元组数组形态(shared schema 契约):原样通过
+    const tuple = parseReportIssueInputPublic({
+      title: 't',
+      description: 'd',
+      source_refs: [{ kind: 'requirement', relative_path: 'r.md' }],
+      metadata: [
+        ['severity', 'high'],
+        ['tags', ['ux', 'completeness']],
+      ],
+    })
+    expect(tuple.ok).toBe(true)
+    if (tuple.ok) {
+      expect(tuple.value.metadata).toEqual([
+        ['severity', 'high'],
+        ['tags', ['ux', 'completeness']],
+      ])
+    }
+
+    // 非法形态:嵌套对象 → 拒绝
+    const nested = parseReportIssueInputPublic({
+      title: 't',
+      description: 'd',
+      source_refs: [{ kind: 'requirement', relative_path: 'r.md' }],
+      metadata: { bad: { nested: 'object' } },
+    })
+    expect(nested.ok).toBe(false)
+    if (!nested.ok) {
+      expect(nested.reason).toMatch(/metadata value must be primitive/)
+    }
+
+    // 非法形态:元组数组 entry 不是 `[key, value]` 二元组 → 拒绝
+    const badTuple = parseReportIssueInputPublic({
+      title: 't',
+      description: 'd',
+      source_refs: [{ kind: 'requirement', relative_path: 'r.md' }],
+      metadata: [{ key: 'severity', value: 'high' }] as unknown as never,
+    })
+    expect(badTuple.ok).toBe(false)
+
+    // metadata 缺省:通过,undefined
+    const none = parseReportIssueInputPublic({
+      title: 't',
+      description: 'd',
+      source_refs: [{ kind: 'requirement', relative_path: 'r.md' }],
+    })
+    expect(none.ok).toBe(true)
+    if (none.ok) {
+      expect(none.value.metadata).toBeUndefined()
+    }
   })
 })
 

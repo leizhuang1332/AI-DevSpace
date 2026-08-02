@@ -10,6 +10,11 @@
  *
  * 业务工具 handler 接受 tool_use_id + args → 返回 CallToolResult 形态,
  * 与 ClaudeCodeProvider.runAnalysisQuery 的真实封装一致。
+ *
+ * issue 07 扩展:
+ * - `behaviorPerAttempt` 支持按 attempt 1-based 查表决定本次 runAnalysisQuery
+ *   返 ok / fail,超出表长 fallback 到第 1 项
+ * - `attemptCount` 在 handle 上可读,用于测试断言"只调用了 1 次"或"调用了 3 次"
  */
 
 import type { AIProvider } from '../../../providers/AIProvider.js'
@@ -17,13 +22,16 @@ import type { AIProvider } from '../../../providers/AIProvider.js'
 /** 单条 SDK 消息(简化形态) */
 export type FakeSdkMessage = Record<string, unknown>
 
-export interface FakeAnalysisProviderHandle {
-  provider: AIProvider
-  /** 业务工具调用的所有调用记录(便于测试断言) */
-  businessToolCalls: Array<{ toolUseId: string; name: string; args: unknown }>
+/** 单次 attempt 的结果指令(issue 07 验收 1 / 2 / 3) */
+export type FakeAttemptBehavior = {
+  result: 'ok' | 'fail'
+  /** 仅在 result='fail' 时生效;原样作为 {ok:false, error} 传给上层 */
+  error?: string
+  /** 是否在 messages 流结束后自动调 complete_analysis 业务工具。默认 true */
+  autoComplete?: boolean
 }
 
-export function createFakeAnalysisProvider(opts: {
+export interface FakeAnalysisProviderOptions {
   messages?: FakeSdkMessage[]
   /**
    * 是否在 SDK 流结束时自动调 `complete_analysis` 业务工具。
@@ -31,12 +39,34 @@ export function createFakeAnalysisProvider(opts: {
    * - `false`→ 适合测试"SDK 成功但未调 complete → Run failed"门禁
    */
   autoComplete?: boolean
-} = {}): FakeAnalysisProviderHandle {
+  /**
+   * issue 07:按 attempt 控制 runAnalysisQuery 返回结果。
+   * 不传 → 与原行为一致(根据 autoComplete 决定)。
+   * 传入 → 第 i 次调用查 `behaviorPerAttempt[i-1]`;超出表长 fallback 到表[0]。
+   */
+  behaviorPerAttempt?: ReadonlyArray<FakeAttemptBehavior>
+}
+
+export interface FakeAnalysisProviderHandle {
+  provider: AIProvider
+  /** 业务工具调用的所有调用记录(便于测试断言) */
+  businessToolCalls: Array<{ toolUseId: string; name: string; args: unknown }>
+  /** issue 07:runAnalysisQuery 被调用的次数(测试断言 retry 行为) */
+  attemptCount: number
+  /** issue 07:每次 attempt 的 result 与 error(供测试回溯) */
+  attemptHistory: Array<{ attempt: number; result: 'ok' | 'fail'; error?: string }>
+}
+
+export function createFakeAnalysisProvider(
+  opts: FakeAnalysisProviderOptions = {},
+): FakeAnalysisProviderHandle {
   const messages = opts.messages ?? []
   const autoComplete = opts.autoComplete ?? true
   const businessToolCalls: Array<{ toolUseId: string; name: string; args: unknown }> = []
 
   let mcpCounter = 0
+  const attemptHistory: Array<{ attempt: number; result: 'ok' | 'fail'; error?: string }> = []
+  let attemptCount = 0
 
   const provider: AIProvider = {
     name: 'fake-analysis',
@@ -45,6 +75,21 @@ export function createFakeAnalysisProvider(opts: {
     },
     async shutdown() {},
     async runAnalysisQuery(input) {
+      attemptCount++
+      // 决定本次 attempt 的结果:有 behaviorPerAttempt 按 1-based 查表,否则用 autoComplete
+      const behavior: FakeAttemptBehavior | undefined =
+        opts.behaviorPerAttempt !== undefined
+          ? opts.behaviorPerAttempt[attemptCount - 1] ?? opts.behaviorPerAttempt[0]
+          : undefined
+
+      const effectiveAutoComplete = behavior?.autoComplete ?? autoComplete
+      // 默认语义:有 behaviorPerAttempt 走查表;否则按 autoComplete 决定
+      // - autoComplete=true (默认):流完后自动调 complete_analysis,本次 ok
+      // - autoComplete=false:不调 complete,本次仍返 ok 但 Run 走门禁失败
+      //   (issue 02 acceptance 已有 fixture 用例依赖此行为)
+      const effectiveResult: 'ok' | 'fail' =
+        behavior?.result ?? (autoComplete ? 'ok' : 'ok')
+
       for (const m of messages) {
         input.onEvent(m)
         // 业务工具调用:content_block_start + tool_use 块 → 调 handler
@@ -70,7 +115,7 @@ export function createFakeAnalysisProvider(opts: {
         }
       }
       // 自动调 complete_analysis 让 Run succeeded(测试可控)
-      if (autoComplete) {
+      if (effectiveAutoComplete) {
         const toolUseId = `mcp-complete-${++mcpCounter}`
         const handler = input.businessTools['complete_analysis']
         if (handler) {
@@ -84,8 +129,18 @@ export function createFakeAnalysisProvider(opts: {
           })
         }
       }
+      // 决定本次最终返回
+      if (effectiveResult === 'fail') {
+        attemptHistory.push({
+          attempt: attemptCount,
+          result: 'fail',
+          error: behavior?.error ?? 'fake_failure',
+        })
+        return { ok: false, error: behavior?.error ?? 'fake_failure' }
+      }
+      attemptHistory.push({ attempt: attemptCount, result: 'ok' })
       return { ok: true }
     },
   }
-  return { provider, businessToolCalls }
+  return { provider, businessToolCalls, get attemptCount() { return attemptCount }, attemptHistory }
 }

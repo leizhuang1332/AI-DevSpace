@@ -168,27 +168,25 @@ describe('resolveDefaultZoneRouteSegment', () => {
 })
 
 // ============================================================================
-// ANALYZING 工位注册表(issue 19a VS1 验收 — ADR-0013 工位注册表更新)
+// ANALYZING 工位注册表(issue 08 · ADR-0021 契约收缩)
 // ============================================================================
 
-describe('ANALYZING 工位注册表(issue 19a VS1)', () => {
+describe('ANALYZING 工位注册表(issue 08 · ADR-0021)', () => {
   const analyzing = ZONE_META.find((z) => z.id === 'analyzing')
 
-  it('ANALYZING display_name 改为"PRD 准入 + 技术概要"', () => {
-    expect(analyzing?.display_name).toBe('PRD 准入 + 技术概要')
+  it('ANALYZING display_name 为"分析"', () => {
+    expect(analyzing?.display_name).toBe('分析')
   })
 
-  it('ANALYZING main_layout 改为 admission-workbench', () => {
-    expect(analyzing?.main_layout).toBe('admission-workbench')
+  it('ANALYZING main_layout 改为 analysis-skill-runs', () => {
+    expect(analyzing?.main_layout).toBe('analysis-skill-runs')
   })
 
-  it('ANALYZING default_arming 含 admission-check + tech-brief-scaffold', () => {
-    expect(analyzing?.default_arming).toEqual(
-      expect.arrayContaining(['admission-check', 'tech-brief-scaffold']),
-    )
+  it('ANALYZING default_arming 为空(Analysis Skill 由用户每次单选)', () => {
+    expect(analyzing?.default_arming).toEqual([])
   })
 
-  it('ANALYZING icon 改为 🧠(原 🔍)', () => {
+  it('ANALYZING icon 仍为 🧠', () => {
     expect(analyzing?.icon).toBe('🧠')
   })
 
