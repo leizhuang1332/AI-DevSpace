@@ -44,13 +44,11 @@ afterEach(() => {
  */
 
 function makeData(issues: AnalysisIssue[]): AnalyzingData {
-  // 用空 AnalyzedData + 标记 data.runs 有一条 succeeded 的 Run,
-  // 我们的 fixture 让 fixture.runs[0].status='succeeded',issue_count=issues.length
-  // 让 useEffect 触发 fetch;在测试里 vi.mock fetch 直接返回 issues。
+  // issue 08 · ADR-0021 契约收缩后,AnalyzingData 不再有 `phase` / `chunks` /
+  // `sessions` 等旧字段;Analysis Issue 通过 SSE / fetch 由父组件累积。
   return {
     ...emptyAnalyzing('req-issue-click'),
     empty: false,
-    phase: 'active',
     prdMarkdown: '# 测试 PRD\n\n业务描述。\n',
     auxFiles: [
       {

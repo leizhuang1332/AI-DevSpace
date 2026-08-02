@@ -13,7 +13,6 @@ import { workspaceRoutes } from './routes/workspace.js'
 import { requirementRoutes } from './routes/requirement.js'
 import { reposRoutes } from './routes/repos.js'
 import { bootstrapRoutes } from './routes/bootstrap.js'
-import { analysisRoutes } from './routes/analysis.js'
 import { spikeRoutes } from './routes/spike.js'
 import { analysisSkillRoutes } from './routes/analysis-skill.js'
 import { analysisRunRoutes } from './routes/analysis-run.js'
@@ -327,7 +326,6 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     fastify.log.error({ err }, 'analysis run: orphan recovery failed on boot')
   }
 
-  await fastify.register(analysisRoutes, { hub, workspaceRoot, provider })
   // issue 01 (ADR-0021):Analysis Skill catalog + per-requirement selection endpoints
   await fastify.register(analysisSkillRoutes, { workspaceRoot })
   // issue 02 (ADR-0021):Analysis Run start / list / detail + SDK 集成
