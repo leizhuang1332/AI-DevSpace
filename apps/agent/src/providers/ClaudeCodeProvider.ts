@@ -507,12 +507,19 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
           if (Object.keys(env).length > 0) sdkOptions['env'] = env
         }
 
-        // 业务工具通过 in-process MCP server 注入(SDK 0.3.206)。
-        // 工具 schema 用 zod raw shape(允许任意字段);真正的字段校验由
-        // AnalysisAgentRunner.parseReportIssueInput 在 handler 内部完成。
+        // SDK 0.3.206 会按 zod raw shape 过滤工具参数。报告工具需显式声明
+        // 可接收字段；真正的必填与内容校验仍由 handler 完成。
         const sdkModule = await import('@anthropic-ai/claude-agent-sdk')
         const { z } = await import('zod')
-        const looseArgsShape = z.object({}).passthrough().shape
+        const reportIssueArgsShape = z
+          .object({
+            title: z.string().optional(),
+            description: z.string().optional(),
+            source_refs: z.array(z.unknown()).optional(),
+            metadata: z.unknown().optional(),
+          })
+          .shape
+        const emptyArgsShape = z.object({}).passthrough().shape
         const mcpServer = sdkModule.createSdkMcpServer({
           name: 'analysis-run-tools',
           version: '1.0.0',
@@ -520,7 +527,7 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
             sdkModule.tool(
               name,
               `Analysis Run 业务工具:${name}。由 AnalysisAgentRunner 在 handler 内执行持久化。`,
-              looseArgsShape,
+              name === 'report_analysis_issue' ? reportIssueArgsShape : emptyArgsShape,
               async (args: unknown) => {
                 // 这里无法拿 SDK 端 tool_use_id(SDK 不透传)——
                 // 我们用一个进程内自增 counter 生成 key,作为幂等键传给 handler

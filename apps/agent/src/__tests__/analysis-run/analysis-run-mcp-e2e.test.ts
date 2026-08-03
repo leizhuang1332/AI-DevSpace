@@ -41,6 +41,7 @@ const mockToolHandlers: Record<
   string,
   (args: unknown) => Promise<{ content: Array<{ type: 'text'; text: string }> }>
 > = {}
+const mockToolSchemas: Record<string, Record<string, unknown>> = {}
 
 vi.mock('@anthropic-ai/claude-agent-sdk', async () => {
   const actual =
@@ -62,13 +63,16 @@ vi.mock('@anthropic-ai/claude-agent-sdk', async () => {
     tool: (
       name: string,
       description: string,
-      _schema: unknown,
+      schema: Record<string, unknown>,
       handler: (args: unknown) => Promise<unknown>,
-    ) => ({
-      name,
-      description,
-      handler,
-    }),
+    ) => {
+      mockToolSchemas[name] = schema
+      return {
+        name,
+        description,
+        handler,
+      }
+    },
     // query 在 createClaudeCodeProvider 的 queryFn 注入路径下不会被调用
     query: vi.fn(),
   }
@@ -115,6 +119,7 @@ describe('真 MCP server 路径 e2e (PR-2 / ticket 10)', () => {
     root = mkdtempSync(join(tmpdir(), 'aidevsp-mcp-e2e-'))
     // 清空 mock 状态
     for (const k of Object.keys(mockToolHandlers)) delete mockToolHandlers[k]
+    for (const k of Object.keys(mockToolSchemas)) delete mockToolSchemas[k]
   })
 
   afterEach(() => {
@@ -195,6 +200,14 @@ describe('真 MCP server 路径 e2e (PR-2 / ticket 10)', () => {
       // 关键断言:wrapper 已被 mock SDK 捕获
       expect(mockToolHandlers['report_analysis_issue']).toBeDefined()
       expect(mockToolHandlers['complete_analysis']).toBeDefined()
+
+      // PR-3 回归:SDK 会按 raw shape 过滤工具参数,报告工具不能注册空 shape。
+      expect(Object.keys(mockToolSchemas['report_analysis_issue'] ?? {})).toEqual([
+        'title',
+        'description',
+        'source_refs',
+        'metadata',
+      ])
 
       // 模拟 SDK 调 wrapper —— 用模型真实 output 形态(snake_case source_refs + 对象 metadata)
       const modelInput = {
