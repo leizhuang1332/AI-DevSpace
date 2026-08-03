@@ -180,7 +180,11 @@ export function assembleAnalysisSystemPrompt(input: AnalysisPromptInput): string
       '',
       scope.prd_markdown.trim().length > 0
         ? scope.prd_markdown.trim()
-        : '_(PRD 尚未填写)_',
+        // PR-5 (ticket 10):防御纵深 —— route 层已经拒绝空 PRD 启动 Run,
+        // 但若 model 在中途收到"PRD 被清空"之类的极端情况,system prompt
+        // 此处的占位也应明确"这是异常状态",提示模型立刻停下而非继续
+        // 调空 `{}` 的 tool_use。
+        : '**错误:PRD 为空。本次 Run 不应启动,route 层已拒绝。**',
     ].join('\n'),
   )
 

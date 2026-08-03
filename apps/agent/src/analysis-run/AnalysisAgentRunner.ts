@@ -89,6 +89,12 @@ export interface ReportIssueToolResult {
   issue_id: string
   ordinal: number
   duplicate?: boolean
+  /**
+   * PR-1:拒绝原因 —— accepted=false 时填具体 reason,
+   * 供 SSE / 工具结果 / stderr 排障。
+   * 字段新增不影响现有接受路径(accepted=true 不带)。
+   */
+  reason?: string
 }
 
 /** 完成工具结果 */
@@ -376,6 +382,18 @@ function buildRunQueryPrompt(input: { scope: AnalysisPromptInput['scope'] }): st
 // 业务工具 handler 工厂
 // ============================================================================
 
+/**
+ * PR-2 (ticket 10):handler 工厂 export —— e2e 测试 (analysis-run-mcp-e2e.test.ts)
+ * 需要在真 ClaudeCodeProvider 之外构造业务工具 handler(不走 runAnalysisQuery
+ * 全流程),以验证 wrapper 透传 args 后整条 parse → report → write 链是否成立。
+ *
+ * 不影响生产路径:AnalysisAgentRunner.runAnalysisQuery 内部仍走非 export 的
+ * makeReportIssueHandler 引用,此 export 仅作测试 seam。
+ */
+export { makeReportIssueHandler, makeCompleteAnalysisHandler }
+
+
+
 /** report_analysis_issue 工具 handler —— 同步接受 + 持久化 + SSE publish */
 function makeReportIssueHandler(ctx: {
   runService: AnalysisRunService
@@ -385,9 +403,29 @@ function makeReportIssueHandler(ctx: {
 }) {
   const { runService, hub, requirementId, runId } = ctx
   return (toolUseId: string, input: unknown): ReportIssueToolResult => {
+    // PR-1:把 input 形状也带上,排障时不用回头翻 log.jsonl
+    const inputKeys =
+      input && typeof input === 'object' && !Array.isArray(input)
+        ? Object.keys(input as Record<string, unknown>).join(',')
+        : `<${input === null ? 'null' : typeof input}>`
     const parsed = parseReportIssueInput(input)
     if (!parsed.ok) {
-      return { accepted: false, issue_id: '', ordinal: 0 }
+      // PR-1:把真实拒绝原因暴露到 stderr + tool_result content(SSE 透传),
+      // 便于从 agent.log / run log / Web 控制台三方同时定位。
+      const reason = parsed.reason
+      process.stderr.write(
+        `[analysis-run] report rejected runId=${runId} toolUseId=${toolUseId} reason=${reason} inputKeys=${inputKeys}\n`,
+      )
+      hub.publish(requirementId, {
+        type: 'analysis_issue_rejected',
+        reqId: requirementId,
+        runId,
+        ts: Date.now(),
+        toolUseId,
+        reason,
+        inputKeys,
+      })
+      return { accepted: false, issue_id: '', ordinal: 0, reason }
     }
     const result = runService.reportIssue({
       requirementId,
@@ -397,7 +435,20 @@ function makeReportIssueHandler(ctx: {
     })
     if (!result.ok) {
       // run_not_found / run_not_running / run_completed:模型侧应停止报告
-      return { accepted: false, issue_id: '', ordinal: 0 }
+      const reason = result.code
+      process.stderr.write(
+        `[analysis-run] reportIssue rejected runId=${runId} toolUseId=${toolUseId} code=${reason}\n`,
+      )
+      hub.publish(requirementId, {
+        type: 'analysis_issue_rejected',
+        reqId: requirementId,
+        runId,
+        ts: Date.now(),
+        toolUseId,
+        reason,
+        inputKeys,
+      })
+      return { accepted: false, issue_id: '', ordinal: 0, reason }
     }
     const { issue, created } = result.result
     if (created) {

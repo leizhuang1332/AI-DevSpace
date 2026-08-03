@@ -19,6 +19,12 @@ Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/age
 - `git commit`
 - `git push`
 
+## MCP wrapper 修改守门(ADR-0023)
+
+修改 `apps/agent/src/providers/ClaudeCodeProvider.ts` 中任何 Analysis Run 路径的 MCP server 包装(`runAnalysisQuery` / `createSdkMcpServer` 注册 / wrapper 闭包 / zod schema 形态 / `mcpCallCounter`)—— **必须先在 `apps/agent/src/__tests__/analysis-run/analysis-run-mcp-e2e.test.ts` 加或修改测试**,且新 e2e 在改动前 RED、改动后 GREEN 才能合入。
+
+理由:`fakeAnalysisQueryProvider` 绕过真 `createSdkMcpServer` 包装层,无法覆盖 SDK 0.3.206 的 args 包装、schema 过滤、async 闭包等行为。详见 ADR-0023。
+
 ## Next.js dev ↔ build 隔离
 
 `next dev` 和 `next build` **共用 `apps/web/.next/` 目录**，且 `build` 会覆盖 dev 的运行时缓存（HMR manifest、CSS URL version 戳等）。

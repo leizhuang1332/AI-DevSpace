@@ -48,7 +48,12 @@ async function authedJson(
 function seedPrd(reqId: string): void {
   const dir = join(root, 'requirements', reqId)
   mkdirSync(dir, { recursive: true })
-  writeFileSync(join(dir, 'requirement.md'), '# E2E PRD\n\n业务内容…\n', 'utf8')
+  // PR-5 (ticket 10):默认 PRD ≥ 50 字符,避免新契约 empty_prd 误伤测试
+  writeFileSync(
+    join(dir, 'requirement.md'),
+    '# E2E PRD\n\n## 业务背景\n\n本需求用于端到端测试 Analysis Run + Issue Response 闭环,描述核心问题与目标用户。\n',
+    'utf8',
+  )
 }
 
 function seedSkill(name: string): void {

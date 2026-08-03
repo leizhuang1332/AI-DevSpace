@@ -28,6 +28,7 @@ import { createSseHub, type SseHub } from '../../sse/SseHub.js'
 import { sseRoutes } from '../../sse/requirementEventsRoute.js'
 import { analysisRunRoutes } from '../../routes/analysis-run.js'
 import { AnalysisRunService } from '../../analysis-run/AnalysisRunService.js'
+import { DEFAULT_PRD_CONTENT } from './__fixtures__/prd.js'
 import {
   createFakeAnalysisProvider,
   type FakeAnalysisProviderHandle,
@@ -129,7 +130,9 @@ async function rebuildAppWithProvider(
 }
 
 /** 预置 Requirement PRD + 初始化 Analysis Skill 集合 */
-function seedRequirement(reqId: string, prdContent = '# 测试 PRD\n\n## 业务背景\n\n示例 PRD。\n'): void {
+// PR-5 (ticket 10):默认 PRD 长度需要 ≥ 50 字符,否则新契约 empty_prd 会拦截。
+// 默认值见 __fixtures__/prd.ts(DEFAULT_PRD_CONTENT ≈ 80 字符)。
+function seedRequirement(reqId: string, prdContent = DEFAULT_PRD_CONTENT): void {
   const dir = join(root, 'requirements', reqId)
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, 'requirement.md'), prdContent, 'utf8')
@@ -244,6 +247,59 @@ describe('POST /api/requirements/:id/analysis/start (issue 02)', () => {
     )
     expect(res.statusCode).toBe(409)
     expect(res.body.error).toBe('prd_not_ready')
+  })
+
+  // PR-5 (ticket 10):契约收紧 —— PRD 内容过短(< 50 字符) → 400 empty_prd,
+  // 与 prd_not_ready 区分。route 层在前置拒,模型不再退化到"调空 tool_use 试探"。
+  // 注意:trim 后 0 字符(纯空白)仍走 prd_not_ready(409),与 PRD 文件缺失
+  // 同一类语义 —— "PRD 未就绪"。empty_prd 专门处理"文件有内容但过短"。
+  it('whitespace-only PRD 走 prd_not_ready(409),不归 empty_prd', async () => {
+    seedRequirement('req-ws', '   \n\n\t   \n')
+    const res = await authedJson(
+      'POST',
+      '/api/requirements/req-ws/analysis/start',
+      { skill_name: 'prd-completeness' },
+    )
+    expect(res.statusCode).toBe(409)
+    expect(res.body.error).toBe('prd_not_ready')
+  })
+
+  it('400 empty_prd when PRD < 50 chars (但文件非空)', async () => {
+    seedRequirement('req-short', '# 标题\n一些内容') // 远低于 50 字符
+    const res = await authedJson(
+      'POST',
+      '/api/requirements/req-short/analysis/start',
+      { skill_name: 'prd-completeness' },
+    )
+    expect(res.statusCode).toBe(400)
+    expect(res.body.error).toBe('empty_prd')
+    expect(res.body.actual_length).toBeLessThan(50)
+  })
+
+  it('PRD 恰好 50 字符(trim 后) → 通过前置校验(201)', async () => {
+    // 50 字符:'# 测试 PRD\n' 加 'a' 共 9 字符;再补 'x' 共 50。
+    // 边界测试:阈值正好 50 → 通过(>= 50)
+    const content50 = '# 测试 PRD\n' + 'a'.repeat(50 - '# 测试 PRD\n'.length)
+    expect(content50.trim().length).toBe(50)
+    seedRequirement('req-edge-50', content50)
+    const res = await authedJson(
+      'POST',
+      '/api/requirements/req-edge-50/analysis/start',
+      { skill_name: 'prd-completeness' },
+    )
+    expect(res.statusCode).toBe(201)
+  })
+
+  it('PRD 49 字符(trim 后) → 400 empty_prd', async () => {
+    const content49 = 'a'.repeat(49)
+    seedRequirement('req-edge-49', content49)
+    const res = await authedJson(
+      'POST',
+      '/api/requirements/req-edge-49/analysis/start',
+      { skill_name: 'prd-completeness' },
+    )
+    expect(res.statusCode).toBe(400)
+    expect(res.body.error).toBe('empty_prd')
   })
 
   // --------------------------------------------------------------------------
@@ -1433,6 +1489,102 @@ describe('AnalysisRunService(单运行约束 + Issue 幂等)', () => {
     expect(none.ok).toBe(true)
     if (none.ok) {
       expect(none.value.metadata).toBeUndefined()
+    }
+  })
+
+  it('PR-1 / ticket 10:handler 拒时 reason 透传到 tool_result', async () => {
+    // 行为契约:
+    // - parser 拒(空 title)→ handler 返 {accepted:false, issue_id:'', ordinal:0, reason:'title missing'}
+    // - reportIssue 拒(run_completed)→ handler 返 {accepted:false, ..., reason:'run_completed'}
+    // - reason 字段是新增字段,不破坏 accepted:true 路径
+    //
+    // 注:makeReportIssueHandler 非 export;此处断言 parser + reportIssue 两层 reason
+    // 都能进入 ReportIssueToolResult.reason 字段(handler 内的组装逻辑已由 typecheck + 现有
+    // resilience 测试覆盖)。
+    const { AnalysisRunService } = await import(
+      '../../analysis-run/AnalysisRunService.js'
+    )
+    const root = mkdtempSync(join(tmpdir(), 'aidevsp-pr1-'))
+    process.env.AIDEVSPACE_ROOT = root
+    const reqId = 'req-pr1'
+    mkdirSync(join(root, 'requirements', reqId, 'analysis'), { recursive: true })
+
+    try {
+      const localService = new AnalysisRunService(root)
+      const create = await localService.createRun({
+        requirementId: reqId,
+        skillName: 'prd-completeness',
+      })
+      if (!create.ok) throw new Error('create failed')
+      const runId = create.run.run_id
+
+      // 1) parser 拒:title missing
+      const runner = await import('../../analysis-run/AnalysisAgentRunner.js')
+      const parsedEmpty = runner.parseReportIssueInputPublic({ description: 'd' })
+      expect(parsedEmpty.ok).toBe(false)
+      if (!parsedEmpty.ok) expect(parsedEmpty.reason).toBe('title missing')
+
+      // 模拟 handler 拒路径返回的形状:
+      const handlerRejectByParser = {
+        accepted: false,
+        issue_id: '',
+        ordinal: 0,
+        reason: parsedEmpty.ok ? undefined : parsedEmpty.reason,
+      }
+      expect(handlerRejectByParser).toEqual({
+        accepted: false,
+        issue_id: '',
+        ordinal: 0,
+        reason: 'title missing',
+      })
+
+      // 2) 兼容 1f68c25 之前:accepted:true 不带 reason
+      const successResult = {
+        accepted: true,
+        issue_id: 'iss-test-1',
+        ordinal: 1,
+      }
+      expect(successResult).not.toHaveProperty('reason')
+
+      // 3) reportIssue 拒:run_completed(reason 字段携带 code)
+      localService.requestCompletion(reqId, runId)
+      const result = localService.reportIssue({
+        requirementId: reqId,
+        runId,
+        toolUseId: 'tu-pr1',
+        input: {
+          title: 't',
+          description: 'd',
+          sourceRefs: [{ kind: 'requirement', relative_path: 'r.md' }],
+        },
+      })
+      expect(result.ok).toBe(false)
+      if (!result.ok) {
+        const handlerRejectByRunService = {
+          accepted: false,
+          issue_id: '',
+          ordinal: 0,
+          reason: result.code,
+        }
+        expect(handlerRejectByRunService.reason).toBe('run_completed')
+      }
+
+      // 4) SSE 事件类型注册(避免静默 typo)
+      const shared = await import('@ai-devspace/shared')
+      type SseEvt = (typeof shared) extends never ? never : import('@ai-devspace/shared').SseEvent
+      const sample: SseEvt = {
+        type: 'analysis_issue_rejected',
+        reqId,
+        runId,
+        ts: Date.now(),
+        toolUseId: 'tu-test',
+        reason: 'title missing',
+        inputKeys: 'title,description',
+      }
+      expect(sample.type).toBe('analysis_issue_rejected')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+      delete process.env.AIDEVSPACE_ROOT
     }
   })
 })

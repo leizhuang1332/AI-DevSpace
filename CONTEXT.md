@@ -313,6 +313,18 @@ ANALYZING 工位的核心职责是：**在开发前，使用用户选择的 Anal
 
 详见 [ADR-0021](docs/adr/0021-analyzing-skill-driven-analysis-runs.md)。
 
+**历史 Analysis Run 展示形态（v1.0.5 更新，覆盖 ADR-0021 决策 36 的抽屉描述）：**
+
+ANALYZING 主区不再使用永久 320px 抽屉，改为 **「默认折叠的浮动召唤按钮 + 浮动面板」** 形态（v1.0.5 增量决策 88-98，[ADR-0022](docs/adr/0022-analyzing-history-floating-action-button.md) D1-D7）：
+
+- **默认折叠态**：主区右上角 absolute 浮动召唤按钮 `[🗂️ 历史分析 N]`，不占主区宽度；N=0 显示灰色 0；不显示运行中 dot（运行态走底部 AI 思考条）
+- **展开态**：浮动面板从 FAB 正下方弹出，宽度 `min(320px, calc(100vw - 24px))`，高度与 [识别产物] 列等高，超出后内部滚动；面板 absolute 覆盖在 [识别产物] 列之上（不挤压列宽），该列加 4% 蒙层提示"面板在前"
+- **关闭方式**：点外部 + Esc + ✕ + 选中 Run 自动关（四种都关，符合 Linear popover 心智模型）
+- **Cmd+K 入口**：命令面板新增「🗂️ 历史分析 · req-XX · 共 N 个 Run」命令，按 `↵` 直接打开浮动面板（决策 23 形态 C 的键盘召唤通道）
+- **状态持久化**：不持久化，永远默认折叠；切需求 / 切工位 / 启动新 Run 时强制收起
+- **a11y**：FAB + 面板是 non-modal popover（`role="region"`，**不**用 `role="dialog"`），Tab 焦点自由，不阻断主区交互
+- **窄视口**：FAB + 面板全保留（天然兼容），无需 `max-h-[200px]` 折叠条逻辑
+
 ### Overview 概览页（需求工作台仪表板）
 
 需求工作台 `/requirements/[id]/` 的**第 7 产品形态**，但**不是工位**——是仪表板（用户"看"而非"做"）。
@@ -456,6 +468,28 @@ ANALYZING 工位的核心职责是：**在开发前，使用用户选择的 Anal
 | 85 | **点右栏 issue → 联动左栏**（切 Tab + 滚 lineRange + 高亮 pulse 1.5s）；点左栏高亮 → 暂不联动右栏（D4 v2 候选） | [ADR-0017](docs/adr/0017-analyzing-main-document-reader.md) D4 |
 | 86 | **VS4 用户加 product 合成 synthetic chunk**（id 前缀 `user-added-<uuid>` + `synthetic: true` 标记）；`source_refs` 不强制（允许"先记草稿"）；重扫时 AI 不复读 synthetic 标记 | [ADR-0017](docs/adr/0017-analyzing-main-document-reader.md) D6 |
 | 87 | **新术语 `AuxFile`（辅助文件）入术语表**——Requirement 内的参考资料文档（独立 markdown），与 Asset（PRD 内联图）/ Knowledge（全局共享）/ PRD（正文）严格区分；数据模型见 `packages/shared/src/drafting.ts` | [ADR-0017](docs/adr/0017-analyzing-main-document-reader.md) |
+
+---
+
+## v1.0.5 增量决策（11 轮 grilling 沉淀 · 2026-08-03）
+
+> 本节是 v1.0.4 锁定后的迭代记录，不修改上面 v1.0 / v1.0.1 / v1.0.2 / v1.0.3 / v1.0.4 决策。决策 88-98 由 [ADR-0022](docs/adr/0022-analyzing-history-floating-action-button.md) 承载完整内容。
+>
+> 本节**覆盖** ADR-0021 决策 36 中"历史 Run 通过侧边抽屉按时间倒序切换"的描述——抽屉改为 FAB + 浮动面板。
+
+| # | 决策 | 关联 ADR |
+| --- | ------ | ---------- |
+| 88 | **历史列折叠形态 = B 方案**（浮动召唤按钮 FAB + 浮动面板）—— 覆盖 ADR-0021 决策 36 的"主区右侧 320px 永久抽屉"描述 | [ADR-0022](docs/adr/0022-analyzing-history-floating-action-button.md) D1 |
+| 89 | **FAB 位置 = 主区右上角 absolute 浮动**（`top: 12px; right: 12px; z-index: 30`），不挤压主区任何列 | [ADR-0022](docs/adr/0022-analyzing-history-floating-action-button.md) D2.1 |
+| 90 | **FAB 样式 = 图标+文字+N 计数**（`🗂️ 历史分析 [N]`），N=0 显示灰色 0（不隐藏），N>99 显示 `99+` | [ADR-0022](docs/adr/0022-analyzing-history-floating-action-button.md) D2.2-D2.3 / D2.5 |
+| 91 | **FAB 不显示运行中 dot**——FAB 只显示 N 计数，运行态走底部 AI 思考条 4 指示器（决策 49），避免重复信号 | [ADR-0022](docs/adr/0022-analyzing-history-floating-action-button.md) D2.4 |
+| 92 | **浮动面板高度策略 = 与 [识别产物] 列等高，超出后内部滚动**（头部固定，列表内滚；上限不超过 AI 思考条之上）；宽度 `min(320px, calc(100vw - 24px))` 窄视口自适应 | [ADR-0022](docs/adr/0022-analyzing-history-floating-action-button.md) D3.2-D3.4 |
+| 93 | **浮动面板覆盖 [识别产物] 列时加 4% 黑色蒙层**（`dimmed` 类，不阻断交互）—— 视觉提示"现在焦点在浮层"，但允许用户继续操作主区（符合 non-modal popover） | [ADR-0022](docs/adr/0022-analyzing-history-floating-action-button.md) D3.7 |
+| 94 | **关闭触发 = 四种都关**（点外部 + Esc + ✕ + 选中 Run 自动关），符合 Linear popover 心智模型 | [ADR-0022](docs/adr/0022-analyzing-history-floating-action-button.md) D4.1 |
+| 95 | **Cmd+K 命令面板新增「🗂️ 历史分析」命令**（描述：`req-XX · 共 N 个 Run`），按 `↵` 直接打开浮动面板；不绑 `⌘⇧H` 快捷键（决策 29：90% 走 Cmd+K） | [ADR-0022](docs/adr/0022-analyzing-history-floating-action-button.md) D4.2-D4.3 |
+| 96 | **FAB 面板状态不持久化**——永远默认折叠；切需求 / 切工位 / 启动新 Run 时强制收起；符合决策 24"克制，在场"的"克制"语义 | [ADR-0022](docs/adr/0022-analyzing-history-floating-action-button.md) D4.4 / D5.2-D5.3 |
+| 97 | **删除 Run 后行为 = 留面板 + currentRun 自动切到下一个 Run**（按 `created_at` 倒序的第一个非删除 Run）；删除按钮仍走二次确认对话框（沿用 `AnalysisDeleteRunDialog`） | [ADR-0022](docs/adr/0022-analyzing-history-floating-action-button.md) D5.1 / D5.5 |
+| 98 | **a11y = non-modal popover**——FAB `role="button"` + `aria-expanded` + `aria-haspopup`；面板 `role="region"` + `aria-label`（**不**用 `role="dialog"`）；Tab 焦点自由，不阻断主区交互 | [ADR-0022](docs/adr/0022-analyzing-history-floating-action-button.md) D6 |
 
 ---
 

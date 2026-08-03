@@ -300,10 +300,6 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
     ? null
     : (opts.providerSemaphore ?? new DefaultProviderSemaphore({ limit: 5 }))
 
-  /** issue 02 (ADR-0021):Analysis Run 路径的 MCP tool_use_id 自增 key
-   *  —— SDK 不透传 tool_use_id,handler 内自己生成;同 SDK session 内唯一。 */
-  let mcpCallCounter = 0
-
   /** Lazy import SDK —— 避免启动时拉 cli 子进程 */
   let cachedQuery: QueryFn | null = opts.queryFn ?? null
   async function getQuery(): Promise<QueryFn> {
@@ -507,12 +503,24 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
           if (Object.keys(env).length > 0) sdkOptions['env'] = env
         }
 
-        // 业务工具通过 in-process MCP server 注入(SDK 0.3.206)。
-        // 工具 schema 用 zod raw shape(允许任意字段);真正的字段校验由
-        // AnalysisAgentRunner.parseReportIssueInput 在 handler 内部完成。
+        // SDK 0.3.206 会按 zod raw shape 过滤工具参数。报告工具需显式声明
+        // 可接收字段；真正的必填与内容校验仍由 handler 完成。
         const sdkModule = await import('@anthropic-ai/claude-agent-sdk')
         const { z } = await import('zod')
-        const looseArgsShape = z.object({}).passthrough().shape
+        const reportIssueArgsShape = z
+          .object({
+            title: z.string().optional(),
+            description: z.string().optional(),
+            source_refs: z.array(z.unknown()).optional(),
+            metadata: z.unknown().optional(),
+          })
+          .shape
+        const emptyArgsShape = z.object({}).passthrough().shape
+        // PR-4 (ticket 10):per-Run 自增 counter —— 此前 module-level 单例
+        // (`mcpCallCounter`)在长寿命进程跑几十次 Run 后会上千,且跨 Run
+        // 状态共享容易在并发 attempt 上产生 race。改成 runAnalysisQuery
+        // 闭包内局部变量,每次 Run 启动时归零,闭包结束自动释放。
+        let perRunCounter = 0
         const mcpServer = sdkModule.createSdkMcpServer({
           name: 'analysis-run-tools',
           version: '1.0.0',
@@ -520,11 +528,12 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
             sdkModule.tool(
               name,
               `Analysis Run 业务工具:${name}。由 AnalysisAgentRunner 在 handler 内执行持久化。`,
-              looseArgsShape,
+              name === 'report_analysis_issue' ? reportIssueArgsShape : emptyArgsShape,
               async (args: unknown) => {
                 // 这里无法拿 SDK 端 tool_use_id(SDK 不透传)——
-                // 我们用一个进程内自增 counter 生成 key,作为幂等键传给 handler
-                const toolUseId = `mcp-${name}-${++mcpCallCounter}`
+                // 我们用一个 Run 内自增 counter 生成 key,作为幂等键传给 handler。
+                // counter 限定在本次 Run 闭包内,Run 结束即释放,跨 Run 不污染。
+                const toolUseId = `mcp-${name}-${++perRunCounter}`
                 const result = await handler(toolUseId, args)
                 // CallToolResult 形态:content 是 MCP 内容块数组
                 return {
