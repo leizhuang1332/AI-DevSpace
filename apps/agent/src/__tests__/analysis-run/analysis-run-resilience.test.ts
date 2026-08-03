@@ -37,6 +37,7 @@ import {
   createFakeAnalysisProvider,
   type FakeAnalysisProviderHandle,
 } from './__fixtures__/fakeAnalysisQueryProvider.js'
+import { DEFAULT_PRD_CONTENT } from './__fixtures__/prd.js'
 import { runAnalysisQueryWithRetry, classifyProviderError } from '../../analysis-run/runAnalysisQueryWithRetry.js'
 
 // ============================================================================
@@ -133,7 +134,9 @@ async function rebuildAppWithProvider(
   port = new URL(url).port
 }
 
-function seedRequirement(reqId: string, prdContent = '# 测试 PRD\n'): void {
+// PR-5 (ticket 10):默认 PRD 见 __fixtures__/prd.ts(DEFAULT_PRD_CONTENT,
+  // 长度 ≥ 50 字符,避免新契约 empty_prd 误伤测试)
+function seedRequirement(reqId: string, prdContent = DEFAULT_PRD_CONTENT): void {
   const dir = join(root, 'requirements', reqId)
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, 'requirement.md'), prdContent, 'utf8')
@@ -932,5 +935,324 @@ describe('runAnalysisQueryWithRetry 单元(issue 07 #1/#2)', () => {
     if (result.ok) return
     expect(result.attempts).toBe(1)
     expect(result.error).toBe('boom')
+  })
+})
+
+// ============================================================================
+// 副测 3:跨 Run 状态隔离(PR-4 / ticket 10)
+//
+// 验证 Run 终态后:
+// - toolUseIndex 索引被清掉(同 run_id 不再有 toolUseIndex 命中)
+// - 下次 Run 用同样的 tool_use_id 不会被旧 entry 拦截
+// - 真实跨 Run 走通 Run A + Run B 共用同一 tool_use_id,两条 issue 各自落盘
+// ============================================================================
+
+describe('AnalysisRunService 跨 Run 状态隔离 (PR-4 / ticket 10)', () => {
+  let root: string
+  let service: AnalysisRunService
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'aidevsp-pr4-'))
+    service = new AnalysisRunService(root)
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('PR-4 #1:Run 终态 succeeded 后,clearToolUseIndexForRun 清掉该 Run 的 toolUseIndex 条目', async () => {
+    const reqId = 'req-pr4-succ'
+    const created = await service.createRun({ requirementId: reqId, skillName: 'prd-completeness' })
+    if (!created.ok) throw new Error('setup failed')
+    const runId = created.run.run_id
+
+    // 提交 1 条 Issue,触发 toolUseIndex 写入
+    const r1 = service.reportIssue({
+      requirementId: reqId,
+      runId,
+      toolUseId: 'mcp-report_analysis_issue-1',
+      input: {
+        title: 'first',
+        description: 'd',
+        sourceRefs: [{ kind: 'requirement', relative_path: 'requirement.md' }],
+      },
+    })
+    expect(r1.ok).toBe(true)
+
+    // 终态 succeeded
+    service.requestCompletion(reqId, runId)
+    const t = service.transitionToSucceeded(reqId, runId)
+    expect(t.ok).toBe(true)
+
+    // PR-4:toolUseIndex 中该 Run 的条目应已被清掉
+    // (验证方法:再次创建 Run + 同 toolUseId 调用 reportIssue,应被接受
+    //  作为新 Issue,而不是命中幂等返 duplicate)
+    const reqIdB = 'req-pr4-succ-b'
+    const createdB = await service.createRun({ requirementId: reqIdB, skillName: 'prd-completeness' })
+    if (!createdB.ok) throw new Error('setup B failed')
+    const runIdB = createdB.run.run_id
+    const r2 = service.reportIssue({
+      requirementId: reqIdB,
+      runId: runIdB,
+      // 同 tool_use_id,但属于不同 Run —— 不应命中旧 entry 走 duplicate
+      toolUseId: 'mcp-report_analysis_issue-1',
+      input: {
+        title: 'second',
+        description: 'd2',
+        sourceRefs: [{ kind: 'requirement', relative_path: 'requirement.md' }],
+      },
+    })
+    expect(r2.ok).toBe(true)
+    if (!r2.ok) return
+    // 应是 created:true(新 Issue),不是 duplicate
+    expect(r2.result.created).toBe(true)
+    expect(r2.result.issue.ordinal).toBe(1)
+    expect(r2.result.issue.title).toBe('second')
+  })
+
+  it('PR-4 #2:Run 终态 failed 后,clearToolUseIndexForRun 同步清掉该 Run 的 toolUseIndex 条目', async () => {
+    const reqId = 'req-pr4-fail'
+    const created = await service.createRun({ requirementId: reqId, skillName: 'prd-completeness' })
+    if (!created.ok) throw new Error('setup failed')
+    const runId = created.run.run_id
+
+    const r1 = service.reportIssue({
+      requirementId: reqId,
+      runId,
+      toolUseId: 'mcp-report_analysis_issue-1',
+      input: {
+        title: 'first',
+        description: 'd',
+        sourceRefs: [{ kind: 'requirement', relative_path: 'requirement.md' }],
+      },
+    })
+    expect(r1.ok).toBe(true)
+
+    // 终态 failed(无需 requestCompletion —— transitionToFailed 不要求)
+    const t = service.transitionToFailed(reqId, runId, 'simulated failure')
+    expect(t.ok).toBe(true)
+
+    // 下次 Run + 同 toolUseId → 不命中旧 entry,接受为新 Issue
+    const reqIdB = 'req-pr4-fail-b'
+    const createdB = await service.createRun({ requirementId: reqIdB, skillName: 'prd-completeness' })
+    if (!createdB.ok) throw new Error('setup B failed')
+    const runIdB = createdB.run.run_id
+    const r2 = service.reportIssue({
+      requirementId: reqIdB,
+      runId: runIdB,
+      toolUseId: 'mcp-report_analysis_issue-1',
+      input: {
+        title: 'after failure',
+        description: 'd',
+        sourceRefs: [{ kind: 'requirement', relative_path: 'requirement.md' }],
+      },
+    })
+    expect(r2.ok).toBe(true)
+    if (!r2.ok) return
+    expect(r2.result.created).toBe(true)
+  })
+
+  it('PR-4 #3:clearToolUseIndexForRun 不影响其它 Run 的索引条目', () => {
+    // 直接填入两个 Run 的索引(测试私有 Map 字段 —— 用 cast 绕过 strict 私有访问)
+    const idx = service.toolUseIndexForTest()
+    idx.set('mcp-report_analysis_issue-1', {
+      run_id: 'run-A',
+      issue_id: 'iss-run-A-0001',
+      ordinal: 1,
+    })
+    idx.set('mcp-report_analysis_issue-2', {
+      run_id: 'run-A',
+      issue_id: 'iss-run-A-0002',
+      ordinal: 2,
+    })
+    idx.set('mcp-report_analysis_issue-1', {
+      run_id: 'run-B',
+      issue_id: 'iss-run-B-0001',
+      ordinal: 1,
+    })
+
+    // 清 run-A
+    service.clearToolUseIndexForRun('run-A')
+
+    // run-A 的两条被清,run-B 的保留
+    expect(idx.has('mcp-report_analysis_issue-1')).toBe(true)
+    const bEntry = idx.get('mcp-report_analysis_issue-1')
+    expect(bEntry?.run_id).toBe('run-B')
+    expect(idx.has('mcp-report_analysis_issue-2')).toBe(false)
+  })
+
+  it('PR-4 #4:同 Run 内重复 tool_use_id 仍走幂等(不应被清错)', async () => {
+    // PR-4 清的是 Run 终态后的索引 —— 同 Run 内 reportIssue 第二次同 tool_use_id
+    // 仍应走 duplicate 路径(清掉的是另一个 Run 的索引)
+    const reqId = 'req-pr4-dup'
+    const created = await service.createRun({ requirementId: reqId, skillName: 'prd-completeness' })
+    if (!created.ok) throw new Error('setup failed')
+    const runId = created.run.run_id
+
+    const r1 = service.reportIssue({
+      requirementId: reqId,
+      runId,
+      toolUseId: 'mcp-report_analysis_issue-1',
+      input: {
+        title: 'first',
+        description: 'd',
+        sourceRefs: [{ kind: 'requirement', relative_path: 'requirement.md' }],
+      },
+    })
+    expect(r1.ok).toBe(true)
+    if (!r1.ok) return
+    expect(r1.result.created).toBe(true)
+
+    // 同 Run 同 tool_use_id 重报 → duplicate
+    const r2 = service.reportIssue({
+      requirementId: reqId,
+      runId,
+      toolUseId: 'mcp-report_analysis_issue-1',
+      input: {
+        title: 'first', // 同 title(幂等只看 tool_use_id)
+        description: 'd',
+        sourceRefs: [{ kind: 'requirement', relative_path: 'requirement.md' }],
+      },
+    })
+    expect(r2.ok).toBe(true)
+    if (!r2.ok) return
+    expect(r2.result.created).toBe(false)
+  })
+})
+
+// ============================================================================
+// 副测 4:PR-4 跨 Run 读盘验证 —— Spec 核心断言
+//
+// spec PR-4 显式要求:
+//   "长寿命进程跑 Run A + Run B 共用 `toolUseId='mcp-report_analysis_issue-1'`,
+//    **断言两条 issue 各自落盘**"
+//
+// 副测 1 (#1/#2) 只断言 API 返回值;这里再加一条**读盘**断言,确保
+// issues.jsonl 真的写入 —— 而不是被 stale toolUseIndex 静默 dup 掉。
+// ============================================================================
+
+describe('PR-4 跨 Run 读盘验证(spec 核心断言)', () => {
+  let root: string
+  let service: AnalysisRunService
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'aidevsp-pr4-disk-'))
+    service = new AnalysisRunService(root)
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('PR-4 disk #1:Run A succeeded → 终态;Run B 同 tool_use_id + 同 title → issues.jsonl 各自一行', async () => {
+    const reqA = 'req-pr4-disk-a'
+    const reqB = 'req-pr4-disk-b'
+
+    // Run A:创建 + 报 1 条 + succeeded
+    const createA = await service.createRun({ requirementId: reqA, skillName: 'prd-completeness' })
+    if (!createA.ok) throw new Error('create A failed')
+    const runIdA = createA.run.run_id
+
+    const rA = service.reportIssue({
+      requirementId: reqA,
+      runId: runIdA,
+      toolUseId: 'mcp-report_analysis_issue-1',
+      input: {
+        title: 'A 自己的问题',
+        description: 'A-desc',
+        sourceRefs: [{ kind: 'requirement', relative_path: 'requirement.md' }],
+      },
+    })
+    expect(rA.ok).toBe(true)
+    service.requestCompletion(reqA, runIdA)
+    const tA = service.transitionToSucceeded(reqA, runIdA)
+    expect(tA.ok).toBe(true)
+
+    // Run B:创建 + 同 tool_use_id + 同 title + 同 description —— 仍应写为新 Issue
+    const createB = await service.createRun({ requirementId: reqB, skillName: 'prd-completeness' })
+    if (!createB.ok) throw new Error('create B failed')
+    const runIdB = createB.run.run_id
+
+    const rB = service.reportIssue({
+      requirementId: reqB,
+      runId: runIdB,
+      toolUseId: 'mcp-report_analysis_issue-1', // 与 Run A 同 tool_use_id
+      input: {
+        title: 'B 自己的问题', // 不同 title —— 便于确认是 B 自己的内容
+        description: 'B-desc',
+        sourceRefs: [{ kind: 'requirement', relative_path: 'requirement.md' }],
+      },
+    })
+    expect(rB.ok).toBe(true)
+    if (!rB.ok) return
+    expect(rB.result.created).toBe(true)
+    expect(rB.result.issue.title).toBe('B 自己的问题')
+
+    // 读盘:Run A 的 issues.jsonl 写入 A 的 Issue;Run B 的 issues.jsonl 写入 B 的 Issue
+    const issuesA = service.readIssues(reqA, runIdA)
+    expect(issuesA).toHaveLength(1)
+    expect(issuesA[0]?.title).toBe('A 自己的问题')
+    expect(issuesA[0]?.ordinal).toBe(1)
+
+    const issuesB = service.readIssues(reqB, runIdB)
+    expect(issuesB).toHaveLength(1)
+    expect(issuesB[0]?.title).toBe('B 自己的问题')
+    expect(issuesB[0]?.ordinal).toBe(1)
+
+    // meta.issue_count 也各自正确
+    const metaA = service.readMeta(reqA, runIdA)
+    expect(metaA?.issue_count).toBe(1)
+    const metaB = service.readMeta(reqB, runIdB)
+    expect(metaB?.issue_count).toBe(1)
+  })
+
+  it('PR-4 disk #2:Run A failed → 终态;Run B 同 tool_use_id → issues.jsonl 各自落盘', async () => {
+    const reqA = 'req-pr4-disk-fail-a'
+    const reqB = 'req-pr4-disk-fail-b'
+
+    const createA = await service.createRun({ requirementId: reqA, skillName: 'prd-completeness' })
+    if (!createA.ok) throw new Error('create A failed')
+    const runIdA = createA.run.run_id
+
+    service.reportIssue({
+      requirementId: reqA,
+      runId: runIdA,
+      toolUseId: 'mcp-report_analysis_issue-1',
+      input: {
+        title: 'A issue',
+        description: 'd',
+        sourceRefs: [{ kind: 'requirement', relative_path: 'requirement.md' }],
+      },
+    })
+    // transitionToFailed 不需要 requestCompletion
+    const tA = service.transitionToFailed(reqA, runIdA, 'simulated')
+    expect(tA.ok).toBe(true)
+
+    const createB = await service.createRun({ requirementId: reqB, skillName: 'prd-completeness' })
+    if (!createB.ok) throw new Error('create B failed')
+    const runIdB = createB.run.run_id
+
+    const rB = service.reportIssue({
+      requirementId: reqB,
+      runId: runIdB,
+      toolUseId: 'mcp-report_analysis_issue-1',
+      input: {
+        title: 'B after A failed',
+        description: 'd',
+        sourceRefs: [{ kind: 'requirement', relative_path: 'requirement.md' }],
+      },
+    })
+    expect(rB.ok).toBe(true)
+    if (!rB.ok) return
+    expect(rB.result.created).toBe(true)
+
+    // 各自读盘
+    const issuesA = service.readIssues(reqA, runIdA)
+    expect(issuesA).toHaveLength(1)
+    expect(issuesA[0]?.title).toBe('A issue')
+
+    const issuesB = service.readIssues(reqB, runIdB)
+    expect(issuesB).toHaveLength(1)
+    expect(issuesB[0]?.title).toBe('B after A failed')
   })
 })

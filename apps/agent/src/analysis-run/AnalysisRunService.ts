@@ -132,6 +132,37 @@ export class AnalysisRunService {
     string,
     { run_id: string; issue_id: string; ordinal: number }
   >()
+
+  /**
+   * PR-4 (ticket 10):清除某 Run 的 toolUseIndex 索引条目。
+   *
+   * 调用于 transitionToSucceeded / transitionToFailed 末尾 —— Run 进入
+   * 终态后,该 Run 的 tool_use_id 不再有命中可能(同 run_id 复用相同
+   * tool_use_id 也应视为新事件)。不清的话,长寿命进程跑几十次 Run 后
+   * Map 持续增长,且跨 Run 状态污染(如某 Run 索引命中前 Run 的旧 entry)。
+   *
+   * 不影响 issues.jsonl 的已持久化内容 —— `toolUseIndex` 仅是进程内
+   * 幂等加速缓存,删除后下次同 tool_use_id 重新调 reportIssue 会从
+   * 磁盘读 issues.jsonl 重新比对,语义正确。
+   */
+  clearToolUseIndexForRun(runId: string): void {
+    for (const [key, val] of this.toolUseIndex.entries()) {
+      if (val.run_id === runId) this.toolUseIndex.delete(key)
+    }
+  }
+
+  /**
+   * 测试专用 seam:返回 toolUseIndex 引用,便于单元测试直接 seed /
+   * inspect 索引(避免测试用 bracket-notation 访问 private 字段)。
+   * 生产代码不应调用此方法 —— 命名 `_ForTest` 后缀 + 仅在测试中导入即
+   * 可明确意图。
+   */
+  toolUseIndexForTest(): Map<
+    string,
+    { run_id: string; issue_id: string; ordinal: number }
+  > {
+    return this.toolUseIndex
+  }
   constructor(public readonly workspaceRoot: string) {}
 
   /** Requirement analysis/runs/ 目录 */
@@ -425,6 +456,10 @@ export class AnalysisRunService {
     }
     writeFileAtomic(join(this.runDirFor(requirementId, runId), 'meta.yaml'), yaml.stringify(updated))
     this.completionRequested.delete(meta.run_id)
+    // PR-4 (ticket 10):清理 Run 作用域内的 toolUseIndex 索引 —— 进程级
+    // Map 在长寿命进程跑几十次 Run 后会持续增长;Run 终态后该 Run 的
+    // tool_use_id 不再有命中可能,显式清掉避免跨 Run 状态污染。
+    this.clearToolUseIndexForRun(meta.run_id)
     // 终态自动释放 startup lock(issue 02 review · 单运行约束原子性)
     void this.releaseStartupLock(requirementId).catch(() => {})
     return { ok: true, run: updated }
@@ -456,6 +491,8 @@ export class AnalysisRunService {
     }
     writeFileAtomic(join(this.runDirFor(requirementId, runId), 'meta.yaml'), yaml.stringify(updated))
     this.completionRequested.delete(meta.run_id)
+    // PR-4 (ticket 10):同步清理 Run 作用域内的 toolUseIndex(同上 transitionToSucceeded)。
+    this.clearToolUseIndexForRun(meta.run_id)
     // 终态自动释放 startup lock(issue 02 review · 单运行约束原子性)
     void this.releaseStartupLock(requirementId).catch(() => {})
     return { ok: true, run: updated }
