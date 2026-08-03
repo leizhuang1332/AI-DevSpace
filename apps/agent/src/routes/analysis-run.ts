@@ -145,6 +145,25 @@ export const analysisRunRoutes: FastifyPluginAsync<AnalysisRunRouteDeps> = async
       })
     }
 
+    // PR-5 (ticket 10):契约收紧 —— PRD 必须达到最低实质长度才能启动分析。
+    // 历史盲点:R3 —— 空 PRD 让模型读 system prompt 第 9 层
+    // "PRD 尚未填写"占位,误以为"无源可引",退化到调空 `{}` 的 tool_use
+    // 进入"试探参数"循环,浪费 token + 浪费时间窗。route 层在前置拒,
+    // 不进入 MCP 调用阶段。
+    //
+    // 阈值 50 字符:低于此值的 PRD 实质内容不足以支撑一次有意义
+    // 的 Analysis(典型一行模板/纯空白远低于此)。不与"prd_not_ready"
+    // 合并,以便 Web 端给不同提示("未就绪" vs "内容过短,无法分析")。
+    const PRD_MIN_LENGTH = 50
+    if (prdContent.trim().length < PRD_MIN_LENGTH) {
+      return reply.code(400).send({
+        error: 'empty_prd',
+        reason: `PRD 内容过短(< ${PRD_MIN_LENGTH} 字符),无法支撑 Analysis;请先完成 DRAFTING 工位的需求文档`,
+        min_length: PRD_MIN_LENGTH,
+        actual_length: prdContent.trim().length,
+      })
+    }
+
     // 3. Skill 必须存在且有效(issue 02 acceptance 2)
     const allSkills = skillService.listAllSkills()
     const skillEntry = allSkills.find((s) => s.meta.name === skillName)

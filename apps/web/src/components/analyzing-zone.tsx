@@ -284,6 +284,11 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       if (err instanceof StartAnalysisRunError) {
         if (err.code === 'prd_not_ready') {
           pushToast('PRD 未就绪,请先完成 DRAFTING 工位的需求文档', 'warn')
+        } else if (err.code === 'empty_prd') {
+          // PR-5 (ticket 10):route 层前置拒空 PRD(< 50 字符)
+          // 单独提示,与 prd_not_ready 区分:前者是"PRD 文件就绪但内容过短",
+          // 后者是"PRD 文件不存在 / 全空白"。
+          pushToast('PRD 内容过短,无法支撑 Analysis;请先填写足够的需求内容', 'warn')
         } else if (err.code === 'analysis_run_already_running') {
           pushToast('已有运行中的 Analysis Run,请等待其结束', 'warn')
         } else if (err.code === 'context_overflow') {

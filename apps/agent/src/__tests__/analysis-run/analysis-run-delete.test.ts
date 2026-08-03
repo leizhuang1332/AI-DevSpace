@@ -29,6 +29,7 @@ import { authPlugin } from '../../auth/authPlugin.js'
 import { createSseHub, type SseHub } from '../../sse/SseHub.js'
 import { sseRoutes } from '../../sse/requirementEventsRoute.js'
 import { analysisRunRoutes } from '../../routes/analysis-run.js'
+import { DEFAULT_PRD_CONTENT } from './__fixtures__/prd.js'
 import { AnalysisRunService } from '../../analysis-run/AnalysisRunService.js'
 import {
   createFakeAnalysisProvider,
@@ -134,7 +135,9 @@ async function rebuildAppWithProvider(
   port = new URL(url).port
 }
 
-function seedRequirement(reqId: string, prdContent = '# 测试 PRD\n'): void {
+// PR-5 (ticket 10):默认 PRD 见 __fixtures__/prd.ts(DEFAULT_PRD_CONTENT,
+  // 长度 ≥ 50 字符,避免新契约 empty_prd 误伤测试)
+function seedRequirement(reqId: string, prdContent = DEFAULT_PRD_CONTENT): void {
   const dir = join(root, 'requirements', reqId)
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, 'requirement.md'), prdContent, 'utf8')
