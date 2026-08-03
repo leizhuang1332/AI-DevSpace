@@ -73,6 +73,11 @@ export type CreateRunResult =
       code: 'analysis_run_already_running'
       runningRun: AnalysisRunMeta
     }
+  | {
+      ok: false
+      code: 'startup_lock_stale'
+      reason: string
+    }
 
 /**
  * 启动锁文件路径 —— 跨 process 单运行约束原子性的关键。
@@ -82,8 +87,14 @@ export type CreateRunResult =
  * 比 readdir→check→mkdir TOCTOU 序列更可靠(issue 02 review 关键修复)。
  *
  * 锁随 Run 创建;Run 进入终态时由 route 显式调用 `releaseStartupLock` 删除。
- * 进程崩溃 / 异常退出 → 锁残留 → 启动新 Run 会失败。**本期未做自动回收**
- * (避免误删其他进程的锁);问题出现时由重启 agent 或人工 `rm -rf` 兜底。
+ * 进程崩溃 / 异常退出 → 锁残留 → 新进程 boot 时 `reconcileRunningRuns`
+ * 显式 `await releaseStartupLock`(同步清除,boot 期间等价于同步刷新),
+ * 避免 microtask race 丢锁(PR-A ticket 11);如果 reconcile 后仍残留,
+ * createRun 返 `startup_lock_stale`(与 `analysis_run_already_running` 区分)
+ * 由前端给运维型提示。
+ *
+ * 单 process 部署下,reconcile 的隐式 rm 即足够兜底;不引入 createRun 自愈
+ * 路径,避免误删其他 agent 进程占用的锁。
  */
 function startupLockPath(workspaceRoot: string, requirementId: string): string {
   return join(
@@ -250,21 +261,17 @@ export class AnalysisRunService {
             runningRun: existing,
           }
         }
-        // 锁残留但无 running Run(meta 已 finished)→ 可能是 stale 锁;
-        // 拒绝本次启动让 agent 重启或运维清理
+        // 锁残留但无 running Run(meta 已 finished)→ stale lock。
+        //
+        // PR-A (ticket 11):与 `analysis_run_already_running` 区分 ——
+        // 后者代表有真实 in-flight Run,前端应继续等终态;
+        // 前者代表 reconcile 跑完仍有 lock 残留,前端给不同提示
+        // (建议重启 agent / 检查 logs),避免误导用户以为有 Run 在跑。
         return {
           ok: false,
-          code: 'analysis_run_already_running',
-          runningRun: {
-            run_id: '',
-            requirement_id: requirementId,
-            skill_name: '',
-            status: 'running',
-            created_at: '',
-            finished_at: null,
-            issue_count: 0,
-            error: 'startup lock exists but no running Run found; please clean up',
-          },
+          code: 'startup_lock_stale',
+          reason:
+            'startup lock exists but no running Run found; reconcile may have missed cleanup, please restart the agent or clean up `.aidevspace/requirements/<id>/analysis/.startup.lock`',
         }
       }
       throw err
@@ -607,14 +614,24 @@ export class AnalysisRunService {
    * - **不**删除 issues.jsonl / log.jsonl:保留已完成的 Issue / Response / Log
    * - meta.error 固定为 `'agent_restart_orphan_recovery'` 字符串,便于 UI 区分
    * - 调 `transitionToFailed` 触发自动 releaseStartupLock(issue 02)
-   * - **best-effort**:单个 Run 转换失败不阻断其他 Run 的收敛
+   * - **PR-A (ticket 11)**:本函数为 async;`transitionToFailed` 内的
+   *   fire-and-forget `releaseStartupLock` 在 microtask race 下可能
+   *   失败丢锁(实测:用户机器上 `run-msdahfw3` 收敛后 lock 仍在)。
+   *   因此本函数末尾对每个 recovered Requirement 显式 `await` 一次
+   *   `releaseStartupLock`,force:true 在已 release 时是幂等 no-op,
+   *   在 stale 时保证再次清除。Server.ts 必须 `await` 本函数,
+   *   才能确保 boot 完成后 lock 一定已不存在、POST /start 不会撞 EEXIST。
+   * - **best-effort**:单个 Run 转换 / 单个 lock 释放失败不阻断其他 Run 的收敛
    */
-  reconcileRunningRuns(aliveRunIds: ReadonlySet<string> | null): {
+  async reconcileRunningRuns(
+    aliveRunIds: ReadonlySet<string> | null,
+  ): Promise<{
     recovered: Array<{ requirementId: string; runId: string; reason: string }>
     skipped: Array<{ requirementId: string; runId: string; reason: string }>
-  } {
+  }> {
     const recovered: Array<{ requirementId: string; runId: string; reason: string }> = []
     const skipped: Array<{ requirementId: string; runId: string; reason: string }> = []
+    const reqsToRelease = new Set<string>()
 
     // 扫描所有 Requirement 的 runs/ 目录
     const reqRoot = join(this.workspaceRoot, 'requirements')
@@ -648,6 +665,7 @@ export class AnalysisRunService {
         const result = this.transitionToFailed(reqId, run.run_id, reason)
         if (result.ok) {
           recovered.push({ requirementId: reqId, runId: run.run_id, reason })
+          reqsToRelease.add(reqId)
         } else {
           skipped.push({
             requirementId: reqId,
@@ -657,6 +675,17 @@ export class AnalysisRunService {
         }
       }
     }
+
+    // PR-A (ticket 11):显式 await 每个被收敛 Requirement 的 lock 释放。
+    // transitionToFailed 内的 fire-and-forget rmAsync 在 server boot 同步流程
+    // 中可能丢(事件循环 race),这里保证 reconcile 退出前 rm 已结束。
+    // force:true 在 lock 已不存在时是 no-op,幂等。
+    for (const reqId of reqsToRelease) {
+      await this.releaseStartupLock(reqId).catch(() => {
+        /* best-effort:createRun EEXIST+stale 错误码兜底 */
+      })
+    }
+
     return { recovered, skipped }
   }
 

@@ -302,7 +302,11 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   // 并释放单运行锁,让用户可以创建新 Run。当前设计下没有跨进程 in-flight 句柄
   // 共享,传 null 把所有 running Run 都视为 orphan(issue 07 验收 9)。
   try {
-    const reconcileResult = runService.reconcileRunningRuns(null)
+    // PR-A (ticket 11):必须 await —— reconcileRunningRuns 内部
+    // 显式 await 每个 recovered Requirement 的 releaseStartupLock,
+    // 同步保证 boot 完成后所有 startup lock 已不存在。
+    // 否则事件循环 race 下 lock 可能残留,POST /start 撞 EEXIST。
+    const reconcileResult = await runService.reconcileRunningRuns(null)
     if (reconcileResult.recovered.length > 0) {
       fastify.log.warn(
         {

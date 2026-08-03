@@ -194,6 +194,16 @@ export const analysisRunRoutes: FastifyPluginAsync<AnalysisRunRouteDeps> = async
       skillName,
     })
     if (!createResult.ok) {
+      // PR-A (ticket 11):区分 startup_lock_stale(运维型)与
+      // analysis_run_already_running(真有 in-flight Run)。前者返 500,
+      // 因为通常不是用户短时间重试能解决 —— 要么 agent 重启,
+      // 要么人工清 lock 文件;前端给运维型 toast。
+      if (createResult.code === 'startup_lock_stale') {
+        return reply.code(500).send({
+          error: 'startup_lock_stale',
+          reason: createResult.reason,
+        })
+      }
       return reply.code(409).send({
         error: 'analysis_run_already_running',
         reason: 'another Analysis Run is already running for this Requirement',

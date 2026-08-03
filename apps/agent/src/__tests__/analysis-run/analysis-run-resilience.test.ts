@@ -22,6 +22,7 @@ import {
   readFileSync,
   existsSync,
   readdirSync,
+  utimesSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -673,7 +674,7 @@ describe('AnalysisRunService.reconcileRunningRuns(issue 07 #9)', () => {
     mkdirSync(lockDir, { recursive: true })
 
     // 调 reconcile
-    const result = service.reconcileRunningRuns(null)
+    const result = await service.reconcileRunningRuns(null)
     expect(result.recovered).toHaveLength(1)
     expect(result.recovered[0]?.runId).toBe(runId)
     expect(result.recovered[0]?.reason).toBe('agent_restart_orphan_recovery')
@@ -730,7 +731,7 @@ describe('AnalysisRunService.reconcileRunningRuns(issue 07 #9)', () => {
     mkdirSync(lockDir, { recursive: true })
 
     // 把当前 runId 标记为 alive
-    const result = service.reconcileRunningRuns(new Set([runId]))
+    const result = await service.reconcileRunningRuns(new Set([runId]))
     expect(result.recovered).toHaveLength(0)
     expect(result.skipped).toHaveLength(1)
     expect(result.skipped[0]?.reason).toBe('alive_in_current_process')
@@ -769,7 +770,7 @@ describe('AnalysisRunService.reconcileRunningRuns(issue 07 #9)', () => {
       writeFileSync(join(runDir, 'log.jsonl'), '', 'utf8')
     }
 
-    const result = service.reconcileRunningRuns(null)
+    const result = await service.reconcileRunningRuns(null)
     expect(result.recovered).toHaveLength(2)
     expect(result.recovered.every((r) => r.reason === 'agent_restart_orphan_recovery')).toBe(true)
 
@@ -805,12 +806,113 @@ describe('AnalysisRunService.reconcileRunningRuns(issue 07 #9)', () => {
     writeFileSync(join(runDir, 'issues.jsonl'), '', 'utf8')
     writeFileSync(join(runDir, 'log.jsonl'), '', 'utf8')
 
-    const result = service.reconcileRunningRuns(null)
+    const result = await service.reconcileRunningRuns(null)
     expect(result.recovered).toHaveLength(0)
 
     const meta = service.readMeta(reqId, runId)
     expect(meta?.status).toBe('succeeded')
     expect(meta?.finished_at).toBe('2026-08-01T00:01:00.000Z') // 不变
+  })
+
+  // ------------------------------------------------------------------
+  // PR-A (ticket 11):回归测试 ——
+  // (1) reconcile 后 .startup.lock 必不存在(不依赖 microtask timing)
+  // (2) createRun EEXIST + 无 running meta → 返 startup_lock_stale
+  //     与 analysis_run_already_running 区分,前端能给运维型 toast
+  // 背景:用户机器上发现 run 被 reconcile 收敛为 failed,error=
+  // agent_restart_orphan_recovery,但 .startup.lock 仍残留,
+  // 导致后续 POST /start 永远 409 → UI 与服务端状态不一致。
+  // 根因:transitionToFailed 内 releaseStartupLock 是 fire-and-forget,
+  // server boot 同步阶段事件循环 race 下被丢。
+  // ------------------------------------------------------------------
+
+  it('PR-A:running meta + lock 残留 → reconcile 完成后 lock **必不存在**(不依赖 setTimeout)', async () => {
+    // 复现"老进程残留":running meta + 残留 lock
+    const reqId = 'req-pr-a-lock'
+    const reqDir = join(root, 'requirements', reqId)
+    mkdirSync(reqDir, { recursive: true })
+    const analysisDir = join(reqDir, 'analysis')
+    mkdirSync(analysisDir, { recursive: true })
+    const runId = 'run-pr-a-lock'
+    const runDir = join(analysisDir, 'runs', runId)
+    mkdirSync(runDir, { recursive: true })
+    writeFileSync(
+      join(runDir, 'meta.yaml'),
+      yaml.stringify({
+        run_id: runId,
+        requirement_id: reqId,
+        skill_name: 'prd-completeness',
+        status: 'running',
+        created_at: '2026-08-03T13:53:05.716Z',
+        finished_at: null,
+        issue_count: 0,
+        error: null,
+      }),
+      'utf8',
+    )
+    const lockDir = join(analysisDir, '.startup.lock')
+    mkdirSync(lockDir, { recursive: true })
+    // 强制设置 mtime,模拟"几天前残留的 lock"(与用户 case 对应)
+    const oldMtime = new Date('2026-08-03T13:53:05.716Z')
+    utimesSync(lockDir, oldMtime, oldMtime)
+
+    // **不 setTimeout**:assert 直接落,reconcile 必须靠自身 await 保证 lock 没了
+    const result = await service.reconcileRunningRuns(null)
+    expect(result.recovered).toHaveLength(1)
+    expect(result.recovered[0]?.runId).toBe(runId)
+
+    // core assert:不再依赖 fire-and-forget 落地
+    expect(existsSync(lockDir)).toBe(false)
+
+    // 修复后再 createRun 同 Requirement 必成功(无 stale lock 阻塞)
+    const newRun = await service.createRun({
+      requirementId: reqId,
+      skillName: 'prd-completeness',
+    })
+    expect(newRun.ok).toBe(true)
+  })
+
+  it('PR-A:createRun 撞 EEXIST + 无 running meta → 返 startup_lock_stale(与 running 区分)', async () => {
+    // 仅有 .startup.lock,无任何 running meta —— 模拟"前进程丢锁"
+    const reqId = 'req-pr-a-stale'
+    const reqDir = join(root, 'requirements', reqId)
+    mkdirSync(reqDir, { recursive: true })
+    const analysisDir = join(reqDir, 'analysis')
+    mkdirSync(analysisDir, { recursive: true })
+    const lockDir = join(analysisDir, '.startup.lock')
+    mkdirSync(lockDir, { recursive: true })
+
+    const result = await service.createRun({
+      requirementId: reqId,
+      skillName: 'prd-completeness',
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    // 必须与"真运行中"区分 —— 前端据此给运维型 toast,而非"等待其结束"
+    expect(result.code).toBe('startup_lock_stale')
+    expect('runningRun' in result).toBe(false)
+    expect(typeof result.reason).toBe('string')
+    expect(result.reason.length).toBeGreaterThan(0)
+  })
+
+  it('PR-A:createRun 撞 EEXIST + 有 running meta → 仍返 analysis_run_already_running(未回归)', async () => {
+    // 控组测试:保真路径不被本 PR 影响
+    const reqId = 'req-pr-a-active'
+    const created = await service.createRun({
+      requirementId: reqId,
+      skillName: 'prd-completeness',
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+
+    const second = await service.createRun({
+      requirementId: reqId,
+      skillName: 'implementation-readiness',
+    })
+    expect(second.ok).toBe(false)
+    if (second.ok) return
+    expect(second.code).toBe('analysis_run_already_running')
+    expect(second.runningRun.run_id).toBe(created.run.run_id)
   })
 })
 
