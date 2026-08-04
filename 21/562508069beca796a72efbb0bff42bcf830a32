@@ -1,0 +1,30 @@
+apps/web/src/components/__tests__/analysis-issue-list.test.tsx
+  s_79daa36d58dcf0::t_57e5bfac5d7026 440-532
+docs/design/pages/scroll-fix-A-h-full.html
+  s_79daa36d58dcf0::t_ccc5a7c3616f0c 1-335
+apps/web/src/components/analysis-issue-list.tsx
+  s_79daa36d58dcf0::t_b3acbffab82b80 26-33
+  s_79daa36d58dcf0::t_d9e32eb58d327b 212,225
+docs/design/pages/scroll-fix-B-flex-on-root.html
+  s_79daa36d58dcf0::t_503ebbad37e837 1-293
+docs/design/pages/scroll-fix-D-scroll-container.html
+  s_79daa36d58dcf0::t_9d3d0d9e208fee 1-331
+docs/design/pages/scroll-fix-C-max-h.html
+  s_79daa36d58dcf0::t_01fc4cf84f1097 1-300
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "21562508069beca796a72efbb0bff42bcf830a32",
+  "prompts": {},
+  "sessions": {
+    "s_79daa36d58dcf0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b2c1a0ef-fa7e-42c5-b82f-d6cb47141aad",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
