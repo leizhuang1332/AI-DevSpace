@@ -1,0 +1,53 @@
+packages/shared/src/__tests__/analysis-skill.test.ts
+  s_43a10d49e4ee8b::t_736a4319f4d851 4
+  s_43a10d49e4ee8b::t_16613c8fe44a7c 37-85
+  s_53f8baaaa41611::t_03ce884ef367f0 86-87
+apps/web/src/components/analyzing-zone.tsx
+  s_8e03292ccade9e::t_fdb9c49b2237f1 675,691
+  s_8e03292ccade9e::t_797acaa747c220 789,806,812,855
+  s_8e03292ccade9e::t_4e649d2e059a41 408-411,413
+  s_8e03292ccade9e::t_f552a79ac91113 49
+  s_8e03292ccade9e::t_4ba952654482bc 874,881,883
+apps/web/tailwind.config.ts
+  s_8e03292ccade9e::t_9890d787493302 112-123
+packages/shared/src/analysis-skill.ts
+  s_43a10d49e4ee8b::t_02a405c267e265 33-57,71-74,76
+apps/agent/src/analysis-skill/builtin-defaults.ts
+  s_43a10d49e4ee8b::t_d006b6fc4bcffb 19-24
+apps/agent/package.json
+  s_43a10d49e4ee8b::t_103b6401086d4f 23-24
+pnpm-lock.yaml
+  s_53f8baaaa41611::t_8a4dda8a10f9ae 59-61,98,115-117,852-856,1792-1796,2303-2312,3482-3485,4467-4469,4808,4829,4937-4944
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "f640b5f79179edef6c8dc12d1889960cc924311e",
+  "prompts": {},
+  "sessions": {
+    "s_43a10d49e4ee8b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8df4a19c-d00d-43c5-9404-87a05dcdc235",
+        "model": "MiniMax-M3"
+      },
+      "human_author": null
+    },
+    "s_53f8baaaa41611": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "939df3a8-efdd-44e9-ad1c-d881df3a2ed0",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    },
+    "s_8e03292ccade9e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "be53f16e-ba6f-498e-9fd6-2aa94fbe1ad9",
+        "model": "MiniMax-M3"
+      },
+      "human_author": null
+    }
+  }
+}
