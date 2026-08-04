@@ -505,6 +505,10 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   // ticket 04 · ADR-0022 D5.2:`isOpen` / `onOpenChange` 由本组件持有
   // (而非由 AnalysisHistoryFabPanel 内部),通过 controller 暴露给
   // `<CommandPalette>` 同步控制。
+  //
+  // ticket 06 · ADR-0022 D6:面板展开时给主区加 dim 蒙层(4% 黑色蒙层),
+  // 给屏幕阅读器加 `aria-hidden="true"`,避免误读蒙层为可交互元素
+  // (`data-dimmed="true"`)。
   const suppressPanelOutsideClose = pendingDeleteRunId !== null
   const historyFabPanelElement = useMemo(
     () => (
@@ -793,6 +797,7 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
             onIssueSourceRefClick={handleIssueSourceRefClick}
             registerIssueResponseFlush={registerIssueResponseFlush}
             historyFabPanel={historyFabPanelElement}
+            historyPanelOpen={isHistoryPanelOpen}
           />
         ) : (
           <NarrowLayout
@@ -809,6 +814,7 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
             onIssueSourceRefClick={handleIssueSourceRefClick}
             registerIssueResponseFlush={registerIssueResponseFlush}
             historyFabPanel={historyFabPanelElement}
+            historyPanelOpen={isHistoryPanelOpen}
           />
         )}
       </div>
@@ -907,6 +913,12 @@ interface LayoutProps {
   onIssueSourceRefClick: (ref: SharedSourceRef) => void
   registerIssueResponseFlush: (issueId: string, flush: () => Promise<void>) => () => void
   historyFabPanel: React.ReactNode
+  /**
+   * FAB 面板是否打开(analyzing-fab ticket 06 · ADR-0022 D6)。
+   * 桌面布局的 `[识别产物]` 列在面板打开时被 dim 蒙层覆盖(4% 黑色蒙层),
+   * 该蒙层 `aria-hidden="true"` 避免屏幕阅读器误读。
+   */
+  historyPanelOpen: boolean
 }
 
 function DesktopLayout(props: LayoutProps) {
@@ -924,11 +936,13 @@ function DesktopLayout(props: LayoutProps) {
     onIssueSourceRefClick,
     registerIssueResponseFlush,
     historyFabPanel,
+    historyPanelOpen,
   } = props
   return (
     <div
       data-testid="analyzing-grid"
       data-viewport="desktop"
+      data-history-panel-open={historyPanelOpen ? 'true' : 'false'}
       className="relative grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-5 flex-1 min-h-0 overflow-hidden"
     >
       <div
@@ -947,7 +961,8 @@ function DesktopLayout(props: LayoutProps) {
       </div>
       <div
         data-testid="analyzing-right-col"
-        className="flex flex-col gap-5 min-h-0 overflow-hidden"
+        data-dimmed={historyPanelOpen ? 'true' : 'false'}
+        className="relative flex flex-col gap-5 min-h-0 overflow-hidden"
       >
         <RunSummary
           currentRun={currentRun}
@@ -971,6 +986,16 @@ function DesktopLayout(props: LayoutProps) {
           userToggle={logPanelUserToggle}
           onToggle={setLogPanelUserToggle}
         />
+        {historyPanelOpen && (
+          // 4% 黑色 dim 蒙层(non-modal 提示焦点在浮层;`aria-hidden` 避免
+          // 屏幕阅读器误读蒙层为可交互元素)。`pointer-events: none` 保
+          // 留主列交互 —— 不阻断(non-modal popover 心智)。
+          <div
+            data-testid="analyzing-right-col-dim"
+            aria-hidden="true"
+            className="absolute inset-0 bg-black/[0.04] pointer-events-none"
+          />
+        )}
       </div>
       {historyFabPanel}
     </div>
@@ -992,12 +1017,14 @@ function NarrowLayout(props: LayoutProps) {
     onIssueSourceRefClick,
     registerIssueResponseFlush,
     historyFabPanel,
+    historyPanelOpen,
   } = props
   const [narrowTab, setNarrowTab] = useState<'doc' | 'issues'>('issues')
   return (
     <div
       data-testid="analyzing-narrow"
       data-narrow-tab={narrowTab}
+      data-history-panel-open={historyPanelOpen ? 'true' : 'false'}
       className="relative flex flex-col gap-3 flex-1 min-h-0 overflow-hidden"
     >
       {historyFabPanel}

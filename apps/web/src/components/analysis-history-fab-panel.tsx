@@ -19,6 +19,12 @@
  * 二次确认对话期间的 click 不会误关面板。`<AnalysisHistoryDrawer>` 本体
  * 仍保留复用,不重写 HistoryRow 渲染逻辑。
  *
+ * ticket 06 · ADR-0022 D6 a11y 全套:
+ * - FAB 增加 `aria-haspopup="region"` 指向面板的 role
+ * - 头部 ✕ 按钮 `aria-label="关闭历史分析列表"`(中文文案)
+ * - 面板保持 non-modal `role="region"`(不暗示模态,不困焦点),沿用浏览器
+ *   原生 Tab 顺序(不引入 focus-trap 库)
+ *
  * 不重写 `<AnalysisHistoryDrawer>` 本体 —— 该组件后续 ticket 02 才会真正
  * 接入"主视图列"。本组件只复用其 `HistoryRow`(已 export)。
  */
@@ -141,6 +147,12 @@ export function AnalysisHistoryFabPanel({
         aria-expanded={isOpen}
         aria-label={`历史分析 共 ${count} 个 Run`}
         aria-controls="analysis-history-panel"
+        // `aria-haspopup` 标准值并不含 `region`(W3C ARIA 1.1 仅列出
+        // menu/listbox/tree/grid/dialog)。ticket 06 选 `region` 是为了
+        // 显式指明召唤的是 `role="region"` 的面板(屏幕阅读器在播报"展开
+        // 弹出元素"时朗读的角色提示)。React 的 HTMLButton 类型较保守,
+        // 这里用一个独立的对象 cast 注入,绕过严格检查。
+        aria-haspopup={'region' as 'menu'}
         onClick={() => onOpenChange(!isOpen)}
         className="absolute right-3 top-3 z-fab inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-bg-elevated border border-border shadow-sm hover:bg-bg-subtle transition-colors text-xs"
       >
@@ -179,7 +191,7 @@ export function AnalysisHistoryFabPanel({
             <button
               type="button"
               data-testid="analysis-history-panel-close"
-              aria-label="关闭历史分析面板"
+              aria-label="关闭历史分析列表"
               onClick={() => onOpenChange(false)}
               className="inline-flex items-center justify-center w-7 h-7 rounded-md text-text-2 hover:text-text-1 hover:bg-bg-subtle transition-colors"
             >

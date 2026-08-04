@@ -1640,3 +1640,244 @@ describe('AnalyzingZone · 切上下文强制收起(analyzing-fab ticket 05 · �
     }
   })
 })
+
+// ===========================================================================
+// a11y 全套(analyzing-fab ticket 06 · ADR-0022 D6)
+//
+// ticket 06 在 01-05 骨架上扩展 FAB / 面板 / 行级 ARIA:
+// - FAB `aria-haspopup="region"` 指向面板 role
+// - 面板 `role="region"`(non-modal,不暗示模态,不困焦点)
+// - 头部 ✕ `aria-label="关闭历史分析列表"`
+// - 删除按钮 `aria-label="删除 Run <run_id> <skill_name>"`
+// - 运行中锁图标 `aria-label="运行中的 Run <run_id> <skill_name> 不可删除"`
+// - 当前 Run 行 `aria-current="true"`
+// - [识别产物] 列 dim 蒙层 `data-dimmed="true"` + `aria-hidden="true"`
+// - 不引入 focus-trap 库(沿用浏览器原生 Tab 顺序)
+//
+// 沿用既有 `data-testid` 命名约定(FAB / panel / close / row / row-delete
+// / row-delete-disabled / right-col / right-col-dim),`toHaveAttribute` 形
+// 式断言。
+// ===========================================================================
+
+describe('AnalyzingZone · a11y 全套(analyzing-fab ticket 06 · ADR-0022 D6)', () => {
+  beforeEach(() => {
+    // ticket 06 的 dim 蒙层断言需要桌面布局;`useMediaQuery('(min-width: 1024px)')`
+    // 在 jsdom 走 fallback(返 false → NarrowLayout)。本组统一强行切到桌面
+    // 形态,让 `analyzing-right-col` 出现在 DOM 中。
+    if (typeof globalThis.setMatchMedia === 'function') {
+      globalThis.setMatchMedia('(min-width: 1024px)', true)
+    }
+  })
+
+  it('FAB `aria-haspopup="region"` + `aria-controls` 指向面板 id', () => {
+    // ticket 06 验收第 1 条:FAB 通过 `aria-haspopup` 指明召唤元素角色。
+    // W3C 标准值并不含 `region`(仅 menu/listbox/tree/grid/dialog),本项目
+    // 在 ticket 06 选 `region` 是为了在屏读器播报"展开 region"时与面板的
+    // `role="region"` 对齐。运行时需要绕过 React 的 HTMLButton 类型 by
+    // inline cast(`'region' as 'menu'`)实现,运行时挂载的是字面量 'region'。
+    const runs: AnalysisRunMeta[] = [
+      buildRun({ run_id: 'r-1', created_at: '2026-08-01T10:00:00.000Z' }),
+    ]
+    render(<AnalyzingZone data={buildFabPanelData(runs)} />)
+
+    const fab = screen.getByTestId('analysis-history-fab')
+    expect(fab.getAttribute('aria-haspopup')).toBe('region')
+    // `aria-controls` 指向面板 id(w3c 推荐显式 ID 关联)
+    expect(fab.getAttribute('aria-controls')).toBe('analysis-history-panel')
+  })
+
+  it('面板 `role="region"`(非 `role="dialog"`) + `aria-label="历史分析列表"`', async () => {
+    const runs: AnalysisRunMeta[] = [
+      buildRun({ run_id: 'r-1', created_at: '2026-08-01T10:00:00.000Z' }),
+    ]
+    render(<AnalyzingZone data={buildFabPanelData(runs)} />)
+    await openHistoryPanel()
+
+    const panel = screen.getByTestId('analysis-history-panel')
+    expect(panel.getAttribute('role')).toBe('region')
+    // 不是 `role="dialog"` —— dialog 暗示模态,会困焦点;我们走 non-modal
+    // popover 心智,Tab 焦点可继续到主区(见后续断言)。
+    expect(panel.getAttribute('role')).not.toBe('dialog')
+    expect(panel.getAttribute('aria-label')).toBe('历史分析列表')
+    // 双重校验:面板上的 id 与 FAB aria-controls 对得上(aria-controls →
+    // 对应 id 形成 aria 关联,a11y API 依赖此关联)
+    expect(panel.id).toBe('analysis-history-panel')
+  })
+
+  it('头部 ✕ 按钮 `aria-label="关闭历史分析列表"`', async () => {
+    const runs: AnalysisRunMeta[] = [
+      buildRun({ run_id: 'r-1', created_at: '2026-08-01T10:00:00.000Z' }),
+    ]
+    render(<AnalyzingZone data={buildFabPanelData(runs)} />)
+    await openHistoryPanel()
+
+    const closeBtn = screen.getByTestId('analysis-history-panel-close')
+    expect(closeBtn.getAttribute('aria-label')).toBe('关闭历史分析列表')
+  })
+
+  it('当前 Run 行 `aria-current="true"`(已 ticket 02 落地),本 ticket 06 联合断言', async () => {
+    // ticket 06 联合 ticket 02:`HistoryRow` 渲染的 `aria-current` 由
+    // HistoryRow 内部的 `run.run_id === activeRunId` 派生,与 FAB 的
+    // `data-active-run-id` 同步。本用例覆盖面板内的多行场景,确认只有
+    // 当前选中行携带 `aria-current`。
+    const runs: AnalysisRunMeta[] = [
+      buildRun({ run_id: 'r-old', created_at: '2026-08-01T08:00:00.000Z' }),
+      buildRun({ run_id: 'r-mid', created_at: '2026-08-01T09:00:00.000Z' }),
+      buildRun({ run_id: 'r-new', created_at: '2026-08-01T10:00:00.000Z' }),
+    ]
+    render(<AnalyzingZone data={buildFabPanelData(runs)} />)
+    await openHistoryPanel()
+
+    // 默认 active = r-new(最新 created_at)
+    expect(screen.getByTestId('analysis-history-fab').getAttribute('data-active-run-id')).toBe(
+      'r-new',
+    )
+    const rows = screen.getAllByTestId('analysis-history-row')
+    const activeRow = rows.find((r) => r.getAttribute('data-run-id') === 'r-new')!
+    const inactiveRows = rows.filter((r) => r.getAttribute('data-run-id') !== 'r-new')
+    expect(activeRow.getAttribute('aria-current')).toBe('true')
+    for (const r of inactiveRows) {
+      expect(r.getAttribute('aria-current')).toBeNull()
+    }
+  })
+
+  it('删除按钮 `aria-label` 包含 `run_id` + `skill_name`,能精确指代 Run 实例', async () => {
+    // ticket 06 验收第 5 条:删除按钮的 `aria-label` 由 ticket 05 的
+    // `删除 Analysis Run ${skill_name}` 扩展为 `删除 Run ${run_id}
+    // ${skill_name}`,让屏读器用户能明确分辨"删的是哪一条 Run"。
+    const runs: AnalysisRunMeta[] = [
+      buildRun({
+        run_id: 'r-deletable-123',
+        created_at: '2026-08-01T10:00:00.000Z',
+        skill_name: 'boundary-check',
+      }),
+    ]
+    render(<AnalyzingZone data={buildFabPanelData(runs)} />)
+    await openHistoryPanel()
+
+    const deleteBtn = screen.getByTestId('analysis-history-row-delete')
+    expect(deleteBtn.getAttribute('aria-label')).toBe(
+      '删除 Run r-deletable-123 boundary-check',
+    )
+  })
+
+  it('运行中 Run 行 锁图标 `aria-label` 包含 `run_id` + `skill_name`', async () => {
+    // ticket 06 验收第 6 条:锁图标的 `aria-label` 也补到具体 Run 实例,
+    // 屏读器用户能听到"这条 Run 是哪一条、为什么不能删"。
+    const runs: AnalysisRunMeta[] = [
+      buildRun({
+        run_id: 'r-running-456',
+        created_at: '2026-08-01T10:00:00.000Z',
+        skill_name: 'prd-completeness',
+        status: 'running',
+      }),
+    ]
+    render(<AnalyzingZone data={buildFabPanelData(runs)} />)
+    await openHistoryPanel()
+
+    const lock = screen.getByTestId('analysis-history-row-delete-disabled')
+    expect(lock.getAttribute('aria-label')).toBe(
+      '运行中的 Run r-running-456 prd-completeness 不可删除',
+    )
+  })
+
+  it('面板展开时 [识别产物] 列加 dim 蒙层(`data-dimmed="true"` + `aria-hidden="true"`)', async () => {
+    // ticket 06 验收第 11 条:面板非 modal 但需视觉提示。dim 蒙层
+    //   `<div data-testid="analyzing-right-col-dim" aria-hidden="true">`
+    //   覆盖 [识别产物] 列,`pointer-events: none` 不阻断交互。
+    const runs: AnalysisRunMeta[] = [
+      buildRun({ run_id: 'r-1', created_at: '2026-08-01T10:00:00.000Z' }),
+    ]
+    render(<AnalyzingZone data={buildFabPanelData(runs)} />)
+    await openHistoryPanel()
+
+    const rightCol = screen.getByTestId('analyzing-right-col')
+    // a11y + 视觉双标识
+    expect(rightCol.getAttribute('data-dimmed')).toBe('true')
+
+    const dim = screen.getByTestId('analyzing-right-col-dim')
+    expect(dim.getAttribute('aria-hidden')).toBe('true')
+    // dim 蒙层不该阻拦用户与 [识别产物] 列交互(仅是视觉提示)
+    expect(dim.className).toContain('pointer-events-none')
+  })
+
+  it('面板关闭后 dim 蒙层消失(`data-dimmed="false"` + 不在 DOM)', async () => {
+    // ticket 06 第 11 条反向:面板关闭 → 不再有 dim 蒙层;DOM 中无
+    // `analyzing-right-col-dim` 节点,`data-dimmed` 回到 false。
+    const runs: AnalysisRunMeta[] = [
+      buildRun({ run_id: 'r-1', created_at: '2026-08-01T10:00:00.000Z' }),
+    ]
+    render(<AnalyzingZone data={buildFabPanelData(runs)} />)
+    await openHistoryPanel()
+
+    // 关闭面板(用 ✕ 按钮)
+    await userEvent.click(screen.getByTestId('analysis-history-panel-close'))
+    await waitFor(() => {
+      expect(screen.queryByTestId('analysis-history-panel')).toBeNull()
+    })
+
+    const rightCol = screen.getByTestId('analyzing-right-col')
+    expect(rightCol.getAttribute('data-dimmed')).toBe('false')
+    expect(screen.queryByTestId('analyzing-right-col-dim')).toBeNull()
+  })
+
+  it('Tab 焦点不困在面板内(沿用浏览器原生顺序;不引入 focus-trap)', async () => {
+    // ticket 06 验收第 9 条:面板不应该是 `role="dialog"`,不困 Tab 焦点。
+    // 在 jsdom 内,Tab 顺序按 DOM 树形顺序自然推进。本用例通过断言「panel
+    // 上没有 `aria-modal="true"` 也没有自定义 focus trap 属性」间接证明。
+    // 真浏览器焦点行为由 Playwright e2e 守护(见 apps/web/e2e 目录)。
+    //
+    // 这里额外验证:
+    // 1) panel 不带 `aria-modal` 属性
+    // 2) panel 不带 `tabindex` 强制接受焦点
+    // 3) panel 内 Run 行 select 按钮可正常 focus(模拟 Tab 路径上的目标之一)
+    const runs: AnalysisRunMeta[] = [
+      buildRun({ run_id: 'r-1', created_at: '2026-08-01T10:00:00.000Z' }),
+      buildRun({ run_id: 'r-2', created_at: '2026-08-01T11:00:00.000Z' }),
+    ]
+    render(<AnalyzingZone data={buildFabPanelData(runs)} />)
+    await openHistoryPanel()
+
+    const panel = screen.getByTestId('analysis-history-panel')
+    // a11y 工具与屏读器:`aria-modal=true` 是 dialog 才会有的标记;我们的
+    // 面板走 non-modal,刻意不带此属性(也明示不困焦点)
+    expect(panel.getAttribute('aria-modal')).toBeNull()
+    // panel 本身不可被强制聚焦(避免变成焦点 trap 的「头部」)
+    expect(panel.getAttribute('tabindex')).toBeNull()
+    // panel 内的 Run 行 select 按钮可被聚焦(浏览器的天然 Tab order)——
+    // 这里仅验证它们是真实的 <button> 元素(默认 focusable),不强断言
+    // `document.activeElement`(jsdom 在测试环境下 activeElement 时序不稳)。
+    const rowSelects = screen.getAllByTestId('analysis-history-row-select')
+    expect(rowSelects.length).toBeGreaterThan(0)
+    for (const btn of rowSelects) {
+      expect(btn.tagName).toBe('BUTTON')
+    }
+  })
+
+  it('面板头部 ✕ 按钮与主区交互入口都是真实的 <button>(原生 Tab 可达)', async () => {
+    // ticket 06 验收第 9 条补强:沿用浏览器原生 Tab 顺序意味着头部 ✕ /
+    // 行 select / 删除按钮 / FAB 自身的 <button> 默认可达(不需手写
+    // tabindex=0)。本断言对这几类关键节点各取一例。
+    const runs: AnalysisRunMeta[] = [
+      buildRun({
+        run_id: 'r-running',
+        created_at: '2026-08-01T09:00:00.000Z',
+        status: 'running',
+      }),
+      buildRun({
+        run_id: 'r-done',
+        created_at: '2026-08-01T10:00:00.000Z',
+        status: 'succeeded',
+      }),
+    ]
+    render(<AnalyzingZone data={buildFabPanelData(runs)} />)
+    await openHistoryPanel()
+
+    expect(screen.getByTestId('analysis-history-fab').tagName).toBe('BUTTON')
+    expect(screen.getByTestId('analysis-history-panel-close').tagName).toBe('BUTTON')
+    expect(screen.getByTestId('analysis-history-row-delete').tagName).toBe('BUTTON')
+    // 无 tabindex hack
+    expect(screen.getByTestId('analysis-history-fab').getAttribute('tabindex')).toBeNull()
+    expect(screen.getByTestId('analysis-history-panel-close').getAttribute('tabindex')).toBeNull()
+  })
+})

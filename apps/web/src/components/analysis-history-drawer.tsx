@@ -16,6 +16,11 @@
  *
  * 视觉:右侧窄抽屉 w-[320px];顶部抽屉标题"历史分析 N";中间列表;无 Run
  * 时显示空态。
+ *
+ * a11y 扩展(analyzing-fab ticket 06 · ADR-0022 D6):被 `<AnalysisHistoryFabPanel>`
+ * 复用的 `<HistoryRow>` 在删除按钮 / 锁图标上加更具体的 `aria-label`(包含
+ * `run_id` 与 `skill_name`),让屏幕阅读器用户在面板里能精确分辨"我即将删
+ * 除哪一条 Run"。
  */
 
 'use client'
@@ -225,7 +230,7 @@ export function HistoryRow({
           <button
             type="button"
             data-testid="analysis-history-row-delete"
-            aria-label={`删除 Analysis Run ${run.skill_name}`}
+            aria-label={`删除 Run ${run.run_id} ${run.skill_name}`}
             onClick={() => onRequestDelete(run.run_id)}
             className="inline-flex items-center justify-center w-7 h-7 rounded-md text-text-3 hover:text-error hover:bg-error/10 transition-colors flex-shrink-0"
           >
@@ -234,7 +239,7 @@ export function HistoryRow({
         ) : (
           <span
             data-testid="analysis-history-row-delete-disabled"
-            aria-label="运行中的 Run 不可删除"
+            aria-label={`运行中的 Run ${run.run_id} ${run.skill_name} 不可删除`}
             className="inline-flex items-center justify-center w-7 h-7 rounded-md text-text-3 opacity-30 flex-shrink-0"
           >
             <span aria-hidden>🔒</span>
