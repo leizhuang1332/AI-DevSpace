@@ -1,0 +1,22 @@
+apps/web/src/__tests__/analyzing-zone-focus.test.tsx
+  s_2f4fd310ff24eb::t_b7e26376425515 1328-1347,1351,1359-1361,1369-1370,1386,1396,1400,1412-1417,1424,1426,1445-1448,1452,1467-1474,1484-1534,1539,1552,1554,1556,1558,1562-1577
+  s_2f4fd310ff24eb::t_e7eabb0812fcaa 1251-1327,1348-1350,1352-1358,1362-1368,1371-1385,1387-1395,1397-1399,1401-1411,1418-1423,1425,1427-1444,1449-1451,1453-1466,1475-1483,1535-1538,1540-1551,1553,1555,1557,1559-1561,1578-1641
+apps/web/src/components/analyzing-zone.tsx
+  s_2f4fd310ff24eb::t_2673b9af750c75 390-394
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "ea89b486f5e9c70f50a3f605b22df512c385a433",
+  "prompts": {},
+  "sessions": {
+    "s_2f4fd310ff24eb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bb67380e-3eba-4a83-85bc-5ad7908119d7",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
