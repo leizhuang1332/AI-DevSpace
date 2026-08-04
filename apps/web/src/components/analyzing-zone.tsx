@@ -55,6 +55,7 @@ import {
   canDeleteAnalysisRun,
   DeleteAnalysisRunError,
 } from '@/lib/analysis-run-delete'
+import { findNextRunId } from '@/lib/analysis-run-focus'
 import { agentFetch, AgentError } from '@/lib/agent-client'
 import type { AnalysisRunDetailResponse } from '@ai-devspace/shared'
 
@@ -170,6 +171,14 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
 
   // 焦点规则(issue 05 验收 6 / 7):用户手动切换 Run 后,SSE 终态事件不抢回焦点
   const userManuallySwitchedRef = useRef(false)
+
+  // 乐观删除 trace(analyzing-fab ticket 03 · ADR-0022 D5.1):本标签主动
+  // 触发的 Run 删除会在 handleConfirmDelete 成功路径中立即更新 runs /
+  // currentRunId;同 Run 的 analysis_run_deleted SSE 广播会在数十毫秒内
+  // 推回本标签,撞到该 ref 时跳过 currentRun 切换,避免与乐观更新的双切换
+  // 竞态。仅记录「最近一次由本标签主动删除的 Run id」,SSE handler 命中后
+  // 清空。
+  const optimisticallyDeletedRunIdRef = useRef<string | null>(null)
 
   // 删除 Run 二次确认状态(issue 05 验收 9)
   const [pendingDeleteRunId, setPendingDeleteRunId] = useState<string | null>(null)
@@ -374,9 +383,9 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
 
   const handleConfirmDelete = useCallback(
     async (runId: string) => {
+      const isCurrent = currentRunId === runId
       try {
         await deleteAnalysisRun(data.requirementId, runId)
-        setPendingDeleteRunId(null)
       } catch (err) {
         if (err instanceof DeleteAnalysisRunError) {
           if (err.code === 'analysis_run_not_found') {
@@ -393,8 +402,34 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
         }
         throw err
       }
+      // 二次确认对话框关闭(analyzing-fab ticket 03 · ADR-0022 D5.1)
+      setPendingDeleteRunId(null)
+
+      // 乐观本地更新(避免等 SSE 异步推 analysis_run_deleted):把被删的
+      // Run 从 runs 列表里去掉,然后:
+      // - 当前 Run 被删 → 切到 findNextRunId 推荐的下一个 Run;
+      // - 非当前 Run 被删 → currentRunId 保持不变。
+      //
+      // 注意:此处 setRuns 用 functional update,因为这是 useCallback 闭包
+      // 内,且需要读最新 runs 状态。如果闭包内的 runs 已过期,filter 会
+      // 多删一份空的 prev,后续 SSE 推送仍然兜底(再 filter 一次)。
+      const optimisticNext = isCurrent ? findNextRunId(runs, runId) : currentRunId
+      optimisticallyDeletedRunIdRef.current = runId
+      setRuns((prev) => prev.filter((r) => r.run_id !== runId))
+      if (isCurrent) {
+        setCurrentRunId(optimisticNext)
+        setCurrentRunIssues([])
+        setCurrentRunLog([])
+        setLogPanelUserToggle(null)
+      }
+      // 让后续 SSE 终态事件可正常收敛 startState —— ticket 03 验收第 7 条
+      // (原本 ticket 02 已落地 handleSelectRun 时翻 true,这里删完后回 false)
+      userManuallySwitchedRef.current = false
+      // 面板保持打开(analyzing-fab ticket 03 · ADR-0022 D5.1):让用户继续在
+      // 「历史语境」里操作;既不调 setIsOpen(false) 也不强渲 isOpen=true,
+      // 由父组件 historyFabPanelEl 持有的 isOpen state 自然不变。
     },
-    [data.requirementId, pushToast],
+    [data.requirementId, pushToast, currentRunId, runs],
   )
 
   const handleCancelDelete = useCallback(() => {
@@ -407,7 +442,16 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
 
   // 浮动召唤按钮 + 浮动面板(analyzing-fab ticket 01 · ADR-0022)
   // 替代旧 320px 永久列;FAB / 面板在 DesktopLayout / NarrowLayout 内
-  // absolute 定位到主区右上角
+  // absolute 定位到主区右上角。
+  //
+  // ticket 03 · ADR-0022 D5.1:删除 UX 重设 — 面板保留打开 + currentRun
+  // 自动切到下一个 Run。删除流程中(dialog 显示期间)用
+  // `suppressOutsideClose` 让 fab-panel 不响应 mousedown outside 关闭,
+  // 避免用户在二次确认对话框上的 click 误关面板(参
+  // `analysis-history-fab-panel.tsx`);删完后 dialog 已关,suppress 解
+  // 除,panel 内 useEffect mousedown listener 重新注册,isOpen 状态保持
+  // 不变。
+  const suppressPanelOutsideClose = pendingDeleteRunId !== null
   const historyFabPanelElement = useMemo(
     () => (
       <AnalysisHistoryFabPanel
@@ -416,9 +460,17 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
         onSelect={handleSelectRun}
         onRequestDelete={handleRequestDelete}
         skillDescriptions={skillDescriptions}
+        suppressOutsideClose={suppressPanelOutsideClose}
       />
     ),
-    [runs, currentRunId, handleSelectRun, handleRequestDelete, skillDescriptions],
+    [
+      runs,
+      currentRunId,
+      handleSelectRun,
+      handleRequestDelete,
+      skillDescriptions,
+      suppressPanelOutsideClose,
+    ],
   )
 
   // -------------------------------------------------------------------------
@@ -549,8 +601,19 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
           runId: string
           skillName: string
         }
-        const isCurrent = currentRunId === parsed.runId
+        // setRuns 始终 filter(idempotent):若本标签已走乐观更新,本次 prev
+        // 列表中已不含 parsed.runId;filter 是 no-op。若是其他标签删除或
+        // 跨进程 race,filter 会去掉该 Run。
         setRuns((prev) => prev.filter((r) => r.run_id !== parsed.runId))
+
+        // 撞到本标签乐观删除 trace → 跳过 currentRun 切换 + toast(乐观路径
+        // 已切 + 不弹 toast 避免重复);仅清 ref,让后续 SSE 行为回归正常。
+        if (optimisticallyDeletedRunIdRef.current === parsed.runId) {
+          optimisticallyDeletedRunIdRef.current = null
+          return
+        }
+
+        const isCurrent = currentRunId === parsed.runId
         if (isCurrent) {
           const remaining = [...runs]
             .filter((r) => r.run_id !== parsed.runId)

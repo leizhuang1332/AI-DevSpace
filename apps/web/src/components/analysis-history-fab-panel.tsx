@@ -14,6 +14,11 @@
  * - ARIA:FAB `aria-expanded` 同步开合,`aria-label="历史分析 共 N 个 Run"`
  *   ;面板 `role="region"`(不是 dialog,不暗示模态)
  *
+ * ticket 03:增加可选 prop `suppressOutsideClose`(删除流程期间禁止外点关
+ * 闭)。父组件在 `<AnalysisDeleteRunDialog>` 显示阶段置 true,确保用户在
+ * 二次确认对话期间的 click 不会误关面板。`<AnalysisHistoryDrawer>` 本体
+ * 仍保留复用,不重写 HistoryRow 渲染逻辑。
+ *
  * 不重写 `<AnalysisHistoryDrawer>` 本体 —— 该组件后续 ticket 02 才会真正
  * 接入"主视图列"。本组件只复用其 `HistoryRow`(已 export)。
  */
@@ -35,6 +40,14 @@ export interface AnalysisHistoryFabPanelProps {
   onRequestDelete: (runId: string) => void
   /** Skill 名 → 简介;供行内显示 Skill 描述 */
   skillDescriptions?: ReadonlyMap<string, string>
+  /**
+   * 抑制「点 FAB / 面板以外任意位置」关闭行为(analyzing-fab ticket 03 ·
+   * ADR-0022 D5.1)。当父组件的二次确认对话框显示期间,父组件把此 prop 置
+   * true,避免用户在对话框上 click 触发 panel 关闭(useEffect mousedown
+   * listener 默认会关掉 panel;此 prop 让该 listener 跳过)。Esc 与 ✕ 按钮
+   * 仍可显式关闭。
+   */
+  suppressOutsideClose?: boolean
 }
 
 /**
@@ -52,6 +65,7 @@ export function AnalysisHistoryFabPanel({
   onSelect,
   onRequestDelete,
   skillDescriptions,
+  suppressOutsideClose,
 }: AnalysisHistoryFabPanelProps) {
   const [isOpen, setIsOpen] = useState(false)
   const fabRef = useRef<HTMLButtonElement>(null)
@@ -77,8 +91,11 @@ export function AnalysisHistoryFabPanel({
   )
 
   // 关闭方式二:点 FAB 面板以外的任意位置 → 关闭面板
+  // ticket 03:当父组件的二次确认对话框显示时,父组件置 suppressOutsideClose
+  // 为 true 跳过此 listener,避免用户在 dialog 上的 click 误关 panel。
   useEffect(() => {
     if (!isOpen) return
+    if (suppressOutsideClose) return
     const onMouseDown = (e: MouseEvent): void => {
       const target = e.target as Node | null
       if (!target) return
@@ -88,7 +105,7 @@ export function AnalysisHistoryFabPanel({
     }
     document.addEventListener('mousedown', onMouseDown)
     return () => document.removeEventListener('mousedown', onMouseDown)
-  }, [isOpen])
+  }, [isOpen, suppressOutsideClose])
 
   // 关闭方式三:按 Esc → 关闭面板
   // - 监听挂 window 而非 document:与既有 `AnalysisDeleteRunDialog` 一致;

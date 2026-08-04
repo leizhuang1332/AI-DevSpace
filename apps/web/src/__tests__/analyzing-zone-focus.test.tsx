@@ -954,3 +954,298 @@ describe('AnalyzingZone · 历史面板 Run 列表 + 选 Run 切 currentRun + �
     })
   })
 })
+
+// ===========================================================================
+// 删除 UX 重新设计(analyzing-fab ticket 03 · ADR-0022 D5.1)
+//
+// ticket 02 时的旧规则(issue 05 决策 36):删除后「不切走焦点」= 切走焦点
+// 的反面。当前 ticket 03 重设:删除 Run 后「面板保留打开 + currentRun
+// 自动切到下一个 Run」(按 created_at 倒序的第一个非删除 Run)。
+//
+// 覆盖工单 acceptance:
+// - 删除当前选中 Run → 面板仍开 + currentRun 切到下一个
+// - 删除非当前选中 Run → 面板仍开 + currentRun 不变
+// - 删除最后一个 Run → 面板仍开 + 显示 N=0 空态
+// - 删除运行中 Run → 被 UI 拒绝(无 DELETE 调用,沿用 ticket 02 的 row-delete
+//   缺席 + ticket 01 的 canDeleteAnalysisRun 入口)
+// - 本标签乐观删除后,SSE analysis_run_deleted 推回同 runId 不再二次切
+//   currentRun(避免乐观更新与 SSE 切换双切换竞态)
+// ===========================================================================
+
+describe('AnalyzingZone · 删除 UX 重设(ticket 03 · ADR-0022 D5.1)', () => {
+  it('删除当前选中的 Run → 面板仍打开 + currentRun 切到下一个', async () => {
+    // 构造默认 active = run-current(最新)以便「删当前」是默认态,无需先点
+    // 行 select —— ticket 02 设计「点 row → 切 + 关面板」,若先点 select 会
+    // 关闭面板让本测试看到的不是 ticket 03 验收点本身。
+    const runs: AnalysisRunMeta[] = [
+      buildRun({
+        run_id: 'run-remaining',
+        created_at: '2026-08-01T10:00:00.000Z',
+        status: 'succeeded',
+      }),
+      buildRun({
+        run_id: 'run-current',
+        created_at: '2026-08-01T12:00:00.000Z', // 最新 → 默认 active
+        status: 'succeeded',
+      }),
+    ]
+    render(<AnalyzingZone data={buildFabPanelData(runs)} />)
+    // 默认 active = run-current(最新),不再「点 row select」
+    expect(
+      screen.getByTestId('analysis-history-fab').getAttribute('data-active-run-id'),
+    ).toBe('run-current')
+    await openHistoryPanel()
+
+    // 删当前 run-current
+    const curRow = screen
+      .getAllByTestId('analysis-history-row')
+      .find((r) => r.getAttribute('data-run-id') === 'run-current')!
+    await userEvent.click(
+      curRow.querySelector('[data-testid="analysis-history-row-delete"]') as HTMLElement,
+    )
+    expect(screen.getByTestId('analysis-delete-dialog')).toBeTruthy()
+    await userEvent.click(screen.getByTestId('analysis-delete-dialog-confirm'))
+
+    // 等 microtask 让 fetch + state 提交
+    await act(async () => {
+      await new Promise((r) => setImmediate(r))
+    })
+
+    // ticket 03 · 验收 1:面板仍打开(非「切走焦点」)
+    expect(screen.getByTestId('analysis-history-panel')).toBeTruthy()
+
+    // ticket 03 · 验收 1:currentRun 自动切到下一个 — 即 run-remaining
+    // (只剩这一个了)
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('analysis-history-fab').getAttribute('data-active-run-id'),
+      ).toBe('run-remaining')
+    })
+
+    // data-run-count 应实时跟到 1(从 2 变 1)
+    expect(
+      screen.getByTestId('analysis-history-panel').getAttribute('data-run-count'),
+    ).toBe('1')
+
+    // 二次确认对话框已关闭
+    expect(screen.queryByTestId('analysis-delete-dialog')).toBeNull()
+  })
+
+  it('删除非当前选中的 Run → 面板仍打开 + currentRun 不变', async () => {
+    const runs: AnalysisRunMeta[] = [
+      buildRun({
+        run_id: 'run-old',
+        created_at: '2026-08-01T08:00:00.000Z',
+        status: 'succeeded',
+      }),
+      buildRun({
+        run_id: 'run-active',
+        created_at: '2026-08-01T10:00:00.000Z',
+        status: 'succeeded',
+      }),
+    ]
+    render(<AnalyzingZone data={buildFabPanelData(runs)} />)
+    // 默认 active = run-active(最新)
+    expect(
+      screen.getByTestId('analysis-history-fab').getAttribute('data-active-run-id'),
+    ).toBe('run-active')
+    await openHistoryPanel()
+
+    // 删 run-old(非 active)
+    const oldRow = screen
+      .getAllByTestId('analysis-history-row')
+      .find((r) => r.getAttribute('data-run-id') === 'run-old')!
+    await userEvent.click(
+      oldRow.querySelector('[data-testid="analysis-history-row-delete"]') as HTMLElement,
+    )
+    await userEvent.click(screen.getByTestId('analysis-delete-dialog-confirm'))
+
+    await act(async () => {
+      await new Promise((r) => setImmediate(r))
+    })
+
+    // ticket 03 · 验收 2:面板仍打开
+    expect(screen.getByTestId('analysis-history-panel')).toBeTruthy()
+
+    // ticket 03 · 验收 2:currentRun 不变(run-active)
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('analysis-history-fab').getAttribute('data-active-run-id'),
+      ).toBe('run-active')
+    })
+
+    // data-run-count 从 2 → 1
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('analysis-history-panel').getAttribute('data-run-count'),
+      ).toBe('1')
+    })
+
+    // run-old 行已从面板列表消失
+    expect(
+      document.querySelector('[data-run-id="run-old"]'),
+    ).toBeNull()
+  })
+
+  it('删除最后一个 Run → 面板仍打开 + 显示 N=0 空态', async () => {
+    const runs: AnalysisRunMeta[] = [
+      buildRun({
+        run_id: 'run-only',
+        created_at: '2026-08-01T10:00:00.000Z',
+        status: 'succeeded',
+      }),
+    ]
+    render(<AnalyzingZone data={buildFabPanelData(runs)} />)
+    expect(
+      screen.getByTestId('analysis-history-fab').getAttribute('data-active-run-id'),
+    ).toBe('run-only')
+    await openHistoryPanel()
+
+    // 删唯一 Run
+    const onlyRow = screen.getByTestId('analysis-history-row')
+    await userEvent.click(
+      onlyRow.querySelector('[data-testid="analysis-history-row-delete"]') as HTMLElement,
+    )
+    await userEvent.click(screen.getByTestId('analysis-delete-dialog-confirm'))
+
+    await act(async () => {
+      await new Promise((r) => setImmediate(r))
+    })
+
+    // ticket 03 · 验收 3:面板仍打开(由 ticket 07 联合兜底 N=0 空态)
+    expect(screen.getByTestId('analysis-history-panel')).toBeTruthy()
+
+    // data-run-count = 0,空态文案出现
+    await waitFor(() => {
+      expect(screen.getByTestId('analysis-history-panel-empty')).toBeTruthy()
+    })
+    expect(screen.getByTestId('analysis-history-panel').getAttribute('data-run-count')).toBe(
+      '0',
+    )
+    expect(screen.getByTestId('analysis-history-panel-empty').textContent).toBe(
+      '暂无历史 Analysis Run',
+    )
+
+    // currentRunId 重置为 ''(由父组件后续回退到「无 Run」空态)
+    expect(
+      screen.getByTestId('analysis-history-fab').getAttribute('data-active-run-id'),
+    ).toBe('')
+
+    // FAB 的 data-empty / data-run-count 同步
+    const fab = screen.getByTestId('analysis-history-fab')
+    expect(fab.getAttribute('data-run-count')).toBe('0')
+    expect(fab.getAttribute('data-empty')).toBe('true')
+  })
+
+  it('删除运行中 Run → 被 UI 拒绝,无 DELETE 调用', async () => {
+    const runs: AnalysisRunMeta[] = [
+      buildRun({
+        run_id: 'run-running',
+        status: 'running',
+        created_at: '2026-08-01T10:00:00.000Z',
+      }),
+    ]
+    render(<AnalyzingZone data={buildFabPanelData(runs)} />)
+    await openHistoryPanel()
+
+    // ticket 02 已断言:running Row 上无 delete 按钮(只有 disabled 占位)
+    const row = screen.getByTestId('analysis-history-row')
+    expect(row.querySelector('[data-testid="analysis-history-row-delete"]')).toBeNull()
+
+    // 等任何潜在 fetch + state
+    await act(async () => {
+      await new Promise((r) => setImmediate(r))
+    })
+
+    // ticket 03 · 验收 4:无 DELETE 调用(沿用 canDeleteAnalysisRun 入口拒绝)
+    const deleteCall = mockFetch.mock.calls.find((c) => {
+      if (typeof c[0] !== 'string') return false
+      if (!c[0].includes('/analysis/runs/')) return false
+      const init = c[1] as { method?: string } | undefined
+      return init?.method === 'DELETE'
+    })
+    expect(deleteCall).toBeUndefined()
+
+    // 面板仍打开 + active 不变
+    expect(screen.getByTestId('analysis-history-panel')).toBeTruthy()
+    expect(
+      screen.getByTestId('analysis-history-fab').getAttribute('data-active-run-id'),
+    ).toBe('run-running')
+  })
+
+  it('本标签乐观删除后,SSE analysis_run_deleted 推回同 runId 不二次切 currentRun', async () => {
+    // ticket 03 · 隐含验收:本标签的删除走乐观更新(handleConfirmDelete),
+    // SSE 后续推 analysis_run_deleted(同 runId)由本标签接收,撞到
+    // optimisticallyDeletedRunIdRef → 跳过 currentRun 切换。否则可能出现
+    // 「乐观切到 run-remaining,SSE 又把它切到别的 Run」的二次切换竞态。
+    //
+    // 该场景是 ticket 03 验收第 6 条的「双切换竞态」防线。
+    //
+    // 与场景 1 同样默认 active 设计:让默认 active 就是要删的那个 Run,避免
+    // ticket 02「点 row 关面板」行为干扰本测试。
+    const runs: AnalysisRunMeta[] = [
+      buildRun({
+        run_id: 'run-other-a',
+        created_at: '2026-08-01T08:00:00.000Z',
+        status: 'succeeded',
+      }),
+      buildRun({
+        run_id: 'run-remaining',
+        created_at: '2026-08-01T10:00:00.000Z',
+        status: 'succeeded',
+      }),
+      buildRun({
+        run_id: 'run-current',
+        created_at: '2026-08-01T12:00:00.000Z', // 最新 → 默认 active
+        status: 'succeeded',
+      }),
+    ]
+    render(<AnalyzingZone data={buildFabPanelData(runs)} />)
+    // 默认 active = run-current(最新)
+    expect(
+      screen.getByTestId('analysis-history-fab').getAttribute('data-active-run-id'),
+    ).toBe('run-current')
+    await openHistoryPanel()
+
+    // 删当前 run-current
+    const curRow = screen
+      .getAllByTestId('analysis-history-row')
+      .find((r) => r.getAttribute('data-run-id') === 'run-current')!
+    await userEvent.click(
+      curRow.querySelector('[data-testid="analysis-history-row-delete"]') as HTMLElement,
+    )
+    await userEvent.click(screen.getByTestId('analysis-delete-dialog-confirm'))
+    await act(async () => {
+      await new Promise((r) => setImmediate(r))
+    })
+
+    // 乐观切到下一个(run-remaining,created_at 最大的剩余 Run)
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('analysis-history-fab').getAttribute('data-active-run-id'),
+      ).toBe('run-remaining')
+    })
+
+    // 模拟 SSE:服务端推 analysis_run_deleted(同一 runId)—— 本标签接收
+    const es = MockEventSource.instances.at(-1)!
+    await act(async () => {
+      es.emit('analysis_run_deleted', {
+        type: 'analysis_run_deleted',
+        reqId: 'req-focus',
+        runId: 'run-current',
+        ts: Date.now(),
+        deletedAt: '2026-08-01T11:30:00.000Z',
+        skillName: 'prd-completeness',
+        issueCount: 0,
+      })
+    })
+
+    // ticket 03 · 验收 6:currentRun 仍是 run-remaining(SSE 不二次切)
+    expect(
+      screen.getByTestId('analysis-history-fab').getAttribute('data-active-run-id'),
+    ).toBe('run-remaining')
+
+    // runs 列表里 run-current 已不在(既被乐观 filter 也被 SSE filter 再次去重)
+    expect(document.querySelector('[data-run-id="run-current"]')).toBeNull()
+  })
+})
