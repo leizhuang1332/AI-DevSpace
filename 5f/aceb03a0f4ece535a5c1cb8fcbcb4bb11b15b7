@@ -1,0 +1,46 @@
+apps/web/src/__tests__/analyzing-zone-focus.test.tsx
+  s_53f8baaaa41611::t_463948a77c736c 233-235
+  s_8e03292ccade9e::t_bddca93db23e95 155-157,166,178-179,197,210,230,253,264,282
+  s_8e03292ccade9e::t_6029276d9d5a87 127-137
+  s_53f8baaaa41611::t_ce1705b921589a 813,817
+  s_8e03292ccade9e::t_688b8b1b0e3906 468-651
+  s_8e03292ccade9e::t_bc45ecc1c3f91d 384,386,397,418
+  s_53f8baaaa41611::t_7065b0e73255b0 784,793
+  s_8e03292ccade9e::t_88878ae336c7ca 292,297,310,328,342
+  s_8e03292ccade9e::t_4a9d808a4e4029 10-15
+  s_53f8baaaa41611::t_9814b562a529ee 652-783,785-792,794-812,814-816,818-955
+apps/web/src/components/analysis-history-fab-panel.tsx
+  s_8e03292ccade9e::t_32d6a779b5712e 1-22,24-67,79-93,97-101,104-113,115-184,186-196
+  s_53f8baaaa41611::t_9ae19475672405 23
+  s_8e03292ccade9e::t_1defd1c461898a 114
+  s_8e03292ccade9e::t_5599a3b25b16dd 94-96,102-103
+  s_53f8baaaa41611::t_78d8aeafc79e7b 68-78
+  s_53f8baaaa41611::t_ed7c8fc255d17e 185
+apps/web/src/components/analysis-history-drawer.tsx
+  s_53f8baaaa41611::t_30802138cb7fe2 163
+  s_8e03292ccade9e::t_0eda7c0adbe169 134,142-147
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "5faceb03a0f4ece535a5c1cb8fcbcb4bb11b15b7",
+  "prompts": {},
+  "sessions": {
+    "s_53f8baaaa41611": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "939df3a8-efdd-44e9-ad1c-d881df3a2ed0",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    },
+    "s_8e03292ccade9e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "be53f16e-ba6f-498e-9fd6-2aa94fbe1ad9",
+        "model": "MiniMax-M3"
+      },
+      "human_author": null
+    }
+  }
+}
