@@ -49,6 +49,35 @@ vi.mock('@/components/ui-overlay-store', () => ({
   }),
 }))
 
+// ---- 受控 mock:AnalyzingHistoryFabController(analyzing-fab ticket 04 · ADR-0022 D5.2) ----
+// 默认无 controller,各 describe 块按需覆写。
+type FakeController = {
+  requirementId: string
+  runCount: number
+  isOpen: boolean
+  open: ReturnType<typeof vi.fn>
+  close: ReturnType<typeof vi.fn>
+}
+let mockHistoryFabController: FakeController | null = null
+const mockOpenHistoryFab = vi.fn()
+const mockCloseHistoryFab = vi.fn()
+const buildFakeController = (
+  requirementId: string,
+  runCount: number,
+): FakeController => ({
+  requirementId,
+  runCount,
+  isOpen: false,
+  open: mockOpenHistoryFab,
+  close: mockCloseHistoryFab,
+})
+vi.mock('@/components/analyzing-history-fab-controller', () => ({
+  AnalyzingHistoryFabControllerProvider: ({ children }: { children: React.ReactNode }) =>
+    children as React.ReactElement,
+  useAnalyzingHistoryFabController: () => null,
+  useAnalyzingHistoryFabControllerValue: () => mockHistoryFabController,
+}))
+
 // 必须放在 vi.mock 之后
 import { CommandPalette } from '@/components/command-palette'
 
@@ -60,6 +89,9 @@ beforeEach(() => {
   mockClose.mockClear()
   mockOpen.mockClear()
   mockCloseKey.mockClear()
+  mockHistoryFabController = null
+  mockOpenHistoryFab.mockClear()
+  mockCloseHistoryFab.mockClear()
 })
 
 afterEach(() => cleanup())
@@ -288,6 +320,139 @@ describe('CommandPalette 工位搜索(ADR-0012 §7 · issue 14)', () => {
       await user.type(screen.getByPlaceholderText(/搜索命令/), '新建需求')
       const item = screen.getByTestId('cmd-new-requirement')
       expect(item.tagName).toBe('BUTTON')
+    })
+  })
+
+  // ============================================================================
+  // analyzing-fab ticket 04 · ADR-0022 D5.2:
+  // Cmd+K 「🗂️ 历史分析」命令(命名沿用「需求操作」section)
+  //
+  // 验收:
+  // - 搜「历史」出现 `cmd-history-fab` 项
+  // - 描述包含当前 reqId + N 计数(实时跟随 controller.runCount)
+  // - 点选 → controller.open('historyFab') + closeKey('cmdK')
+  // - 无 controller / requirementId 不匹配 → 命令 disabled(降级文案 +
+  //   data-disabled="true",不挂 click handler)
+  // ============================================================================
+  describe('「🗂️ 历史分析」命令项(analyzing-fab ticket 04 · ADR-0022 D5.2)', () => {
+    it('搜「历史」出现 cmd-history-fab 项(默认 disabled,无 controller)', async () => {
+      const user = userEvent.setup()
+      render(<CommandPalette />)
+      await user.type(screen.getByPlaceholderText(/搜索命令/), '历史')
+      expect(screen.getByTestId('cmd-history-fab')).toBeInTheDocument()
+      expect(screen.getByTestId('cmd-history-fab')).toHaveTextContent(/历史分析/)
+    })
+
+    it('controller 存在且 requirementId 匹配 → 命令 enabled,desc 包含 reqId + N 计数', async () => {
+      mockPathname = '/requirements/REQ-CMDK/analyzing'
+      mockHistoryFabController = buildFakeController('REQ-CMDK', 7)
+      const user = userEvent.setup()
+      render(<CommandPalette />)
+      await user.type(screen.getByPlaceholderText(/搜索命令/), '历史')
+      const item = screen.getByTestId('cmd-history-fab')
+      // 启用态 → 渲染为可交互 button(非 div)
+      expect(item.tagName).toBe('BUTTON')
+      // desc 包含 reqId + N
+      expect(item).toHaveTextContent(/REQ-CMDK/)
+      expect(item).toHaveTextContent(/共 7 个 Run/)
+      // 不带 data-disabled
+      expect(item.getAttribute('data-disabled')).toBeNull()
+    })
+
+    it('点击 enabled 命令 → controller.open("historyFab") + closeKey("cmdK")', async () => {
+      mockPathname = '/requirements/REQ-CMDK/analyzing'
+      mockHistoryFabController = buildFakeController('REQ-CMDK', 2)
+      const user = userEvent.setup()
+      render(<CommandPalette />)
+      await user.type(screen.getByPlaceholderText(/搜索命令/), '历史')
+      await user.click(screen.getByTestId('cmd-history-fab'))
+      expect(mockOpenHistoryFab).toHaveBeenCalledWith('historyFab')
+      // 用 closeKey 避免 React 18 batching 把 open 覆盖(沿用「新建需求」范式)
+      expect(mockCloseKey).toHaveBeenCalledWith('cmdK')
+    })
+
+    it('controller 不存在(无 AnalyzingZone) → 命令 disabled(data-disabled="true")', async () => {
+      mockPathname = '/requirements/REQ-CMDK/'
+      // mockHistoryFabController = null (默认)
+      const user = userEvent.setup()
+      render(<CommandPalette />)
+      await user.type(screen.getByPlaceholderText(/搜索命令/), '历史')
+      const item = screen.getByTestId('cmd-history-fab')
+      // 禁用态 → 渲染为 div(data-disabled="true"),并展示降级文案
+      expect(item.tagName).toBe('DIV')
+      expect(item.getAttribute('data-disabled')).toBe('true')
+      expect(item).toHaveTextContent(/请进入需求后再用/)
+    })
+
+    it('controller 存在但 requirementId 不匹配(跨 req 跳转过渡) → 命令 disabled', async () => {
+      // 用户在 REQ-CMDK/analyzing;controller 来自 REQ-OTHER(stale);
+      // 应 disabled —— 避免 stale 残留导致 Cmd+K 跳错面板
+      mockPathname = '/requirements/REQ-CMDK/analyzing'
+      mockHistoryFabController = buildFakeController('REQ-OTHER', 3)
+      const user = userEvent.setup()
+      render(<CommandPalette />)
+      await user.type(screen.getByPlaceholderText(/搜索命令/), '历史')
+      const item = screen.getByTestId('cmd-history-fab')
+      expect(item.tagName).toBe('DIV')
+      expect(item.getAttribute('data-disabled')).toBe('true')
+      expect(item).toHaveTextContent(/请进入需求后再用/)
+      // 无 controller.open 调用(若误点也不触发)
+      expect(mockOpenHistoryFab).not.toHaveBeenCalled()
+    })
+
+    it('disabled 命令点击不会调 controller.open(不挂 click handler)', async () => {
+      mockPathname = '/requirements/REQ-OVERVIEW/' // 不在 req 内 → 无 req context
+      mockHistoryFabController = null
+      const user = userEvent.setup()
+      render(<CommandPalette />)
+      await user.type(screen.getByPlaceholderText(/搜索命令/), '历史')
+      await user.click(screen.getByTestId('cmd-history-fab'))
+      expect(mockOpenHistoryFab).not.toHaveBeenCalled()
+      expect(mockCloseKey).not.toHaveBeenCalled()
+    })
+
+    it('Overview 概览页(`/requirements/<id>/` 无 zone)→ 命令 disabled', async () => {
+      mockPathname = '/requirements/REQ-OVERVIEW/'
+      mockHistoryFabController = null
+      const user = userEvent.setup()
+      render(<CommandPalette />)
+      await user.type(screen.getByPlaceholderText(/搜索命令/), '历史')
+      const item = screen.getByTestId('cmd-history-fab')
+      expect(item.getAttribute('data-disabled')).toBe('true')
+    })
+
+    it('完全在 workspace 根(`/`)→ 命令 disabled', async () => {
+      mockPathname = '/'
+      mockHistoryFabController = null
+      const user = userEvent.setup()
+      render(<CommandPalette />)
+      await user.type(screen.getByPlaceholderText(/搜索命令/), '历史')
+      const item = screen.getByTestId('cmd-history-fab')
+      expect(item.getAttribute('data-disabled')).toBe('true')
+    })
+
+    it('controller.runCount 实时更新:desc 在两次渲染间从「共 5」变「共 6」(SSE 追加 Run 模拟)', () => {
+      mockPathname = '/requirements/REQ-CMDK/analyzing'
+      mockHistoryFabController = buildFakeController('REQ-CMDK', 5)
+      const { rerender } = render(<CommandPalette />)
+      // 用 query 直接查 textContent,避开 autoFocus input
+      expect(document.body.textContent ?? '').toMatch(/共 5 个 Run/)
+
+      mockHistoryFabController = buildFakeController('REQ-CMDK', 6)
+      rerender(<CommandPalette />)
+      expect(document.body.textContent ?? '').toMatch(/共 6 个 Run/)
+    })
+
+    it('「🗂️ 历史分析」命令被搜索过滤:搜「历史」命中 label 「历史分析」', async () => {
+      mockHistoryFabController = null
+      const user = userEvent.setup()
+      render(<CommandPalette />)
+      await user.type(screen.getByPlaceholderText(/搜索命令/), '历史分析')
+      const item = screen.getByTestId('cmd-history-fab')
+      expect(item).toBeInTheDocument()
+      expect(item).toHaveTextContent(/历史分析/)
+      // 搜「历史」不命中其他命令(避免现有 「新建需求」/「code-stage」误匹配)
+      expect(screen.queryByTestId('cmd-new-requirement')).toBeNull()
     })
   })
 })

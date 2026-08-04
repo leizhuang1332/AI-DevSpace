@@ -25,7 +25,7 @@
 
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { AnalysisRunMeta } from '@ai-devspace/shared'
 import { HistoryRow } from './analysis-history-drawer'
 
@@ -48,6 +48,14 @@ export interface AnalysisHistoryFabPanelProps {
    * 仍可显式关闭。
    */
   suppressOutsideClose?: boolean
+  /**
+   * 面板是否打开(controlled prop · analyzing-fab ticket 04 · ADR-0022
+   * D5.2)。父组件 `AnalyzingZone` 持有此 state,以便通过
+   * `AnalyzingHistoryFabController` 暴露给 Cmd+K 等上层消费方。
+   */
+  isOpen: boolean
+  /** 设置面板开合 —— 父组件持有此 setState。Cmd+K 通过 controller 间接调。 */
+  onOpenChange: (open: boolean) => void
 }
 
 /**
@@ -66,8 +74,9 @@ export function AnalysisHistoryFabPanel({
   onRequestDelete,
   skillDescriptions,
   suppressOutsideClose,
+  isOpen,
+  onOpenChange,
 }: AnalysisHistoryFabPanelProps) {
-  const [isOpen, setIsOpen] = useState(false)
   const fabRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const count = runs.length
@@ -85,9 +94,9 @@ export function AnalysisHistoryFabPanel({
   const handleSelectAndClose = useCallback(
     (runId: string) => {
       onSelect(runId)
-      setIsOpen(false)
+      onOpenChange(false)
     },
-    [onSelect],
+    [onSelect, onOpenChange],
   )
 
   // 关闭方式二:点 FAB 面板以外的任意位置 → 关闭面板
@@ -101,11 +110,11 @@ export function AnalysisHistoryFabPanel({
       if (!target) return
       if (fabRef.current?.contains(target)) return
       if (panelRef.current?.contains(target)) return
-      setIsOpen(false)
+      onOpenChange(false)
     }
     document.addEventListener('mousedown', onMouseDown)
     return () => document.removeEventListener('mousedown', onMouseDown)
-  }, [isOpen, suppressOutsideClose])
+  }, [isOpen, suppressOutsideClose, onOpenChange])
 
   // 关闭方式三:按 Esc → 关闭面板
   // - 监听挂 window 而非 document:与既有 `AnalysisDeleteRunDialog` 一致;
@@ -114,11 +123,11 @@ export function AnalysisHistoryFabPanel({
   useEffect(() => {
     if (!isOpen) return
     const onKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setIsOpen(false)
+      if (e.key === 'Escape') onOpenChange(false)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [isOpen])
+  }, [isOpen, onOpenChange])
 
   return (
     <>
@@ -132,7 +141,7 @@ export function AnalysisHistoryFabPanel({
         aria-expanded={isOpen}
         aria-label={`历史分析 共 ${count} 个 Run`}
         aria-controls="analysis-history-panel"
-        onClick={() => setIsOpen((v) => !v)}
+        onClick={() => onOpenChange(!isOpen)}
         className="absolute right-3 top-3 z-fab inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-bg-elevated border border-border shadow-sm hover:bg-bg-subtle transition-colors text-xs"
       >
         <span aria-hidden>🗂️</span>
@@ -171,7 +180,7 @@ export function AnalysisHistoryFabPanel({
               type="button"
               data-testid="analysis-history-panel-close"
               aria-label="关闭历史分析面板"
-              onClick={() => setIsOpen(false)}
+              onClick={() => onOpenChange(false)}
               className="inline-flex items-center justify-center w-7 h-7 rounded-md text-text-2 hover:text-text-1 hover:bg-bg-subtle transition-colors"
             >
               <span aria-hidden>✕</span>

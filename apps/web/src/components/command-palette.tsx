@@ -1,5 +1,6 @@
 'use client';
 import { useUIOverlay } from './ui-overlay-store';
+import { useAnalyzingHistoryFabControllerValue } from './analyzing-history-fab-controller';
 import { ZONE_META, ZONE_STATUS_COLOR_CLASS, type ZoneMeta } from '@/lib/zones';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
@@ -17,6 +18,12 @@ interface Item {
    * 设置后 Item 渲染为可交互 `<button>`,否则渲染为只读 `<div>`。
    */
   action?: () => void;
+  /**
+   * 可选:disabled 态(analyzing-fab ticket 04 · ADR-0022 D5.2)。当 controller
+   * 不存在 / requirementId 不匹配当前路由时为 true —— Item 渲染为只读
+   * div,`data-disabled="true"`,不暴露 `action` 闭包。
+   */
+  disabled?: boolean;
   /** 可选:用于测试断言 */
   testId?: string;
 }
@@ -50,13 +57,20 @@ type Jump = OverviewJump | ZoneJump;
  * 抽成函数而非模块常量 —— 「新建需求」的 `action` 需要闭包 `open` / `close`,
  * 而它们只在 `useUIOverlay()` 解构后才存在。函数让组件按需构造,避免把 React
  * 状态绑进 module load。
+ *
+ * analyzing-fab ticket 04 · ADR-0022 D5.2:新增「🗂️ 历史分析」命令,
+ * 由 `historyFabDeps` 注入 controller / currentReqId,实时跟随当前
+ * requirement 的 Analysis Run 总数。无 controller / req id 不匹配 → 命令
+ * disabled(沿用 ticket 04 PRD「无 req 上下文时 disabled」契约)。
  */
 function buildAllCommands(
   open: (k: 'cmdK' | 'cmdSlash' | 'cmdN') => void,
   close: () => void,
+  historyFabDeps?: HistoryFabCommandDeps,
 ): Item[] {
   return [
     { icon: '✨', label: '新建需求', shortcut: ['⌘', 'N'], section: '需求操作', testId: 'cmd-new-requirement', action: () => { open('cmdN'); close(); } },
+    buildHistoryFabCommand(historyFabDeps),
     { icon: '▶', label: '运行 code-stage Skill', desc: '继续执行下一个 Task（当前 #12 退款接口开发）', shortcut: ['⌘', 'R'], section: '需求操作' },
     { icon: '⏸', label: '暂停当前 Skill', desc: '保存 AI 会话上下文到 conversations/', section: '需求操作' },
     { icon: '⟳', label: '重新运行 code-stage', desc: '丢弃当前进度，重新执行', section: '需求操作' },
@@ -64,7 +78,80 @@ function buildAllCommands(
     { icon: '📦', label: '打开 artifacts/refund.sql', desc: '产物 · 5 分钟前由 design-stage 生成', section: '导航' },
     { icon: '⌘⇧E', label: '在 IDEA 打开 refund-service worktree', desc: '~/.aidevspace/requirements/req-2024-007/refund-service', shortcut: ['⌘', '⇧', 'E'], section: '导航' },
     { icon: '📚', label: '添加知识：refund-idempotency', desc: '从历史需求沉淀 · 已存在于知识库', section: '仓库 / 知识库' },
-  ];
+  ].filter((x): x is Item => x !== null)
+}
+
+/**
+ * 「🗂️ 历史分析」命令的依赖。组件 render 时构造;依赖变更触发
+ * useMemo 重建,保证 desc 实时跟随 runCount。
+ */
+interface HistoryFabCommandDeps {
+  /** 当前 pathname 解析出的 requirement id(若不在 req 路由则为 null) */
+  currentRequirementId: string | null
+  /** 从 controller context 读到的 controller(无 AnalyzingZone → null) */
+  controller: import('./analyzing-history-fab-controller').AnalyzingHistoryFabController | null
+  /** Cmd+K 命令面板「关闭 Cmd+K」的二阶调用 —— 沿用「新建需求」范式 */
+  closeCmdK: () => void
+}
+
+/**
+ * 构建「🗂️ 历史分析」命令项(analyzing-fab ticket 04)。
+ *
+ * 启用条件(controller 可用 && requirementId 一致):
+ * - desc = `req-<id> · 共 N 个 Run`(N 实时跟随 controller.runCount)
+ * - action = `controller.open('historyFab') + closeCmdK()`
+ * - 测试 testId = `cmd-history-fab`
+ *
+ * 禁用条件(controller 不可用 或 requirementId 不匹配,例:Overview 页 / 跨
+ * req 跳转过渡):
+ * - desc = `请进入需求后再用`(降级文案)
+ * - action 不设置(沿用 disabled 渲染分支,click 不触发)
+ * - `data-disabled="true"`,由测试断言
+ *
+ * 返回值类型:`Item | null`。null 仅在 buildAllCommands 的 filter 兜底时
+ * 出现;正常 path 总是返回 Item。
+ */
+function buildHistoryFabCommand(deps: HistoryFabCommandDeps | undefined): Item | null {
+  // no deps → 命令不可用(测试中故意不传,或骨架渲染),保留 stub。
+  if (!deps) {
+    return {
+      icon: '🗂️',
+      label: '历史分析',
+      desc: '请进入需求后再用',
+      section: '需求操作',
+      testId: 'cmd-history-fab',
+      disabled: true,
+    }
+  }
+  const { controller, currentRequirementId, closeCmdK } = deps
+  // 启用判定:controller 存在 AND 需求 id 匹配当前路径
+  // (避免 stale controller 在跨 req 跳转中残留)。
+  const enabled =
+    controller !== null &&
+    currentRequirementId !== null &&
+    controller.requirementId === currentRequirementId
+
+  if (enabled && controller) {
+    return {
+      icon: '🗂️',
+      label: '历史分析',
+      desc: `${controller.requirementId} · 共 ${controller.runCount} 个 Run`,
+      section: '需求操作',
+      testId: 'cmd-history-fab',
+      action: () => {
+        controller.open('historyFab')
+        closeCmdK()
+      },
+    }
+  }
+  return {
+    icon: '🗂️',
+    label: '历史分析',
+    desc: '请进入需求后再用',
+    section: '需求操作',
+    testId: 'cmd-history-fab',
+    disabled: true,
+  }
 }
 
 const HISTORY: Item[] = [
@@ -155,10 +242,16 @@ export function CommandPalette() {
   const pathname = usePathname();
   const router = useRouter();
   const requirementId = useMemo(() => parseRequirementId(pathname), [pathname]);
+  const historyFabController = useAnalyzingHistoryFabControllerValue();
   // 「新建需求」项需要 open/close 闭包,按 render 构造一次即可
   const allItems = useMemo(
-    () => buildAllCommands(open, () => closeKey('cmdK')),
-    [open, closeKey],
+    () =>
+      buildAllCommands(open, () => closeKey('cmdK'), {
+        currentRequirementId: requirementId,
+        controller: historyFabController,
+        closeCmdK: () => closeKey('cmdK'),
+      }),
+    [open, closeKey, requirementId, historyFabController],
   );
 
   // Reset query when palette opens; ⌘I toggles AI mode
@@ -325,6 +418,20 @@ export function CommandPalette() {
 }
 
 function Item({ item }: { item: Item }) {
+  // disabled 态(analyzing-fab ticket 04):不暴露 click handler,降级文案 +
+  // 半透明,避免误触(也禁止键盘 Enter 触发)
+  if (item.disabled) {
+    return (
+      <div
+        data-testid={item.testId}
+        data-disabled="true"
+        aria-disabled="true"
+        className="w-full flex items-center gap-3 px-5 py-2 text-left opacity-50 cursor-not-allowed"
+      >
+        <ItemBody item={item} />
+      </div>
+    );
+  }
   // 带 action 的项(issue 03 「新建需求」)渲染为可交互按钮,与工位 jump 按钮一致
   if (item.action) {
     return (

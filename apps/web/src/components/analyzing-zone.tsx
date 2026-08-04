@@ -22,6 +22,11 @@
  * 不依赖旧 `AnalyzingChunk` / `AnalyzingProductGroup` / `AnalyzingData.chunks`
  * 等任何遗留字段 —— `AnalyzingData` 已收缩为只含 Requirement id + PRD /
  * AuxFile / Asset + 可用 Skill + 已选 Skill + Analysis Run 元数据列表。
+ *
+ * analyzing-fab ticket 04 · ADR-0022 D5.2:把 FAB 浮动面板的 `isOpen` state
+ * 提升到本组件,以便通过 `useAnalyzingHistoryFabController` 暴露给
+ * `<CommandPalette>`(Cmd+K 「🗂️ 历史分析」命令)。AnalyzingZone unmount →
+ * setController(null) → 命令 disabled。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -57,6 +62,7 @@ import {
 } from '@/lib/analysis-run-delete'
 import { findNextRunId } from '@/lib/analysis-run-focus'
 import { agentFetch, AgentError } from '@/lib/agent-client'
+import { useAnalyzingHistoryFabController } from './analyzing-history-fab-controller'
 import type { AnalysisRunDetailResponse } from '@ai-devspace/shared'
 
 // ---------------------------------------------------------------------------
@@ -169,6 +175,15 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   const [logPanelUserToggle, setLogPanelUserToggle] = useState<boolean | null>(null)
   const currentRun = runs.find((r) => r.run_id === currentRunId) ?? null
 
+  // 浮动面板开合 state(analyzing-fab ticket 04 · ADR-0022 D5.2):
+  // 提升到 AnalyzingContent 层,这样 Cmd+K 等上层通过 controller 间接控
+  // 制面板;sse handler 不影响这个 state(创建 / 切上下文时不强制收起,
+  // 由 ADR-0022 决策 96-98 后续 ticket 05 处理)。
+  const [isHistoryPanelOpen, setIsHistoryPanelOpen] = useState(false)
+  // 用 ref 包 setState(避免 useEffect deps 每次 re-render 都跑)。
+  const setIsHistoryPanelOpenRef = useRef(setIsHistoryPanelOpen)
+  setIsHistoryPanelOpenRef.current = setIsHistoryPanelOpen
+
   // 焦点规则(issue 05 验收 6 / 7):用户手动切换 Run 后,SSE 终态事件不抢回焦点
   const userManuallySwitchedRef = useRef(false)
 
@@ -185,6 +200,36 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   const deleteTarget = pendingDeleteRunId
     ? runs.find((r) => r.run_id === pendingDeleteRunId) ?? null
     : null
+
+  // ──────────────────────────────────────────────────────────────────────
+  // analyzing-fab ticket 04 · ADR-0022 D5.2:注册到 controller context
+  // - 把本 zone 的 `requirementId` / `runCount` / `isOpen` / open+close 暴露给
+  //   workspace 顶层,让 `<CommandPalette>` 知道有没有「🗂️ 历史分析」能力。
+  // - AnalyzingZone unmount → setController(null) → CommandPalette 命令
+  //   disabled,符合 PRD「无 req 上下文时 disabled」契约。
+  // - useEffect cleanup 兜底:即使 React 18 在严格模式下双 mount,clear
+  //   也会把上一次注册的 instance 清掉,避免悬挂引用。
+  // ──────────────────────────────────────────────────────────────────────
+  const fabControllerCtx = useAnalyzingHistoryFabController()
+  useEffect(() => {
+    if (!fabControllerCtx) return
+    const controllerValue = {
+      requirementId: data.requirementId,
+      runCount: runs.length,
+      isOpen: isHistoryPanelOpen,
+      open: () => setIsHistoryPanelOpenRef.current(true),
+      close: () => setIsHistoryPanelOpenRef.current(false),
+    }
+    fabControllerCtx.setController(controllerValue)
+    return () => {
+      fabControllerCtx.setController(null)
+    }
+  }, [
+    fabControllerCtx,
+    data.requirementId,
+    runs.length,
+    isHistoryPanelOpen,
+  ])
 
   // 文档阅读器联动(issue 03 · ADR-0017 D4)
   type PulseRefState =
@@ -451,6 +496,10 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   // `analysis-history-fab-panel.tsx`);删完后 dialog 已关,suppress 解
   // 除,panel 内 useEffect mousedown listener 重新注册,isOpen 状态保持
   // 不变。
+  //
+  // ticket 04 · ADR-0022 D5.2:`isOpen` / `onOpenChange` 由本组件持有
+  // (而非由 AnalysisHistoryFabPanel 内部),通过 controller 暴露给
+  // `<CommandPalette>` 同步控制。
   const suppressPanelOutsideClose = pendingDeleteRunId !== null
   const historyFabPanelElement = useMemo(
     () => (
@@ -461,6 +510,8 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
         onRequestDelete={handleRequestDelete}
         skillDescriptions={skillDescriptions}
         suppressOutsideClose={suppressPanelOutsideClose}
+        isOpen={isHistoryPanelOpen}
+        onOpenChange={setIsHistoryPanelOpen}
       />
     ),
     [
@@ -470,6 +521,7 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       handleRequestDelete,
       skillDescriptions,
       suppressPanelOutsideClose,
+      isHistoryPanelOpen,
     ],
   )
 
