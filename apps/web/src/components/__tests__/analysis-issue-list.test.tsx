@@ -438,3 +438,96 @@ describe('AnalysisIssueList 组件', () => {
     expect(chips[0].getAttribute('data-source-kind')).toBe('asset')
   })
 })
+
+// ============================================================================
+// 滚动条修复 · 高度契约(2026-08 grill-with-docs)
+// 根因:外层 div 缺 `h-full`,导致 inner `flex-1 overflow-auto` 拿不到约束高度,
+// scrollbar 不触发;改为 `h-full` 后 outer 拿父 wrapper 的 flex 分配高度,inner
+// 进入"约束 < 内容"状态,scrollbar 触发。契约:组件要求父级提供 definite height。
+// ============================================================================
+
+describe('AnalysisIssueList · 高度契约 / 滚动条', () => {
+  it('非空态:外层根 div 包含 h-full 类(让 inner 能拿到约束高度 → scroll 触发)', () => {
+    const issue = buildIssue({
+      source_refs: [
+        { kind: 'requirement', relative_path: 'requirement.md', line_range: [0, 5] },
+      ],
+    })
+    render(
+      <AnalysisIssueList
+        issues={[issue]}
+        prdExists
+        auxFiles={[]}
+        assetList={[]}
+      />,
+    )
+    const root = screen.getByTestId('analysis-issue-list')
+    expect(root.className).toContain('h-full')
+  })
+
+  it('空态:外层根 div 也包含 h-full 类(空态卡片同样占满 wrapper,视觉一致)', () => {
+    render(
+      <AnalysisIssueList
+        issues={[]}
+        prdExists
+        auxFiles={[]}
+        assetList={[]}
+      />,
+    )
+    const root = screen.getByTestId('analysis-issue-list')
+    expect(root.getAttribute('data-empty')).toBe('true')
+    expect(root.className).toContain('h-full')
+  })
+
+  it('内层列表 div 保留 flex-1 overflow-auto(滚动容器仍由组件自身负责)', () => {
+    // 33 条 Issue 模拟溢出场景
+    const issues: AnalysisIssue[] = Array.from({ length: 33 }, (_, i) =>
+      buildIssue({
+        issue_id: `iss-${i + 1}`,
+        ordinal: i + 1,
+        source_refs: [
+          { kind: 'requirement', relative_path: 'requirement.md', line_range: [0, 5] },
+        ],
+      }),
+    )
+    render(
+      <AnalysisIssueList
+        issues={issues}
+        prdExists
+        auxFiles={[]}
+        assetList={[]}
+      />,
+    )
+    // 卡片 root 之下、内层列表 div 是 root 的直接子元素
+    const root = screen.getByTestId('analysis-issue-list')
+    const listDiv = root.querySelector(':scope > div:nth-of-type(2)') as HTMLElement
+    expect(listDiv).not.toBeNull()
+    expect(listDiv.className).toContain('flex-1')
+    expect(listDiv.className).toContain('overflow-auto')
+    // 33 张卡全部进入 DOM(滚动由 inner 接管,不靠 outer 撑高)
+    const cards = screen.getAllByTestId('analysis-issue-card')
+    expect(cards).toHaveLength(33)
+  })
+
+  it('父级包裹 div 缺约束高度时组件不报错(契约边界 · 调用方负责保证 wrapper 高度)', () => {
+    // 故意不套 flex-[2] min-h-0 wrapper 渲染 → jsdom 不算 layout,组件只断言
+    // "根 div 已声明 h-full";若 caller 没提供高度,实际滚动不生效(浏览器层)——
+    // 此用例只锁组件契约,锁不住调用方失误(由 e2e 覆盖)。
+    const issue = buildIssue({
+      source_refs: [
+        { kind: 'requirement', relative_path: 'requirement.md', line_range: [0, 5] },
+      ],
+    })
+    render(
+      // 注意:此处故意不放 wrapper —— 测的是组件自身
+      <AnalysisIssueList
+        issues={[issue]}
+        prdExists
+        auxFiles={[]}
+        assetList={[]}
+      />,
+    )
+    const root = screen.getByTestId('analysis-issue-list')
+    expect(root.className).toContain('h-full')
+  })
+})

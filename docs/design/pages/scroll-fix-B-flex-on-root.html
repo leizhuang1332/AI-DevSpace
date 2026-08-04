@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>方案 B · flex sizing 下沉到 root · AnalysisIssueList 滚动条修复 · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{
+  --brand:#5e6ad2; --brand-50:#eef0fb; --brand-500:#5e6ad2; --brand-600:#525bc7; --brand-700:#4147a3;
+  --bg:#fbfbfd; --bg-elevated:#ffffff; --bg-subtle:#f5f5f7; --border:#ebebef; --border-strong:#d8d8de;
+  --text-1:#0f172a; --text-2:#475569; --text-3:#94a3b8;
+  --success:#16a34a; --warning:#f59e0b; --error:#ef4444; --warn:#f59e0b; --warn-700:#92400e;
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-6:24px;
+  --text-xs:11px; --text-sm:12px; --text-base:13px; --text-md:14px;
+  --radius-sm:4px; --radius-md:6px; --radius-lg:8px; --radius-xl:12px;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.04); --shadow-md:0 2px 4px rgba(0,0,0,.06);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg);color:var(--text-1);font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased}
+
+.topnav{background:#0f172a;color:#fff;padding:10px 24px;font-size:12px;display:flex;align-items:center;gap:16px}
+.topnav .pill{background:var(--brand);color:#fff;padding:2px 10px;border-radius:6px;font-size:11px;font-weight:500}
+.topnav a{color:#94a3b8;text-decoration:none;padding:4px 10px;border-radius:6px;font-size:12px}
+.topnav a:hover{color:#fff;background:rgba(255,255,255,.06)}
+.topnav a.cur{color:#fff;background:var(--brand)}
+.topnav .spacer{flex:1}
+.topnav .meta{color:#64748b;font-size:11px;font-family:'JetBrains Mono',monospace}
+
+.hero{padding:32px 24px 24px;max-width:1320px;margin:0 auto}
+.hero .badge{display:inline-block;background:var(--brand-50);color:var(--brand-700);padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;letter-spacing:.04em;margin-bottom:12px}
+.hero h1{font-size:24px;font-weight:700;color:var(--text-1);margin-bottom:8px}
+.hero .lede{font-size:13px;color:var(--text-2);max-width:760px;line-height:1.7}
+.hero .lede code{background:var(--bg-subtle);padding:1px 6px;border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--brand-700)}
+.hero .meta-row{display:flex;gap:24px;margin-top:16px;flex-wrap:wrap}
+.hero .meta-row .m{display:flex;flex-direction:column;gap:2px}
+.hero .meta-row .m .l{font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:500}
+.hero .meta-row .m .v{font-size:12px;color:var(--text-1);font-weight:500}
+.hero .meta-row .m .v.good{color:#16a34a}
+.hero .meta-row .m .v.warn{color:#f59e0b}
+
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:20px;max-width:1320px;margin:0 auto;padding:0 24px 32px}
+.col-card{background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+.col-card .col-hd{padding:14px 18px;border-bottom:1px solid var(--border);background:var(--bg-subtle);display:flex;align-items:center;justify-content:space-between}
+.col-card .col-hd h2{font-size:13px;font-weight:600;color:var(--text-1);display:flex;align-items:center;gap:8px}
+.col-card .col-hd .meta{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-3)}
+.col-card .col-body{padding:18px;flex:1}
+
+.diff{font-family:'JetBrains Mono','Menlo',monospace;font-size:12px;line-height:1.7;border-radius:8px;overflow:hidden;border:1px solid var(--border)}
+.diff .line{padding:2px 14px;display:flex;gap:8px}
+.diff .line .ln{color:#94a3b8;width:24px;flex-shrink:0;text-align:right;user-select:none;font-size:11px}
+.diff .line .code{flex:1;white-space:pre-wrap;word-break:break-all}
+.diff .line.add{background:rgba(22,163,74,.07);border-left:3px solid #16a34a}
+.diff .line.add .code{color:#15803d}
+.diff .line.del{background:rgba(239,68,68,.07);border-left:3px solid #ef4444}
+.diff .line.del .code{color:#b91c1c;text-decoration:line-through;opacity:.8}
+.diff .line.ctx .code{color:var(--text-2)}
+.diff .file-tag{padding:6px 14px;background:#1e293b;color:#cbd5e1;font-size:11px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
+.diff .file-tag .dot{width:8px;height:8px;border-radius:50%;background:#fbbf24}
+
+.viewport{
+  width:720px; height:720px;
+  border:1px solid var(--border-strong);border-radius:12px;overflow:hidden;
+  background:var(--bg-elevated);display:flex;flex-direction:column;
+  box-shadow:0 6px 24px rgba(15,23,42,.08);position:relative;
+}
+.viewport .stage-strip{background:linear-gradient(90deg,var(--brand-50) 0%,rgba(238,240,251,.3) 60%);border-bottom:1px solid var(--border);padding:10px 18px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.viewport .stage-strip .ttl{display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px;color:var(--brand-700)}
+.viewport .stage-strip .ttl .badge{background:var(--brand);color:#fff;font-size:11px;font-weight:500;padding:2px 8px;border-radius:4px}
+.viewport .stage-strip .meta{font-size:11px;color:var(--text-3);font-family:'JetBrains Mono',monospace}
+.viewport .narrow-tabs{display:flex;gap:4px;padding:8px 18px 0;flex-shrink:0}
+.viewport .narrow-tabs button{flex:1;height:34px;border-radius:6px;font-size:12px;font-weight:500;display:flex;align-items:center;justify-content:center;gap:6px;border:1px solid transparent;background:transparent;color:var(--text-2);cursor:pointer;font-family:inherit}
+.viewport .narrow-tabs button.active{background:var(--bg-elevated);color:var(--text-1);border-color:var(--border);box-shadow:var(--shadow-sm)}
+
+.viewport .narrow-body{flex:1;min-height:0;overflow:hidden;padding:12px 18px 18px;display:flex;flex-direction:column;gap:16px}
+
+.rsum{background:linear-gradient(135deg,var(--brand-50) 0%,rgba(238,240,251,.4) 100%);border:1px solid var(--brand-50);border-radius:10px;padding:12px 14px;display:flex;align-items:center;gap:12px;flex-shrink:0}
+.rsum .ic{width:40px;height:40px;border-radius:50%;background:var(--bg-elevated);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;border:2px solid var(--brand-50)}
+.rsum .txt{flex:1;min-width:0}
+.rsum .ttl{font-size:12px;font-weight:600;color:var(--brand-700);margin-bottom:2px}
+.rsum .desc{font-size:11px;color:var(--text-2);line-height:1.5}
+
+/* B: root is direct flex item */
+.ail-root-b{
+  flex:2 1 0%;
+  min-height:0;
+  background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;
+  display:flex;flex-direction:column;overflow:hidden;
+}
+.ail-list-b{flex:1;overflow:auto;padding:10px 14px;display:flex;flex-direction:column;gap:10px;min-height:0}
+
+.rlog{background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;overflow:hidden;flex-shrink:0}
+.rlog .hd{padding:10px 14px;display:flex;align-items:center;justify-content:space-between;background:var(--bg-subtle);font-size:12px;font-weight:600}
+.rlog .hd .l{display:flex;align-items:center;gap:8px}
+.rlog .hd .r{font-size:11px;color:var(--text-3);font-family:'JetBrains Mono',monospace}
+
+.iss{background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.iss .head{display:flex;align-items:flex-start;gap:8px}
+.iss .ord{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-3);flex-shrink:0;margin-top:2px}
+.iss .title{flex:1;font-size:12px;font-weight:600;line-height:1.4}
+.iss .desc{font-size:11px;color:var(--text-2);line-height:1.55;white-space:pre-wrap}
+.iss .meta{font-size:11px;display:grid;grid-template-columns:auto 1fr;gap:2px 8px;border-top:1px solid var(--border);padding-top:6px}
+.iss .meta dt{color:var(--text-3);font-family:'JetBrains Mono',monospace;font-size:10px}
+.iss .meta dd{color:var(--text-2);font-size:11px}
+.iss .chips{display:flex;flex-wrap:wrap;gap:4px;padding-top:4px}
+.iss .chip{display:inline-flex;align-items:center;gap:4px;font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid rgba(94,106,210,.4);background:rgba(94,106,210,.08);color:var(--brand-700);font-family:'JetBrains Mono',monospace}
+.iss .editor{border-top:1px solid var(--border);padding-top:8px;margin-top:4px;display:flex;flex-direction:column;gap:4px}
+.iss .editor .lbl{font-size:11px;font-weight:500;color:var(--text-2);display:flex;align-items:center;gap:4px}
+.iss .editor textarea{width:100%;font-size:11px;font-family:'JetBrains Mono',monospace;border:1px solid var(--border);background:var(--bg-elevated);border-radius:4px;padding:6px 8px;resize:none;height:60px;color:var(--text-1)}
+
+.ail-card{position:relative}
+.annot{position:absolute;pointer-events:none;font-size:11px;color:var(--brand-700);font-weight:500;display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.95);padding:4px 8px;border-radius:6px;border:1px solid var(--brand-50);box-shadow:var(--shadow-sm)}
+.annot::before{content:'←';font-size:14px;color:var(--brand)}
+
+.notes{max-width:1320px;margin:0 auto;padding:0 24px 48px}
+.notes h3{font-size:14px;font-weight:600;margin-bottom:10px;color:var(--text-1)}
+.notes ul{list-style:none;display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.notes li{background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-size:12px;color:var(--text-2);line-height:1.6}
+.notes li .h{display:flex;align-items:center;gap:6px;font-weight:600;color:var(--text-1);margin-bottom:4px;font-size:12px}
+.notes li .h .ok{color:#16a34a}
+.notes li .h .warn{color:#f59e0b}
+.notes li .h .info{color:var(--brand-700)}
+</style>
+</head>
+<body>
+
+<nav class="topnav">
+  <span class="pill">② 分析</span>
+  <span style="font-weight:600">ANALYZING · AnalysisIssueList 滚动条修复</span>
+  <a href="scroll-fix-A-h-full.html">A · h-full</a>
+  <a href="scroll-fix-B-flex-on-root.html" class="cur">B · flex 下沉</a>
+  <a href="scroll-fix-C-max-h.html">C · max-h</a>
+  <a href="scroll-fix-D-scroll-container.html">D · ScrollContainer</a>
+  <span class="spacer"></span>
+  <span class="meta">grill-with-docs · 2026-08-04</span>
+</nav>
+
+<header class="hero">
+  <span class="badge">方案 B · 组件自包含</span>
+  <h1>把 <code>flex-[2] min-h-0</code> 下沉到 AnalysisIssueList root,删掉 wrapper</h1>
+  <p class="lede">根因同 A,但走另一条路:让组件自己成为父 flex 容器的直接 flex item(吃掉 wrapper 的位置),不再依赖父级用 wrapper div 转一道。改两个 caller(DesktopLayout + NarrowLayout)+ 改组件根。</p>
+  <div class="meta-row">
+    <div class="m"><span class="l">改动范围</span><span class="v">3 文件 · 组件 + 2 caller</span></div>
+    <div class="m"><span class="l">影响</span><span class="v">桌面 + 窄视口同时修复</span></div>
+    <div class="m"><span class="l">风险</span><span class="v warn">动 caller 模板,Review 面更大</span></div>
+    <div class="m"><span class="l">ADR</span><span class="v warn">建议短 ADR</span></div>
+  </div>
+</header>
+
+<section class="cols">
+  <div class="col-card">
+    <div class="col-hd">
+      <h2>📝 代码改动 · 三处</h2>
+      <span class="meta">component root + 2 callers</span>
+    </div>
+    <div class="col-body">
+
+      <div class="diff">
+        <div class="file-tag"><span class="dot"></span>analysis-issue-list.tsx · root className</div>
+        <div class="line ctx"><span class="ln">216</span><span class="code">    &lt;div</span></div>
+        <div class="line ctx"><span class="ln">217</span><span class="code">      data-testid="analysis-issue-list"</span></div>
+        <div class="line del"><span class="ln">221</span><span class="code">      className="bg-bg-elevated border border-border rounded-lg overflow-hidden flex flex-col"</span></div>
+        <div class="line add"><span class="ln">221</span><span class="code">      className="bg-bg-elevated border border-border rounded-lg overflow-hidden flex flex-col flex-[2] min-h-0"</span></div>
+      </div>
+
+      <div class="diff" style="margin-top:14px">
+        <div class="file-tag"><span class="dot"></span>analyzing-zone.tsx · DesktopLayout (≈ line 937)</div>
+        <div class="line del"><span class="ln">-</span><span class="code">        &lt;div className="flex-[2] min-h-0"&gt;</span></div>
+        <div class="line del"><span class="ln">-</span><span class="code">          &lt;AnalysisIssueList ... /&gt;</span></div>
+        <div class="line del"><span class="ln">-</span><span class="code">        &lt;/div&gt;</span></div>
+        <div class="line add"><span class="ln">+</span><span class="code">        &lt;AnalysisIssueList ... /&gt;</span></div>
+      </div>
+
+      <div class="diff" style="margin-top:14px">
+        <div class="file-tag"><span class="dot"></span>analyzing-zone.tsx · NarrowLayout (≈ line 1066)</div>
+        <div class="line del"><span class="ln">-</span><span class="code">            &lt;div className="flex-[2] min-h-0"&gt;</span></div>
+        <div class="line del"><span class="ln">-</span><span class="code">              &lt;AnalysisIssueList ... /&gt;</span></div>
+        <div class="line del"><span class="ln">-</span><span class="code">            &lt;/div&gt;</span></div>
+        <div class="line add"><span class="ln">+</span><span class="code">            &lt;AnalysisIssueList ... /&gt;</span></div>
+      </div>
+
+      <div style="margin-top:14px;padding:10px 12px;background:var(--bg-subtle);border-radius:6px;font-size:11px;color:var(--text-2);line-height:1.6">
+        <strong style="color:var(--brand-700)">本质:</strong>组件根直接成 flex item,跟 RunSummary / RunLog 平级参与 flex 分配(同一个父 flex 容器里)。不再需要 wrapper div 转发 <code>flex-[2] min-h-0</code>。
+      </div>
+    </div>
+  </div>
+
+  <div class="col-card">
+    <div class="col-hd">
+      <h2>🪟 窄视口实测 · 720 × 720</h2>
+      <span class="meta">flex 下沉到 root</span>
+    </div>
+    <div class="col-body" style="display:flex;justify-content:center;background:var(--bg)">
+      <div class="viewport">
+        <div class="stage-strip">
+          <div class="ttl"><span class="badge">② 分析</span><span>ANALYZING · Analysis Skill &amp; Run</span></div>
+          <div class="meta">h-[calc(100vh-84px)]</div>
+        </div>
+        <div class="narrow-tabs">
+          <button>📑 文档</button>
+          <button class="active">📝 问题</button>
+        </div>
+        <div class="narrow-body">
+          <div class="rsum">
+            <div class="ic">⚠️</div>
+            <div class="txt">
+              <div class="ttl">Analysis Run 失败</div>
+              <div class="desc">Skill: prd-completeness · 已提交 Issue <strong>33</strong> 条</div>
+            </div>
+          </div>
+
+          <!-- B 的关键结构:无 wrapper,root 直接是 flex item -->
+          <div class="ail-root-b ail-card" data-tag="root · flex-[2] min-h-0">
+            <div class="hd" style="padding:10px 14px;border-bottom:1px solid var(--border);background:var(--bg-subtle);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
+              <span style="font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px">📝 Analysis Issues</span>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-3)">共 33 条</span>
+            </div>
+            <div class="ail-list-b" id="list-b" data-tag="inner · flex-1 overflow-auto"></div>
+            <div class="annot" style="right:-148px;top:55px">inner 在这滚</div>
+          </div>
+
+          <div class="rlog">
+            <div class="hd">
+              <div class="l"><span>▶</span><span>📜 Run Log</span><span style="font-family:'JetBrains Mono',monospace;font-weight:400;color:var(--text-3);font-size:11px">(1 文本 · 35 工具 · 35 结果)</span></div>
+              <div class="r">已折叠 · 默认折叠</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="notes">
+  <h3>关键点 · 风险 · 验收</h3>
+  <ul>
+    <li>
+      <div class="h"><span class="info">i</span>组件自包含</div>
+      AnalysisIssueList 自带 flex sizing,放在任何 flex-col 父容器里都能正确占满剩余空间。不依赖外部 wrapper 模板。
+    </li>
+    <li>
+      <div class="h"><span class="warn">!</span>动 caller</div>
+      DesktopLayout + NarrowLayout 各一处 caller 改写。e2e / visual regression 都要重跑,确认 dim 蒙层位置 / z-index 没被波及。
+    </li>
+    <li>
+      <div class="h"><span class="info">i</span>语义对齐</div>
+      RunSummary / RunLog 都是裸组件放 flex 容器里(flex: 0 1 auto),AnalysisIssueList 走 flex-[2] min-h-0 一致 —— 三者平级。
+    </li>
+    <li>
+      <div class="h"><span class="ok">✓</span>未来可复用</div>
+      之后若要把 AnalysisIssueList 嵌进其它模块(比如 DASHBOARD 的 issue widget),不用记得外面套 wrapper div。
+    </li>
+    <li>
+      <div class="h"><span class="warn">!</span>建议补短 ADR</div>
+      「组件自管 flex sizing」是契约变更(分析区 wrapper 模板废除),未来 reviewer 看 git blame 时会问"为什么这个组件要 self-manage flex" —— 值得一段 ADR。
+    </li>
+    <li>
+      <div class="h"><span class="ok">✓</span>测试覆盖</div>
+      vitest: 33 条 Issue 时 outer 高度 === 父容器 flex 分配高度。e2e: 窄视口滚到底后 #33 标题进入视口。
+    </li>
+  </ul>
+</section>
+
+<script>
+const titles = [
+  '业务流程描述缺失,仅引用外部 MRD 文档','验收标准(AC)整体缺失','边界 / 异常分支未覆盖','数据模型字段约束模糊','权限模型与角色定义缺失',
+  '性能指标与容量基线缺失','审计日志范围未明确','接口契约字段类型不一致','外部依赖 SLA 未声明','国际化策略未约定',
+  '错误码体系散落多处','回滚策略与数据迁移缺失','可观测性(trace/metric)未规划','并发模型与锁粒度模糊','缓存一致性策略缺失',
+  '幂等性与重试语义未定义','超时与熔断阈值缺失','部署拓扑与灰度策略缺失','容量估算与压测基线缺失','数据保留与删除策略缺失',
+  '多租户隔离边界未定义','GDPR / 合规字段标记缺失','PR-5 验收:PRD 内容过短提示文案缺失','Issue Response 自动保存未触发','SourceRef repository 类型定位缺失',
+  'Issue 卡片「引用缺失」角标渲染异常','metadata 重复 key 静默覆盖','来源漂移(aux 删除)页面崩溃','Run Log 折叠状态未持久化','Skill 描述加载失败 toast 重试缺失',
+  '历史面板 N=0 空态 CTA 未启用','FAB dim 蒙层覆盖主列交互','窄视口 tab 切换丢焦点'
+];
+const descs = [
+  '当前 PRD 第 2.3 节"业务流程"仅写了「参考 MRD 文档」,未在本文档输出任何 step-by-step 的核心业务流程图或步骤化描述。',
+  '整个 PRD 没有显式标定"通过标准"章节或 AC 字段,导致评审无法对齐。',
+  '正常路径写得很细,但 4xx / 5xx / 业务异常的分支处理几乎没有提及。',
+];
+const con = document.getElementById('list-b');
+for (let i = 1; i <= 33; i++) {
+  const el = document.createElement('div');
+  el.className = 'iss';
+  el.innerHTML = `
+    <div class="head"><span class="ord">#${i}</span><div class="title">${titles[(i-1) % titles.length]}</div></div>
+    <div class="desc">${descs[i % descs.length]}</div>
+    <dl class="meta"><dt>severity</dt><dd>${i % 4 === 0 ? 'critical' : i % 3 === 0 ? 'high' : 'medium'}</dd><dt>dimension</dt><dd>${['核心流程','数据契约','错误处理','可观测性'][i % 4]}</dd></dl>
+    <div class="chips"><span class="chip">📄 requirement.md [${i}-${i+5})</span><span class="chip">📎 aux-api [1-3)</span></div>
+    <div class="editor"><div class="lbl">📝 Issue Response(自动保存)</div><textarea readonly placeholder="回答、解释或补充需求上下文(留空表示未答复)"></textarea></div>`;
+  con.appendChild(el);
+}
+</script>
+</body>
+</html>

@@ -23,6 +23,14 @@
  * - 不做语义合并(决策 23)
  * - 不按 metadata 排序或判定 Verdict(决策 33)
  * - 不持久化 Issue,只读 `props.issues`
+ *
+ * 高度契约(2026-08 修复 · 滚动条缺失):
+ * - 组件根 div 加 `h-full`,要求直接父元素提供 definite height
+ *   (典型场景:父级是 `<div className="flex-[2] min-h-0">`,由 flex 分配高度)
+ * - 若父级没有 definite height,scroll 不会触发,卡片高度 = 内容自然高
+ *   (33 条 Issue 时约 3700+px,会撑爆页面)
+ * - 与 AnalysisRunLogPanel 用 max-h-[400px] 兜底的策略不同:本组件更依赖
+ *   父级提供约束,留给调用方决定 Issue 列表占多少空间
  */
 
 import { useCallback, useEffect, useMemo, useRef, type Ref } from 'react'
@@ -201,7 +209,7 @@ export function AnalysisIssueList({
         data-testid="analysis-issue-list"
         data-empty="true"
         ref={containerRef}
-        className="bg-bg-elevated border border-border rounded-lg p-6 text-center text-sm text-text-3"
+        className="bg-bg-elevated border border-border rounded-lg h-full p-6 text-center text-sm text-text-3"
       >
         {emptyMessage}
       </div>
@@ -214,7 +222,7 @@ export function AnalysisIssueList({
       data-empty="false"
       data-issue-count={issues.length}
       ref={containerRef}
-      className="bg-bg-elevated border border-border rounded-lg overflow-hidden flex flex-col"
+      className="bg-bg-elevated border border-border rounded-lg h-full overflow-hidden flex flex-col"
     >
       <div className="px-4 py-3 border-b border-border bg-bg-subtle flex items-center justify-between flex-shrink-0">
         <span className="text-md font-semibold flex items-center gap-2">
