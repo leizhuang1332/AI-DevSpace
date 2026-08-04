@@ -1,0 +1,19 @@
+apps/web/src/components/analysis-run-log-panel.tsx
+  s_1779c681a6d680::t_4f9ef5b9d912b4 192
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "3dec3bbd68c9f247170456352df033ee59f55121",
+  "prompts": {},
+  "sessions": {
+    "s_1779c681a6d680": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "837be284-6e9d-4252-b974-dd49544bea07",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
