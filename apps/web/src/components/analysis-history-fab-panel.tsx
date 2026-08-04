@@ -8,7 +8,7 @@
  * - N=0 时 N 数字呈灰色(text-3)
  * - 点 FAB → 打开/关闭浮动面板
  * - 面板头部固定显示「🗂️ 历史分析 N ✕」,头部右侧 ✕ 关闭
- * - N=0 面板内显示「暂无历史 Analysis Run」
+ * - N=0 面板内显示「暂无历史 Analysis Run · 点击下方 [▶ 开始分析] 按钮发起首次分析」
  * - N>0 面板内复用 `HistoryRow` 列表(后续 ticket 02 补充删除 UX / N 计数规则 / a11y)
  * - 关闭方式:① 头部 ✕ 按钮 ② 点 FAB 以外任意位置 ③ 按 Esc
  * - ARIA:FAB `aria-expanded` 同步开合,`aria-label="历史分析 共 N 个 Run"`
@@ -25,6 +25,13 @@
  * - 面板保持 non-modal `role="region"`(不暗示模态,不困焦点),沿用浏览器
  *   原生 Tab 顺序(不引入 focus-trap 库)
  *
+ * ticket 07:N 计数规则(0 灰 / 99+ 上限)+ N=0 空态 CTA:
+ * - N=99 显示 `99`,N≥100 显示 `99+`(Gmail 范式,不撑爆 FAB 宽度);
+ *   `data-run-count` 仍保留真实数字便于自动化断言
+ * - FAB 不显示运行中 dot(运行中信号走底部 AI 思考条 4 指示器)
+ * - N=0 空态加上 CTA「▶ 开始分析」按钮,沿用主区 `StartAnalysisButton`,
+ *   点击触发父组件的 `handleStart`(同一入口,行为完全等价)
+ *
  * 不重写 `<AnalysisHistoryDrawer>` 本体 —— 该组件后续 ticket 02 才会真正
  * 接入"主视图列"。本组件只复用其 `HistoryRow`(已 export)。
  */
@@ -34,6 +41,19 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { AnalysisRunMeta } from '@ai-devspace/shared'
 import { HistoryRow } from './analysis-history-drawer'
+import {
+  StartAnalysisButton,
+  type StartAnalysisState,
+} from './start-analysis-button'
+
+/** 面板 N 上限 —— Gmail 范式,N≥100 一律显示 `99+`。 */
+const FAB_COUNT_CEILING = 100
+
+/** 把真实计数格式化为 FAB 显示文案(N=0 / N=99 / N≥100 → `99+`)。 */
+function formatFabCount(n: number): string {
+  if (n >= FAB_COUNT_CEILING) return '99+'
+  return String(n)
+}
 
 export interface AnalysisHistoryFabPanelProps {
   /** Analysis Run 列表(SSR 注入 + SSE 追加 + 删除消失) */
@@ -62,6 +82,23 @@ export interface AnalysisHistoryFabPanelProps {
   isOpen: boolean
   /** 设置面板开合 —— 父组件持有此 setState。Cmd+K 通过 controller 间接调。 */
   onOpenChange: (open: boolean) => void
+  /**
+   * 「开始分析」按钮状态机(analyzing-fab ticket 07)。
+   * N=0 空态 CTA 沿用此状态机:`idle → starting → running` 显示完全交
+   * 由父组件 useState 持有,本组件不复制一份。
+   */
+  startAnalysisState?: StartAnalysisState
+  /**
+   * 「开始分析」按钮 disabled 标志(analyzing-fab ticket 07)。
+   * 通常与 `availableSkills.length === 0` 一致 —— 父组件把可用 Skill
+   * 数推到此处,N=0 空态 CTA 与主区按钮的 disabled 行为完全对齐。
+   */
+  startAnalysisDisabled?: boolean
+  /**
+   * 「开始分析」点击回调(analyzing-fab ticket 07)。
+   * 空态 CTA 点击走父组件 `handleStart` 入口,与主区按钮同入口。
+   */
+  onStartAnalysis?: () => void | Promise<void>
 }
 
 /**
@@ -82,6 +119,9 @@ export function AnalysisHistoryFabPanel({
   suppressOutsideClose,
   isOpen,
   onOpenChange,
+  startAnalysisState = 'idle',
+  startAnalysisDisabled = false,
+  onStartAnalysis,
 }: AnalysisHistoryFabPanelProps) {
   const fabRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -164,7 +204,7 @@ export function AnalysisHistoryFabPanel({
             isEmpty ? 'text-text-3' : 'text-text-1'
           }`}
         >
-          {count}
+          {formatFabCount(count)}
         </span>
       </button>
       {isOpen && (
@@ -205,9 +245,23 @@ export function AnalysisHistoryFabPanel({
             {isEmpty ? (
               <div
                 data-testid="analysis-history-panel-empty"
-                className="px-4 py-6 text-center text-xs text-text-3"
+                className="px-4 py-6 flex flex-col items-center gap-3 text-center text-xs text-text-3"
               >
-                暂无历史 Analysis Run
+                {/* ticket 07:升级空态文案,引导用户去点 CTA */}
+                <span>
+                  暂无历史 Analysis Run · 点击下方 [▶ 开始分析] 按钮发起首次分析
+                </span>
+                {/* ticket 07:空态 CTA 沿用主区 StartAnalysisButton,等
+                    价于主区 [▶ 开始分析] 按钮 —— 同一 handleStart 入口,
+                    同一 idle → starting → running 状态机。data-testid
+                    复用,以便 e2e / 自动化统一入口。 */}
+                {onStartAnalysis && (
+                  <StartAnalysisButton
+                    state={startAnalysisState}
+                    disabled={startAnalysisDisabled}
+                    onClick={onStartAnalysis}
+                  />
+                )}
               </div>
             ) : (
               <ul

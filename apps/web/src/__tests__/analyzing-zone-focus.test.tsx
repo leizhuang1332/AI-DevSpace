@@ -537,11 +537,15 @@ describe('AnalyzingZone · FAB + 浮动面板(analyzing-fab ticket 01)', () => {
   })
 
   it('N=0 面板内显示「暂无历史 Analysis Run」', async () => {
+    // ticket 07 把空态文案升级为「暂无历史 Analysis Run · 点击下方
+    // [▶ 开始分析] 按钮发起首次分析」。本断言保持 ticket 01 的"非空" +
+    // "以核心关键词开头"的契约,把整段包含「暂无历史 Analysis Run」
+    // 作为稳定锚点。具体后半句在 ticket 07 的 describe 里另行覆盖。
     render(<AnalyzingZone data={buildData([])} />)
     await userEvent.click(screen.getByTestId('analysis-history-fab'))
     const panel = await screen.findByTestId('analysis-history-panel')
     expect(panel.getAttribute('data-run-count')).toBe('0')
-    expect(screen.getByTestId('analysis-history-panel-empty').textContent).toBe(
+    expect(screen.getByTestId('analysis-history-panel-empty').textContent).toContain(
       '暂无历史 Analysis Run',
     )
   })
@@ -1122,7 +1126,7 @@ describe('AnalyzingZone · 删除 UX 重设(ticket 03 · ADR-0022 D5.1)', () => 
     expect(screen.getByTestId('analysis-history-panel').getAttribute('data-run-count')).toBe(
       '0',
     )
-    expect(screen.getByTestId('analysis-history-panel-empty').textContent).toBe(
+    expect(screen.getByTestId('analysis-history-panel-empty').textContent).toContain(
       '暂无历史 Analysis Run',
     )
 
@@ -1879,5 +1883,216 @@ describe('AnalyzingZone · a11y 全套(analyzing-fab ticket 06 · ADR-0022 D6)',
     // 无 tabindex hack
     expect(screen.getByTestId('analysis-history-fab').getAttribute('tabindex')).toBeNull()
     expect(screen.getByTestId('analysis-history-panel-close').getAttribute('tabindex')).toBeNull()
+  })
+})
+
+// ===========================================================================
+// FAB N 计数规则 + N=0 空态 CTA(analyzing-fab ticket 07)
+//
+// ticket 07 在 ticket 01-06 骨架上引入三条 FAB N 显示规则 + N=0 空态 CTA:
+// - N=0 时 N 数字仍呈灰色(FAB 本身不隐藏,避免遗忘入口存在)—— 由 ticket 01
+//   落地,本 describe 不重复。
+// - N=99 显示 `99`,N≥100 显示 `99+`(Gmail 范式,数字宽度不撑爆 FAB)
+// - FAB 不显示运行中 dot(运行中状态已走底部 AI 思考条 4 指示器)
+// - N=0 面板空态增加 CTA「▶ 开始分析」按钮,点击触发主区 handleStart,
+//   复用既有 `data-testid="analysis-run-start-btn"`,state 'idle' → 'starting'
+//   → 'running' 由主区决定。
+// ===========================================================================
+
+/**
+ * ticket 07 fixture —— 工厂出 N 个 Run,用于 N 计数规则断言。无需 Skill
+ * 元数据(本组测的是 FAB N 显示规则,不需要走 handleStart)。
+ */
+function buildRunsByCount(count: number): AnalysisRunMeta[] {
+  const runs: AnalysisRunMeta[] = []
+  for (let i = 0; i < count; i++) {
+    runs.push(
+      buildRun({
+        run_id: `r-${String(i).padStart(3, '0')}`,
+        created_at: `2026-08-01T${String(10 + Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}:00.000Z`,
+      }),
+    )
+  }
+  return runs
+}
+
+describe('AnalyzingZone · FAB N 计数规则 + N=0 空态 CTA(ticket 07)', () => {
+  it('N=99 时 FAB 数字显示 `99`(不显示 `99+`)', () => {
+    render(<AnalyzingZone data={buildFabPanelData(buildRunsByCount(99))} />)
+    const fab = screen.getByTestId('analysis-history-fab')
+    expect(fab.getAttribute('data-run-count')).toBe('99')
+    // ticket 07:FAB 上的数字文本就是 '99',不是 '99+'
+    const count = screen.getByTestId('analysis-history-fab-count')
+    expect(count.textContent).toBe('99')
+  })
+
+  it('N=100 时 FAB 数字显示 `99+`(Gmail 范式)', () => {
+    render(<AnalyzingZone data={buildFabPanelData(buildRunsByCount(100))} />)
+    const fab = screen.getByTestId('analysis-history-fab')
+    expect(fab.getAttribute('data-run-count')).toBe('100')
+    // 数据层 N=100 但显示用 99+;data-run-count 保持 100 让测试 / 自动化
+    // 仍能拿到真实数字,可视化用 99+ 防撑爆宽度
+    const count = screen.getByTestId('analysis-history-fab-count')
+    expect(count.textContent).toBe('99+')
+  })
+
+  it('N=999 时 FAB 数字仍显示 `99+`(不撑爆 FAB 宽度)', () => {
+    render(<AnalyzingZone data={buildFabPanelData(buildRunsByCount(999))} />)
+    const count = screen.getByTestId('analysis-history-fab-count')
+    expect(count.textContent).toBe('99+')
+  })
+
+  it('FAB 节点内不显示运行中 dot(运行中状态走底部 AI 思考条)', () => {
+    // ticket 07 + ticket 01 的兜底:FAB 上永远没有 `data-testid="history-fab-running-dot"`。
+    // 即便有 RUNNING 状态的 Run,运行中信号统一走底部 AI 思考条,FAB 不重复信号。
+    const runs: AnalysisRunMeta[] = [
+      buildRun({ run_id: 'r-running', status: 'running', created_at: '2026-08-01T10:00:00.000Z' }),
+    ]
+    render(<AnalyzingZone data={buildFabPanelData(runs)} />)
+    const fab = screen.getByTestId('analysis-history-fab')
+    expect(fab.querySelector('[data-testid="history-fab-running-dot"]')).toBeNull()
+  })
+
+  it('N=0 面板空态文案:「暂无历史 Analysis Run · 点击下方 [▶ 开始分析] 按钮发起首次分析」', async () => {
+    render(<AnalyzingZone data={buildFabPanelData([])} />)
+    await userEvent.click(screen.getByTestId('analysis-history-fab'))
+    const empty = await screen.findByTestId('analysis-history-panel-empty')
+    // ticket 07:升级空态文案 —— 引导用户去点 CTA,而非仅说"暂无"
+    expect(empty.textContent).toContain('暂无历史 Analysis Run')
+    expect(empty.textContent).toContain('[▶ 开始分析]')
+  })
+
+  it('N=0 空态 CTA 「▶ 开始分析」按钮存在 + 复用既有 data-testid `analysis-run-start-btn`', async () => {
+    // ticket 07 验收:N=0 面板空态显示 CTA,沿用主区「▶ 开始分析」按钮
+    // 的 data-testid,行为完全等价(同 handleStart 入口)。
+    render(<AnalyzingZone data={buildFabPanelData([])} />)
+    await userEvent.click(screen.getByTestId('analysis-history-fab'))
+    const empty = await screen.findByTestId('analysis-history-panel-empty')
+    // 空态内必须含 CTA 按钮,data-testid 与主区按钮一致
+    const cta = empty.querySelector('[data-testid="analysis-run-start-btn"]') as HTMLElement
+    expect(cta).toBeTruthy()
+    // 初始 state = 'idle'(有可用 Skill 时;在 ticket 07 测试夹具里 Skill 默
+    // 认走空数组,data-disabled='no_skills' 是「无可用 Skill」标识,不阻塞
+    // CTA 渲染)
+    expect(cta.getAttribute('data-state')).toBe('idle')
+    expect(cta.textContent).toContain('开始分析')
+  })
+
+  it('N=0 空态 CTA 点击 → 触发主区 handleStart(state 走向 starting)', async () => {
+    // ticket 07 验收第 2 条:CTA 行为等价于主区「▶ 开始分析」按钮,沿用
+    // 同一 handleStart 入口。
+    //
+    // 实现注:CTA 与主区 toolbar 的 StartAnalysisButton 共享同一 state
+    // 状态机(`startAnalysisState` prop)。ticket 05 的 handleStart 成功
+    // 路径会同步 `setIsHistoryPanelOpen(false)` 收起面板 → CTA 节点被
+    // React 在 commit 时直接卸载(不会先更新其 data-state 再卸载)。所以
+    // 验证 transition 不直接打 cta 节点,而是打仍在 DOM 中的 toolbar
+    // StartAnalysisButton —— 同一状态机,data-state 同步变化。
+    render(
+      <AnalyzingZone
+        data={buildFabPanelData([], [buildSkill('prd-completeness', '检查 PRD 完整性')])}
+      />,
+    )
+    await userEvent.click(screen.getByTestId('analysis-history-fab'))
+    const empty = await screen.findByTestId('analysis-history-panel-empty')
+    const ctaInPanel = empty.querySelector(
+      '[data-testid="analysis-run-start-btn"]',
+    ) as HTMLElement
+    // 起点:CTA 的 state = 'idle'(同主区)
+    expect(ctaInPanel.getAttribute('data-state')).toBe('idle')
+
+    // mock POST /analysis/start 成功 → handleStart 走 starting → running
+    queueAnalysisStartSuccess(
+      'r-fresh',
+      'req-focus',
+      'prd-completeness',
+      '2026-08-01T12:00:00.000Z',
+    )
+
+    await userEvent.click(ctaInPanel)
+
+    // ticket 07 验收第 3 条:面板被 ticket 05 的「启动成功 → 收起」兜底
+    await waitFor(() => {
+      expect(screen.queryByTestId('analysis-history-panel')).toBeNull()
+    })
+
+    // 主区 StartAnalysisButton 与 CTA 共享 state,验证 toolbar 节点已
+    // 经处于 'running'(间接证明 CTA 也走过同样的 transition)
+    const mainBtn = screen.getByTestId('analysis-run-start-btn')
+    expect(mainBtn.getAttribute('data-state')).toBe('running')
+
+    // 新 Run 已出现在 FAB 计数内
+    expect(screen.getByTestId('analysis-history-fab').getAttribute('data-run-count')).toBe('1')
+  })
+
+  it('N=0 空态 CTA 点击不重复 toast(Skill 面板 / 开始按钮反馈由主区接管)', async () => {
+    // ticket 07 验收第 4 条:CTA 走的是主区 handleStart 入口,不会自己再弹
+    // 独立的「已点击」toast。所有反馈(开始中 spinner / Skill 选完 + 启动
+    // toast 等)由主区 StartAnalysisButton 自己负责。
+    //
+    // 本断言只验证:面板内 CTA 按钮点击不会在 panel 节点上派发任何额外
+    // UI(没有「独立面板 toast」/「面板内 spinner」/ 等)—— 直接看 CTA
+    // 被推进到 'running' 状态 + panel 已被收起。
+    render(
+      <AnalyzingZone
+        data={buildFabPanelData([], [buildSkill('prd-completeness', '检查 PRD 完整性')])}
+      />,
+    )
+    await userEvent.click(screen.getByTestId('analysis-history-fab'))
+    const empty = await screen.findByTestId('analysis-history-panel-empty')
+    const cta = empty.querySelector(
+      '[data-testid="analysis-run-start-btn"]',
+    ) as HTMLElement
+
+    queueAnalysisStartSuccess(
+      'r-fresh',
+      'req-focus',
+      'prd-completeness',
+      '2026-08-01T12:00:00.000Z',
+    )
+    await userEvent.click(cta)
+
+    // CTA 数据流进入运行态(借 toolbar 节点间接断言 — 见上条注)
+    await waitFor(() => {
+      expect(screen.queryByTestId('analysis-history-panel')).toBeNull()
+    })
+    expect(screen.getByTestId('analysis-run-start-btn').getAttribute('data-state')).toBe(
+      'running',
+    )
+  })
+
+  it('N=0 面板内 CTA 按钮样式与主区按钮共用(同 [分析中…] 视觉变体)', async () => {
+    // ticket 07:CTA 的样式与主区「▶ 开始分析」按钮完全一致(主区负责渲染
+    // 实际按钮,空态只是引用 + 嵌入)。点击后 spinner + 「分析中…」文案
+    // 由 StartAnalysisButton 内部决定,与位置无关。
+    //
+    // 因 ticket 05 的 panel 收起会卸载 CTA 节点,验证打 toolbar 上仍在
+    // DOM 的同款按钮 — 它们由 StartAnalysisButton 统一渲染,样式共享。
+    render(
+      <AnalyzingZone
+        data={buildFabPanelData([], [buildSkill('prd-completeness', '检查 PRD 完整性')])}
+      />,
+    )
+    await userEvent.click(screen.getByTestId('analysis-history-fab'))
+    const empty = await screen.findByTestId('analysis-history-panel-empty')
+    const cta = empty.querySelector(
+      '[data-testid="analysis-run-start-btn"]',
+    ) as HTMLElement
+
+    queueAnalysisStartSuccess(
+      'r-fresh',
+      'req-focus',
+      'prd-completeness',
+      '2026-08-01T12:00:00.000Z',
+    )
+    await userEvent.click(cta)
+
+    // 主区 StartAnalysisButton 已切到 running → 视觉变「分析中…」
+    await waitFor(() => {
+      expect(screen.getByTestId('analysis-run-start-btn').getAttribute('data-state')).toBe(
+        'running',
+      )
+    })
+    expect(screen.getByTestId('analysis-run-start-btn').textContent).toContain('分析中')
   })
 })

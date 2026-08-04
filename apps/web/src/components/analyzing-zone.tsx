@@ -51,6 +51,7 @@ import {
 } from '@/lib/analysis-run-start'
 import { AnalysisIssueList } from './analysis-issue-list'
 import { AnalysisRunLogPanel } from './analysis-run-log-panel'
+import { StartAnalysisButton } from './start-analysis-button'
 import { AnalysisHistoryFabPanel } from './analysis-history-fab-panel'
 import {
   AnalysisDeleteRunDialog,
@@ -71,6 +72,9 @@ import type { AnalysisRunDetailResponse } from '@ai-devspace/shared'
 //   starting → POST 在路上;切"分析中…",disabled 防重
 //   running  → POST 201 已返,SSE 在推;disabled(等终态事件复位)
 // ---------------------------------------------------------------------------
+// analyzing-fab ticket 07:状态机类型与按钮组件抽到独立文件,
+// 让 `<AnalysisHistoryFabPanel>` 的 N=0 空态 CTA 也能复用同一按钮,
+// 保证两个位置的「idle → starting → running」视觉与状态机完全一致。
 type StartAnalysisState = 'idle' | 'starting' | 'running'
 
 /** SSE 端点路径(同 apps/agent/src/sse/requirementEventsRoute.ts) */
@@ -521,6 +525,10 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
         suppressOutsideClose={suppressPanelOutsideClose}
         isOpen={isHistoryPanelOpen}
         onOpenChange={setIsHistoryPanelOpen}
+        // analyzing-fab ticket 07:N=0 空态 CTA 接入主区 handleStart
+        startAnalysisState={startState}
+        startAnalysisDisabled={data.availableSkills.length === 0}
+        onStartAnalysis={handleStart}
       />
     ),
     [
@@ -531,6 +539,9 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
       skillDescriptions,
       suppressPanelOutsideClose,
       isHistoryPanelOpen,
+      startState,
+      data.availableSkills.length,
+      handleStart,
     ],
   )
 
@@ -849,51 +860,6 @@ function StageStrip() {
         <span data-testid="analyzing-stage-title">ANALYZING · Analysis Skill & Run</span>
       </div>
     </div>
-  )
-}
-
-function StartAnalysisButton({
-  state,
-  disabled,
-  onClick,
-}: {
-  state: StartAnalysisState
-  disabled?: boolean
-  onClick?: () => void
-}) {
-  const isStreaming = state !== 'idle'
-  const isDisabled = isStreaming || disabled
-  return (
-    <button
-      type="button"
-      data-testid="analysis-run-start-btn"
-      data-state={state}
-      data-disabled={disabled ? 'no_skills' : 'ok'}
-      onClick={isDisabled ? undefined : onClick}
-      disabled={isDisabled}
-      aria-disabled={isDisabled}
-      className={`inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-semibold transition-colors flex-shrink-0 ${
-        isDisabled
-          ? 'bg-brand/50 text-white cursor-not-allowed'
-          : 'bg-brand text-white hover:bg-brand-600'
-      }`}
-    >
-      {isStreaming ? (
-        <>
-          <span
-            aria-hidden
-            data-testid="analysis-run-start-spinner"
-            className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"
-          />
-          分析中…
-        </>
-      ) : (
-        <>
-          <span aria-hidden>▶</span>
-          开始分析
-        </>
-      )}
-    </button>
   )
 }
 
