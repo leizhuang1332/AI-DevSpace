@@ -1,0 +1,34 @@
+apps/web/src/components/start-analysis-button.tsx
+  s_0996faf9fce987::t_6bd64f684c557e 1-64
+apps/web/src/__tests__/analyzing-zone-focus.test.tsx
+  s_0996faf9fce987::t_de59b06883a905 1129
+  s_0996faf9fce987::t_281aac299bef82 540-543,548
+  s_0996faf9fce987::t_ef587f80645e3a 1983-1990,1998,2001-2002,2004,2012,2014,2018-2023,2055,2059-2061,2068-2070,2090,2092-2094,2096
+  s_0996faf9fce987::t_e2c58588150ab1 1887-1982,1991-1997,1999-2000,2003,2005-2011,2013,2015-2017,2024-2054,2056-2058,2062-2067,2071-2089,2091,2095,2097
+apps/web/src/components/analyzing-zone.tsx
+  s_0996faf9fce987::t_6eb55cbf05b75c 54
+  s_0996faf9fce987::t_e312e8165312cd 77
+  s_0996faf9fce987::t_b5cfc1f3526668 528-531,542-544
+  s_0996faf9fce987::t_565611be21efaf 75-76
+apps/web/src/components/analysis-history-fab-panel.tsx
+  s_0996faf9fce987::t_28a21df4f72535 11,28-34,44-56,85-101
+  s_0996faf9fce987::t_a6c19988e86994 122-124
+  s_0996faf9fce987::t_90b7c15c0adbe4 248,250-264
+  s_0996faf9fce987::t_85c26dd169b88f 207
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "2e623b059cb9037909eb1078c9ca51fbf3d85c03",
+  "prompts": {},
+  "sessions": {
+    "s_0996faf9fce987": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "28e3d276-8ea4-4e4e-993e-a2a2c177ac90",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
