@@ -107,8 +107,15 @@ export interface AnalysisHistoryFabPanelProps {
  * 父组件(analyzing-zone 的 DesktopLayout / NarrowLayout)负责把本组件
  * 渲染到"主区右上角"的 `relative` 父节点下:FAB 与面板都用 `absolute`
  * 定位,FAB 锚定在右上,面板从 FAB 正下方弹出,覆盖在[识别产物]列之上
- * (不挤压列宽)。z-index 走 tailwind 命名 `z-fab` / `z-fab-panel`,
+ * (不挤压列宽)。z-index 走 tailwind 命名 `z-fab` / `z-panel`,
  * 不散落魔数(见 tailwind.config.ts `theme.extend.zIndex`)。
+ *
+ * analyzing-fab ticket 08 · ADR-0022 D8:
+ * - 面板宽度 = `min(320px, calc(100vw - 24px))`,窄视口(< 1024px)下自
+ *   然收敛到视口宽度 - 24px,不溢出视口右边;桌面形态下 320px 是
+ *   min(320px, calc(100vw-24px)) 的更小值,等效保留桌面 320px。
+ * - FAB / 面板的 z-fab / z-panel 由 tailwind 集中声明(同时新增
+ *   z-overlay / z-modal 命名槽位,留给后续 overlay / 模态使用)。
  */
 export function AnalysisHistoryFabPanel({
   runs,
@@ -215,7 +222,7 @@ export function AnalysisHistoryFabPanel({
           aria-label="历史分析列表"
           data-testid="analysis-history-panel"
           data-run-count={count}
-          className="absolute right-3 top-14 z-fab-panel w-[320px] max-h-[480px] flex flex-col bg-bg-elevated border border-border-strong rounded-lg shadow-lg overflow-hidden"
+          className="absolute right-3 top-14 z-panel w-[min(320px,calc(100vw-24px))] max-h-[480px] flex flex-col bg-bg-elevated border border-border-strong rounded-lg shadow-lg overflow-hidden"
         >
           <header className="px-4 py-3 border-b border-border bg-bg-subtle flex items-center justify-between">
             <h2 className="text-md font-semibold flex items-center gap-2">

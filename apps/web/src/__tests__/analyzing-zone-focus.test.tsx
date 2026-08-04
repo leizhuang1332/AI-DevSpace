@@ -2096,3 +2096,118 @@ describe('AnalyzingZone · FAB N 计数规则 + N=0 空态 CTA(ticket 07)', () =
     expect(screen.getByTestId('analysis-run-start-btn').textContent).toContain('分析中')
   })
 })
+
+// ===========================================================================
+// 窄视口 CSS 自适应 + z-index 命名约定(analyzing-fab ticket 08 · ADR-0022 D8)
+// ===========================================================================
+//
+// ticket 08 验收:
+// - FAB 在窄视口(< 1024px)仍渲染,不因视口窄而隐藏
+// - 面板宽度 = `min(320px, calc(100vw - 24px))`,窄视口不溢出视口右边
+// - 删除 ticket 01 已删的 `analyzing-narrow-history` `max-h-[200px]` 折叠条
+// - z-index 命名约定:FAB = 30,面板 = 40,tailwind 集中声明
+//   (overlay = 50 / modal = 60 预留给后续二次确认 / 模态)
+//
+// 沿用既有 `useMediaQuery` mock(vitest.setup.ts 全局桩 +
+// `globalThis.setMatchMedia` 控制),与本文件 a11y describe 块一致。
+
+describe('AnalyzingZone · 窄视口 CSS 自适应 + z-index 命名约定(analyzing-fab ticket 08 · ADR-0022 D8)', () => {
+  // ticket 08:FAB 在窄视口(< 1024px)仍渲染 —— 不应被 visibility: hidden / display: none 隐藏
+  it('窄视口(< 1024px)下 FAB 仍渲染 — 不因视口窄而隐藏', () => {
+    // 切到窄视口:`(min-width: 1024px)` 命中 false → NarrowLayout 形态
+    globalThis.setMatchMedia('(min-width: 1024px)', false)
+    render(<AnalyzingZone data={buildFabPanelData([])} />)
+
+    // ticket 01:FAB 默认折叠(沿用 ticket 01 「FAB 始终可见」语义)
+    // 渲染。ticket 08 验收第 1 条:窄视口不因窄而隐藏。
+    const fab = screen.getByTestId('analysis-history-fab')
+    expect(fab).toBeInTheDocument()
+    expect(fab.getAttribute('aria-expanded')).toBe('false')
+    // 节点本身在 DOM 中且非 display: none,即便视口窄也保留视觉入口
+    expect(fab).toBeVisible()
+  })
+
+  // ticket 08:旧 `max-h-[200px]` 折叠条 div 已从 DOM 移除
+  // —— ticket 01 删除 desktop 永久列 `analyzing-history-col`,ticket 08 兜底
+  // 确认窄视口里 `analyzing-narrow-history` 也已彻底清掉。
+  it('窄视口下旧 `analyzing-narrow-history` 折叠条已从 DOM 移除', () => {
+    globalThis.setMatchMedia('(min-width: 1024px)', false)
+    render(<AnalyzingZone data={buildFabPanelData([])} />)
+
+    // ticket 08 兜底:整段折叠条 div 已经从 DOM 移除,document 全树查询应
+    // 为 null(用 document.querySelector 直接验证,不依赖 testing-library
+    // 的 portal 等转义边界)。
+    expect(document.querySelector('[data-testid="analyzing-narrow-history"]')).toBeNull()
+    // `.max-h-\\[200px\\]` 类名在分析相关子树里也应不存在 —— 通过
+    // getElementsByTagName(*) 走全树扫描。
+    const allEls = document.getElementsByTagName('*')
+    for (let i = 0; i < allEls.length; i++) {
+      const cls = allEls[i]?.className ?? ''
+      // 通用 Element.className 在 jsdom 里是 SVGAnimatedString / string 两种;
+      // 仅检查 string 类型以避开 SVGElement 路径。
+      if (typeof cls !== 'string') continue
+      expect(cls.includes('max-h-[200px]')).toBe(false)
+    }
+  })
+
+  // ticket 08:面板宽度 = `min(320px, calc(100vw - 24px))`,窄视口不溢出
+  // ticket 验收文档明确「通过 getComputedStyle 或类名断言」,本测用类名
+  // 断言 — jsdom 不解析 Tailwind 任意值,getBoundingClientRect.width 在
+  // jsdom 总是 0,而 className 是稳定的契约载体(由 Tailwind 编译产出
+  // 实际 CSS)。两个 viewport 形态下都用同一 `min(320px, calc(100vw-24px))`
+  // 表达式 —— 桌面 320px 是更小值,窄视口 `calc(100vw-24px)` 是更小值。
+  it('面板宽度 = min(320px, calc(100vw - 24px))(双视口都使用同一响应式表达式)', async () => {
+    // 桌面形态
+    globalThis.setMatchMedia('(min-width: 1024px)', true)
+    render(<AnalyzingZone data={buildFabPanelData([])} />)
+    await userEvent.click(screen.getByTestId('analysis-history-fab'))
+    await waitFor(() => {
+      expect(screen.getByTestId('analysis-history-panel')).toBeInTheDocument()
+    })
+    const panelDesktop = screen.getByTestId('analysis-history-panel')
+    expect(panelDesktop.className).toContain('min(320px')
+    expect(panelDesktop.className).toContain('calc(100vw-24px)')
+    cleanup()
+    globalThis.resetMatchMedia()
+
+    // 窄视口形态:表达式保持不变(本 ticket 不引入 breakpoint + `w-[xxx]`
+    // 的 ladder),由 CSS calc() 在窄视口下自然收敛。
+    globalThis.setMatchMedia('(min-width: 1024px)', false)
+    render(<AnalyzingZone data={buildFabPanelData([])} />)
+    await userEvent.click(screen.getByTestId('analysis-history-fab'))
+    await waitFor(() => {
+      expect(screen.getByTestId('analysis-history-panel')).toBeInTheDocument()
+    })
+    const panelNarrow = screen.getByTestId('analysis-history-panel')
+    expect(panelNarrow.className).toContain('min(320px')
+    expect(panelNarrow.className).toContain('calc(100vw-24px)')
+    // ticket 08 验收第 3 条:不引入 `useMediaQuery` 新增断点查询;面板类名
+    // 中也不应出现 `lg:w-` 等 breakpoint 前缀(沿用 ticket 01 的 1024px 单
+    // 一断点)。
+    expect(panelNarrow.className).not.toMatch(/\blg:w-/)
+  })
+
+  // ticket 08:z-index 命名约定在 tailwind.config.ts 集中声明,且生效
+  // (FAB = 30,面板 = 40)。具体值由 tailwind 的 z-fab / z-panel 类产出。
+  it('z-index 命名约定生效:FAB = 30,面板 = 40(tailwind 集中声明)', async () => {
+    // ticket 08:沿用 a11y 块的桌面形态设置(`z-[30]` / `z-[40]` 在窄视口
+    // 形态同样生效,FAB / 面板本身在 NarrowLayout 也渲染)。
+    globalThis.setMatchMedia('(min-width: 1024px)', true)
+    render(<AnalyzingZone data={buildFabPanelData([])} />)
+
+    const fab = screen.getByTestId('analysis-history-fab')
+    // ticket 08 验收第 5 条:FAB 的 `z-index` 通过 tailwind 命名 → 30
+    expect(fab.className).toContain('z-fab')
+    // jsdom 的 getComputedStyle 不实际解析 tailwind 类;但 className 含
+    // `z-fab` 即代表 tailwind 编译后会输出对应 z-index。这是 tailwind 命
+    // 名约定的契约保证。
+
+    // 点开面板后断言面板 className 含 `z-panel`(对齐 ticket 08 新约定)
+    await userEvent.click(screen.getByTestId('analysis-history-fab'))
+    await waitFor(() => {
+      expect(screen.getByTestId('analysis-history-panel')).toBeInTheDocument()
+    })
+    const panel = screen.getByTestId('analysis-history-panel')
+    expect(panel.className).toContain('z-panel')
+  })
+})

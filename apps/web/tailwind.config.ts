@@ -110,16 +110,22 @@ const config: Config = {
         mono: 'var(--font-mono)',
       },
       /**
-       * 浮动层 z-index 命名(analyzing-fab 规划包 ticket 01 · ADR-0022 决策 88)
-       * - fab: 浮动召唤按钮(FAB)—— 比 statusbar(z-50)低,比正文高
-       * - fab-panel: FAB 展开的浮动面板—— 比 FAB 高
-       * - overlay: 二次确认 / 全屏遮罩(如删除 Run 对话框,继续用 z-50)
-       *
-       * 避免在组件里直接写 z-[30] / z-[40] 这类魔数,统一从命名取。
+       * 浮动层 z-index 命名(analyzing-fab 规划包 ticket 01 / ticket 08 ·
+       * ADR-0022 决策 88)。统一从命名取,避免组件里散落 z-[30] / z-[40]
+       * 这类魔数:
+       * - fab: 浮动召唤按钮(FAB)。比正文高,比面板 / 弹层低。
+       * - panel: FAB / Cmd+K 召唤的浮动面板(历史分析面板、命令面板等)。
+       *   比 FAB 高,比全屏遮罩低。
+       * - overlay: 二次确认 / 全屏遮罩(删除 Run 对话框、Cmd+K 的 dim 蒙层
+       *   等)。比面板高,比真正模态低。
+       * - modal: 真正模态(若未来引入 full-screen 阻断型弹窗)。保留位以避
+       *   免后续 ticket 临时发明魔数。
        */
       zIndex: {
         fab: '30',
-        'fab-panel': '40',
+        panel: '40',
+        overlay: '50',
+        modal: '60',
       },
     },
   },
