@@ -46,8 +46,8 @@ import {
 } from '@/lib/analysis-run-start'
 import { AnalysisIssueList } from './analysis-issue-list'
 import { AnalysisRunLogPanel } from './analysis-run-log-panel'
+import { AnalysisHistoryFabPanel } from './analysis-history-fab-panel'
 import {
-  AnalysisHistoryDrawer,
   AnalysisDeleteRunDialog,
 } from './analysis-history-drawer'
 import {
@@ -405,9 +405,12 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
     return new Map(data.availableSkills.map((s) => [s.name, s.description]))
   }, [data.availableSkills])
 
-  const historyDrawerElement = useMemo(
+  // 浮动召唤按钮 + 浮动面板(analyzing-fab ticket 01 · ADR-0022)
+  // 替代旧 320px 永久列;FAB / 面板在 DesktopLayout / NarrowLayout 内
+  // absolute 定位到主区右上角
+  const historyFabPanelElement = useMemo(
     () => (
-      <AnalysisHistoryDrawer
+      <AnalysisHistoryFabPanel
         runs={runs}
         activeRunId={currentRunId}
         onSelect={handleSelectRun}
@@ -669,7 +672,7 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
             setLogPanelUserToggle={setLogPanelUserToggle}
             onIssueSourceRefClick={handleIssueSourceRefClick}
             registerIssueResponseFlush={registerIssueResponseFlush}
-            historyDrawer={historyDrawerElement}
+            historyFabPanel={historyFabPanelElement}
           />
         ) : (
           <NarrowLayout
@@ -685,7 +688,7 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
             setLogPanelUserToggle={setLogPanelUserToggle}
             onIssueSourceRefClick={handleIssueSourceRefClick}
             registerIssueResponseFlush={registerIssueResponseFlush}
-            historyDrawer={historyDrawerElement}
+            historyFabPanel={historyFabPanelElement}
           />
         )}
       </div>
@@ -783,7 +786,7 @@ interface LayoutProps {
   setLogPanelUserToggle: (next: boolean | null) => void
   onIssueSourceRefClick: (ref: SharedSourceRef) => void
   registerIssueResponseFlush: (issueId: string, flush: () => Promise<void>) => () => void
-  historyDrawer: React.ReactNode
+  historyFabPanel: React.ReactNode
 }
 
 function DesktopLayout(props: LayoutProps) {
@@ -800,13 +803,13 @@ function DesktopLayout(props: LayoutProps) {
     setLogPanelUserToggle,
     onIssueSourceRefClick,
     registerIssueResponseFlush,
-    historyDrawer,
+    historyFabPanel,
   } = props
   return (
     <div
       data-testid="analyzing-grid"
       data-viewport="desktop"
-      className="relative grid grid-cols-1 lg:grid-cols-[2fr_1fr_320px] gap-5 flex-1 min-h-0 overflow-hidden"
+      className="relative grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-5 flex-1 min-h-0 overflow-hidden"
     >
       <div
         data-testid="analyzing-left-col"
@@ -849,12 +852,7 @@ function DesktopLayout(props: LayoutProps) {
           onToggle={setLogPanelUserToggle}
         />
       </div>
-      <div
-        data-testid="analyzing-history-col"
-        className="flex flex-col min-h-0 overflow-hidden"
-      >
-        {historyDrawer}
-      </div>
+      {historyFabPanel}
     </div>
   )
 }
@@ -873,20 +871,16 @@ function NarrowLayout(props: LayoutProps) {
     setLogPanelUserToggle,
     onIssueSourceRefClick,
     registerIssueResponseFlush,
-    historyDrawer,
+    historyFabPanel,
   } = props
   const [narrowTab, setNarrowTab] = useState<'doc' | 'issues'>('issues')
   return (
     <div
       data-testid="analyzing-narrow"
       data-narrow-tab={narrowTab}
-      className="flex flex-col gap-3 flex-1 min-h-0 overflow-hidden"
+      className="relative flex flex-col gap-3 flex-1 min-h-0 overflow-hidden"
     >
-      {historyDrawer && (
-        <div className="max-h-[200px] flex-shrink-0" data-testid="analyzing-narrow-history">
-          {historyDrawer}
-        </div>
-      )}
+      {historyFabPanel}
       <div
         role="tablist"
         aria-label="ANALYZING 窄视口切换"

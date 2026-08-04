@@ -16,16 +16,14 @@
  *   (本 ticket 不暴露上传/编辑 UI,纯占位 + 升级覆盖)
  */
 
-import { z } from 'zod'
-import { parseMinimalFrontmatter, splitSkillMarkdown } from '@ai-devspace/shared'
+import {
+  AnalysisSkillFrontmatterSchema,
+  parseMinimalFrontmatter,
+  splitSkillMarkdown,
+  type AnalysisSkillFrontmatter,
+} from '@ai-devspace/shared'
 
 /** SKILL.md frontmatter 最小契约(对应 packages/shared/src/analysis-skill.ts) */
-export const AnalysisSkillFrontmatterSchema = z.object({
-  name: z.string().min(1),
-  description: z.string().min(1),
-  version: z.string().regex(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/),
-})
-export type AnalysisSkillFrontmatter = z.infer<typeof AnalysisSkillFrontmatterSchema>
 
 /** 单条内置默认 Skill 的"frontmatter + body"打包形式 */
 export interface BuiltinDefaultSkill {

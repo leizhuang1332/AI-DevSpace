@@ -31,6 +31,31 @@ export const SemVerSchema = z
 export type SemVer = z.infer<typeof SemVerSchema>
 
 // ---------------------------------------------------------------------------
+// AnalysisSkillFrontmatter —— SKILL.md frontmatter 最小契约
+// ---------------------------------------------------------------------------
+
+/**
+ * SKILL.md frontmatter 最小契约(issue 01 · ADR-0021)。
+ *
+ * 与 `AnalysisSkillMeta` 的区别:不含 `is_reserved` —— `is_reserved` 由 Agent
+ * 端按 `RESERVED_ANALYSIS_SKILL_NAMES` 计算注入,不是 SKILL.md 文本字段。
+ *
+ * 复用面:
+ * - Agent 端 `builtin-defaults.ts` 解析内置默认 SKILL.md 字面文本时
+ *   校验 `name` / `description` / `version` 三字段
+ * - 与 `AnalysisSkillMetaSchema` 配套,后者通过 `.extend({ is_reserved })`
+ *   复用本 schema,不重复定义同名字段
+ */
+export const AnalysisSkillFrontmatterSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().min(1),
+  version: SemVerSchema,
+})
+export type AnalysisSkillFrontmatter = z.infer<
+  typeof AnalysisSkillFrontmatterSchema
+>
+
+// ---------------------------------------------------------------------------
 // AnalysisSkillMeta —— 列表接口单条契约
 // ---------------------------------------------------------------------------
 
@@ -43,11 +68,12 @@ export type SemVer = z.infer<typeof SemVerSchema>
  * - `description`:非空功能简介(进 On-arming system prompt 的 1 句描述)
  * - `version`:语义版本,字符串字面形式
  * - `is_reserved`:是否为平台保留名称(决定 UI 是否有"系统"徽章 + 升级覆盖行为)
+ *
+ * 形态继承自 `AnalysisSkillFrontmatterSchema`,通过 extend 叠加
+ * `is_reserved`,保证 frontmatter 校验与 list 校验在 name / description /
+ * version 上**单一真相**。
  */
-export const AnalysisSkillMetaSchema = z.object({
-  name: z.string().min(1),
-  description: z.string().min(1),
-  version: SemVerSchema,
+export const AnalysisSkillMetaSchema = AnalysisSkillFrontmatterSchema.extend({
   is_reserved: z.boolean(),
 })
 export type AnalysisSkillMeta = z.infer<typeof AnalysisSkillMetaSchema>

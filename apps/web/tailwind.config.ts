@@ -109,6 +109,18 @@ const config: Config = {
         sans: 'var(--font-sans)',
         mono: 'var(--font-mono)',
       },
+      /**
+       * 浮动层 z-index 命名(analyzing-fab 规划包 ticket 01 · ADR-0022 决策 88)
+       * - fab: 浮动召唤按钮(FAB)—— 比 statusbar(z-50)低,比正文高
+       * - fab-panel: FAB 展开的浮动面板—— 比 FAB 高
+       * - overlay: 二次确认 / 全屏遮罩(如删除 Run 对话框,继续用 z-50)
+       *
+       * 避免在组件里直接写 z-[30] / z-[40] 这类魔数,统一从命名取。
+       */
+      zIndex: {
+        fab: '30',
+        'fab-panel': '40',
+      },
     },
   },
   plugins: [require('tailwindcss-animate')],

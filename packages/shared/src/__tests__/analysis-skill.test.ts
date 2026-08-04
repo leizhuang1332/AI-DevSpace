@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   SemVerSchema,
+  AnalysisSkillFrontmatterSchema,
   AnalysisSkillMetaSchema,
   AnalysisSkillListResponseSchema,
   AnalysisSkillSelectionResponseSchema,
@@ -30,6 +31,57 @@ describe('SemVerSchema', () => {
     expect(() => SemVerSchema.parse('v1.0.0')).toThrow()
     expect(() => SemVerSchema.parse('1.0.0 ')).toThrow()
     expect(() => SemVerSchema.parse('')).toThrow()
+  })
+})
+
+describe('AnalysisSkillFrontmatterSchema', () => {
+  it('接受有效 frontmatter 三字段', () => {
+    const r = AnalysisSkillFrontmatterSchema.parse({
+      name: 'prd-completeness',
+      description: '检查 PRD 完整性',
+      version: '1.0.0',
+    })
+    expect(r.name).toBe('prd-completeness')
+    expect(r.version).toBe('1.0.0')
+  })
+
+  it('空 description → 拒绝', () => {
+    expect(() =>
+      AnalysisSkillFrontmatterSchema.parse({
+        name: 'foo',
+        description: '',
+        version: '1.0.0',
+      }),
+    ).toThrow()
+  })
+
+  it('空 name → 拒绝', () => {
+    expect(() =>
+      AnalysisSkillFrontmatterSchema.parse({
+        name: '',
+        description: 'd',
+        version: '1.0.0',
+      }),
+    ).toThrow()
+  })
+
+  it('非 semver version → 拒绝', () => {
+    expect(() =>
+      AnalysisSkillFrontmatterSchema.parse({
+        name: 'foo',
+        description: 'd',
+        version: 'abc',
+      }),
+    ).toThrow()
+  })
+
+  it('不含 is_reserved 字段(归 Meta 层加)', () => {
+    const r = AnalysisSkillFrontmatterSchema.parse({
+      name: 'foo',
+      description: 'd',
+      version: '1.0.0',
+    })
+    expect((r as { is_reserved?: unknown }).is_reserved).toBeUndefined()
   })
 })
 
