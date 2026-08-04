@@ -25,7 +25,7 @@
 
 'use client'
 
-import { createContext, useContext, useState, type ReactNode } from 'react'
+import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
 
 /**
  * 当前可识别的浮动面板 key。预留多 panel 扩展位(analyzing-fab ticket 04
@@ -65,7 +65,15 @@ const Ctx = createContext<CtxValue | null>(null)
  */
 export function AnalyzingHistoryFabControllerProvider({ children }: { children: ReactNode }) {
   const [controller, setController] = useState<AnalyzingHistoryFabController | null>(null)
-  const value: CtxValue = { controller, setController }
+  // useMemo 锁住 value 对象引用:只在 `controller` 实际变化时才生成新引用。
+  // 之前每次 Provider render 都重建 value 对象,导致 `useContext(Ctx)` 在消费
+  // 方每次都拿到新引用 —— 与 AnalyzingZone 的 controller 同步 effect 联用时,
+  // 副作用(setController)反作用于自己会触发无限循环("Maximum update depth
+  // exceeded")。
+  const value = useMemo<CtxValue>(
+    () => ({ controller, setController }),
+    [controller],
+  )
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
 

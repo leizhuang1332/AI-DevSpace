@@ -22,7 +22,7 @@
 
 'use client'
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { AnalysisSkillMeta } from '@ai-devspace/shared'
 import {
   writeSelection,
@@ -132,13 +132,21 @@ function List({
 
   // 若 props 变化(SSE 推送 / SSR re-render / 路由切换)→ 重新同步
   // —— 切需求时 selectedSkillName 会变;此 effect 让乐观值也跟着变
-  // (避免 useState 只在首次 mount 捕获旧值)
-  // 注意:useEffect 内 setOptimistic 会触发额外 render,但这是必要同步
-  // (Alternative:用 useReducer + key 重建,但本组件简单,useEffect 足够)
-  if (optimistic !== selectedSkillName && !pending) {
-    // 仅在不写盘时同步;写盘中的乐观值不被外部 props 覆盖
-    setOptimistic(selectedSkillName)
-  }
+  // (避免 useState 只在首次 mount 捕获旧值)。
+  //
+  // 不在 render 期间 setOptimistic:虽然 React 18 在值不变时会 bail out,但
+  // 与父级 router.refresh() / SSEInvalidator 引发的连续 re-render 叠加时
+  // 会触发 "Maximum update depth exceeded"(参考 analyzing-zone 同步 effect
+  // 同类问题的修复)。Effect 里同步语义相同,行为更稳。
+  //
+  // 仅在不写盘时同步;写盘中的乐观值不被外部 props 覆盖(否则用户点选 →
+  // 写盘期间 server 又推回旧值 → 乐观值被擦,写盘成功后 server 返回新值又
+  // 同步,会出现一帧的"选中态消失"视觉抖跳)。
+  useEffect(() => {
+    if (!pending && optimistic !== selectedSkillName) {
+      setOptimistic(selectedSkillName)
+    }
+  }, [selectedSkillName, pending, optimistic])
 
   const handleSelect = useCallback(
     (name: string) => {

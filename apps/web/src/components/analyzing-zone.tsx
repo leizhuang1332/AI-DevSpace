@@ -160,12 +160,23 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   const isDesktop = useMediaQuery('(min-width: 1024px)')
 
   // Skill 选择(issue 01 · ADR-0021)
+  // 与 `data.selectedSkillName` 同步的策略:**只在 effect 里跑**,不在 render
+  // 期间 setState。
+  // - render 期间 setState 是反模式,虽然 React 18 在值不变时会 bail out,但
+  //   与父级 router.refresh() / SSEInvalidator 引发的连续 re-render 叠加
+  //   时会触发 "Maximum update depth exceeded"(issue 01 当时合入时未踩到,
+  //   本次因 sibling controller 修复一起治理)。
+  // - startState !== 'idle' 时保留用户本地选择(避免用户点了「开始分析」后,
+  //   父组件因为 SSE 推回 server 状态而把乐观值擦掉,造成「按了按钮但 UI
+  //   又跳回旧 Skill」的视觉抖跳)。
   const [currentSelectedSkill, setCurrentSelectedSkill] = useState<string>(
     data.selectedSkillName,
   )
-  if (currentSelectedSkill !== data.selectedSkillName && startState === 'idle') {
-    setCurrentSelectedSkill(data.selectedSkillName)
-  }
+  useEffect(() => {
+    if (startState === 'idle' && currentSelectedSkill !== data.selectedSkillName) {
+      setCurrentSelectedSkill(data.selectedSkillName)
+    }
+  }, [data.selectedSkillName, startState, currentSelectedSkill])
 
   // Analysis Run 状态(issue 02 · ADR-0021)
   const [runs, setRuns] = useState<AnalysisRunMeta[]>([...data.runs])
@@ -214,27 +225,31 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   //   disabled,符合 PRD「无 req 上下文时 disabled」契约。
   // - useEffect cleanup 兜底:即使 React 18 在严格模式下双 mount,clear
   //   也会把上一次注册的 instance 清掉,避免悬挂引用。
+  //
+  // 关键:**不要**把 `fabControllerCtx` 放进 deps。Provider 的 value 对象每次
+  // render 都会重建(它包了 `controller` + `setController`,后者稳定但 value
+  // 不是),所以 deps 含它会让 effect 副作用(setController)反作用于自己:
+  // setController → Provider 重建 value → deps 变化 → cleanup setController(null)
+  // → Provider 又重建 value → effect 再跑 → 死循环("Maximum update depth
+  // exceeded")。把 setController 收到 ref 里只关心真正可能变的字段。
   // ──────────────────────────────────────────────────────────────────────
   const fabControllerCtx = useAnalyzingHistoryFabController()
+  const setControllerRef = useRef(fabControllerCtx?.setController ?? null)
+  setControllerRef.current = fabControllerCtx?.setController ?? null
   useEffect(() => {
-    if (!fabControllerCtx) return
-    const controllerValue = {
+    const setController = setControllerRef.current
+    if (!setController) return
+    setController({
       requirementId: data.requirementId,
       runCount: runs.length,
       isOpen: isHistoryPanelOpen,
       open: () => setIsHistoryPanelOpenRef.current(true),
       close: () => setIsHistoryPanelOpenRef.current(false),
-    }
-    fabControllerCtx.setController(controllerValue)
+    })
     return () => {
-      fabControllerCtx.setController(null)
+      setController(null)
     }
-  }, [
-    fabControllerCtx,
-    data.requirementId,
-    runs.length,
-    isHistoryPanelOpen,
-  ])
+  }, [data.requirementId, runs.length, isHistoryPanelOpen])
 
   // 文档阅读器联动(issue 03 · ADR-0017 D4)
   type PulseRefState =
