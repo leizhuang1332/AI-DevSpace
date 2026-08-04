@@ -1,0 +1,20 @@
+apps/web/src/components/analyzing-zone.tsx
+  s_1779c681a6d680::t_a19fc5ae0e4475 39
+  s_1779c681a6d680::t_78d05010058764 759-775
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "1e39a943a46062149c76cb6d2813df2517d8d8c4",
+  "prompts": {},
+  "sessions": {
+    "s_1779c681a6d680": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "837be284-6e9d-4252-b974-dd49544bea07",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
