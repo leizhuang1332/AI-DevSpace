@@ -387,6 +387,11 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
     setCurrentRunLog([])
     setLogPanelUserToggle(null)
     setStartState('running')
+    // analyzing-fab ticket 05 · ADR-0022 决策 96~98:启动新 Run 成功后强制
+    // 收起 FAB 面板(state 留在 AnalyzingContent 内,unmount → 自动重置)。
+    // - 失败路径不碰该 state(只 pushToast),保「若已开则仍开,若已关则仍
+    //   关」契约。
+    setIsHistoryPanelOpen(false)
   }, [
     data.requirementId,
     data.availableSkills.length,

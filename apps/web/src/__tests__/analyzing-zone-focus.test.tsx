@@ -1249,3 +1249,394 @@ describe('AnalyzingZone · 删除 UX 重设(ticket 03 · ADR-0022 D5.1)', () => 
     expect(document.querySelector('[data-run-id="run-current"]')).toBeNull()
   })
 })
+
+// ===========================================================================
+// 切上下文强制收起(analyzing-fab ticket 05 · ADR-0022 决策 96~98)
+//
+// 决策 24「克制,在场」的「克制」语义在本 ticket 落地:
+//   - FAB 面板开合 state 不持久化(完全不写 cookie / localStorage /
+//     sessionStorage),仅由 AnalyzingContent 内的 useState 持有
+//   - 切到其他 Requirement → AnalyzingContent 因 key/路由变化
+//     unmount → remount → 新 mount 时 isHistoryPanelOpen=false(默认)
+//   - 切到其他工位 → 沿用 unmount → remount 机制,同上
+//   - 启动新 Analysis Run(handleStart 成功路径)→ FAB 强制收起 + 焦点
+//     切新 Run,沿用既有 userManuallySwitchedRef = false 重置
+//   - 启动新 Run 失败的 toast 提示不影响 FAB 面板开合(若开则仍开,
+//     若关则仍关)
+// ===========================================================================
+
+/**
+ * ticket 05 用的扩展 fixture —— 注入至少一个可用 Skill,让父组件
+ * `handleStart` 通过前置校验(data.availableSkills 非空 +
+ * `currentSelectedSkill` 已选,后者取首项)。
+ */
+function buildFabStartData(
+  runs: AnalysisRunMeta[],
+  requirementId = 'req-focus',
+  skills: AnalysisSkillMeta[] = [buildSkill('prd-completeness', '检查 PRD 完整性')],
+): AnalyzingData {
+  return {
+    ...emptyAnalyzing(requirementId),
+    empty: false,
+    prdMarkdown: '# 测试 PRD\n',
+    runs,
+    availableSkills: skills,
+    selectedSkillName: skills[0]?.name ?? '',
+  }
+}
+
+/**
+ * 让 mockFetch 对 POST `/analysis/start` 返一条「成功」响应。其它 URL
+ * 沿用 jest 默认 { ok: true, status: 204, json: ... },不打扰既有用例。
+ */
+function queueAnalysisStartSuccess(
+  runId: string,
+  requirementId: string,
+  skillName: string,
+  createdAt: string,
+): void {
+  mockFetch.mockResolvedValueOnce({
+    ok: true,
+    status: 201,
+    json: async () => ({
+      run_id: runId,
+      requirement_id: requirementId,
+      skill_name: skillName,
+      created_at: createdAt,
+      status: 'running',
+    }),
+  })
+}
+
+/**
+ * 让 mockFetch 对 POST `/analysis/start` 返一条「失败」响应(与
+ * `agent-client.AgentError` 兼容的 4xx)。状态码与 body 由调用方决定,
+ * 默认 409 + `analysis_run_already_running`,与 issue 02 既有契约一致。
+ */
+function queueAnalysisStartFailure(
+  status = 409,
+  body: { error: string } = { error: 'analysis_run_already_running' },
+): void {
+  mockFetch.mockResolvedValueOnce({
+    ok: false,
+    status,
+    json: async () => body,
+  })
+}
+
+describe('AnalyzingZone · 切上下文强制收起(analyzing-fab ticket 05 · 决策 96~98)', () => {
+  /**
+   * 内层 wrapper —— 在 React 树外再压一层 `<AnalyzingZone key=...>`,模拟
+   * 「父路由层 key 因 `requirementId` 变化而重置」的真实场景。React 看到
+   * key 变化 → unmount → remount,父组件 `AnalyzingContent` 内的
+   * `useState<boolean>(false)` 自然回到初始值。
+   *
+   * 直接 `rerender(<AnalyzingZone data={...} />)` 不会重置 state(state 由
+   * 同一个 component instance 持有),所以 ticket 05 的「unmount → remount」
+   * 契约必须用 key 模拟。
+   */
+  function AnalyzingZoneByRequirement({
+    requirementId,
+    runs,
+  }: {
+    requirementId: string
+    runs: AnalysisRunMeta[]
+  }) {
+    return <AnalyzingZone key={requirementId} data={buildFabStartData(runs, requirementId)} />
+  }
+
+  it('切到其他 Requirement(unmount → remount)→ 新 mount 的 FAB 默认折叠', () => {
+    // ticket 05 验收第 2 条:`AnalyzingZone` 父组件因 key/路由变化 unmount
+    // → remount → 新 mount 时 `isHistoryPanelOpen` 从 `useState<boolean>(false)`
+    // 重置为默认折叠。本测试通过 key prop 强制 remount 模拟这一场景。
+    const runsReqA: AnalysisRunMeta[] = [
+      buildRun({ run_id: 'run-a', created_at: '2026-08-01T08:00:00.000Z' }),
+      buildRun({ run_id: 'run-b', created_at: '2026-08-01T10:00:00.000Z' }),
+    ]
+    const runsReqB: AnalysisRunMeta[] = [
+      buildRun({ run_id: 'run-x', created_at: '2026-08-01T11:00:00.000Z' }),
+    ]
+    const { rerender } = render(
+      <AnalyzingZoneByRequirement requirementId="req-A" runs={runsReqA} />,
+    )
+
+    // req-A 阶段:确认 FAB 默认折叠 + aria-expanded=false + 无 panel
+    const fabA = screen.getByTestId('analysis-history-fab')
+    expect(fabA.getAttribute('aria-expanded')).toBe('false')
+    expect(fabA.getAttribute('data-active-run-id')).toBe('run-b')
+    expect(screen.queryByTestId('analysis-history-panel')).toBeNull()
+
+    // 切到 req-B:key 变化 → unmount → remount,`isHistoryPanelOpen` 重置为 false
+    rerender(<AnalyzingZoneByRequirement requirementId="req-B" runs={runsReqB} />)
+
+    // ticket 05 验收第 2 / 5 条:新 mount 的 FAB 默认折叠
+    const fabB = screen.getByTestId('analysis-history-fab')
+    expect(fabB.getAttribute('aria-expanded')).toBe('false')
+    expect(fabB.getAttribute('data-active-run-id')).toBe('run-x')
+    expect(screen.queryByTestId('analysis-history-panel')).toBeNull()
+  })
+
+  it('切到其他 Requirement 之前打开的 panel,在新 mount 后不再保留(state 不持久化)', async () => {
+    // ticket 05 验收第 1 条:FAB 面板开合 state 不持久化。切 Requirement
+    // 之前手动打开的 panel,不应在新 Requirement 的 mount 上仍打开。
+    const runsA: AnalysisRunMeta[] = [
+      buildRun({ run_id: 'run-a', created_at: '2026-08-01T08:00:00.000Z' }),
+    ]
+    const { rerender } = render(
+      <AnalyzingZoneByRequirement requirementId="req-A" runs={runsA} />,
+    )
+
+    // req-A 阶段打开 panel(用户操作历史语境)
+    await userEvent.click(screen.getByTestId('analysis-history-fab'))
+    await screen.findByTestId('analysis-history-panel')
+    expect(screen.getByTestId('analysis-history-fab').getAttribute('aria-expanded')).toBe(
+      'true',
+    )
+
+    // 切到 req-B(不同 requirementId):key 变 → unmount → remount
+    const runsB: AnalysisRunMeta[] = [
+      buildRun({ run_id: 'run-b1', created_at: '2026-08-01T11:00:00.000Z' }),
+    ]
+    rerender(<AnalyzingZoneByRequirement requirementId="req-B" runs={runsB} />)
+
+    // ticket 05 验收第 1 条:state 不持久化 —— 新 mount 上 panel 默认关闭
+    expect(screen.getByTestId('analysis-history-fab').getAttribute('aria-expanded')).toBe(
+      'false',
+    )
+    expect(screen.queryByTestId('analysis-history-panel')).toBeNull()
+  })
+
+  it('启动新 Run(handleStart 成功)→ FAB 收起 + 焦点切新 Run', async () => {
+    // ticket 05 验收第 4 条:启动新 Run 成功 → FAB 面板强制收起 +
+    // 焦点切到新 Run(沿用既有 userManuallySwitchedRef = false 重置)。
+    // - 不打开 panel —— button click 触发 mousedown 关闭逻辑(无论成功
+    //   失败都会关闭),故此测试简化为「panel 默认折叠 → 启动 → 仍折叠」
+    //   观察。
+    // - 焦点切到 run-fresh + count 推进到 3 是 `handleStart` 既有行为,
+    //   ticket 05 顺带对焦点切新 Run 一并断言,确保本 ticket 联动的
+    //   `userManuallySwitchedRef = false` 与 `setCurrentRunId` 没被破坏。
+    const runs: AnalysisRunMeta[] = [
+      buildRun({ run_id: 'run-old', created_at: '2026-08-01T08:00:00.000Z' }),
+      buildRun({ run_id: 'run-cur', created_at: '2026-08-01T10:00:00.000Z' }),
+    ]
+    render(<AnalyzingZone data={buildFabStartData(runs)} />)
+
+    // ticket 05 起始状态:panel 默认折叠
+    expect(screen.getByTestId('analysis-history-fab').getAttribute('aria-expanded')).toBe(
+      'false',
+    )
+
+    // 让 mockFetch 对 POST /analysis/start 返成功;其他 URL 沿用 jest 默认
+    queueAnalysisStartSuccess(
+      'run-fresh',
+      'req-focus',
+      'prd-completeness',
+      '2026-08-01T12:00:00.000Z',
+    )
+
+    // 点 [▶ 开始分析]:handleStart 成功路径应乐观追加新 Run + 切到 run-fresh
+    await userEvent.click(screen.getByTestId('analysis-run-start-btn'))
+
+    // 等 microtask 让 fetch + state 提交
+    await act(async () => {
+      await new Promise((r) => setImmediate(r))
+    })
+
+    // ticket 05 验收第 4 条:handleStart 成功后 FAB 面板仍折叠
+    // (默认 false + outside-click + 我新加的 setIsHistoryPanelOpen(false)
+    // 共同兜底 —— 但最重要的 contract 是「成功路径不会让 panel 从 false
+    // 变成 true」,改回 false 是失败兜底)。
+    expect(screen.getByTestId('analysis-history-fab').getAttribute('aria-expanded')).toBe(
+      'false',
+    )
+    expect(screen.queryByTestId('analysis-history-panel')).toBeNull()
+
+    // 焦点切到新 Run
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('analysis-history-fab').getAttribute('data-active-run-id'),
+      ).toBe('run-fresh')
+    })
+
+    // data-run-count 从 2 → 3
+    expect(screen.getByTestId('analysis-history-fab').getAttribute('data-run-count')).toBe(
+      '3',
+    )
+  })
+
+  it('启动新 Run 成功 → 从「FAB 召唤出 panel」的状态点 [▶ 开始分析] → panel 被强制收起', async () => {
+    // ticket 05 验收第 4 条反向:用户先点 FAB 召唤出 panel(在历史语境里)→
+    // 在 panel 打开的当口点 [▶ 开始分析]。此时 panel 上的 outside-click
+    // handler 已经把 panel 关掉(ticket 01 的关闭方式二),handleStart 成功
+    // 路径的 `setIsHistoryPanelOpen(false)` 是「保证最终状态 = false」的
+    // 兜底 —— 本断言主要观察:整个流程走完后 panel 一定是关的 + 焦点切到
+    // 新 Run。这条把 outside-click + ticket 05 新加 reset 的双保险合在
+    // 一起验证。
+    const runs: AnalysisRunMeta[] = [
+      buildRun({ run_id: 'run-old', created_at: '2026-08-01T08:00:00.000Z' }),
+      buildRun({ run_id: 'run-cur', created_at: '2026-08-01T10:00:00.000Z' }),
+    ]
+    render(<AnalyzingZone data={buildFabStartData(runs)} />)
+    await openHistoryPanel()
+
+    expect(screen.getByTestId('analysis-history-fab').getAttribute('aria-expanded')).toBe(
+      'true',
+    )
+
+    queueAnalysisStartSuccess(
+      'run-fresh',
+      'req-focus',
+      'prd-completeness',
+      '2026-08-01T12:00:00.000Z',
+    )
+
+    // 在 panel 打开的当口点 [▶ 开始分析](在 panel/fab 外 → 触发 outside-click 关闭)
+    await userEvent.click(screen.getByTestId('analysis-run-start-btn'))
+
+    // 等 microtask
+    await act(async () => {
+      await new Promise((r) => setImmediate(r))
+    })
+
+    // 最终:panel 仍关 + 焦点切到新 Run + 计数 +1
+    expect(screen.getByTestId('analysis-history-fab').getAttribute('aria-expanded')).toBe(
+      'false',
+    )
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('analysis-history-fab').getAttribute('data-active-run-id'),
+      ).toBe('run-fresh')
+    })
+    expect(screen.getByTestId('analysis-history-fab').getAttribute('data-run-count')).toBe(
+      '3',
+    )
+  })
+
+  it('启动新 Run 失败 → FAB 面板开合不受影响(只弹 toast)', async () => {
+    // ticket 05 验收第 5 条:启动失败 → FAB 面板开合不受影响。
+    // 失败路径不调用 `setIsHistoryPanelOpen`,所以 handleStart 失败不
+    // 是「关 panel」也不是「开 panel」的诱因。本测试覆盖「面板已关 →
+    // 失败后面板仍关」(「若面板已关,保持关」half)。
+    //
+    // 关于「面板已开 → 失败后面板仍开」半句:在真实 UX 里 [▶ 开始分析]
+    // 按钮在 panel 外,无论成功失败都会触发 outside-click mousedown 关闭
+    // panel;但 ticket 05 接受契约是「handleStart 失败路径不写 panel
+    // state」,本条通过对失败路径上「count + activeRunId 都没动」的副
+    // 断言间接守护。
+    const runs: AnalysisRunMeta[] = [
+      buildRun({ run_id: 'run-old', created_at: '2026-08-01T08:00:00.000Z' }),
+      buildRun({ run_id: 'run-cur', created_at: '2026-08-01T10:00:00.000Z' }),
+    ]
+    render(<AnalyzingZone data={buildFabStartData(runs)} />)
+
+    // 起始:panel = 关(count = 2,active = run-cur)
+    expect(screen.getByTestId('analysis-history-fab').getAttribute('aria-expanded')).toBe(
+      'false',
+    )
+    expect(
+      screen.getByTestId('analysis-history-fab').getAttribute('data-active-run-id'),
+    ).toBe('run-cur')
+    expect(screen.getByTestId('analysis-history-fab').getAttribute('data-run-count')).toBe('2')
+
+    // 让 start 失败:409 + analysis_run_already_running
+    queueAnalysisStartFailure()
+
+    // 点 [▶ 开始分析]:handleStart 应 catch AgentError → pushToast → return
+    await userEvent.click(screen.getByTestId('analysis-run-start-btn'))
+
+    // 等 microtask 让 fetch + state 提交
+    await act(async () => {
+      await new Promise((r) => setImmediate(r))
+    })
+
+    // ticket 05 验收第 5 条「若面板已关,保持关」:panel 仍关
+    expect(screen.getByTestId('analysis-history-fab').getAttribute('aria-expanded')).toBe(
+      'false',
+    )
+    expect(screen.queryByTestId('analysis-history-panel')).toBeNull()
+
+    // 焦点不变(还是 run-cur,handleStart 失败没切 Run)
+    expect(
+      screen.getByTestId('analysis-history-fab').getAttribute('data-active-run-id'),
+    ).toBe('run-cur')
+
+    // data-run-count 不变(2)
+    expect(screen.getByTestId('analysis-history-fab').getAttribute('data-run-count')).toBe(
+      '2',
+    )
+
+    // toast 已弹(由 pushToast 写入,这里只断言 toast-host 出现)
+    expect(screen.getByTestId('toast-host')).toBeTruthy()
+
+    // 等任何潜在 toast 后再断言 button 回到 idle(spinner 消失,文案「开始分析」)
+    await waitFor(() => {
+      expect(
+        screen.getByTestId('analysis-run-start-btn').getAttribute('data-state'),
+      ).toBe('idle')
+    })
+  })
+
+  it('FAB 面板开合 state 不写 cookie / localStorage / sessionStorage', async () => {
+    // ticket 05 验收第 1 条的「完全不持久化」语义。在 jsdom 内 stub
+    // localStorage.setItem / sessionStorage.setItem / document.cookie
+    // setter,任何 panel 开合都不应触发这些 sink。
+    const localSet = vi.fn()
+    const sessionSet = vi.fn()
+    const originalLS = window.localStorage
+    const originalSS = window.sessionStorage
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: { setItem: localSet, getItem: () => null, removeItem: vi.fn() },
+    })
+    Object.defineProperty(window, 'sessionStorage', {
+      configurable: true,
+      value: { setItem: sessionSet, getItem: () => null, removeItem: vi.fn() },
+    })
+    // cookie setter 用 property descriptor 拦截
+    const originalCookieDesc = Object.getOwnPropertyDescriptor(document, 'cookie')
+    let cookieWriteAttempts = 0
+    Object.defineProperty(document, 'cookie', {
+      configurable: true,
+      get() {
+        return ''
+      },
+      set() {
+        cookieWriteAttempts++
+      },
+    })
+
+    try {
+      const runs: AnalysisRunMeta[] = [
+        buildRun({ run_id: 'run-1', created_at: '2026-08-01T08:00:00.000Z' }),
+      ]
+      render(<AnalyzingZone data={buildFabStartData(runs)} />)
+
+      // 1) 打开 panel
+      await userEvent.click(screen.getByTestId('analysis-history-fab'))
+      await screen.findByTestId('analysis-history-panel')
+      // 2) 关闭 panel
+      await userEvent.click(screen.getByTestId('analysis-history-panel-close'))
+      await waitFor(() => {
+        expect(screen.queryByTestId('analysis-history-panel')).toBeNull()
+      })
+
+      // ticket 05 验收第 1 条:任何 panel 操作都不应触发持久化 sink
+      expect(localSet).not.toHaveBeenCalled()
+      expect(sessionSet).not.toHaveBeenCalled()
+      expect(cookieWriteAttempts).toBe(0)
+    } finally {
+      // restore
+      Object.defineProperty(window, 'localStorage', {
+        configurable: true,
+        value: originalLS,
+      })
+      Object.defineProperty(window, 'sessionStorage', {
+        configurable: true,
+        value: originalSS,
+      })
+      if (originalCookieDesc) {
+        Object.defineProperty(document, 'cookie', originalCookieDesc)
+      }
+    }
+  })
+})
