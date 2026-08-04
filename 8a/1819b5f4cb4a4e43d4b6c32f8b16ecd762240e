@@ -1,0 +1,26 @@
+apps/web/src/components/analyzing-history-fab-controller.tsx
+  s_dae6d8f8a105ab::t_85061d5d963c14 28
+  s_dae6d8f8a105ab::t_06cb923a376b02 68-76
+apps/web/src/components/analysis-skill-selector.tsx
+  s_dae6d8f8a105ab::t_24bf3174aa9c6d 135-149
+  s_dae6d8f8a105ab::t_5c40fde2db4cbf 25
+apps/web/src/components/analyzing-zone.tsx
+  s_dae6d8f8a105ab::t_755db7ee49e5b9 163-171,175-179
+  s_dae6d8f8a105ab::t_eb1f3bba4dc042 228-234,237-238,240-242,248,250,252
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "8a1819b5f4cb4a4e43d4b6c32f8b16ecd762240e",
+  "prompts": {},
+  "sessions": {
+    "s_dae6d8f8a105ab": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6ede4b32-ecd6-4c55-9a45-43bd48017f50",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
