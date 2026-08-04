@@ -36,6 +36,7 @@ import {
   emptyAnalyzing,
   type AnalyzingData,
 } from '@/lib/analyzing'
+import { sharedSourceRefToWebRef } from './analysis-issue-list'
 import type { AnalysisIssue, AnalysisLogEntry, AnalysisRunMeta } from '@ai-devspace/shared'
 import type { SourceRef as SharedSourceRef } from '@ai-devspace/shared'
 import { useMediaQuery } from '@/lib/use-media-query'
@@ -755,11 +756,23 @@ function AnalyzingContent({ data }: { data: AnalyzingData }) {
   )
 
   // 当前 Run 已收集的 SourceRef(用于 DocumentReaderPane 高亮)
-  const sourceRefs = useMemo(
-    () =>
-      currentRunIssues.flatMap((issue) => issue.source_refs as readonly unknown[]),
-    [currentRunIssues],
-  )
+  // - shared SourceRef 用 `kind: 'requirement'` 等(参见 packages/shared),
+  //   而 `collectCitationRefs` 期望 web 端的 `kind: 'prd'` / `'aux'` / `'asset'`。
+  //   在 flatMap 阶段就通过 `sharedSourceRefToWebRef` 转好,避免 requirement
+  //   refs 在 collectCitationRefs 里被静默丢弃(issue 03 联动 → no mark →
+  //   scrollIntoView 找不到目标,见 analyzing-issue-click 集成测试新 case)。
+  // - `repository` kind 返回 null,过滤掉(本期不在阅读器内,等
+  //   isSourceRefMissing 的契约)。
+  const sourceRefs = useMemo(() => {
+    const out: Array<NonNullable<ReturnType<typeof sharedSourceRefToWebRef>>> = []
+    for (const issue of currentRunIssues) {
+      for (const ref of issue.source_refs) {
+        const webRef = sharedSourceRefToWebRef(ref)
+        if (webRef) out.push(webRef)
+      }
+    }
+    return out
+  }, [currentRunIssues])
   const citationRefs = useMemo(() => collectCitationRefs(sourceRefs as never), [sourceRefs])
   const citationCounts = useMemo(() => countCitationsByDoc(citationRefs), [citationRefs])
 
