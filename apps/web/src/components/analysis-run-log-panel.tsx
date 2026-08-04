@@ -189,7 +189,7 @@ export function AnalysisRunLogPanel({
             {expanded ? '▼' : '▶'}
           </span>
           <span aria-hidden>📜</span>
-          <span>Run Log</span>
+          <span>Log</span>
           <span
             data-testid="analysis-run-log-counts"
             className="font-mono text-xs text-text-3 ml-1"
