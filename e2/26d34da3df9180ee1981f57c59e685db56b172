@@ -1,0 +1,25 @@
+apps/web/tailwind.config.ts
+  s_2c37ffbdc465d0::t_cff6a4bf814ec2 113-122,126-128
+apps/web/src/__tests__/analyzing-zone-focus.test.tsx
+  s_2c37ffbdc465d0::t_9c284c638f1267 2154-2171,2173-2174,2184-2187
+  s_2c37ffbdc465d0::t_c4da75ec7b6460 2098-2153,2172,2175-2183,2188-2212
+apps/web/src/components/analysis-history-fab-panel.tsx
+  s_2c37ffbdc465d0::t_a6f41c7c9afeaf 110,112-118
+  s_2c37ffbdc465d0::t_f8acef21d376be 225
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "e226d34da3df9180ee1981f57c59e685db56b172",
+  "prompts": {},
+  "sessions": {
+    "s_2c37ffbdc465d0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cc8e66f2-4c42-4a11-8447-a7e23892095e",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
