@@ -131,7 +131,7 @@ export function AnalysisHistoryDrawer({
 // 单行 Run
 // ---------------------------------------------------------------------------
 
-interface HistoryRowProps {
+export interface HistoryRowProps {
   run: AnalysisRunMeta
   active: boolean
   skillDescription?: string
@@ -139,7 +139,12 @@ interface HistoryRowProps {
   onRequestDelete: (runId: string) => void
 }
 
-function HistoryRow({
+/**
+ * 单行 Run(供 `AnalysisHistoryFabPanel` 复用,见 analyzing-fab ticket 01 / 02)。
+ *
+ * 暂以"export"暴露给同包组件使用,本文件其余本体未动。
+ */
+export function HistoryRow({
   run,
   active,
   skillDescription,
@@ -155,6 +160,7 @@ function HistoryRow({
       data-run-id={run.run_id}
       data-run-status={run.status}
       data-active={active ? 'true' : 'false'}
+      aria-current={active ? 'true' : undefined}
       className={`border-b border-border last:border-b-0 transition-colors ${
         active ? 'bg-brand-50/40' : 'hover:bg-bg-subtle'
       }`}
