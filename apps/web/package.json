@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3333",
-    "build": "next build",
+    "build": "cross-env AIDEVSPACE_CONFIG_PATH=$INIT_CWD/.aidevspace/config.yaml next build",
     "start": "next start -p 3333",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -24,6 +24,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.49.0",
     "@testing-library/jest-dom": "^6.6.0",
     "@testing-library/react": "^16.0.0",
     "@testing-library/user-event": "^14.5.0",
@@ -31,8 +32,8 @@
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
-    "@playwright/test": "^1.49.0",
     "autoprefixer": "^10.5.2",
+    "cross-env": "^10.1.0",
     "jsdom": "^25.0.0",
     "postcss": "^8.5.16",
     "tailwindcss": "^3.4",

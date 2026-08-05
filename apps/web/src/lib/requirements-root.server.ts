@@ -43,19 +43,47 @@
  *   3. fallback 顺序跟后端一致(env 在 config 之后,默认在 env 之后)
  */
 
-import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import { parseFlatMap, readYamlFileOrNull } from './yaml.server'
 
 // ---------------------------------------------------------------------------
-// 常量
+// 路径解析
 // ---------------------------------------------------------------------------
 
 /**
- * 默认 config 路径:`~/.aidevspace/config.yaml`(后端配置入口)。
+ * 默认 config 路径解析(`~/.aidevspace/config.yaml`,可被 env / option 覆盖)。
+ *
+ * 根治背景(ticket:next-build-homedir-fix):
+ * - Next.js `@vercel/nft` 在 `next build` 期间会**主动 glob 配置路径所在目录**
+ *   找相关文件。如果路径里包含 `~` 前缀或 `os.homedir()` 的结果,NFT 会用
+ *   `validatePath` 把它 expand 成 `${homedir}` 下的绝对路径,然后 emit 一个递归
+ *   glob(`${homedir}` 加递归通配)在 Windows 下这个 glob 撞到 XP 遗留路径
+ *   (`My Documents`)或 JetBrains IDE socket 文件时 EPERM/EACCES,build abort
+ *   (glob strict:true)。
+ * - 本文件**完全不 import `node:os`**(包括 `homedir()`)。`process.env.HOME`
+ *   / `USERPROFILE` 在 NFT 静态分析期值不可知 → NFT 不会主动 glob 它们。
+ *   运行时 dev shell 自动有 `HOME`,Windows cmd 自动有 `USERPROFILE`,无需用户
+ *   显式设。
+ *
+ * 短路链:
+ * 1. `process.env.AIDEVSPACE_CONFIG_PATH` 存在且 `.length > 0` 且 trim 非空
+ *    → 直接返回(env 由 build script 注入,production 部署可显式覆盖)
+ * 2. 否则 → `join($HOME, '.aidevspace', 'config.yaml')`(dev fallback,env 不可
+ *    推断 → NFT 安全)
+ *
+ * 空字符串 / 全空白视为未设,走 fallback。
+ *
  * 可被 `options.configPath` 覆盖(主要为测试方便注入 fixture)。
  */
-export const DEFAULT_CONFIG_PATH = join(homedir(), '.aidevspace', 'config.yaml')
+export function getDefaultConfigPath(): string {
+  const fromEnv = process.env.AIDEVSPACE_CONFIG_PATH
+  if (fromEnv !== undefined && fromEnv.length > 0 && fromEnv.trim().length > 0) {
+    return fromEnv
+  }
+  // 走 env 而非 `os.homedir()`,避开 NFT 的 homedir scan —— 见函数注释
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? ''
+  return join(home, '.aidevspace', 'config.yaml')
+}
 
 // ---------------------------------------------------------------------------
 // 公开 API
@@ -84,7 +112,7 @@ export interface ResolveRequirementsRootOptions {
 export function resolveRequirementsRoot(
   options: ResolveRequirementsRootOptions = {},
 ): string {
-  const configPath = options.configPath ?? DEFAULT_CONFIG_PATH
+  const configPath = options.configPath ?? getDefaultConfigPath()
 
   // 第 1 层:config.yaml + workspaceRoot
   const fromConfig = readWorkspaceRootFromConfig(configPath)
@@ -101,8 +129,12 @@ export function resolveRequirementsRoot(
 /**
  * 把 `~` 开头路径展开为绝对路径(对齐后端 `defaultLogPath` 的 homedir 拼接模式)。
  *
- * - `~` 单独 → `homedir()`
- * - `~/foo` → `join(homedir(), 'foo')`
+ * 不调 `os.homedir()` —— 走 `process.env.HOME` / `USERPROFILE`,避开 NFT 在
+ * `next build` 期间对家目录的递归 glob(见 `getDefaultConfigPath` 注释里的
+ * 根治背景)。
+ *
+ * - `~` 单独 → `$HOME`(env 不可推断 → NFT 安全)
+ * - `~/foo` → `$HOME/foo`
  * - 其他(`~~xxx` / 绝对路径 / 相对路径)→ 原样返回
  *
  * @example
@@ -110,8 +142,15 @@ export function resolveRequirementsRoot(
  * expandHome('/tmp/fake-root') // → '/tmp/fake-root'
  */
 export function expandHome(s: string): string {
-  if (s === '~') return homedir()
-  if (s.startsWith('~/')) return join(homedir(), s.slice(2))
+  if (s === '~') {
+    return process.env.HOME ?? process.env.USERPROFILE ?? ''
+  }
+  if (s.startsWith('~/')) {
+    // 走 join() 而非字符串拼接,保证分隔符按平台归一化
+    // (Windows 下 HOME 是 C:\\Users\\Lorcan → join 后变 \\.aidevspace,不是 /.aidevspace)
+    const home = process.env.HOME ?? process.env.USERPROFILE ?? ''
+    return join(home, s.slice(2))
+  }
   return s
 }
 

@@ -1,12 +1,16 @@
 /**
  * requirements-root.server 测试
- * (issue: zone-data-fidelity-fixes · 05 · D-6.1)
+ * (issue: zone-data-fidelity-fixes · 05 · D-6.1 / next-build-homedir-fix · 01)
  *
- * 验收点(对应 PRD T-2.5):
+ * 验收点(对应 zone-data-fidelity-fixes PRD T-2.5):
  * - 注入 configPath 含 `workspaceRoot: <fixture>` → 返回 expandHome(workspaceRoot)
  * - config 无 workspaceRoot 字段 → fallback AIDEVSPACE_HOME
  * - config 文件不存在 + AIDEVSPACE_HOME 不存在 → fallback `cwd + ../..`
  * - config 不存在时静默降级,不抛错
+ *
+ * 默认 config 路径现在来自 `getDefaultConfigPath()`(next-build-homedir-fix
+ * PRD D-1),env `AIDEVSPACE_CONFIG_PATH` 存在时被短路;本文件测试 env 全部
+ * 干净,默认行为验证见 `requirements-root-config-path.test.ts`。
  *
  * 测试用 `os.tmpdir()` 隔离,afterEach 清理 fixture + 还原 env。
  */
@@ -27,11 +31,14 @@ import {
 
 let tmpRoot: string
 const ORIGINAL_AIDEVSPACE_HOME = process.env.AIDEVSPACE_HOME
+const ORIGINAL_AIDEVSPACE_CONFIG_PATH = process.env.AIDEVSPACE_CONFIG_PATH
 
 beforeEach(() => {
   tmpRoot = mkdtempSync(join(tmpdir(), 'aidevspace-req-root-'))
-  // 关键:每个用例从干净 env 出发,避免宿主 shell 里设置的 AIDEVSPACE_HOME 串扰
+  // 关键:每个用例从干净 env 出发,避免宿主 shell 里设置的 AIDEVSPACE_HOME
+  // 或 build script 注入的 AIDEVSPACE_CONFIG_PATH 串扰
   delete process.env.AIDEVSPACE_HOME
+  delete process.env.AIDEVSPACE_CONFIG_PATH
 })
 
 afterEach(() => {
@@ -42,6 +49,11 @@ afterEach(() => {
     delete process.env.AIDEVSPACE_HOME
   } else {
     process.env.AIDEVSPACE_HOME = ORIGINAL_AIDEVSPACE_HOME
+  }
+  if (ORIGINAL_AIDEVSPACE_CONFIG_PATH === undefined) {
+    delete process.env.AIDEVSPACE_CONFIG_PATH
+  } else {
+    process.env.AIDEVSPACE_CONFIG_PATH = ORIGINAL_AIDEVSPACE_CONFIG_PATH
   }
 })
 
@@ -217,8 +229,9 @@ describe('resolveRequirementsRoot · 行为契约', () => {
     expect(() => resolveRequirementsRoot({ configPath })).not.toThrow()
   })
 
-  it('不传 options 时仍能工作(默认 configPath = ~/.aidevspace/config.yaml)', () => {
-    // 默认 configPath 解析失败 + AIDEVSPACE_HOME 未设 → 走到 cwd fallback
+  it('不传 options 时仍能工作(默认 configPath 由 getDefaultConfigPath() 解析)', () => {
+    // 默认 configPath(env 已干净 → fallback `join(homedir(), '.aidevspace', 'config.yaml')`)
+    // 解析失败 + AIDEVSPACE_HOME 未设 → 走到 cwd fallback
     // 这里不断言具体值(默认 configPath 可能恰好存在 → 测宿主环境耦合)
     // 只断言不抛错 + 返回字符串
     const root = resolveRequirementsRoot()
