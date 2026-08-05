@@ -1,0 +1,45 @@
+apps/web/src/lib/requirements-root.server.ts
+  s_6c36d498a5c18d::t_5d73cf590e700d 50,54-55,67-68,73,75,78-82,86
+  s_6c36d498a5c18d::t_2c7a3124f5c093 149-150,152
+  s_6c36d498a5c18d::t_07e880499da86c 56-58,61-63,65-66,71-72,74,83-85
+  s_6c36d498a5c18d::t_35731f6bbd1047 115
+  s_6c36d498a5c18d::t_931384a3e35ea5 133-134
+  s_6c36d498a5c18d::t_32520c7704f6e5 59-60,64
+  s_6c36d498a5c18d::t_2389731a42a29c 132,135-137,145-148,151,153
+  s_6c36d498a5c18d::t_6c0c1837b5bbba 69-70
+.scratch/next-build-homedir-fix/issues/02-build-script-wiring.md
+  s_6c36d498a5c18d::t_6703ab68c110e6 1-61
+.scratch/next-build-homedir-fix/issues/01-lazy-config-path.md
+  s_6c36d498a5c18d::t_25637d0864642f 1-46
+apps/web/package.json
+  s_6c36d498a5c18d::t_9687a067a181ba 27,36
+  s_6c36d498a5c18d::t_d5df9398fd6f18 7
+.scratch/next-build-homedir-fix/PRD.md
+  s_6c36d498a5c18d::t_97f49d07c77f9e 1-215
+apps/web/src/__tests__/requirements-root-config-path.test.ts
+  s_6c36d498a5c18d::t_0be7400d6785eb 27
+  s_6c36d498a5c18d::t_a83dd2e9a193e4 1-6,8-15,26,30-32,34-54,56,63-64,71-73,75-77,79,81-82,84,94-103,105-108,110-113,115-122,124-125,134-141,143-144,147-148,150-151,154-157,159-161,163-171,173-186
+  s_6c36d498a5c18d::t_f1839bc542fbb4 57,87-88,126,128,146,153
+  s_6c36d498a5c18d::t_6f1e6c772c51e4 7,16-25,28-29,33,55,58-62,65-70,74,78,80,83,85-86,89-93,104,109,114,123,127,129-133,142,145,149,152,158,162,172
+apps/web/src/__tests__/requirements-root.server.test.ts
+  s_6c36d498a5c18d::t_3906862d38ea9e 3,5,11-14,34,38-39,41,53-57
+  s_6c36d498a5c18d::t_0198a68e5b4869 232-234
+pnpm-lock.yaml
+  s_6c36d498a5c18d::t_cb691c3225e788 142-144,374-376,1474-1478,3168-3169,4080-4084
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "89f884336b5f26451004a8f895fa7e55acf2e7e3",
+  "prompts": {},
+  "sessions": {
+    "s_6c36d498a5c18d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "382f7aca-4611-47ad-8557-101293e4d20d",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
