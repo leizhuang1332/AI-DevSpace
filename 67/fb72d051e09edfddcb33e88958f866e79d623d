@@ -1,0 +1,23 @@
+apps/web/package.json
+  s_6c36d498a5c18d::t_74316ffdb7199c 24
+.scratch/analyzing-yaml-dep/issues/01-add-yaml-dep.md
+  s_6c36d498a5c18d::t_bb74b045b7046d 1-67
+pnpm-lock.yaml
+  s_6c36d498a5c18d::t_4a966142d921c5 111-113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "67fb72d051e09edfddcb33e88958f866e79d623d",
+  "prompts": {},
+  "sessions": {
+    "s_6c36d498a5c18d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "382f7aca-4611-47ad-8557-101293e4d20d",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
