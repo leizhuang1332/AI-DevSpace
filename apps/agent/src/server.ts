@@ -44,6 +44,10 @@ import { ProviderSemaphore } from './error/ProviderSemaphore.js'
 import { SessionLogger } from './log/SessionLogger.js'
 import { GlobalLogger } from './log/GlobalLogger.js'
 import { sessionsRetryRoutes, type RunTurn } from './routes/sessionsRetryRoute.js'
+import { TaskCardStore } from './services/board/TaskCardStore.js'
+import { boardCardRoutes } from './routes/board-cards.js'
+import { OverrideLog } from './services/board/OverrideLog.js'
+import { boardRoutes } from './routes/board.js'
 
 const ALLOWED_ORIGINS: string[] = ['http://localhost:3333', 'http://127.0.0.1:3333']
 
@@ -340,6 +344,22 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   await fastify.register(bootstrapRoutes, { tokenManager, apiBase: 'http://localhost:7777' })
   // P4 · Task 4:retry route —— UI 点重试时调;GET/sessions/:sid 是 GET,POST /retry 是 action
   await fastify.register(sessionsRetryRoutes, { sessionStore, runTurn })
+
+  // issue 02 (ADR-0024) —— board section 的 TaskCardStore + REST 端点
+  // (GET/GET-by-id/POST/PATCH/POST archive)。不动 ClaudeCodeProvider /
+  // runAnalysisQuery 路径(ADR-0023 守门)。
+  const taskCardStore = new TaskCardStore({ root: workspaceRoot })
+  await fastify.register(boardCardRoutes, { store: taskCardStore })
+
+  // issue 03 (ADR-0025) —— StatusConstraintGuard + OverrideLog:
+  // PATCH /api/requirement/:id/board/cards/:cardId/status 走 Guard,
+  // 违规返回 conflicts 让 web 弹 Modal;override=true 写 board/overrides.log。
+  const overrideLog = new OverrideLog({ root: workspaceRoot })
+  await fastify.register(boardRoutes, {
+    taskCardStore,
+    overrideLog,
+    requirementService,
+  })
 
   // 7. 启动 / 配置变更日志
   globalLogger.agentStarted({ root: workspaceRoot, version: opts.agentVersion ?? '0.0.0' })
