@@ -1,0 +1,576 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>任务卡片详情页 · field chips 三方案对比 · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{
+  --brand:#5e6ad2; --brand-50:#eef0fb; --brand-500:#5e6ad2; --brand-600:#525bc7; --brand-700:#4147a3;
+  --success:#16a34a; --warning:#f59e0b; --error:#ef4444; --info:#64748b;
+  --bg:#fbfbfd; --bg-elevated:#ffffff; --bg-subtle:#f5f5f7; --bg-hover:#f1f1f3;
+  --border:#ebebef; --border-strong:#d8d8de;
+  --text-1:#0f172a; --text-2:#475569; --text-3:#94a3b8; --text-inverse:#ffffff;
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px; --space-6:24px; --space-8:32px;
+  --text-xs:11px; --text-sm:12px; --text-base:13px; --text-md:14px; --text-lg:16px; --text-xl:18px; --text-2xl:20px; --text-3xl:24px;
+  --radius-sm:4px; --radius-md:6px; --radius-lg:8px; --radius-xl:12px;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.04); --shadow-md:0 2px 4px rgba(0,0,0,.06); --shadow-lg:0 4px 12px rgba(0,0,0,.08);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--text-1);font-family:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased}
+
+.page-wrap{padding:var(--space-8);max-width:1480px;margin:0 auto}
+.nav{display:flex;gap:var(--space-3);margin-bottom:var(--space-6);font-size:var(--text-sm)}
+.nav a{color:var(--text-2);text-decoration:none;padding:6px 12px;border-radius:var(--radius-md)}
+.nav a:hover{background:var(--bg-subtle);color:var(--text-1)}
+.nav a.cur{background:var(--brand-50);color:var(--brand-600);font-weight:500}
+h1{font-size:var(--text-2xl);font-weight:600;letter-spacing:-0.02em;margin-bottom:var(--space-2)}
+.sub{color:var(--text-3);font-size:var(--text-sm);margin-bottom:var(--space-8);line-height:1.7}
+.sub code{font-family:'JetBrains Mono',monospace;background:var(--bg-subtle);padding:1px 6px;border-radius:var(--radius-sm);font-size:12px;color:var(--brand-700)}
+
+.scheme{margin-bottom:var(--space-8);background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-xl);overflow:hidden;box-shadow:var(--shadow-sm)}
+.scheme header{padding:var(--space-5) var(--space-6);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:var(--space-4)}
+.scheme header h2{font-size:var(--text-lg);font-weight:600;flex:1}
+.scheme header .desc{color:var(--text-3);font-size:var(--text-sm);flex:2}
+.scheme header .tag{font-size:var(--text-xs);padding:3px 8px;border-radius:var(--radius-md);font-weight:500;background:var(--brand-50);color:var(--brand-600)}
+
+.page-host{padding:var(--space-4);background:var(--bg-subtle);min-height:680px}
+
+/* StatusBar */
+.statusbar{height:36px;padding:0 var(--space-4);background:var(--bg-elevated);border-bottom:1px solid var(--border);display:flex;align-items:center;font-size:var(--text-sm);color:var(--text-2)}
+.statusbar .crumb{display:flex;gap:var(--space-2);align-items:center}
+.statusbar .crumb .sep{color:var(--text-3)}
+.statusbar .crumb .cur{color:var(--text-1);font-weight:500}
+.statusbar .right{margin-left:auto;display:flex;gap:var(--space-3);align-items:center;color:var(--text-3)}
+
+/* Breadcrumb */
+.crumb{padding:10px var(--space-4);font-size:var(--text-sm);color:var(--text-3);border-bottom:1px solid var(--border);background:var(--bg-elevated)}
+.crumb a{color:var(--text-3);text-decoration:none}
+.crumb a:hover{color:var(--text-1)}
+.crumb .sep{margin:0 6px;color:var(--text-3)}
+.crumb .cur{color:var(--text-1)}
+
+/* Detail layout */
+.detail{display:grid;grid-template-columns:2fr 1fr;gap:var(--space-4)}
+.main{padding:var(--space-5) var(--space-6);background:var(--bg-elevated);border-right:1px solid var(--border);min-width:0}
+.drawer{padding:var(--space-4);background:var(--bg-elevated);min-height:600px;display:flex;flex-direction:column;gap:var(--space-3);min-width:0}
+.drawer-head{display:flex;align-items:center;justify-content:space-between;padding-bottom:var(--space-2);border-bottom:1px solid var(--border)}
+.drawer-head h3{font-size:var(--text-sm);font-weight:600}
+
+/* Title */
+.task-title-row{display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)}
+.task-title-row .id{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-3);padding:3px 6px;background:var(--bg-subtle);border-radius:var(--radius-sm);border:1px solid var(--border)}
+.task-title-row h1{font-size:var(--text-2xl);font-weight:600;letter-spacing:-0.02em;flex:1}
+.task-actions{display:flex;gap:var(--space-2)}
+.icon-btn{width:32px;height:32px;border-radius:var(--radius-md);border:1px solid var(--border);background:var(--bg-elevated);color:var(--text-2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px}
+.icon-btn:hover{border-color:var(--text-3);color:var(--text-1)}
+
+/* Chip row (option a/b/c 区别在这里) */
+.chip-row{display:flex;flex-wrap:wrap;gap:var(--space-2);padding:var(--space-3) 0;margin-bottom:var(--space-4);border-bottom:1px dashed var(--border)}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-md);font-size:var(--text-sm);color:var(--text-2);cursor:pointer}
+.chip:hover{border-color:var(--text-3)}
+.chip .label{color:var(--text-3);font-size:var(--text-xs)}
+.chip .val{color:var(--text-1);font-weight:500}
+.chip.status-in_progress{background:#f59e0b1a;border-color:#f59e0b4d;color:#b45309}
+.chip.status-in_progress .dot{background:#f59e0b}
+.chip.status-done{background:#3b82f61a;border-color:#3b82f64d;color:#1d4ed8}
+.chip.status-done .dot{background:#3b82f6}
+.chip .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.chip.prio-urgent{background:#fee2e2;border-color:#fca5a5;color:#991b1b}
+.chip.prio-high{background:#ffedd5;border-color:#fdba74;color:#9a3412}
+.chip.prio-medium{background:#fef3c7;border-color:#fcd34d;color:#92400e}
+.chip.prio-low{background:#dbeafe;border-color:#93c5fd;color:#1e40af}
+.chip .avatar{width:18px;height:18px;border-radius:50%;background:linear-gradient(135deg,#fb923c,#f43f5e);display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:9px;font-weight:600}
+.chip.source-prd_split .code{background:#e0e7ff;color:#3730a3;padding:1px 4px;border-radius:3px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600}
+
+/* Details table (option b/c) */
+.details-table{width:100%;border-collapse:collapse;font-size:var(--text-sm)}
+.details-table th{text-align:left;padding:8px 12px;background:var(--bg-subtle);font-weight:500;color:var(--text-3);font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.04em;width:30%;border-bottom:1px solid var(--border)}
+.details-table td{padding:8px 12px;border-bottom:1px solid var(--border);color:var(--text-1)}
+.details-table tr:last-child th,.details-table tr:last-child td{border-bottom:none}
+
+/* Fold details (option a) */
+.fold{margin-top:var(--space-3);border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg-elevated)}
+.fold-head{padding:var(--space-3) var(--space-4);display:flex;align-items:center;justify-content:space-between;cursor:pointer;font-size:var(--text-sm);font-weight:500;color:var(--text-2)}
+.fold-head .caret{color:var(--text-3);font-size:11px}
+.fold-body{padding:0 var(--space-4) var(--space-4);display:none}
+.fold.open .fold-body{display:block}
+.fold-body .details-table th,.fold-body .details-table td{padding:6px 12px;font-size:var(--text-sm)}
+
+/* Content area */
+.content-section{margin-bottom:var(--space-5)}
+.content-section h4{font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:var(--space-2);font-weight:600;display:flex;align-items:center;gap:var(--space-2)}
+.content-section h4 .count{background:var(--bg-subtle);color:var(--text-3);padding:1px 6px;border-radius:var(--radius-sm);font-weight:500;font-size:10px}
+.content-block{padding:var(--space-3) var(--space-4);background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-md);font-size:var(--text-sm);line-height:1.6;color:var(--text-2)}
+.markdown-block p{margin-bottom:var(--space-2)}
+.markdown-block h5{font-size:var(--text-md);font-weight:600;color:var(--text-1);margin:var(--space-3) 0 var(--space-2)}
+.markdown-block ul{margin-left:var(--space-5);margin-bottom:var(--space-2)}
+.markdown-block ol{margin-left:var(--space-5);margin-bottom:var(--space-2)}
+.markdown-block code{font-family:'JetBrains Mono',monospace;background:var(--bg-subtle);padding:1px 4px;border-radius:3px;font-size:12px;color:var(--brand-700)}
+
+/* Sub task list */
+.sub-list{padding:var(--space-3);background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-md)}
+.sub-item{display:flex;align-items:center;gap:var(--space-2);padding:6px 0;font-size:var(--text-sm);border-bottom:1px solid var(--border)}
+.sub-item:last-child{border-bottom:none}
+.sub-item .id{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-3)}
+.sub-item .title{flex:1;color:var(--text-1)}
+.sub-item .status-pill{padding:2px 8px;border-radius:var(--radius-sm);font-size:11px;font-weight:500}
+.sub-item .status-pill.todo{background:#cbd5e11a;color:#64748b}
+.sub-item .status-pill.in_progress{background:#f59e0b1a;color:#b45309}
+.sub-item .status-pill.done{background:#3b82f61a;color:#1d4ed8}
+
+/* Depends list */
+.dep-list{padding:var(--space-3);background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-md)}
+.dep-item{display:flex;align-items:center;gap:var(--space-2);padding:6px 0;font-size:var(--text-sm);color:var(--text-2)}
+.dep-item::before{content:'→';color:var(--text-3);font-weight:600;margin-right:var(--space-1)}
+
+/* Progress bar */
+.progress{display:flex;align-items:center;gap:var(--space-3);padding:var(--space-2) var(--space-3);background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:var(--space-4)}
+.progress .bar{flex:1;height:6px;background:var(--bg-subtle);border-radius:3px;overflow:hidden}
+.progress .bar i{display:block;height:100%;background:var(--brand);border-radius:3px}
+.progress .label{font-size:var(--text-xs);color:var(--text-3);font-variant-numeric:tabular-nums}
+
+/* Drawer transcript */
+.drawer .msgs{display:flex;flex-direction:column;gap:var(--space-3);flex:1;min-height:300px;padding:var(--space-2) 0;overflow:auto}
+.msg{padding:var(--space-3);border-radius:var(--radius-md);font-size:var(--text-sm);line-height:1.55}
+.msg .head{display:flex;align-items:center;gap:var(--space-2);margin-bottom:6px;font-size:var(--text-xs);color:var(--text-3)}
+.msg .head .role{font-weight:600;color:var(--text-1);text-transform:uppercase;letter-spacing:.05em}
+.msg.user{background:var(--bg-subtle)}
+.msg.user .head .role{color:var(--brand-700)}
+.msg.assistant{background:var(--brand-50);color:var(--text-2)}
+.msg.assistant .head .role{color:var(--brand-700)}
+.msg .ref-link{color:var(--brand-600);font-size:var(--text-xs);font-family:'JetBrains Mono',monospace}
+.msg.ref{border-left:2px solid var(--info);padding-left:10px;background:#64748b0a;color:var(--text-2);font-size:var(--text-xs)}
+
+.input-row{margin-top:auto;padding:var(--space-3);border:1px solid var(--border-strong);border-radius:var(--radius-md);background:var(--bg-elevated)}
+.input-row textarea{width:100%;border:none;outline:none;resize:none;font-family:inherit;font-size:var(--text-sm);color:var(--text-1);background:transparent;min-height:60px}
+.input-row textarea::placeholder{color:var(--text-3)}
+.input-row .controls{display:flex;align-items:center;justify-content:space-between;padding-top:6px;border-top:1px dashed var(--border);margin-top:6px}
+.input-row .controls .hint{color:var(--text-3);font-size:var(--text-xs)}
+.input-row .controls .ref-tag{font-family:'JetBrains Mono',monospace;color:var(--text-3);font-size:11px;margin-right:6px}
+
+/* Notes */
+.note-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-3);margin-top:var(--space-4)}
+.note-card{padding:var(--space-3);background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-md);font-size:var(--text-xs)}
+.note-card h5{font-size:var(--text-xs);font-weight:600;color:var(--text-1);margin-bottom:var(--space-2);text-transform:uppercase;letter-spacing:.05em}
+.note-card p{color:var(--text-2);margin-bottom:6px;line-height:1.5}
+.note-card .ok{color:var(--success)}
+.note-card .bad{color:var(--error)}
+</style>
+</head>
+<body>
+
+<div class="page-wrap">
+
+  <div class="nav">
+    <a href="board-detail-field-chips.html" class="cur">3 方案 · field chips</a>
+    <a href="board-color-options.html">5 列颜色</a>
+    <a href="13-command-palette.html">13 命令面板</a>
+  </div>
+
+  <h1>任务卡片详情页 · field chips 三方案对比</h1>
+  <p class="sub">
+    配套 ADR-0027 D5 + ADR-0028 D5。详情页 <code>main</code> 2/3 = field chips + content + 子任务 + 依赖列表 + 进度条;<code>drawer</code> 1/3 = transcript(物理独立,仅描述,不挂 Run)。本页对比"field chips 在主区怎么排"3 套方案。
+  </p>
+
+  <!-- ============== 选项 a: 顶部 chip 行 + 折叠 details ============== -->
+  <section class="scheme scheme-a">
+    <header>
+      <h2>方案 a · 顶部 chip 行 + 折叠 details</h2>
+      <span class="desc">主区顶部 6 个常用 chip 行,中部 title + content + 进度条 + 子任务 + 依赖列表,底部"详细信息 ▾"折叠块装剩余 8 个冷字段</span>
+      <span class="tag">a-fold</span>
+    </header>
+    <div class="page-host">
+      <div class="statusbar">
+        <div class="crumb">
+          <span>Requirements</span><span class="sep">/</span>
+          <span>REF-100</span><span class="sep">/</span>
+          <span>Board</span><span class="sep">/</span>
+          <span class="cur">MUL-12</span>
+        </div>
+        <div class="right">
+          <span>◷ &nbsp;2 天前</span>
+          <span>·</span>
+          <span style="color:var(--text-1)">⌘ + Enter</span>
+          <span>发送</span>
+        </div>
+      </div>
+
+      <div class="crumb">
+        <a href="#">REF-100 · 电商后台接入 Stripe</a>
+        <span class="sep">/</span>
+        <a href="#">Board</a>
+        <span class="sep">/</span>
+        <span class="cur">MUL-12 · Add end-to-end encryption for messages</span>
+      </div>
+
+      <div class="detail">
+        <!-- 主区 -->
+        <div class="main">
+
+          <div class="task-title-row">
+            <span class="id">MUL-12</span>
+            <h1>Add end-to-end encryption for messages</h1>
+            <div class="task-actions">
+              <button class="icon-btn" title="Archive">🗄</button>
+              <button class="icon-btn" title="More">⋯</button>
+            </div>
+          </div>
+
+          <!-- 顶部 chip 行 (6 项) -->
+          <div class="chip-row">
+            <span class="chip status-in_progress"><span class="dot"></span><span class="label">状态</span><span class="val">In Progress</span></span>
+            <span class="chip prio-high"><span class="label">优先级</span><span class="val">High</span></span>
+            <span class="chip source-prd_split"><span class="label">来源</span><span class="code">PRD 拆</span></span>
+            <span class="chip"><span class="avatar">ZH</span><span class="label">负责人</span><span class="val">Zhang Hang</span></span>
+            <span class="chip"><span class="label">创建</span><span class="val">2026-07-28</span></span>
+            <span class="chip"><span class="label">更新</span><span class="val">2 天前</span></span>
+          </div>
+
+          <div class="progress">
+            <span style="font-size:var(--text-sm);font-weight:500;color:var(--text-2)">父 Requirement 进度</span>
+            <div class="bar"><i style="width:42%"></i></div>
+            <span class="label">5 / 12 卡</span>
+          </div>
+
+          <div class="content-section">
+            <h4>Content <span class="count">Markdown 渲染</span></h4>
+            <div class="content-block markdown-block">
+              <p>直接消息必须用 E2E 加密,密钥在客户端生成,服务端只转发现密钥指纹。</p>
+              <h5>验收标准</h5>
+              <ol>
+                <li>新密钥对在客户端 <code>WebCrypto</code> 生成</li>
+                <li>服务端存储 <code>pubkey</code> + 指纹,不发私钥</li>
+                <li>本地 IndexedDB 缓存私钥,passphrase 解锁</li>
+              </ol>
+              <h5>实现细节</h5>
+              <ul>
+                <li>密钥交换走 X3DH(无在线同步)</li>
+                <li>消息体 AES-GCM 256</li>
+                <li>Ratcheting 每个新会话</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="content-section">
+            <h4>子任务 <span class="count">3 项</span></h4>
+            <div class="sub-list">
+              <div class="sub-item">
+                <span class="id">MUL-13</span>
+                <span class="title">客户端密钥对生成</span>
+                <span class="status-pill done">Done</span>
+              </div>
+              <div class="sub-item">
+                <span class="id">MUL-14</span>
+                <span class="title">X3DH 密钥交换实现</span>
+                <span class="status-pill in_progress">In Progress</span>
+              </div>
+              <div class="sub-item">
+                <span class="id">MUL-15</span>
+                <span class="title">IndexedDB 私钥缓存</span>
+                <span class="status-pill todo">Todo</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="content-section">
+            <h4>依赖卡 <span class="count">2 项</span></h4>
+            <div class="dep-list">
+              <div class="dep-item"><a href="#">MUL-9</a> · Build WebSocket notification system</div>
+              <div class="dep-item"><a href="#">MUL-11</a> · Refactor API error handling middleware</div>
+            </div>
+          </div>
+
+          <!-- 折叠 details -->
+          <div class="fold open">
+            <div class="fold-head">
+              <span>详细信息 <span style="color:var(--text-3);font-weight:normal">· 8 项</span></span>
+              <span class="caret">▾</span>
+            </div>
+            <div class="fold-body">
+              <table class="details-table">
+                <tbody>
+                  <tr><th>id</th><td>MUL-12 · ULID <code>01J7X3K2P5EVR</code></td></tr>
+                  <tr><th>parent_id</th><td>REF-100 · 电商后台接入 Stripe</td></tr>
+                  <tr><th>labels</th><td><span style="display:inline-block;padding:2px 8px;background:var(--bg-subtle);border-radius:3px;font-size:11px;margin-right:4px">security</span><span style="display:inline-block;padding:2px 8px;background:var(--bg-subtle);border-radius:3px;font-size:11px;margin-right:4px">backend</span></td></tr>
+                  <tr><th>order_index</th><td>2 · 9 号位(可重排)</td></tr>
+                  <tr><th>depends_on</th><td>MUL-9(WS),MUL-11(API err)</td></tr>
+                  <tr><th>is_archived</th><td>false</td></tr>
+                  <tr><th>completed_at</th><td><span style="color:var(--text-3)">—</span> · 状态非 done 时为空</td></tr>
+                  <tr><th>创建于</th><td>2026-07-28 14:23 · by PRD 拆分 Run #42</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- 抽屉 transcript -->
+        <div class="drawer">
+          <div class="drawer-head">
+            <h3>💬 AI 协作 · MUL-12 transcript</h3>
+            <span style="font-size:11px;color:var(--text-3)">物理独立</span>
+          </div>
+          <div class="msgs">
+            <div class="msg user">
+              <div class="head"><span class="role">用户</span><span>2 天前</span></div>
+              <div>passphrase 解锁的 UX 流程你能再细化一下吗?</div>
+            </div>
+            <div class="msg assistant">
+              <div class="head"><span class="role">AI</span><span>2 天前</span></div>
+              <div>建议分三段:首次设置 passphrase → 后续登录解锁 → 设备丢失通过 recovery code。建议看下 <span class="ref-link">#17</span> 历史 Run 产物中「密钥管理 UI」章节。</div>
+            </div>
+            <div class="msg ref">
+              <span class="ref-link">引用父 PRD §2.3</span> · <span class="ref-link">#17</span> Run 产物(分析 Run history)
+            </div>
+            <div class="msg user">
+              <div class="head"><span class="role">用户</span><span>昨天 23:14</span></div>
+              <div>recovery code 用 BIP-39 12 字词表,UI 引导强制用户手抄</div>
+            </div>
+          </div>
+          <div class="input-row">
+            <textarea placeholder="继续对话…只能描述/提问,不可发 Run"></textarea>
+            <div class="controls">
+              <div>
+                <span class="ref-tag"># ?</span>
+                <span class="hint">插入 Run 引用</span>
+              </div>
+              <button class="btn primary" style="padding:5px 12px;background:var(--brand);color:#fff;border:1px solid var(--brand);border-radius:var(--radius-md);font-size:var(--text-sm);font-weight:500">发送</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== 选项 b ============== -->
+  <section class="scheme scheme-b">
+    <header>
+      <h2>方案 b · 顶部 chip + 常显 2 列 details table</h2>
+      <span class="desc">顶部 chip 行同 a,主区下方 2 列 key-value 表常显全部 13 字段。优:不藏信息;劣:占地大,挤压 content/子任务/依赖</span>
+      <span class="tag">b-table</span>
+    </header>
+    <div class="page-host">
+      <div class="statusbar">
+        <div class="crumb">
+          <span>Requirements</span><span class="sep">/</span>
+          <span>REF-100</span><span class="sep">/</span>
+          <span class="cur">MUL-12</span>
+        </div>
+        <div class="right"><span>◷ &nbsp;2 天前</span><span>·</span><span style="color:var(--text-1)">⌘ + Enter 发送</span></div>
+      </div>
+      <div class="crumb">
+        <a href="#">REF-100</a><span class="sep">/</span>
+        <a href="#">Board</a><span class="sep">/</span>
+        <span class="cur">MUL-12 · Add end-to-end encryption for messages</span>
+      </div>
+      <div class="detail">
+        <div class="main">
+          <div class="task-title-row">
+            <span class="id">MUL-12</span>
+            <h1>Add end-to-end encryption for messages</h1>
+            <div class="task-actions">
+              <button class="icon-btn">🗄</button>
+              <button class="icon-btn">⋯</button>
+            </div>
+          </div>
+
+          <div class="chip-row">
+            <span class="chip status-in_progress"><span class="dot"></span><span class="val">In Progress</span></span>
+            <span class="chip prio-high"><span class="val">High</span></span>
+            <span class="chip source-prd_split"><span class="code">PRD 拆</span></span>
+            <span class="chip"><span class="avatar">ZH</span><span class="val">Zhang Hang</span></span>
+          </div>
+
+          <!-- 注意:不放进度条等,直接吃 details table 全部 13 字段 -->
+          <div style="margin-bottom:var(--space-4)">
+            <table class="details-table">
+              <tbody>
+                <tr><th>id</th><td>MUL-12 · ULID <code>01J7X3K2P5EVR…</code></td></tr>
+                <tr><th>parent_id</th><td>REF-100 · 电商后台接入 Stripe</td></tr>
+                <tr><th>status</th><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f59e0b;margin-right:6px"></span>In Progress</td></tr>
+                <tr><th>priority</th><td><span style="color:#9a3412;font-weight:600">High</span></td></tr>
+                <tr><th>source</th><td><span class="code" style="background:#e0e7ff;color:#3730a3;padding:1px 4px;border-radius:3px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600">PRD 拆</span></td></tr>
+                <tr><th>assignee</th><td>Zhang Hang (avatar)</td></tr>
+                <tr><th>labels</th><td><span style="display:inline-block;padding:2px 8px;background:var(--bg-subtle);border-radius:3px;font-size:11px;margin-right:4px">security</span><span style="display:inline-block;padding:2px 8px;background:var(--bg-subtle);border-radius:3px;font-size:11px;margin-right:4px">backend</span></td></tr>
+                <tr><th>order_index</th><td>2</td></tr>
+                <tr><th>depends_on</th><td>MUL-9, MUL-11</td></tr>
+                <tr><th>is_archived</th><td>false</td></tr>
+                <tr><th>created_at</th><td>2026-07-28 14:23 · by Run #42</td></tr>
+                <tr><th>updated_at</th><td>2 天前</td></tr>
+                <tr><th>completed_at</th><td><span style="color:var(--text-3)">—</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- (不展示 content/子任务/依赖,因为它们被 details 挤掉了) -->
+          <div style="padding:var(--space-3);background:#fef3c7;border:1px dashed #f59e0b;border-radius:var(--radius-md);font-size:var(--text-xs);color:#92400e">
+            <b>⚠ 警示:</b> 选项 b 把 13 字段全部常显后,content / 子任务 / 依赖列表 实际位于屏外,用户需要滚动 2-3 屏才能看到主线内容。本方案极端忠实于"所有字段可见",但与决策 17「Linear 紧凑」相悖。
+          </div>
+        </div>
+
+        <div class="drawer">
+          <div class="drawer-head">
+            <h3>💬 AI 协作 · MUL-12 transcript</h3>
+            <span style="font-size:11px;color:var(--text-3)">物理独立</span>
+          </div>
+          <div class="msgs">
+            <div class="msg user">
+              <div class="head"><span class="role">用户</span><span>2 天前</span></div>
+              <div>passphrase 解锁的 UX 流程你能再细化一下吗?</div>
+            </div>
+            <div class="msg assistant">
+              <div class="head"><span class="role">AI</span><span>2 天前</span></div>
+              <div>建议分三段:首次设置 passphrase → 后续登录解锁 → 设备丢失通过 recovery code。</div>
+            </div>
+          </div>
+          <div class="input-row">
+            <textarea placeholder="继续对话…"></textarea>
+            <div class="controls">
+              <span class="ref-tag"># ?</span>
+              <button class="btn primary" style="padding:5px 12px;background:var(--brand);color:#fff;border:1px solid var(--brand);border-radius:var(--radius-md);font-size:var(--text-sm);font-weight:500">发送</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== 选项 c ============== -->
+  <section class="scheme scheme-c">
+    <header>
+      <h2>方案 c · 全部字段横向 chip(无折叠)</h2>
+      <span class="desc">所有 13 个字段全部展开为 chip,横向流(自动换行)。折中 a 与 b,占地中等</span>
+      <span class="tag">c-flat</span>
+    </header>
+    <div class="page-host">
+      <div class="statusbar">
+        <div class="crumb">
+          <span>Requirements</span><span class="sep">/</span>
+          <span class="cur">MUL-12</span>
+        </div>
+        <div class="right"><span>◷ &nbsp;2 天前</span></div>
+      </div>
+      <div class="crumb">
+        <a href="#">REF-100</a><span class="sep">/</span>
+        <span class="cur">MUL-12 · E2E encryption for messages</span>
+      </div>
+      <div class="detail">
+        <div class="main">
+          <div class="task-title-row">
+            <span class="id">MUL-12</span>
+            <h1>Add end-to-end encryption for messages</h1>
+            <div class="task-actions">
+              <button class="icon-btn">🗄</button>
+              <button class="icon-btn">⋯</button>
+            </div>
+          </div>
+
+          <div class="chip-row">
+            <span class="chip"><span class="label">id</span><span class="code" style="font-family:'JetBrains Mono',monospace;font-size:11px">01J7X3K2P5EVR…</span></span>
+            <span class="chip"><span class="label">parent</span><span class="val">REF-100</span></span>
+            <span class="chip status-in_progress"><span class="dot"></span><span class="label">状态</span><span class="val">In Progress</span></span>
+            <span class="chip prio-high"><span class="label">优先级</span><span class="val">High</span></span>
+            <span class="chip source-prd_split"><span class="label">来源</span><span class="code">PRD 拆</span></span>
+            <span class="chip"><span class="avatar">ZH</span><span class="label">负责人</span><span class="val">Zhang Hang</span></span>
+            <span class="chip"><span class="label">标签</span><span class="val">security · backend</span></span>
+            <span class="chip"><span class="label">顺序</span><span class="val">#2</span></span>
+            <span class="chip"><span class="label">依赖</span><span class="val">MUL-9, MUL-11</span></span>
+            <span class="chip"><span class="label">已归档</span><span class="val">false</span></span>
+            <span class="chip"><span class="label">创建</span><span class="val">2026-07-28 14:23</span></span>
+            <span class="chip"><span class="label">更新</span><span class="val">2 天前</span></span>
+            <span class="chip"><span class="label">完成</span><span class="val" style="color:var(--text-3)">—</span></span>
+          </div>
+
+          <div class="progress">
+            <span style="font-size:var(--text-sm);font-weight:500;color:var(--text-2)">父 Requirement 进度</span>
+            <div class="bar"><i style="width:42%"></i></div>
+            <span class="label">5 / 12 卡</span>
+          </div>
+
+          <div class="content-section">
+            <h4>Content</h4>
+            <div class="content-block markdown-block">
+              <p>直接消息必须用 E2E 加密,密钥在客户端生成,服务端只转发现密钥指纹。</p>
+              <h5>验收标准</h5>
+              <ol>
+                <li>新密钥对在客户端 <code>WebCrypto</code> 生成</li>
+                <li>服务端存储 <code>pubkey</code> + 指纹</li>
+                <li>本地 IndexedDB 缓存私钥</li>
+              </ol>
+            </div>
+          </div>
+
+          <div class="content-section">
+            <h4>子任务 <span class="count">3 项</span></h4>
+            <div class="sub-list">
+              <div class="sub-item"><span class="id">MUL-13</span><span class="title">客户端密钥对生成</span><span class="status-pill done">Done</span></div>
+              <div class="sub-item"><span class="id">MUL-14</span><span class="title">X3DH 密钥交换实现</span><span class="status-pill in_progress">In Progress</span></div>
+              <div class="sub-item"><span class="id">MUL-15</span><span class="title">IndexedDB 私钥缓存</span><span class="status-pill todo">Todo</span></div>
+            </div>
+          </div>
+
+          <div class="content-section">
+            <h4>依赖卡 <span class="count">2 项</span></h4>
+            <div class="dep-list">
+              <div class="dep-item"><a href="#">MUL-9</a> · Build WebSocket notification system</div>
+              <div class="dep-item"><a href="#">MUL-11</a> · Refactor API error handling middleware</div>
+            </div>
+          </div>
+        </div>
+        <div class="drawer">
+          <div class="drawer-head">
+            <h3>💬 AI 协作 · MUL-12 transcript</h3>
+          </div>
+          <div class="msgs">
+            <div class="msg user"><div class="head"><span class="role">用户</span><span>2 天前</span></div><div>passphrase UX?</div></div>
+            <div class="msg assistant"><div class="head"><span class="role">AI</span><span>2 天前</span></div><div>建议三段式解锁。</div></div>
+          </div>
+          <div class="input-row"><textarea placeholder="继续对话…"></textarea></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== 对照 ============== -->
+  <section class="scheme" style="background:var(--bg-elevated);border-color:var(--border-strong)">
+    <header>
+      <h2>对照表</h2>
+      <span class="desc">3 方案在主区信息密度与详尽程度的对比</span>
+    </header>
+    <div style="padding:var(--space-6)">
+      <div class="note-grid">
+        <div class="note-card">
+          <h5>方案 a · 折叠</h5>
+          <p class="ok">✓ 主区聚焦 content/子任务/依赖</p>
+          <p class="ok">✓ 与决策 17 Linear 紧凑哲学一致</p>
+          <p class="bad">✗ 冷字段需点击展开(一步操作成本)</p>
+          <p class="ok">✓ 子任务 3+ 卡片不挤</p>
+        </div>
+        <div class="note-card">
+          <h5>方案 b · 常显全字段</h5>
+          <p class="ok">✓ 0 操作成本,所有字段即开即用</p>
+          <p class="ok">✓ 适合"配置类"卡片(用户主要改字段)</p>
+          <p class="bad">✗ 主区被吃 50% 屏幕,content/子任务/依赖挤压</p>
+          <p class="bad">✗ 与决策 17「Linear 紧凑」相悖</p>
+        </div>
+        <div class="note-card">
+          <h5>方案 c · 全 chip</h5>
+          <p class="ok">✓ 13 字段全展示,无折叠</p>
+          <p class="bad">✗ 字段多时 chip 流拥挤(13 个 chip 难扫)</p>
+          <p class="bad">✗ chip 表达字段属性弱(无 label-value 关系)</p>
+          <p class="ok">✓ 主区可视化,无 table 占用</p>
+        </div>
+        <div class="note-card" style="background:var(--brand-50);border-color:var(--brand-500)">
+          <h5 style="color:var(--brand-700)">推荐 a</h5>
+          <p>6 chip + 内容 + 子任务 + 依赖列表是 1 屏内主线;详细字段按需 ▾ 展开,与决策 17 紧凑哲学一致。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+</body>
+</html>

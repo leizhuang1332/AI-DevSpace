@@ -3,7 +3,7 @@
 > 本文档是项目的"活字典"。所有领域名词在此有且仅有一个含义。修改任何产品设计前，请先来对照术语。
 >
 > 创建：2026-07-08  
-> 当前版本：v1.0.5（ANALYZING Analysis Run 模型）
+> 当前版本：v1.0.6（BOARD section + TaskCard 引入；CLARIFYING/DESIGNING/EXECUTING 三工位退役；zones 注册表退役）
 
 ---
 
@@ -78,6 +78,19 @@ AI 可执行的工作单元（如"设计退款表结构"、"开发 refund-servic
 
 - Task 是 AI 的执行粒度
 - 一个 Requirement 包含多个 Task
+
+### TaskCard（任务卡片）
+
+需求拆分后的「工作项」。在 `board` section 5 列(backlog / todo / in_progress / in_review / done)入列,可独立推进。隶属于某个 Requirement,存放路径 `~/.aidevspace/requirements/<id>/board/tasks/<ulid>.json`。
+
+- 比 `Task(任务)` 更「产品侧」:用户能看、能拖、能用 AI 协作;Task 是 EXECUTING-zone 的执行序列
+- 父子关系:TaskCard ⊂ Requirement。`parent_id` 可指向 Requirement.id(根级粗卡片)或另一个 TaskCard.id(子拆)
+- 三种来源:`prd_split`(PRD 拆解)、`sub_split`(父卡片详情内子拆)、`manual`(`+` 号直接创建)
+- 5 态 status:`backlog / todo / in_progress / in_review / done`,与父 Requirement 10 态走互锁(详见 [ADR-0025](docs/adr/0025-parent-child-status-lock.md))
+- 每张卡片物理独立 transcript(`board/tasks/<ulid>/transcript.yaml`),仅描述、不挂 Run(详见 [ADR-0028](docs/adr/0028-taskcard-transcript-independence.md))
+- 字段全集、Zod schema 与 UI 形态见 [ADR-0024](docs/adr/0024-taskcard-card-model.md)
+
+_Avoid_: 工作项 / 子任务 / Issue(都模糊;本术语锁定为 TaskCard)。**注意**:`board/tasks/<ulid>.json` 中的 `tasks` 目录名 ≠ `Task(任务)`(EXECUTING-zone 的 `plan/tasks.md`),二者并存且不互通
 
 ### Artifact（产物）
 
@@ -272,25 +285,25 @@ Vibecoding 是一种典型开发场景：拿 PRD → 澄清 → 设计 → 计�
 
 需求工作台（原"需求详情页"）内的**独立工作环境**——类比汽车维修车间，维修区 / 洗车区 / 检测区各自是工位，自带固定装备，无方向，可任意跳转。
 
-- **6 工位 + 1 Overview 概览页 = 7 产品形态**
-- 工位 = 独立路由 = 独立工作台（URL：`/requirements/[id]/[zone]/`）
-- 工位**无方向**（不是流程节点，可任意跳转，包括反向 WRAP-UP → DRAFTING）
-- 工位**不推动流程**（用户意图驱动，继承决策 15 不写状态机）
-- **环境决定装备**：工位注册表 `default_arming` 字段决定该工位默认装填哪些 Skill
-- 工位集合 = 声明式注册表（`~/.aidevspace/zones/*.yaml`，v1.0 不开放 user 自定义）
+- **4 section + 1 Overview 概览页 = 5 产品形态**(CLARIFYING / DESIGNING / EXECUTING 三工位已退役,详见 [ADR-0027](docs/adr/0027-board-section-intro.md))
+- section = 独立路由 = 独立工作台(URL:`/requirements/[id]/[zone]/`,Next.js 动态段名沿用 `[zone]` 不重命名)
+- section **无方向**(不是流程节点,可任意跳转,包括反向 WRAP-UP → DRAFTING)
+- section **不推动流程**(用户意图驱动,继承决策 15 不写状态机)
+- **环境决定装备**:`SECTION_META.default_arming` 字段决定该 section 默认装填哪些 Skill
+- section 集合 = **hardcode 枚举** `REQUIREMENT_SECTIONS = ['drafting', 'board', 'analyzing', 'wrapup']`(zones yaml 注册表已退役,详见 [ADR-0026](docs/adr/0026-zones-registry-retirement.md))
 
-v1.0 工位清单：
+v1.0.6 section 清单:
 
-| 工位 | 用户动作 | 资源树 | Inline 栏 |
+| Section | 用户动作 | 资源树 | Inline 栏 |
 |---|---|---|---|
 | **DRAFTING** | 写需求 PRD | ✅ PRD 章节 + AC + 仓库 | ✅ 保留 |
-| **ANALYZING** | 需求梳理 + 准入问题识别 | ❌ 主区全宽 | ❌ 无 |
-| **CLARIFYING** | 澄清聚合模块落地细节 | ❌ 主区全宽 | ❌ 无 |
-| **DESIGNING** | 评审候选方案 | ❌ 默认无 | ❌ 无 |
-| **EXECUTING** | 监督 AI 实施 | ✅ 任务 DAG + Diff + 产物 | ✅ 保留 |
+| **BOARD** | 看 + 推进 5 列工作项 | ❌ 全屏列布局 | ❌ 无 |
+| **ANALYZING** | 需求梳理 + 准入问题识别 + Run 发起 | ❌ 主区全宽 | ❌ 无 |
 | **WRAP-UP** | 归档复盘 | ✅ 产物 + PR + 决策 | ❌ 无 |
 
-详见 [ADR-0011](docs/adr/0011-requirement-workbench-zone-adaptive.md) · [ADR-0012](docs/adr/0012-requirement-workbench-shell-topology.md) · [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md)
+~~CLARIFYING / DESIGNING / EXECUTING 已退役(v1.0.6),功能吸收到 BOARD section 的 5 列工作项推进 + 详情页 transcript 协作。~~
+
+详见 [ADR-0011](docs/adr/0011-requirement-workbench-zone-adaptive.md) · [ADR-0012](docs/adr/0012-requirement-workbench-shell-topology.md) · [ADR-0013](docs/adr/0013-analyzing-zone-rewrite.md) · [ADR-0026](docs/adr/0026-zones-registry-retirement.md) · [ADR-0027](docs/adr/0027-board-section-intro.md)
 
 ### ANALYZING 工位（展开）
 
@@ -490,6 +503,20 @@ ANALYZING 主区不再使用永久 320px 抽屉，改为 **「默认折叠的浮
 | 96 | **FAB 面板状态不持久化**——永远默认折叠；切需求 / 切工位 / 启动新 Run 时强制收起；符合决策 24"克制，在场"的"克制"语义 | [ADR-0022](docs/adr/0022-analyzing-history-floating-action-button.md) D4.4 / D5.2-D5.3 |
 | 97 | **删除 Run 后行为 = 留面板 + currentRun 自动切到下一个 Run**（按 `created_at` 倒序的第一个非删除 Run）；删除按钮仍走二次确认对话框（沿用 `AnalysisDeleteRunDialog`） | [ADR-0022](docs/adr/0022-analyzing-history-floating-action-button.md) D5.1 / D5.5 |
 | 98 | **a11y = non-modal popover**——FAB `role="button"` + `aria-expanded` + `aria-haspopup`；面板 `role="region"` + `aria-label`（**不**用 `role="dialog"`）；Tab 焦点自由，不阻断主区交互 | [ADR-0022](docs/adr/0022-analyzing-history-floating-action-button.md) D6 |
+
+## v1.0.6 增量决策（13 轮 grilling 沉淀 · 2026-08-06）
+
+> 本节是 v1.0.5 锁定后的迭代记录,不修改上面 v1.0 / v1.0.1 / v1.0.2 / v1.0.3 / v1.0.4 / v1.0.5 决策。决策 99-103 由 [ADR-0024](docs/adr/0024-taskcard-card-model.md) 至 [ADR-0028](docs/adr/0028-taskcard-transcript-independence.md) 五份新立 ADR 承载完整内容。
+>
+> 本节定义第三种核心实体 **TaskCard** + 引入 **BOARD section**,同时退役 **CLARIFYING / DESIGNING / EXECUTING 三工位** + **整体退役 zones 注册表**。前两件改动 ↓ (覆盖 7 形态描述 + 工位清单)。
+
+| # | 决策 | 关联 ADR |
+| --- | ------ | ---------- |
+| 99 | **TaskCard 卡片模型** = 第三种核心实体,字段集 13(id / parent_id / status / title / content / priority / assignee / labels / depends_on / order_index / source / is_archived / created_at / updated_at / completed_at);物理路径 `~/.aidevspace/requirements/<id>/board/tasks/<ulid>.json`;父子关系 `TaskCard ⊂ Requirement`,`parent_id` 可指向 Requirement.id(根级粗卡片)或另一个 TaskCard.id(子拆) | [ADR-0024](docs/adr/0024-taskcard-card-model.md) D1-D7 |
+| 100 | **父子 status 互锁**(软约束 + override):父 Requirement 进入 `implementing` 需子无 `backlog`、进入 `submitting` 需子无 `in_progress`、进入 `done` 需子全部 `done`;不自动反向(子全部 done 不自动切父 done,只弹建议) | [ADR-0025](docs/adr/0025-parent-child-status-lock.md) D1-D6 |
+| 101 | **zones 注册表整体退役** = `ZONE_META` 数组 + `~/.aidevspace/zones/*.yaml` + `ZoneRegistry.ts` + `ZoneConfig` schema 整套退役;改为 `SECTION_META`(4 section,7 字段 hardcode);`zones` 概念词保留(用户仍称 analyzing 工位),但声明式机制废 | [ADR-0026](docs/adr/0026-zones-registry-retirement.md) D1-D6 |
+| 102 | **BOARD section 引入 + 3 工位退役** = route `/requirements/[id]/board/`(与 drafting/analyzing/wrapup 平级),5 列(backlog / todo / in_progress / in_review / done)按 `status` 字段分组;CLARIFYING / DESIGNING / EXECUTING 路由 + 组件 + 数据加载全部退役;PRD 拆解工作流从 board "[+ 从 PRD 拆]" 按钮触发,Run 仍走父 analyzing transcript(产物落 `analysis/proposals/<run-id>/cards.yaml`) | [ADR-0027](docs/adr/0027-board-section-intro.md) D1-D6 |
+| 103 | **TaskCard transcript 物理独立 + Run 路径不动** = 每张卡片一份 transcript(`board/tasks/<ulid>/transcript.yaml`),仅描述 / 不挂 Run;Run 入口与 Run 上下文契约完全沿用 ADR-0021 / ADR-0022 / ADR-0023,board 详情页右抽屉不渲染 "[开始 Run]" 按钮;transcript 派生父 analyzing transcript 的最后 K 条作为初始快照(`schema_version + snapshot_hash` 标识稳定性) | [ADR-0028](docs/adr/0028-taskcard-transcript-independence.md) D1-D6 |
 
 ---
 

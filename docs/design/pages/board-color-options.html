@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>任务看板 · 5 列 status 颜色三方案对比 · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+/* ====== 全局 token(沿用决策 17 Linear 风) ====== */
+:root{
+  --brand:#5e6ad2; --brand-50:#eef0fb; --brand-100:#dadef7; --brand-500:#5e6ad2; --brand-600:#525bc7; --brand-700:#4147a3;
+  --success:#16a34a; --warning:#f59e0b; --error:#ef4444; --info:#64748b;
+  --bg:#fbfbfd; --bg-elevated:#ffffff; --bg-subtle:#f5f5f7; --bg-hover:#f1f1f3;
+  --border:#ebebef; --border-strong:#d8d8de; --border-focus:#5e6ad2;
+  --text-1:#0f172a; --text-2:#475569; --text-3:#94a3b8; --text-inverse:#ffffff;
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px; --space-6:24px; --space-8:32px;
+  --text-xs:11px; --text-sm:12px; --text-base:13px; --text-md:14px; --text-lg:16px; --text-xl:18px; --text-2xl:20px;
+  --radius-sm:4px; --radius-md:6px; --radius-lg:8px; --radius-xl:12px;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.04); --shadow-md:0 2px 4px rgba(0,0,0,.06); --shadow-lg:0 4px 12px rgba(0,0,0,.08);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--text-1);font-family:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased}
+
+/* ====== 页面外层 ====== */
+.page-wrap{padding:var(--space-8);max-width:1480px;margin:0 auto}
+.nav{display:flex;gap:var(--space-3);margin-bottom:var(--space-6);font-size:var(--text-sm)}
+.nav a{color:var(--text-2);text-decoration:none;padding:6px 12px;border-radius:var(--radius-md)}
+.nav a:hover{background:var(--bg-subtle);color:var(--text-1)}
+.nav a.cur{background:var(--brand-50);color:var(--brand-600);font-weight:500}
+h1{font-size:var(--text-2xl);font-weight:600;letter-spacing:-0.02em;margin-bottom:var(--space-2)}
+.sub{color:var(--text-3);font-size:var(--text-sm);margin-bottom:var(--space-8);line-height:1.7}
+.sub code{font-family:'JetBrains Mono',monospace;background:var(--bg-subtle);padding:1px 6px;border-radius:var(--radius-sm);font-size:12px;color:var(--brand-700)}
+
+/* ====== 单方案 section ====== */
+.scheme{margin-bottom:var(--space-8);background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-xl);overflow:hidden;box-shadow:var(--shadow-sm)}
+.scheme header{padding:var(--space-5) var(--space-6);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:var(--space-4)}
+.scheme header h2{font-size:var(--text-lg);font-weight:600;flex:1}
+.scheme header .desc{color:var(--text-3);font-size:var(--text-sm);flex:2}
+.scheme header .tag{font-size:var(--text-xs);padding:3px 8px;border-radius:var(--radius-md);font-weight:500}
+.scheme header .tag.rec{background:var(--brand-50);color:var(--brand-600)}
+.scheme .board-host{padding:var(--space-6);background:var(--bg-subtle)}
+
+/* ====== StatusBar(decision 17:常驻) ====== */
+.statusbar{height:36px;padding:0 var(--space-4);background:var(--bg-elevated);border-bottom:1px solid var(--border);display:flex;align-items:center;font-size:var(--text-sm);color:var(--text-2)}
+.statusbar .crumb{display:flex;gap:var(--space-2);align-items:center}
+.statusbar .crumb .sep{color:var(--text-3)}
+.statusbar .crumb .cur{color:var(--text-1);font-weight:500}
+.statusbar .right{margin-left:auto;display:flex;gap:var(--space-3);align-items:center}
+.statusbar .ai-dot{width:6px;height:6px;border-radius:50%;background:var(--info)}
+.statusbar .ai-dot.thinking{background:var(--brand);box-shadow:0 0 0 3px rgba(94,106,210,.15)}
+
+/* ====== toolbar(decision 内 b 案) ====== */
+.toolbar{display:flex;align-items:center;padding:var(--space-3) 0;gap:var(--space-3)}
+.toolbar .left{display:flex;align-items:center;gap:var(--space-2)}
+.toolbar .view-chip{display:flex;align-items:center;gap:var(--space-2);padding:5px 10px;border:1px solid var(--border-strong);border-radius:var(--radius-md);font-size:var(--text-sm);font-weight:500;color:var(--text-1);background:var(--bg-elevated);cursor:pointer}
+.toolbar .view-chip .caret{color:var(--text-3);font-size:10px}
+.toolbar .filter-chips{display:flex;gap:var(--space-1);margin-left:var(--space-4)}
+.toolbar .filter-chip{padding:4px 10px;font-size:var(--text-sm);border-radius:var(--radius-md);color:var(--text-2);cursor:pointer;border:1px solid transparent}
+.toolbar .filter-chip:hover{background:var(--bg-hover)}
+.toolbar .filter-chip.active{background:var(--brand-50);color:var(--brand-600);font-weight:500}
+.toolbar .right{margin-left:auto;display:flex;gap:var(--space-2);align-items:center}
+.btn{padding:5px 12px;border-radius:var(--radius-md);font-size:var(--text-sm);font-weight:500;cursor:pointer;border:1px solid var(--border-strong);background:var(--bg-elevated);color:var(--text-1)}
+.btn:hover{border-color:var(--text-3)}
+.btn.primary{background:var(--brand);color:#fff;border-color:var(--brand)}
+.btn.primary:hover{background:var(--brand-600);border-color:var(--brand-600)}
+
+/* ====== 5 列看板 ====== */
+.board{display:grid;grid-template-columns:repeat(5,1fr);gap:var(--space-3)}
+.column{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-3);min-width:0;display:flex;flex-direction:column;gap:var(--space-2)}
+.column-head{display:flex;align-items:center;gap:var(--space-2);padding:0 var(--space-1) var(--space-2);border-bottom:1px solid var(--border);margin-bottom:var(--space-2)}
+.col-status{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.col-name{font-size:var(--text-sm);font-weight:600;color:var(--text-1)}
+.col-count{font-size:var(--text-xs);color:var(--text-3);background:var(--bg-subtle);padding:1px 6px;border-radius:var(--radius-sm);margin-left:auto}
+.col-add{margin-left:var(--space-1);color:var(--text-3);cursor:pointer;font-size:14px;line-height:1}
+.col-add:hover{color:var(--text-1)}
+.col-warn{display:none;color:var(--error);font-size:11px;margin-left:var(--space-1)}
+.column.conflict .col-warn{display:inline}
+.cards{display:flex;flex-direction:column;gap:var(--space-2);flex:1;min-height:200px}
+
+/* ====== 卡片 ====== */
+.card{background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-md);padding:var(--space-3);cursor:pointer;transition:all .15s;display:flex;flex-direction:column;gap:var(--space-2)}
+.card:hover{border-color:var(--border-focus);box-shadow:var(--shadow-md);transform:translateY(-1px)}
+.card .id-short{font-family:'JetBrains Mono',monospace;font-size:var(--text-xs);color:var(--text-3)}
+.card .title{font-size:var(--text-sm);font-weight:500;color:var(--text-1);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card .summary{font-size:var(--text-xs);color:var(--text-2);line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card .meta{display:flex;align-items:center;gap:var(--space-2);padding-top:var(--space-1);border-top:1px dashed var(--border);margin-top:var(--space-1)}
+.card .priority{display:inline-flex;align-items:center;gap:3px;font-size:11px;font-weight:600;padding:2px 6px;border-radius:var(--radius-sm)}
+.card .priority .bar{display:inline-block;width:3px;height:8px;border-radius:1px;background:currentColor}
+.card .priority.urgent{background:#fee2e2;color:#991b1b}
+.card .priority.high{background:#ffedd5;color:#9a3412}
+.card .priority.medium{background:#fef3c7;color:#92400e}
+.card .priority.low{background:#dbeafe;color:#1e40af}
+.card .priority.no{background:var(--bg-subtle);color:var(--text-3)}
+.card .source{font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em}
+.card .right{margin-left:auto;display:flex;align-items:center;gap:4px}
+.avatar{width:20px;height:20px;border-radius:50%;background:linear-gradient(135deg,#fb923c,#f43f5e);display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:600}
+.avatar.placeholder{background:var(--bg-subtle);color:var(--text-3);border:1px dashed var(--border-strong)}
+.label-chip{font-size:10px;padding:1px 5px;border-radius:3px;background:var(--bg-subtle);color:var(--text-2)}
+
+/* ====== 三方案颜色覆盖 ====== */
+/* 方案 A:沿用图 1(灰 / 灰空心 / 黄 / 绿 / 蓝) */
+.scheme-a .col-status.bg{background:#94a3b8}
+.scheme-a .col-status.td{background:transparent;border:1.5px solid #cbd5e1}
+.scheme-a .col-status.ip{background:#f59e0b}
+.scheme-a .col-status.ir{background:#16a34a}
+.scheme-a .col-status.dn{background:#3b82f6}
+.scheme-a .col-bg.bg{background:#94a3b80d}
+.scheme-a .col-bg.td{background:#cbd5e10d}
+.scheme-a .col-bg.ip{background:#f59e0b0d}
+.scheme-a .col-bg.ir{background:#16a34a0d}
+.scheme-a .col-bg.dn{background:#3b82f60d}
+.scheme-a .col-name.bg{color:#475569}
+.scheme-a .col-name.td{color:#64748b}
+.scheme-a .col-name.ip{color:#b45309}
+.scheme-a .col-name.ir{color:#15803d}
+.scheme-a .col-name.dn{color:#1d4ed8}
+
+/* 方案 B:Linear 风格(灰 / 灰 / 橙 / 紫 / 绿) */
+.scheme-b .col-status.bg{background:#71717a}
+.scheme-b .col-status.td{background:transparent;border:1.5px solid #a1a1aa}
+.scheme-b .col-status.ip{background:#f97316}
+.scheme-b .col-status.ir{background:#a855f7}
+.scheme-b .col-status.dn{background:#22c55e}
+.scheme-b .col-bg.bg{background:#71717a0d}
+.scheme-b .col-bg.td{background:#a1a1aa0d}
+.scheme-b .col-bg.ip{background:#f973160d}
+.scheme-b .col-bg.ir{background:#a855f70d}
+.scheme-b .col-bg.dn{background:#22c55e0d}
+.scheme-b .col-name.bg{color:#52525b}
+.scheme-b .col-name.td{color:#71717a}
+.scheme-b .col-name.ip{color:#c2410c}
+.scheme-b .col-name.ir{color:#7e22ce}
+.scheme-b .col-name.dn{color:#15803d}
+
+/* 方案 C:brand 紫色阶(Linear 渐变,同 hue 不同 tone) */
+.scheme-c .col-status.bg{background:#cbd5e1}
+.scheme-c .col-status.td{background:#a5b4fc}
+.scheme-c .col-status.ip{background:#818cf8}
+.scheme-c .col-status.ir{background:#5e6ad2}
+.scheme-c .col-status.dn{background:#4147a3}
+.scheme-c .col-bg.bg{background:#cbd5e10d}
+.scheme-c .col-bg.td{background:#a5b4fc1a}
+.scheme-c .col-bg.ip{background:#818cf826}
+.scheme-c .col-bg.ir{background:#5e6ad233}
+.scheme-c .col-bg.dn{background:#4147a340}
+.scheme-c .col-name.bg{color:#64748b}
+.scheme-c .col-name.td{color:#4f46e5}
+.scheme-c .col-name.ip{color:#4338ca}
+.scheme-c .col-name.ir{color:#3730a3}
+.scheme-c .col-name.dn{color:#312e81}
+
+/* ====== 列底色 ====== */
+.column.conflict{outline:2px dashed var(--error);outline-offset:-2px}
+
+/* ====== 信息密度对照 ====== */
+.density-row{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-4);margin-top:var(--space-4)}
+.density-cell{padding:var(--space-3);border:1px dashed var(--border-strong);border-radius:var(--radius-md);background:var(--bg-elevated)}
+.density-cell h4{font-size:var(--text-xs);color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:var(--space-2);font-weight:500}
+.density-cell .card-eg{margin-bottom:var(--space-2)}
+.density-cell .card-eg:last-child{margin-bottom:0}
+.card.compact{padding:8px 10px}
+.card.compact .title{font-size:var(--text-xs);-webkit-line-clamp:1}
+.card.compact .summary{display:none}
+.card.compact .id-short{font-size:10px}
+.card.compact .meta{padding-top:2px;margin-top:2px;border-top:none}
+</style>
+</head>
+<body>
+
+<div class="page-wrap">
+
+  <div class="nav">
+    <a href="board-color-options.html" class="cur">3 方案 · 颜色对比</a>
+    <a href="#">看板详情 → 待定编号</a>
+    <a href="13-command-palette.html">13 命令面板</a>
+ –    <a href="00-req-detail-compare.html">00 详情页 3 方案</a>
+  </div>
+
+  <h1>任务看板 · 5 列 status 颜色三方案对比</h1>
+  <p class="sub">
+    配套 ADR-0027(board section 引入)。本页面对 <code>board</code> section 的 5 列(backlog / todo / in_progress / in_review / done)配色做三方案对比。各方案仅在 <b>列头部色点 + 列名色 + 列背景 tint</b> 三处覆盖,卡片、卡片槽、toolbar、StatusBar 共享。
+    <br>决策记录:决策 22「需求状态色 = 分组共享色(4 色 + 灰)」基础上扩展出 TaskCard 的 5 态配色。
+  </p>
+
+  <!-- ====== 方案 A ====== -->
+  <section class="scheme scheme-a">
+    <header>
+      <h2>方案 A · 图 1 1:1 复刻</h2>
+      <span class="desc">backlog 灰 / todo 灰空心 / in_progress 黄 / in_review 绿 / done 蓝。来源:用户提供的飞书任务截图。</span>
+      <span class="tag">a-color</span>
+    </header>
+    <div class="board-host">
+
+      <div class="statusbar">
+        <div class="crumb">
+          <span>Requirements</span><span class="sep">/</span>
+          <span>REF-100 · 电商后台接入 Stripe</span><span class="sep">/</span>
+          <span class="cur">📋 Board</span>
+        </div>
+        <div class="right">
+          <span class="ai-dot"></span>
+          <span>idle</span>
+          <span style="color:var(--text-3)">|</span>
+          <span style="color:var(--text-3)">⌘K 命令</span>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div class="left">
+          <div class="view-chip">REF-100 Board <span class="caret">▾</span></div>
+          <div class="filter-chips">
+            <span class="filter-chip active">全部</span>
+            <span class="filter-chip">我的</span>
+            <span class="filter-chip">高优先级</span>
+            <span class="filter-chip">PRD 拆</span>
+          </div>
+        </div>
+        <div class="right">
+          <button class="btn">+ 新任务</button>
+          <button class="btn primary">+ 从 PRD 拆</button>
+        </div>
+      </div>
+
+      <div class="board">
+        <!-- backlog -->
+        <div class="column col-bg bg">
+          <div class="column-head">
+            <span class="col-status bg"></span>
+            <span class="col-name bg">Backlog</span>
+            <span class="col-count">5</span>
+            <span class="col-warn">⚠</span>
+            <span class="col-add">+</span>
+          </div>
+          <div class="cards">
+            <div class="card">
+              <span class="id-short">MUL-17</span>
+              <div class="title">梳理 Stripe API 端点能力</div>
+              <div class="summary">Benchmark Stripe vs in-memory 缓存,选型接入方案。</div>
+              <div class="meta">
+                <span class="priority low"><span class="bar"></span><span class="bar"></span> Low</span>
+                <div class="right">
+                  <span class="source">PRD 拆</span>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <span class="id-short">MUL-19</span>
+              <div class="title">Mobile responsive optimization</div>
+              <div class="summary">Audit and optimize all views for mobile width</div>
+              <div class="meta">
+                <span class="priority medium"><span class="bar"></span><span class="bar"></span><span class="bar"></span> Medium</span>
+                <div class="right">
+                  <span class="source">手动</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- todo -->
+        <div class="column col-bg td">
+          <div class="column-head">
+            <span class="col-status td"></span>
+            <span class="col-name td">Todo</span>
+            <span class="col-count">4</span>
+            <span class="col-warn">⚠</span>
+            <span class="col-add">+</span>
+          </div>
+          <div class="cards">
+            <div class="card">
+              <span class="id-short">MUL-12</span>
+              <div class="title">Add end-to-end encryption for messages</div>
+              <div class="summary">Implement E2E encryption for direct messages</div>
+              <div class="meta">
+                <span class="priority high"><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span> High</span>
+                <div class="right">
+                  <span class="label-chip">security</span>
+                  <span class="avatar">JL</span>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <span class="id-short">MUL-15</span>
+              <div class="title">Implement email notification preferences</div>
+              <div class="summary">Per-user notification settings for issues & commits</div>
+              <div class="meta">
+                <span class="priority medium"><span class="bar"></span><span class="bar"></span><span class="bar"></span> Medium</span>
+                <div class="right">
+                  <span class="source">手动</span>
+                  <span class="avatar placeholder">+</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- in_progress -->
+        <div class="column col-bg ip conflict">
+          <div class="column-head">
+            <span class="col-status ip"></span>
+            <span class="col-name ip">In Progress</span>
+            <span class="col-count">3</span>
+            <span class="col-warn">⚠</span>
+            <span class="col-add">+</span>
+          </div>
+          <div class="cards">
+            <div class="card">
+              <span class="id-short">MUL-9</span>
+              <div class="title">Build WebSocket notification system</div>
+              <div class="summary">Real-time notifications for issue updates</div>
+              <div class="meta">
+                <span class="priority high"><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span> High</span>
+                <div class="right">
+                  <span class="source">PRD 拆</span>
+                  <span class="avatar">ZH</span>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <span class="id-short">MUL-11</span>
+              <div class="title">Refactor API error handling middleware</div>
+              <div class="summary">Standardize error responses across all routes</div>
+              <div class="meta">
+                <span class="priority medium"><span class="bar"></span><span class="bar"></span><span class="bar"></span> Medium</span>
+                <div class="right">
+                  <span class="source">子拆</span>
+                  <span class="avatar">EM</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- in_review -->
+        <div class="column col-bg ir">
+          <div class="column-head">
+            <span class="col-status ir"></span>
+            <span class="col-name ir">In Review</span>
+            <span class="col-count">2</span>
+            <span class="col-warn">⚠</span>
+            <span class="col-add">+</span>
+          </div>
+          <div class="cards">
+            <div class="card">
+              <span class="id-short">MUL-7</span>
+              <div class="title">Add real-time collaborative editing</div>
+              <div class="summary">Implement conflict-free real-time editing</div>
+              <div class="meta">
+                <span class="priority high"><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span> High</span>
+                <div class="right">
+                  <span class="source">手动</span>
+                  <span class="avatar">SK</span>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <span class="id-short">MUL-8</span>
+              <div class="title">Implement role-based access control</div>
+              <div class="summary">Add workspace-level roles (owner/admin/member)</div>
+              <div class="meta">
+                <span class="priority high"><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span> High</span>
+                <div class="right">
+                  <span class="label-chip">rbac</span>
+                  <span class="avatar">JK</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- done -->
+        <div class="column col-bg dn">
+          <div class="column-head">
+            <span class="col-status dn"></span>
+            <span class="col-name dn">Done</span>
+            <span class="col-count">6</span>
+            <span class="col-warn">⚠</span>
+            <span class="col-add">+</span>
+          </div>
+          <div class="cards">
+            <div class="card">
+              <span class="id-short">MUL-1</span>
+              <div class="title">Set up CI/CD pipeline with GitHub Actions</div>
+              <div class="summary">Configure automated build, test, and deploy</div>
+              <div class="meta">
+                <span class="priority high"><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span> High</span>
+                <div class="right">
+                  <span class="source">手动</span>
+                  <span class="avatar">MR</span>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <span class="id-short">MUL-2</span>
+              <div class="title">Implement user authentication with OAuth</div>
+              <div class="summary">Add Google OAuth login flow with JWT</div>
+              <div class="meta">
+                <span class="priority urgent"><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span> Urgent</span>
+                <div class="right">
+                  <span class="source">PRD 拆</span>
+                  <span class="avatar">CD</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====== 方案 B ====== -->
+  <section class="scheme scheme-b">
+    <header>
+      <h2>方案 B · Linear 官方风格</h2>
+      <span class="desc">backlog 灰 / todo 灰空心 / in_progress 橙 / in_review 紫 / done 绿。Linear 默认 status 配色,紫色 in_review 较突出。</span>
+      <span class="tag">b-color</span>
+    </header>
+    <div class="board-host">
+      <div class="board">
+        <div class="column col-bg bg">
+          <div class="column-head"><span class="col-status bg"></span><span class="col-name bg">Backlog</span><span class="col-count">5</span><span class="col-add">+</span></div>
+          <div class="cards">
+            <div class="card"><span class="id-short">MUL-17</span><div class="title">梳理 Stripe API 端点能力</div><div class="summary">Benchmark Stripe vs in-memory 缓存,选型接入方案。</div><div class="meta"><span class="priority low">Low</span><div class="right"><span class="source">PRD 拆</span></div></div></div>
+            <div class="card"><span class="id-short">MUL-19</span><div class="title">Mobile responsive optimization</div><div class="summary">Audit and optimize all views for mobile width</div><div class="meta"><span class="priority medium">Medium</span><div class="right"><span class="source">手动</span></div></div></div>
+          </div>
+        </div>
+        <div class="column col-bg td">
+          <div class="column-head"><span class="col-status td"></span><span class="col-name td">Todo</span><span class="col-count">4</span><span class="col-add">+</span></div>
+          <div class="cards">
+            <div class="card"><span class="id-short">MUL-12</span><div class="title">Add end-to-end encryption</div><div class="summary">Implement E2E encryption</div><div class="meta"><span class="priority high">High</span><div class="right"><span class="label-chip">security</span><span class="avatar">JL</span></div></div></div>
+            <div class="card"><span class="id-short">MUL-15</span><div class="title">Implement email notification</div><div class="summary">Per-user notification settings</div><div class="meta"><span class="priority medium">Medium</span><div class="right"><span class="source">手动</span><span class="avatar placeholder">+</span></div></div></div>
+          </div>
+        </div>
+        <div class="column col-bg ip">
+          <div class="column-head"><span class="col-status ip"></span><span class="col-name ip">In Progress</span><span class="col-count">3</span><span class="col-add">+</span></div>
+          <div class="cards">
+            <div class="card"><span class="id-short">MUL-9</span><div class="title">Build WebSocket notification system</div><div class="summary">Real-time notifications</div><div class="meta"><span class="priority high">High</span><div class="right"><span class="source">PRD 拆</span><span class="avatar">ZH</span></div></div></div>
+            <div class="card"><span class="id-short">MUL-11</span><div class="title">Refactor API error handling</div><div class="summary">Standardize error responses</div><div class="meta"><span class="priority medium">Medium</span><div class="right"><span class="source">子拆</span><span class="avatar">EM</span></div></div></div>
+          </div>
+        </div>
+        <div class="column col-bg ir">
+          <div class="column-head"><span class="col-status ir"></span><span class="col-name ir">In Review</span><span class="col-count">2</span><span class="col-add">+</span></div>
+          <div class="cards">
+            <div class="card"><span class="id-short">MUL-7</span><div class="title">Add real-time collaborative editing</div><div class="summary">Conflict-free real-time editing</div><div class="meta"><span class="priority high">High</span><div class="right"><span class="source">手动</span><span class="avatar">SK</span></div></div></div>
+            <div class="card"><span class="id-short">MUL-8</span><div class="title">Implement RBAC</div><div class="summary">Workspace-level roles</div><div class="meta"><span class="priority high">High</span><div class="right"><span class="label-chip">rbac</span><span class="avatar">JK</span></div></div></div>
+          </div>
+        </div>
+        <div class="column col-bg dn">
+          <div class="column-head"><span class="col-status dn"></span><span class="col-name dn">Done</span><span class="col-count">6</span><span class="col-add">+</span></div>
+          <div class="cards">
+            <div class="card"><span class="id-short">MUL-1</span><div class="title">Set up CI/CD pipeline</div><div class="summary">Build, test, deploy</div><div class="meta"><span class="priority high">High</span><div class="right"><span class="source">手动</span><span class="avatar">MR</span></div></div></div>
+            <div class="card"><span class="id-short">MUL-2</span><div class="title">OAuth user authentication</div><div class="summary">Google OAuth + JWT</div><div class="meta"><span class="priority urgent">Urgent</span><div class="right"><span class="source">PRD 拆</span><span class="avatar">CD</span></div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====== 方案 C ====== -->
+  <section class="scheme scheme-c">
+    <header>
+      <h2>方案 C · brand 紫色阶(单色渐变)</h2>
+      <span class="desc">backlog 灰 / todo 浅紫 / in_progress 紫 / in_review 深紫 / done 极深紫。同 hue 不同 tone,统一品牌色,识别较弱。</span>
+      <span class="tag">c-color</span>
+    </header>
+    <div class="board-host">
+      <div class="board">
+        <div class="column col-bg bg">
+          <div class="column-head"><span class="col-status bg"></span><span class="col-name bg">Backlog</span><span class="col-count">5</span><span class="col-add">+</span></div>
+          <div class="cards">
+            <div class="card"><span class="id-short">MUL-17</span><div class="title">梳理 Stripe API 端点能力</div><div class="summary">Benchmark Stripe vs in-memory 缓存。</div><div class="meta"><span class="priority low">Low</span><div class="right"><span class="source">PRD 拆</span></div></div></div>
+            <div class="card"><span class="id-short">MUL-19</span><div class="title">Mobile responsive optimization</div><div class="summary">Audit all views for mobile</div><div class="meta"><span class="priority medium">Medium</span><div class="right"><span class="source">手动</span></div></div></div>
+          </div>
+        </div>
+        <div class="column col-bg td">
+          <div class="column-head"><span class="col-status td"></span><span class="col-name td">Todo</span><span class="col-count">4</span><span class="col-add">+</span></div>
+          <div class="cards">
+            <div class="card"><span class="id-short">MUL-12</span><div class="title">Add end-to-end encryption</div><div class="summary">E2E encryption</div><div class="meta"><span class="priority high">High</span><div class="right"><span class="label-chip">security</span><span class="avatar">JL</span></div></div></div>
+            <div class="card"><span class="id-short">MUL-15</span><div class="title">Implement email notification</div><div class="summary">Per-user settings</div><div class="meta"><span class="priority medium">Medium</span><div class="right"><span class="source">手动</span><span class="avatar placeholder">+</span></div></div></div>
+          </div>
+        </div>
+        <div class="column col-bg ip">
+          <div class="column-head"><span class="col-status ip"></span><span class="col-name ip">In Progress</span><span class="col-count">3</span><span class="col-add">+</span></div>
+          <div class="cards">
+            <div class="card"><span class="id-short">MUL-9</span><div class="title">Build WebSocket notification system</div><div class="summary">Real-time notifications</div><div class="meta"><span class="priority high">High</span><div class="right"><span class="source">PRD 拆</span><span class="avatar">ZH</span></div></div></div>
+            <div class="card"><span class="id-short">MUL-11</span><div class="title">Refactor API error handling</div><div class="summary">Standardize error responses</div><div class="meta"><span class="priority medium">Medium</span><div class="right"><span class="source">子拆</span><span class="avatar">EM</span></div></div></div>
+          </div>
+        </div>
+        <div class="column col-bg ir">
+          <div class="column-head"><span class="col-status ir"></span><span class="col-name ir">In Review</span><span class="col-count">2</span><span class="col-add">+</span></div>
+          <div class="cards">
+            <div class="card"><span class="id-short">MUL-7</span><div class="title">Add real-time collaborative editing</div><div class="summary">Conflict-free editing</div><div class="meta"><span class="priority high">High</span><div class="right"><span class="source">手动</span><span class="avatar">SK</span></div></div></div>
+            <div class="card"><span class="id-short">MUL-8</span><div class="title">Implement RBAC</div><div class="summary">Workspace-level roles</div><div class="meta"><span class="priority high">High</span><div class="right"><span class="label-chip">rbac</span><span class="avatar">JK</span></div></div></div>
+          </div>
+        </div>
+        <div class="column col-bg dn">
+          <div class="column-head"><span class="col-status dn"></span><span class="col-name dn">Done</span><span class="col-count">6</span><span class="col-add">+</span></div>
+          <div class="cards">
+            <div class="card"><span class="id-short">MUL-1</span><div class="title">Set up CI/CD pipeline</div><div class="summary">Build, test, deploy</div><div class="meta"><span class="priority high">High</span><div class="right"><span class="source">手动</span><span class="avatar">MR</span></div></div></div>
+            <div class="card"><span class="id-short">MUL-2</span><div class="title">OAuth user authentication</div><div class="summary">Google OAuth + JWT</div><div class="meta"><span class="priority urgent">Urgent</span><div class="right"><span class="source">PRD 拆</span><span class="avatar">CD</span></div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====== 决策对照表 ====== -->
+  <section class="scheme" style="border-color:var(--border-strong);background:var(--bg-elevated)">
+    <header>
+      <h2>决策对照表</h2>
+      <span class="desc">对照 5 态 status 各自配色 × 三方案,决定 board section 实际配色用哪套。</span>
+    </header>
+    <div style="padding:var(--space-6);overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:var(--text-sm)">
+        <thead>
+          <tr style="border-bottom:1px solid var(--border)">
+            <th style="text-align:left;padding:10px 12px;color:var(--text-3);font-weight:500;font-size:var(--text-xs);text-transform:uppercase">Status</th>
+            <th style="text-align:left;padding:10px 12px;color:var(--text-3);font-weight:500;font-size:var(--text-xs);text-transform:uppercase">方案 A(图 1)</th>
+            <th style="text-align:left;padding:10px 12px;color:var(--text-3);font-weight:500;font-size:var(--text-xs);text-transform:uppercase">方案 B(Linear)</th>
+            <th style="text-align:left;padding:10px 12px;color:var(--text-3);font-weight:500;font-size:var(--text-xs);text-transform:uppercase">方案 C(brand 紫阶)</th>
+            <th style="text-align:left;padding:10px 12px;color:var(--text-3);font-weight:500;font-size:var(--text-xs);text-transform:uppercase">语义备注</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:10px 12px;font-weight:500"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#94a3b8;margin-right:6px"></span>backlog</td>
+            <td style="padding:10px 12px;color:var(--text-2)">slate-400 灰(#94a3b8)</td>
+            <td style="padding:10px 12px;color:var(--text-2)">zinc-500 灰(#71717a)</td>
+            <td style="padding:10px 12px;color:var(--text-2)">slate-300 灰(#cbd5e1)</td>
+            <td style="padding:10px 12px;color:var(--text-3);font-size:var(--text-xs)">未开始 · 静态存放</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:10px 12px;font-weight:500"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;border:1.5px solid #cbd5e1;margin-right:6px"></span>todo</td>
+            <td style="padding:10px 12px;color:var(--text-2)">slate-300 空心</td>
+            <td style="padding:10px 12px;color:var(--text-2)">zinc-400 空心</td>
+            <td style="padding:10px 12px;color:var(--text-2)">indigo-300 实心(浅紫)</td>
+            <td style="padding:10px 12px;color:var(--text-3);font-size:var(--text-xs)">已计划 · 待启动</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:10px 12px;font-weight:500"><span style="display:inlinepx;width:8px;height:8px;border-radius:50%;background:#f59e0b;margin-right:6px"></span>in_progress</td>
+            <td style="padding:10px 12px;color:var(--text-2)">amber-500 黄(#f59e0b)</td>
+            <td style="padding:10px 12px;color:var(--text-2)">orange-500 橙(#f97316)</td>
+            <td style="padding:10px 12px;color:var(--text-2)">indigo-400 紫(#818cf8)</td>
+            <td style="padding:10px 12px;color:var(--text-3);font-size:var(--text-xs)">正在推进 · 高亮</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:10px 12px;font-weight:500"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#16a34a;margin-right:6px"></span>in_review</td>
+            <td style="padding:10px 12px;color:var(--text-2)">green-600 绿(#16a34a)</td>
+            <td style="padding:10px 12px;color:var(--text-2)">purple-500 紫(#a855f7)</td>
+            <td style="padding:10px 12px;color:var(--text-2)">brand 主紫(#5e6ad2)</td>
+            <td style="padding:10px 12px;color:var(--text-3);font-size:var(--text-xs)">待审 · 中性色</td>
+          </tr>
+          <tr>
+            <td style="padding:10px 12px;font-weight:500"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#3b82f6;margin-right:6px"></span>done</td>
+            <td style="padding:10px 12px;color:var(--text-2)">blue-500 蓝(#3b82f6)</td>
+            <td style="padding:10px 12px;color:var(--text-2)">green-500 绿(#22c55e)</td>
+            <td style="padding:10px 12px;color:var(--text-2)">brand-700 深紫(#4147a3)</td>
+            <td style="padding:10px 12px;color:var(--text-3);font-size:var(--text-xs)">完成 · 静止终态</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+
+</body>
+</html>
