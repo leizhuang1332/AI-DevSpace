@@ -18,7 +18,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildServer } from '../../server.js'
@@ -34,10 +34,7 @@ beforeEach(async () => {
   writeFileSync(join(tmpRoot, 'config.yaml'), 'name: dev\n')
   app = await buildServer({
     workspaceRoot: tmpRoot,
-    // 测试不出 log;指向 /dev/null 让 pino transport 落黑洞,
-    // 避免 tmpRoot 在 afterEach rmSync 之后,pino worker 还在异步写
-    // agent.log 抛 ENOENT(issue 02 review 修复:CI 偶发 unhandled)。
-    logFilePath: '/dev/null',
+    logFilePath: join(tmpRoot, 'agent.log'),
   })
   await app.ready()
   token = readFileSync(join(tmpRoot, '.agent-token'), 'utf8')
@@ -45,7 +42,9 @@ beforeEach(async () => {
 
 afterEach(async () => {
   if (app) await app.close()
-  rmSync(tmpRoot, { recursive: true, force: true })
+  // 给 pino 30ms flush 缓冲,避免 ENOENT on agent.log(参见 repos-attach.e2e.test.ts 同样处理)
+  await new Promise((r) => setTimeout(r, 30))
+  if (existsSync(tmpRoot)) rmSync(tmpRoot, { recursive: true, force: true })
 })
 
 function authHeaders(): Record<string, string> {

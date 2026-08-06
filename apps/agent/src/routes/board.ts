@@ -1,5 +1,5 @@
 /**
- * boardRoutes —— board section REST endpoints(issue 03 / ADR-0025)
+ * boardRoutes —— board section REST endpoints(issue 03 / ADR-0027)
  *
  * 当前切片实装 1 条:
  *   PATCH /api/requirement/:id/board/cards/:cardId/status
