@@ -19,6 +19,77 @@ const TaskCardIdSchema = z
   .string()
   .regex(TASK_CARD_ID_RE, 'id must be a 26-character ULID')
 
+/**
+ * Crockford Base32 字母表(无 I / L / O / U)。与 `TASK_CARD_ID_RE` 对齐。
+ *
+ * 暴露给测试用(`__test_ulidInternals.CROCKFORD_ALPHABET`),生产代码请走
+ * `generateTaskCardUlid` 入口,不要直接拼字符串。
+ */
+export const CROCKFORD_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ' as const
+
+/**
+ * 生成一个 26 字符的 Crockford Base32 ULID(10 字符时间戳 + 16 字符随机段)。
+ *
+ * 设计要点:
+ * - 时间戳部分截到 48 bit(`now & 0xffffffffffff`),保证到 10889 年不溢出
+ * - 随机段用 `crypto.getRandomValues` 拿 10 字节(80 bit),Node 19+ 全局可用,
+ *   vitest jsdom 也提供;失败 fallback `Math.random`(不推荐用于安全场景)
+ * - 不依赖外部 `ulid` / `ulidx` 库,避免给 shared / agent / web 增依赖
+ *
+ * 用途:
+ * - `TaskCardStore.create()` 默认 `ulidFactory`
+ * - 测试可注入 `now` + `randomBytes`(确定性)
+ *
+ * 返回值永远匹配 `TASK_CARD_ID_RE`。
+ */
+export function generateTaskCardUlid(
+  now: number = Date.now(),
+  randomBytes?: Uint8Array,
+): string {
+  // 1) 10 字符时间戳:48-bit 毫秒数 → 10 个 5-bit 字符
+  let ts = now & 0xffffffffffff
+  const timeChars: string[] = new Array(10)
+  for (let i = 9; i >= 0; i--) {
+    timeChars[i] = CROCKFORD_ALPHABET[ts & 0x1f]!
+    ts = Math.floor(ts / 32)
+  }
+  const timePart = timeChars.join('')
+
+  // 2) 16 字符随机段:80 bit → 16 个 5-bit 字符(BigInt 防 32-bit 截断)
+  const rand = randomBytes ?? defaultRandomBytes()
+  const randChars: string[] = new Array(16)
+  let bits = 0n
+  for (let i = 0; i < rand.length; i++) {
+    bits = (bits << 8n) | BigInt(rand[i]!)
+  }
+  for (let i = 15; i >= 0; i--) {
+    const idx = Number(bits & 0x1fn)
+    randChars[i] = CROCKFORD_ALPHABET[idx]!
+    bits = bits >> 5n
+  }
+  const randPart = randChars.join('')
+
+  return timePart + randPart
+}
+
+function defaultRandomBytes(): Uint8Array {
+  const buf = new Uint8Array(10)
+  if (typeof globalThis.crypto?.getRandomValues === 'function') {
+    globalThis.crypto.getRandomValues(buf)
+  } else {
+    // 极罕见 fallback:Math.random 32 bit → 不安全但保证代码不崩
+    for (let i = 0; i < buf.length; i++) {
+      buf[i] = Math.floor(Math.random() * 256)
+    }
+  }
+  return buf
+}
+
+/** 暴露给测试:允许注入时间 + 随机源。 */
+export const __test_ulidInternals = {
+  CROCKFORD_ALPHABET,
+} as const
+
 // ---------------------------------------------------------------------------
 // 枚举
 // ---------------------------------------------------------------------------
