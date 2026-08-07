@@ -1,0 +1,61 @@
+packages/shared/src/prd-split.ts
+  s_a600c64efbd60f::t_5eb031c728fcf1 1-194
+packages/shared/src/index.ts
+  s_a600c64efbd60f::t_ba841eea59eb01 16-17
+apps/agent/src/prd-split/PrdSplitRunner.ts
+  s_a600c64efbd60f::t_fafd1101aceb4c 1-306
+apps/agent/src/__tests__/board/board-cards-route.test.ts
+  s_a600c64efbd60f::t_3688b589b3fc3c 37-40
+apps/agent/src/server.ts
+  s_a600c64efbd60f::t_e92684f1cd5c63 51-52
+  s_a600c64efbd60f::t_4a6474a6317ca0 366-384
+apps/agent/src/prd-split/PrdSplitRoute.ts
+  s_a600c64efbd60f::t_4804f2be886f17 1-310,312-314,317-322
+  s_a600c64efbd60f::t_758dc5c45b92ea 311,315-316
+.scratch/board-section/issues/05-agent-prd-split-service.md
+  s_a600c64efbd60f::t_a9c9e8d822bd73 9-40
+  s_a600c64efbd60f::t_78600e3e3ea769 7-8
+apps/agent/src/__tests__/board/prd-split-prompt-assembler.test.ts
+  s_a600c64efbd60f::t_11640964ccd1d0 1-140
+packages/shared/src/sse.ts
+  s_a600c64efbd60f::t_fa24f60cb0eef6 403-415
+  s_a600c64efbd60f::t_e38f783bf84d5b 349-402
+packages/shared/src/__tests__/prd-split.test.ts
+  s_a600c64efbd60f::t_7a06985eeb03c1 1-301
+apps/agent/src/prd-split/PrdSplitPromptAssembler.ts
+  s_a600c64efbd60f::t_9008d9b9c7107c 1-187
+apps/agent/src/__tests__/board/prd-split-service.test.ts
+  s_a600c64efbd60f::t_3c91028855cda8 1-428
+apps/agent/src/__tests__/board/__fixtures__/fakePrdSplitProvider.ts
+  s_a600c64efbd60f::t_7e4626704994ee 29,32-33
+  s_a600c64efbd60f::t_9546f8a914b603 82-85
+  s_a600c64efbd60f::t_c25a09df0e4cfb 1-28,30-31,34-81,86-100
+apps/agent/src/__tests__/board/prd-split-routes.test.ts
+  s_a600c64efbd60f::t_19dc1c0cf9d85c 323,329-330
+  s_a600c64efbd60f::t_ea85fe2be13159 1-190,192-322,324-328,331-389
+  s_a600c64efbd60f::t_7426210b04b8f1 191
+apps/agent/src/prd-split/PrdSplitService.ts
+  s_a600c64efbd60f::t_e9f09f25f0a8db 274-279,286-287,295-296
+  s_a600c64efbd60f::t_568bae77f0e1ee 1-42,44-273,280-285,288-294,297-350,352-539,543-551,553-635
+  s_a600c64efbd60f::t_7d8775e5b91316 351
+  s_a600c64efbd60f::t_250f9f7ef30eb8 540-542,552
+  s_a600c64efbd60f::t_cdc392724dfd79 43
+apps/agent/src/prd-split/proposalPaths.ts
+  s_a600c64efbd60f::t_9b887225283e46 1-92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "18637b0073b523920de655b3800cf4c59c36c72c",
+  "prompts": {},
+  "sessions": {
+    "s_a600c64efbd60f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ca019418-a0b3-46fa-b2b5-804f073a3df8",
+        "model": "xopglm52"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
