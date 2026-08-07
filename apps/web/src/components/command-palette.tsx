@@ -1,7 +1,7 @@
 'use client';
 import { useUIOverlay } from './ui-overlay-store';
 import { useAnalyzingHistoryFabControllerValue } from './analyzing-history-fab-controller';
-import { ZONE_META, ZONE_STATUS_COLOR_CLASS, type ZoneMeta } from '@/lib/zones';
+import { SECTION_META, SECTION_STATUS_COLOR_CLASS, type SectionMeta } from '@/lib/sections';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -45,7 +45,7 @@ interface ZoneJump {
   id: string;
   label: string;
   icon: string;
-  status_color: ZoneMeta['status_color'];
+  status_color: SectionMeta['statusColor'];
   route: string;
 }
 
@@ -176,14 +176,14 @@ function parseRequirementId(pathname: string): string | null {
 }
 
 /**
- * 工位 Cmd+K 匹配(ADR-0012 §7 · issue 14):
- * - 匹配字段:id / name(大写)/ display_name(中文)/ route_segment
+ * 工位 Cmd+K 匹配(ADR-0012 §7 · issue 14 · ADR-0026:4 section):
+ * - 匹配字段:id / label(大写)/ displayName(中文)/ routeSegment
  * - 大小写不敏感
  * - 包含匹配(query 是字段子串)
  * - 支持 `@zone` 前缀(ADR §7 表格):内部剥掉 `@` 再匹配
  * - 空 query / 无 requirementId → []
  * - 同时支持两种匹配风格:
- *   1) 直接 includes("执行中" 匹配 display_name、"executing" 匹配 id)
+ *   1) 直接 includes("看板" 匹配 displayName、"board" 匹配 id)
  *   2) 去元音 + includes("wrp" 匹配 "wrap-up"、"ana" 匹配 "analyzing")
  *
  * Overview 不是工位,但在 Cmd+K 里也作为"回仪表板"项匹配,便于用户在工位页快速回 Overview。
@@ -197,12 +197,12 @@ export function matchZoneJumps(query: string, requirementId: string | null): Jum
   if (!stripped) return []
   const q = stripped.toLowerCase()
   const qStripped = q.replace(STRIP_VOWELS_RE, '')
-  const matchesZone = (z: ZoneMeta) => {
+  const matchesZone = (z: SectionMeta) => {
     const targets = [
       z.id.toLowerCase(),
-      z.name.toLowerCase(),
-      z.display_name.toLowerCase(),
-      z.route_segment.toLowerCase(),
+      z.label.toLowerCase(),
+      z.displayName.toLowerCase(),
+      z.routeSegment.toLowerCase(),
     ]
     if (targets.some((t) => t.includes(q))) return true
     // 缩写前缀场景:只对 ASCII 字段生效,避免破坏中文匹配
@@ -210,13 +210,16 @@ export function matchZoneJumps(query: string, requirementId: string | null): Jum
     return asciiTargets.some((t) => t.includes(qStripped))
   }
 
-  const zoneJumps: ZoneJump[] = ZONE_META.filter(matchesZone).map((z) => ({
+  const sectionMetas = (Object.keys(SECTION_META) as Array<keyof typeof SECTION_META>).map(
+    (k) => SECTION_META[k],
+  )
+  const zoneJumps: ZoneJump[] = sectionMetas.filter(matchesZone).map((z) => ({
     kind: 'zone' as const,
     id: z.id,
-    label: `切到 ${z.name} 工位`,
+    label: `切到 ${z.label} 工位`,
     icon: z.icon,
-    status_color: z.status_color,
-    route: `/requirements/${requirementId}/${z.route_segment}/`,
+    status_color: z.statusColor,
+    route: `/requirements/${requirementId}/${z.routeSegment}/`,
   }))
 
   const overviewMatches = 'overview'.includes(q) || '概览'.includes(q)
@@ -392,7 +395,7 @@ export function CommandPalette() {
                 <span
                   aria-hidden="true"
                   data-testid={`cmd-zone-dot-${j.id}`}
-                  className={`w-1.5 h-1.5 rounded-full ${ZONE_STATUS_COLOR_CLASS[j.status_color]}`}
+                  className={`w-1.5 h-1.5 rounded-full ${SECTION_STATUS_COLOR_CLASS[j.status_color]}`}
                 />
               )}
             </button>

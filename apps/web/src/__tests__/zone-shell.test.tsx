@@ -1,63 +1,53 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { render, cleanup } from '@testing-library/react'
-import { ZONE_META, type ZoneMeta } from '@/lib/zones'
+import { SECTION_META, type SectionMeta } from '@/lib/sections'
 import { ZoneShell, zoneShellGridClass } from '@/lib/zone-shell'
 
-const drafting: ZoneMeta = {
-  id: 'drafting',
-  name: 'DRAFTING',
-  display_name: '起草',
-  icon: '✏️',
-  route_segment: 'drafting',
-  // issue 01 后:DRAFTING 不再渲染资源树(主区全宽 + 右侧 Inline 栏)
-  has_resource_tree: false,
-  has_inline_rail: true,
-  status_color: 'gray',
-  status_pulse: false,
-  description: '...',
+// ============================================================================
+// section fixtures(ADR-0026:camelCase 字段;board 新增,clarifying/executing 退役)
+// ============================================================================
+
+const drafting: SectionMeta = {
+  ...SECTION_META.drafting,
+  // 显式声明:DRAFTING(issue 01 后)仅 Inline 栏,无资源树
+  hasResourceTree: false,
+  hasInlineRail: true,
 }
 
-const wrapup: ZoneMeta = {
-  ...drafting,
-  id: 'wrapup',
-  name: 'WRAP-UP',
-  display_name: '归档',
-  icon: '📦',
-  route_segment: 'wrap-up',
-  // 显式声明:WRAP-UP 仍有资源树(沿用 issue 01 之前的设定)
-  has_resource_tree: true,
-  has_inline_rail: false,
+const board: SectionMeta = {
+  ...SECTION_META.board,
+  // BOARD(ADR-0027 D2):全宽无树无栏
+  hasResourceTree: false,
+  hasInlineRail: false,
 }
 
-const clarifying: ZoneMeta = {
-  ...drafting,
-  id: 'clarifying',
-  name: 'CLARIFYING',
-  display_name: '澄清',
-  icon: '❓',
-  route_segment: 'clarifying',
-  has_resource_tree: false,
-  has_inline_rail: false,
+const analyzing: SectionMeta = {
+  ...SECTION_META.analyzing,
+  // ANALYZING:全宽无树无栏
+  hasResourceTree: false,
+  hasInlineRail: false,
 }
 
-const executing: ZoneMeta = {
+const wrapup: SectionMeta = {
+  ...SECTION_META.wrapup,
+  // WRAP-UP:仅资源树
+  hasResourceTree: true,
+  hasInlineRail: false,
+}
+
+// 资源树 + Inline 栏组合(本期无 section 使用,但保留 grid 3 列测试以覆盖 zoneShellGridClass)
+// id 必须是合法 RequirementSection;复用 drafting id(仅用于 grid 测试)
+const treeAndRail: SectionMeta = {
   ...drafting,
-  id: 'executing',
-  name: 'EXECUTING',
-  display_name: '执行中',
-  icon: '⚡',
-  route_segment: 'executing',
-  // 显式声明:EXECUTING 仍有资源树(issue 01 不影响 EXECUTING)
-  has_resource_tree: true,
-  has_inline_rail: true,
+  hasResourceTree: true,
+  hasInlineRail: true,
 }
 
 afterEach(() => cleanup())
 
 describe('zoneShellGridClass', () => {
   it('资源树 + Inline 栏 → 3 列', () => {
-    // 仍有一个组合属 3 列(EXECUTING)
-    expect(zoneShellGridClass(executing)).toBe('grid-cols-[240px_1fr_120px]')
+    expect(zoneShellGridClass(treeAndRail)).toBe('grid-cols-[240px_1fr_120px]')
   })
   it('仅资源树 → 2 列(左 + 主)', () => {
     expect(zoneShellGridClass(wrapup)).toBe('grid-cols-[240px_1fr]')
@@ -67,7 +57,8 @@ describe('zoneShellGridClass', () => {
     expect(zoneShellGridClass(drafting)).toBe('grid-cols-[1fr_120px]')
   })
   it('均无 → 1 列(主区全宽)', () => {
-    expect(zoneShellGridClass(clarifying)).toBe('grid-cols-1')
+    expect(zoneShellGridClass(board)).toBe('grid-cols-1')
+    expect(zoneShellGridClass(analyzing)).toBe('grid-cols-1')
   })
 })
 
@@ -86,13 +77,14 @@ describe('ZoneShell', () => {
     expect(getByTestId('main')).toBeInTheDocument()
   })
 
-  it('CLARIFYING(均无):1 列布局,主区全宽', () => {
+  it('BOARD(均无):1 列布局,主区全宽', () => {
     const { getByTestId } = render(
-      <ZoneShell id="REF-001" zone={clarifying}>
+      <ZoneShell id="REF-001" zone={board}>
         <span data-testid="main">main</span>
       </ZoneShell>,
     )
     const shell = getByTestId('zone-shell')
+    expect(shell.getAttribute('data-zone-id')).toBe('board')
     expect(shell.getAttribute('data-has-resource-tree')).toBe('false')
     expect(shell.getAttribute('data-has-inline-rail')).toBe('false')
     expect(shell.className).toContain('grid-cols-1')
@@ -106,23 +98,28 @@ describe('ZoneShell', () => {
       </ZoneShell>,
     )
     const shell = getByTestId('zone-shell')
+    expect(shell.getAttribute('data-zone-id')).toBe('wrapup')
     expect(shell.getAttribute('data-has-resource-tree')).toBe('true')
     expect(shell.getAttribute('data-has-inline-rail')).toBe('false')
     expect(shell.className).toContain('grid-cols-[240px_1fr]')
   })
 
-  it('EXECUTING(资源树 + Inline 栏):同 DRAFTING 3 列布局', () => {
+  it('ANALYZING(均无):1 列布局,主区全宽', () => {
     const { getByTestId } = render(
-      <ZoneShell id="REF-001" zone={executing}>
+      <ZoneShell id="REF-001" zone={analyzing}>
         <span data-testid="main">main</span>
       </ZoneShell>,
     )
     const shell = getByTestId('zone-shell')
-    expect(shell.className).toContain('grid-cols-[240px_1fr_120px]')
+    expect(shell.getAttribute('data-zone-id')).toBe('analyzing')
+    expect(shell.getAttribute('data-has-resource-tree')).toBe('false')
+    expect(shell.getAttribute('data-has-inline-rail')).toBe('false')
+    expect(shell.className).toContain('grid-cols-1')
   })
 
-  it('6 个内置工位都能渲染且 data-zone-id 与 zone.id 一致', () => {
-    for (const z of ZONE_META) {
+  it('4 个内置 section 都能渲染且 data-zone-id 与 zone.id 一致', () => {
+    for (const id of ['drafting', 'board', 'analyzing', 'wrapup'] as const) {
+      const z = SECTION_META[id]
       const { unmount, getByTestId } = render(
         <ZoneShell id="REF-001" zone={z}>
           <span>main</span>
@@ -133,24 +130,26 @@ describe('ZoneShell', () => {
     }
   })
 
-  it('资源树 / Inline 栏的实际可见性与 zone config 一致', () => {
+  it('资源树 / Inline 栏的实际可见性与 section config 一致', () => {
     // DRAFTING(issue 01 后):仅 Inline 栏渲染,grid-cols-[1fr_120px]
     const { unmount, container: c1 } = render(
       <ZoneShell id="REF-001" zone={drafting}>
         main
       </ZoneShell>,
     )
-    expect((c1.querySelector('[data-testid="zone-shell"]') as HTMLElement).className).toContain(
-      'grid-cols-[1fr_120px]',
-    )
+    expect(
+      (c1.querySelector('[data-testid="zone-shell"]') as HTMLElement).className,
+    ).toContain('grid-cols-[1fr_120px]')
     unmount()
 
-    // CLARIFYING:都无,只有 main
+    // BOARD:都无,只有 main
     const { container: c2 } = render(
-      <ZoneShell id="REF-001" zone={clarifying}>
+      <ZoneShell id="REF-001" zone={board}>
         main
       </ZoneShell>,
     )
-    expect((c2.querySelector('[data-testid="zone-shell"]') as HTMLElement).className).toContain('grid-cols-1')
+    expect(
+      (c2.querySelector('[data-testid="zone-shell"]') as HTMLElement).className,
+    ).toContain('grid-cols-1')
   })
 })

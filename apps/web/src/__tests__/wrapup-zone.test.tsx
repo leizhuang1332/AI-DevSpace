@@ -265,14 +265,14 @@ describe('WrapupZone · 满数据渲染', () => {
       'Archive',
     )
 
-    // ZONE_STATUS_COLOR_CLASS.gray = 'bg-gray-400'(决策 22)
-    const { ZONE_STATUS_COLOR_CLASS } = await import('@/lib/zones')
-    expect(ZONE_STATUS_COLOR_CLASS.gray).toBe('bg-gray-400')
+    // SECTION_STATUS_COLOR_CLASS.gray = 'bg-gray-400'(决策 22 · ADR-0026)
+    const { SECTION_STATUS_COLOR_CLASS } = await import('@/lib/sections')
+    expect(SECTION_STATUS_COLOR_CLASS.gray).toBe('bg-gray-400')
 
-    const { ZONE_META } = await import('@/lib/zones')
-    const wrapup = ZONE_META.find((z) => z.id === 'wrapup')
+    const { SECTION_META } = await import('@/lib/sections')
+    const wrapup = SECTION_META.wrapup
     expect(wrapup).toBeDefined()
-    expect(wrapup!.status_color).toBe('gray')
+    expect(wrapup.statusColor).toBe('gray')
   })
 })
 
@@ -331,7 +331,7 @@ describe('WrapupZone · Archive / Reopen 交互', () => {
     fireEvent.click(screen.getByTestId('wrapup-reopen'))
 
     expect(onReopen).toHaveBeenCalledTimes(1)
-    expect(onReopen.mock.calls[0][0]).toEqual({ toZone: 'executing' })
+    expect(onReopen.mock.calls[0][0]).toEqual({ toZone: 'board' })
     expect(screen.getByTestId('wrapup-zone').getAttribute('data-archived')).toBe(
       'false',
     )
@@ -347,13 +347,13 @@ describe('WrapupZone · Archive / Reopen 交互', () => {
     expect(tb.hasAttribute('disabled')).toBe(true)
   })
 
-  it('archived 态:跳转链接 [→ 跳到 EXECUTING] 指向 /requirements/<id>/executing', async () => {
+  it('archived 态:跳转链接 [→ 跳到 BOARD] 指向 /requirements/<id>/board', async () => {
     const base = await getWrapupData('req-001')
     const data = { ...base, archive: { archived: true } }
     render(<WrapupZone data={data} />)
 
-    const link = screen.getByTestId('wrapup-archive-go-executing')
-    expect(link.getAttribute('href')).toBe('/requirements/req-001/executing')
+    const link = screen.getByTestId('wrapup-archive-go-board')
+    expect(link.getAttribute('href')).toBe('/requirements/req-001/board')
   })
 
   it('默认 no-op 回调(不传 onArchive / onReopen)点击不会抛错', async () => {
@@ -425,8 +425,8 @@ describe('WrapupZone · 空数据', () => {
     expect(root.getAttribute('data-requirement-id')).toBe('NEW-REQ')
 
     expect(screen.getByText('WRAP-UP 工位暂无可归档内容')).toBeInTheDocument()
-    const cta = screen.getByText('→ 进入 EXECUTING 工位')
-    expect(cta.getAttribute('href')).toBe('/requirements/NEW-REQ/executing')
+    const cta = screen.getByText('→ 进入 BOARD 工位')
+    expect(cta.getAttribute('href')).toBe('/requirements/NEW-REQ/board')
 
     // 7 个 section 都 query 不出
     expect(screen.queryByTestId('wrapup-hero')).toBeNull()

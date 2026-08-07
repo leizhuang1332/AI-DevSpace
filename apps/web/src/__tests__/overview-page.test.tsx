@@ -56,20 +56,15 @@ const FULL_DATA: OverviewData = {
   },
   zoneCards: [
     { zoneId: 'drafting', caption: 'PRD 已写', meta: '3 节', state: 'done' },
+    { zoneId: 'board', caption: '5 列看板', meta: '7/12 卡', state: 'cur' },
     { zoneId: 'analyzing', caption: '已完成', meta: '5 子问题', state: 'done' },
-    { zoneId: 'clarifying', caption: '已澄清', meta: '3 轮', state: 'done' },
-    { zoneId: 'designing', caption: '方案 A 已选', meta: '3 候选', state: 'done' },
-    { zoneId: 'executing', caption: '当前进度', meta: '1/4 任务', state: 'cur' },
     { zoneId: 'wrapup', caption: '待归档', meta: '—', state: 'todo' },
   ],
   milestones: [
     { id: 'drafting', name: 'DRAFTING · 写 PRD', ts: '2026-07-08', sub: '完成需求文档 + AC 5 条', state: 'done' },
     { id: 'analyzing', name: 'ANALYZING · AI 分析', ts: '2026-07-09', sub: '识别子问题 5 个', state: 'done' },
-    { id: 'clarifying', name: 'CLARIFYING · 澄清', ts: '2026-07-09 → 07-10', sub: '3 轮问答', state: 'done' },
-    { id: 'designing', name: 'DESIGNING · 选方案', ts: '2026-07-10', sub: '选择方案 A', state: 'done' },
-    { id: 'planning', name: 'PLANNING · 任务拆分', ts: '2026-07-11', sub: '12 个任务', state: 'done' },
-    { id: 'executing', name: 'EXECUTING · 实施中', ts: '2026-07-11 → 进行中', sub: '已完成 7/12 任务', state: 'cur' },
-    { id: 'wrapup', name: 'WRAP-UP · 归档', ts: null, sub: '待 EXECUTING 完成后归档', state: 'todo' },
+    { id: 'board', name: 'BOARD · 看板推进', ts: '2026-07-11 → 进行中', sub: '7/12 卡片推进中', state: 'cur' },
+    { id: 'wrapup', name: 'WRAP-UP · 归档', ts: null, sub: '待 BOARD 推进完成后归档', state: 'todo' },
   ],
   aiActivity: {
     totalActiveMinutes: 83,
@@ -77,10 +72,8 @@ const FULL_DATA: OverviewData = {
     skillCalls: 23,
     snapshotCount: 7,
     zones: [
-      { zoneId: 'executing', percent: 78 },
-      { zoneId: 'designing', percent: 42 },
-      { zoneId: 'clarifying', percent: 28 },
-      { zoneId: 'analyzing', percent: 18 },
+      { zoneId: 'board', percent: 78 },
+      { zoneId: 'analyzing', percent: 42 },
       { zoneId: 'drafting', percent: 12 },
     ],
   },
@@ -139,12 +132,12 @@ describe('OverviewPage · 满数据', () => {
     expect(detail.textContent).toContain('PR #234 等待 review')
   })
 
-  it('工位地图:6 工位卡片,点击跳对应工位(WRAP-UP → wrap-up/)', () => {
+  it('工位地图:4 section 卡片,点击跳对应 section(WRAP-UP → wrap-up/)', () => {
     render(<OverviewPage data={FULL_DATA} />)
-    expect(screen.getByTestId('overview-zone-map').children.length).toBe(6)
+    expect(screen.getByTestId('overview-zone-map').children.length).toBe(4)
 
-    // 6 个工位都渲染
-    for (const id of ['drafting', 'analyzing', 'clarifying', 'designing', 'executing', 'wrapup']) {
+    // 4 个 section 都渲染(ADR-0026:4 section hardcode)
+    for (const id of ['drafting', 'board', 'analyzing', 'wrapup']) {
       expect(screen.getByTestId(`overview-zone-${id}`)).toBeInTheDocument()
     }
 
@@ -152,27 +145,27 @@ describe('OverviewPage · 满数据', () => {
     const wrapup = screen.getByTestId('overview-zone-wrapup')
     expect(wrapup.getAttribute('href')).toBe('/requirements/REF-001/wrap-up/')
 
-    // EXECUTING 是当前 zone → state=cur
-    const executing = screen.getByTestId('overview-zone-executing')
-    expect(executing.getAttribute('data-zone-state')).toBe('cur')
-    // EXECUTING 的 class 应含 brand-50 / brand 高亮
-    expect(executing.className).toContain('bg-brand-50')
+    // BOARD 是当前 section → state=cur
+    const board = screen.getByTestId('overview-zone-board')
+    expect(board.getAttribute('data-zone-state')).toBe('cur')
+    // BOARD 的 class 应含 brand-50 / brand 高亮
+    expect(board.className).toContain('bg-brand-50')
 
     // WRAP-UP 是 todo
     expect(wrapup.getAttribute('data-zone-state')).toBe('todo')
   })
 
-  it('时间线:7 节点,当前 zone 高亮,已完成绿色', () => {
+  it('时间线:4 节点,当前 section 高亮,已完成绿色', () => {
     render(<OverviewPage data={FULL_DATA} />)
     const timeline = screen.getByTestId('overview-timeline')
-    expect(timeline.querySelectorAll('li').length).toBe(7)
+    expect(timeline.querySelectorAll('li').length).toBe(4)
 
-    // EXECUTING 是当前节点(state=cur)
-    const cur = screen.getByTestId('overview-milestone-executing')
+    // BOARD 是当前节点(state=cur)
+    const cur = screen.getByTestId('overview-milestone-board')
     expect(cur.getAttribute('data-milestone-state')).toBe('cur')
 
-    // DRAFTING / ANALYZING / CLARIFYING / DESIGNING / PLANNING 都是 done
-    for (const id of ['drafting', 'analyzing', 'clarifying', 'designing', 'planning']) {
+    // DRAFTING / ANALYZING 都是 done
+    for (const id of ['drafting', 'analyzing']) {
       expect(screen.getByTestId(`overview-milestone-${id}`).getAttribute('data-milestone-state')).toBe('done')
     }
 
@@ -180,7 +173,7 @@ describe('OverviewPage · 满数据', () => {
     expect(screen.getByTestId('overview-milestone-wrapup').getAttribute('data-milestone-state')).toBe('todo')
   })
 
-  it('AI 活动概览:3 stat cell + 工位活跃度条', () => {
+  it('AI 活动概览:3 stat cell + section 活跃度条', () => {
     render(<OverviewPage data={FULL_DATA} />)
     const stats = screen.getByTestId('overview-ai-stats')
     expect(stats.textContent).toContain('124')
@@ -190,8 +183,8 @@ describe('OverviewPage · 满数据', () => {
     expect(stats.textContent).toContain('7')
     expect(stats.textContent).toContain('快照数')
 
-    // 5 个工位活跃度
-    expect(screen.getByTestId('overview-ai-zone-executing').getAttribute('data-percent')).toBe('78')
+    // 3 个 section 活跃度(ADR-0026:4 section,本 fixture 给 3 个)
+    expect(screen.getByTestId('overview-ai-zone-board').getAttribute('data-percent')).toBe('78')
     expect(screen.getByTestId('overview-ai-zone-drafting').getAttribute('data-percent')).toBe('12')
 
     // 总活跃时间显示 1h 23min
@@ -251,8 +244,8 @@ describe('getRequirementOverview', () => {
     const data = await getRequirementOverview('req-001')
     expect(data.empty).toBe(false)
     expect(data.meta.title).toBe('退款功能优化')
-    expect(data.zoneCards.length).toBe(6)
-    expect(data.milestones.length).toBe(7)
+    expect(data.zoneCards.length).toBe(4)
+    expect(data.milestones.length).toBe(4)
   })
 
   it('未知 id 返回空状态', async () => {

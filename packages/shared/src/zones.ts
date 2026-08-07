@@ -1,3 +1,13 @@
+/**
+ * @deprecated ADR-0026 — zones 声明式注册表已整体退役(`ZONE_META` 数组 +
+ * `~/.aidevspace/zones/*.yaml` + agent 端 `ZoneRegistry.ts` + 本 schema)。
+ * 请勿新增引用。web 端 section 元数据改用 `apps/web/src/lib/sections.ts`
+ * (`SECTION_META` / `REQUIREMENT_SECTIONS` hardcode 4 section)。
+ *
+ * 本文件按 issue 06 checklist 第 3 项**保留一周**(不立即删除),供过渡期
+ * 观测;agent 删除 `ZoneRegistry.ts` 后,本 schema 已无运行时消费方。
+ * 一周后物理删除 + 同步移除 `packages/shared/src/index.ts` 的 `export * from './zones'`。
+ */
 import { z } from 'zod'
 
 /** 工位状态色(对应 ADR-0011 决策 22) */

@@ -1,5 +1,5 @@
 /**
- * ANALYZING + DESIGNING fs loader 测试
+ * ANALYZING fs loader 测试
  *
  * 文件名保留 `analyzing-designing` 子串,以便 `pnpm --filter web test analyzing-designing`
  * 仍能匹配到本文件。
@@ -13,7 +13,8 @@
  *   `analysis-skills/<name>/SKILL.md` / `analysis/selected-skill.yaml` /
  *   `analysis/runs/<run-id>/meta.yaml`
  *
- * DESIGNING 端:沿用既有契约不变,本文件保留其测试。
+ * 注:原 DESIGNING fs loader 测试已随 ADR-0027(3 工位退役)删除 ——
+ * `@/lib/designing` + `@/lib/designing.server` 整体退役。
  */
 
 import { describe, it, expect, afterEach, beforeEach } from 'vitest'
@@ -26,8 +27,6 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { getAnalyzingData } from '@/lib/analyzing.server'
-import { getDesigningDataFromFs } from '@/lib/designing.server'
-import { emptyDesigning } from '@/lib/designing'
 
 // ============================================================================
 // fixture 隔离
@@ -181,190 +180,5 @@ describe('ANALYZING · getAnalyzingData · issue 08 新契约', () => {
     // 旧文件不影响新契约:AnalyzingData 没有 sessions / techBriefPreview 等字段
     expect(data.runs).toEqual([])
     expect(data.availableSkills).toEqual([])
-  })
-})
-
-// ============================================================================
-// DESIGNING · 与 analyzing 并存的 fs loader 测试(沿用既有契约)
-// ============================================================================
-
-function writeDesignDir(id: string): string {
-  const dir = join(tmpRoot, 'requirements', id, 'design')
-  mkdirSync(dir, { recursive: true })
-  return dir
-}
-
-function writeFullDesignBundle(id: string): void {
-  const dir = writeDesignDir(id)
-
-  writeFileSync(
-    join(dir, 'stage.yaml'),
-    [
-      'stage:',
-      '  badge: ④ 设计',
-      '  title: 退款功能优化 · DESIGNING',
-      '  meta: 等选 3 / 3',
-      '',
-    ].join('\n'),
-    'utf8',
-  )
-
-  writeFileSync(
-    join(dir, 'candidates.yaml'),
-    [
-      'candidates:',
-      '  - id: A',
-      '    title: 同步单阶段',
-      '    tag_label: 最简',
-      '    tag_variant: simple',
-      '    pros:',
-      '      - 实现简单',
-      '    cons:',
-      '      - 高并发下性能差',
-      '    metrics:',
-      '      - label: 微服务调用',
-      '        value: 3 个',
-      '  - id: B',
-      '    title: 异步多阶段',
-      '    tag_label: AI 推荐',
-      '    tag_variant: recommended',
-      '    pros:',
-      '      - 容错好',
-      '    cons:',
-      '      - 复杂度高',
-      '    metrics:',
-      '      - label: 预估延迟',
-      '        value: 80ms',
-      '        tone: good',
-      '    recommended: true',
-      '  - id: C',
-      '    title: 同步+回滚',
-      '    tag_label: 强一致',
-      '    tag_variant: strict',
-      '    pros:',
-      '      - 一致性最强',
-      '    cons:',
-      '      - 复杂度高',
-      '    metrics:',
-      '      - label: 失败率',
-      '        value: 0.001%',
-      '',
-    ].join('\n'),
-    'utf8',
-  )
-
-  writeFileSync(
-    join(dir, 'design_doc.yaml'),
-    [
-      'design_doc:',
-      '  title: 退款功能 · 设计文档',
-      '  markdown: |',
-      '    ## 问题背景',
-      '    退款链路当前调用 5 个微服务',
-      '  toc:',
-      '    - id: 问题背景',
-      '      label: 问题背景',
-      '      level: 0',
-      '',
-    ].join('\n'),
-    'utf8',
-  )
-
-  writeFileSync(
-    join(dir, 'tradeoff.yaml'),
-    [
-      'tradeoff:',
-      '  rows:',
-      '    - candidate_id: A',
-      '      summary: 简单但性能差',
-      '    - candidate_id: B',
-      '      summary: 复杂度中等',
-      '    - candidate_id: C',
-      '      summary: 强一致但维护成本高',
-      '  recommendation_candidate_id: B',
-      '  recommendation_reason: 推荐 B',
-      '',
-    ].join('\n'),
-    'utf8',
-  )
-}
-
-describe('DESIGNING · getDesigningDataFromFs · design/ 目录不存在', () => {
-  it('目录里没有 design/ → emptyDesigning(reqId)', async () => {
-    const data = await getDesigningDataFromFs('req-no-design', {
-      requirementsRoot: tmpRoot,
-    })
-    expect(data.requirementId).toBe('req-no-design')
-    expect(data.empty).toBe(true)
-    expect(data.candidates).toEqual([])
-    expect(data.designDoc.markdown).toBe('')
-    expect(data.tradeoff.rows).toEqual([])
-  })
-
-  it('requirements/ 目录根本不存在 → emptyDesigning', async () => {
-    const data = await getDesigningDataFromFs('req-no-requirements', {
-      requirementsRoot: tmpRoot,
-    })
-    expect(data.empty).toBe(true)
-  })
-})
-
-describe('DESIGNING · getDesigningDataFromFs · design/ 存在但 candidates.yaml 缺失', () => {
-  it('只建 design/ 空目录 → emptyDesigning', async () => {
-    writeDesignDir('req-empty-design')
-    const data = await getDesigningDataFromFs('req-empty-design', {
-      requirementsRoot: tmpRoot,
-    })
-    expect(data.empty).toBe(true)
-  })
-
-  it('candidates.yaml 存在但为空 → emptyDesigning', async () => {
-    const dir = writeDesignDir('req-empty-yaml')
-    writeFileSync(join(dir, 'candidates.yaml'), '', 'utf8')
-    const data = await getDesigningDataFromFs('req-empty-yaml', {
-      requirementsRoot: tmpRoot,
-    })
-    expect(data.empty).toBe(true)
-  })
-})
-
-describe('DESIGNING · getDesigningDataFromFs · 四 yaml 齐备且非空', () => {
-  it('stage + candidates + design_doc + tradeoff 齐备 → empty=false,字段正确解析', async () => {
-    writeFullDesignBundle('req-full')
-
-    const data = await getDesigningDataFromFs('req-full', {
-      requirementsRoot: tmpRoot,
-    })
-
-    expect(data.requirementId).toBe('req-full')
-    expect(data.empty).toBe(false)
-
-    expect(data.stage.badge).toBe('④ 设计')
-    expect(data.candidates.length).toBe(3)
-    expect(data.candidates[0].id).toBe('A')
-    expect(data.candidates[1].recommended).toBe(true)
-    const goodMetric = data.candidates[1].metrics.find((m) => m.tone === 'good')
-    expect(goodMetric).toBeDefined()
-    expect(data.designDoc.title).toBe('退款功能 · 设计文档')
-    expect(data.tradeoff.rows.length).toBe(3)
-    expect(data.tradeoff.recommendation.candidateId).toBe('B')
-  })
-
-  it('selectedCandidateId 默认 null(组件 useState 接管)', async () => {
-    writeFullDesignBundle('req-selected')
-    const data = await getDesigningDataFromFs('req-selected', {
-      requirementsRoot: tmpRoot,
-    })
-    expect(data.selectedCandidateId).toBeNull()
-  })
-})
-
-describe('DESIGNING · 非 req-001 且 fs 没有 → emptyDesigning(reqId)', () => {
-  it('语义与 emptyDesigning("NEW-REQ")一致', async () => {
-    const fromFs = await getDesigningDataFromFs('NEW-REQ', { requirementsRoot: tmpRoot })
-    const baseline = emptyDesigning('NEW-REQ')
-    expect(fromFs.empty).toBe(baseline.empty)
-    expect(fromFs.candidates).toEqual(baseline.candidates)
-    expect(fromFs.designDoc.markdown).toBe(baseline.designDoc.markdown)
   })
 })

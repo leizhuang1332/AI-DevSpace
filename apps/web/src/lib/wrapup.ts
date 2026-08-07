@@ -131,10 +131,10 @@ export interface WrapupArchivePayload {
   withKnowledge?: boolean
 }
 
-/** 重新打开载荷 —— 从 ARCHIVED → EXECUTING */
+/** 重新打开载荷 —— 从 ARCHIVED → BOARD(ADR-0027:EXECUTING 退役,功能吸收到 BOARD) */
 export interface WrapupReopenPayload {
-  /** 回退到哪个工位(默认 'executing') */
-  toZone?: 'executing' | 'designing'
+  /** 回退到哪个 section(默认 'board') */
+  toZone?: 'board' | 'analyzing'
 }
 
 /** 归档状态 */

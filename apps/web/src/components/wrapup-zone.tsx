@@ -52,7 +52,7 @@ export interface WrapupZoneProps {
   data: WrapupData
   /** 归档触发 —— page 层接 API:把需求状态改为 ARCHIVED */
   onArchive?: (payload: WrapupArchivePayload) => void
-  /** 重新打开触发 —— 从 ARCHIVED → EXECUTING(或 designing) */
+  /** 重新打开触发 —— 从 ARCHIVED → BOARD(或 analyzing) */
   onReopen?: (payload: WrapupReopenPayload) => void
 }
 
@@ -79,7 +79,7 @@ export function WrapupZone({
 }
 
 // ============================================================================
-// 空态(引导去 EXECUTING)
+// 空态(引导去 BOARD,EXECUTING 已退役吸收到 BOARD section)
 // ============================================================================
 
 function EmptyWrapup({ data }: { data: WrapupData }) {
@@ -94,10 +94,10 @@ function EmptyWrapup({ data }: { data: WrapupData }) {
         <EmptyState
           icon="📦"
           title="WRAP-UP 工位暂无可归档内容"
-          subtitle="这个需求还没有完成。先去 EXECUTING 工位让 AI 完成实施,完成后再来这里归档复盘。"
+          subtitle="这个需求还没有完成。先去 BOARD 工位推进任务卡片,完成后再来这里归档复盘。"
           cta={{
-            label: '→ 进入 EXECUTING 工位',
-            href: `/requirements/${data.requirementId}/executing`,
+            label: '→ 进入 BOARD 工位',
+            href: `/requirements/${data.requirementId}/board`,
           }}
         />
       </div>
@@ -126,7 +126,7 @@ function WrapupContent({
   const handleReopen = () => {
     if (!archived) return
     setArchived(false)
-    onReopen({ toZone: 'executing' })
+    onReopen({ toZone: 'board' })
   }
 
   return (
@@ -807,7 +807,7 @@ function ArchiveActions({
         </div>
         <div className="text-sm text-text-3 mt-1">
           {archived
-            ? '需求已归档到只读区。可重新打开回到 EXECUTING 工位继续。'
+            ? '需求已归档到只读区。可重新打开回到 BOARD 工位继续。'
             : '归档后只读,不可编辑。可同步沉淀知识库条目(可选)。'}
         </div>
       </div>
@@ -815,11 +815,11 @@ function ArchiveActions({
         {archived ? (
           <>
             <Link
-              href={`/requirements/${requirementId}/executing`}
-              data-testid="wrapup-archive-go-executing"
+              href={`/requirements/${requirementId}/board`}
+              data-testid="wrapup-archive-go-board"
               className="inline-flex items-center gap-1.5 h-9 px-4 rounded-md text-sm font-medium bg-bg-elevated text-text-1 border border-border-strong hover:bg-bg-subtle"
             >
-              → 跳到 EXECUTING
+              → 跳到 BOARD
             </Link>
             <button
               type="button"

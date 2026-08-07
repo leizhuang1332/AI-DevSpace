@@ -1,10 +1,11 @@
 import Link from 'next/link'
 import {
-  ZONE_META,
-  ZONE_LIFECYCLE_ORDER,
-  ZONE_STATUS_COLOR_CLASS,
-} from '@/lib/zones'
-import type { ZoneMeta } from '@/lib/zones'
+  SECTION_META,
+  REQUIREMENT_SECTIONS,
+  type RequirementSection,
+  SECTION_STATUS_COLOR_CLASS,
+} from '@/lib/sections'
+import type { SectionMeta } from '@/lib/sections'
 import type {
   OverviewAIActivity,
   OverviewData,
@@ -302,9 +303,9 @@ function ZoneMapCard({
   requirementId: string
   zones: OverviewZoneCard[]
 }) {
-  // 按 lifecycle 顺序对齐(原型的视觉顺序)
-  const sorted = ZONE_LIFECYCLE_ORDER.map((id) => {
-    const meta = ZONE_META.find((z) => z.id === id)!
+  // 按 lifecycle 顺序对齐(原型的视觉顺序;ADR-0026:4 section)
+  const sorted = REQUIREMENT_SECTIONS.map((id) => {
+    const meta = SECTION_META[id]
     const card = zones.find((z) => z.zoneId === id)
     return { meta, card }
   })
@@ -318,7 +319,7 @@ function ZoneMapCard({
         <h3 className="text-md font-semibold flex items-center gap-2">
           🗺️ 工作台地图
         </h3>
-        <span className="font-mono text-xs text-text-3">6 工位 · 点击进入</span>
+        <span className="font-mono text-xs text-text-3">4 section · 点击进入</span>
       </header>
 
       <div
@@ -344,7 +345,7 @@ function ZoneMapItem({
   card,
 }: {
   requirementId: string
-  meta: ZoneMeta
+  meta: SectionMeta
   card: OverviewZoneCard | null
 }) {
   const isCur = card?.state === 'cur'
@@ -356,18 +357,18 @@ function ZoneMapItem({
       data-testid={`overview-zone-${meta.id}`}
       data-zone-id={meta.id}
       data-zone-state={card?.state ?? 'todo'}
-      href={`/requirements/${requirementId}/${meta.route_segment}/`}
+      href={`/requirements/${requirementId}/${meta.routeSegment}/`}
       className={`block border rounded-md p-3 text-left transition-all ${stateClass}`}
     >
       <div className="flex items-center gap-2 mb-2">
         <span className="text-base">{meta.icon}</span>
         <span className="text-sm font-semibold text-text-1 flex-1">
-          {meta.name}
+          {meta.label}
         </span>
         <span
           data-testid={`overview-zone-dot-${meta.id}`}
-          data-status-color={meta.status_color}
-          className={`w-2 h-2 rounded-full ${ZONE_STATUS_COLOR_CLASS[meta.status_color]}`}
+          data-status-color={meta.statusColor}
+          className={`w-2 h-2 rounded-full ${SECTION_STATUS_COLOR_CLASS[meta.statusColor]}`}
         />
       </div>
       <div className="flex items-center justify-between text-xs text-text-3 font-mono mt-1">
@@ -521,14 +522,14 @@ function ZoneActivityRow({
   zoneId: string
   percent: number
 }) {
-  const meta = ZONE_META.find((z) => z.id === zoneId)
+  const meta = SECTION_META[zoneId as RequirementSection]
   return (
     <li
       data-testid={`overview-ai-zone-${zoneId}`}
       data-percent={percent}
       className="flex items-center gap-2 text-xs"
     >
-      <span className="w-[90px] text-text-2">{meta?.name ?? zoneId}</span>
+      <span className="w-[90px] text-text-2">{meta?.label ?? zoneId}</span>
       <span className="flex-1 h-1.5 bg-bg-subtle rounded-full overflow-hidden">
         <span
           className="block h-full bg-brand rounded-full"

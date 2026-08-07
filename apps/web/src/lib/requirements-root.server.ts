@@ -28,10 +28,9 @@
  * - 项目当前未安装 `server-only` npm 包;若以后装了,把 `import 'server-only'`
  *   放到文件顶部一行即可获得编译期越界保护
  *
- * 被引用方:
+ * 被引用方(ADR-0027:`designing.server.ts` 已退役删除):
  * - `drafting.server.ts` `defaultRequirementsRoot()`
  * - `analyzing.server.ts` `defaultRequirementsRoot()`
- * - `designing.server.ts` `defaultRequirementsRoot()`
  *
  * 与后端的对齐:
  * - 后端 `RequirementService.root = process.env.AIDEVSPACE_HOME ?? join(homedir(), '.aidevspace')`

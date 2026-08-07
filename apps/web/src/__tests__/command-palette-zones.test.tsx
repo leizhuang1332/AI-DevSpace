@@ -1,11 +1,14 @@
 /**
- * CommandPalette 工位搜索测试(issue 14 · ADR-0012 §7)
+ * CommandPalette 工位搜索测试(issue 14 · ADR-0012 §7 · ADR-0026:4 section)
  *
  * 验收:
- * - Cmd+K 唤起命令面板,输入 "exe" 出现 "切到 EXECUTING 工位" 选项
+ * - Cmd+K 唤起命令面板,输入 "boa" 出现 "切到 BOARD 工位" 选项
  * - 选中后回车跳转 /requirements/<currentId>/<zone-route>/
  * - 与既有 / 命令前缀 + ⌘I AI 提问切换不冲突
  * - Overview Tab 点击回到 /requirements/[id]/(无 ZoneBar 状态)
+ *
+ * ADR-0026:CLARIFYING / DESIGNING / EXECUTING 三工位退役,搜索用例改为
+ * board / analyzing / wrapup / drafting。
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -96,35 +99,42 @@ beforeEach(() => {
 
 afterEach(() => cleanup())
 
-describe('CommandPalette 工位搜索(ADR-0012 §7 · issue 14)', () => {
+describe('CommandPalette 工位搜索(ADR-0012 §7 · issue 14 · ADR-0026:4 section)', () => {
   describe('工位匹配', () => {
-    it('输入 "exe" 出现 "切到 EXECUTING 工位" 选项', async () => {
+    it('输入 "boa" 出现 "切到 BOARD 工位" 选项', async () => {
       const user = userEvent.setup()
       render(<CommandPalette />)
-      await user.type(screen.getByPlaceholderText(/搜索命令/), 'exe')
-      expect(screen.getByTestId('cmd-zone-executing')).toBeInTheDocument()
-      expect(screen.getByTestId('cmd-zone-executing')).toHaveTextContent(/切到 EXECUTING 工位/)
+      await user.type(screen.getByPlaceholderText(/搜索命令/), 'boa')
+      expect(screen.getByTestId('cmd-zone-board')).toBeInTheDocument()
+      expect(screen.getByTestId('cmd-zone-board')).toHaveTextContent(/切到 BOARD 工位/)
     })
 
-    it('输入 "wrp" 出现 WRAP-UP 工位项(route_segment wrap-up 匹配)', async () => {
+    it('输入 "wrp" 出现 WRAP-UP 工位项(routeSegment wrap-up 匹配)', async () => {
       const user = userEvent.setup()
       render(<CommandPalette />)
       await user.type(screen.getByPlaceholderText(/搜索命令/), 'wrp')
       expect(screen.getByTestId('cmd-zone-wrapup')).toBeInTheDocument()
     })
 
-    it('输入 "执行中" 匹配 EXECUTING(display_name 包含)', async () => {
+    it('输入 "看板" 匹配 BOARD(displayName 包含)', async () => {
       const user = userEvent.setup()
       render(<CommandPalette />)
-      await user.type(screen.getByPlaceholderText(/搜索命令/), '执行中')
-      expect(screen.getByTestId('cmd-zone-executing')).toBeInTheDocument()
+      await user.type(screen.getByPlaceholderText(/搜索命令/), '看板')
+      expect(screen.getByTestId('cmd-zone-board')).toBeInTheDocument()
     })
 
-    it('输入 "clar" 出现 CLARIFYING 工位项', async () => {
+    it('退役工位不再匹配:输入 "exe" 不出现 EXECUTING(已退役)', async () => {
+      const user = userEvent.setup()
+      render(<CommandPalette />)
+      await user.type(screen.getByPlaceholderText(/搜索命令/), 'exe')
+      expect(screen.queryByTestId('cmd-zone-executing')).toBeNull()
+    })
+
+    it('退役工位不再匹配:输入 "clar" 不出现 CLARIFYING(已退役)', async () => {
       const user = userEvent.setup()
       render(<CommandPalette />)
       await user.type(screen.getByPlaceholderText(/搜索命令/), 'clar')
-      expect(screen.getByTestId('cmd-zone-clarifying')).toBeInTheDocument()
+      expect(screen.queryByTestId('cmd-zone-clarifying')).toBeNull()
     })
 
     it('输入 "ana" 出现 ANALYZING 工位项', async () => {
@@ -134,39 +144,39 @@ describe('CommandPalette 工位搜索(ADR-0012 §7 · issue 14)', () => {
       expect(screen.getByTestId('cmd-zone-analyzing')).toBeInTheDocument()
     })
 
-    it('大小写不敏感:输入 "EXE" 也匹配 EXECUTING', async () => {
+    it('大小写不敏感:输入 "BOA" 也匹配 BOARD', async () => {
       const user = userEvent.setup()
       render(<CommandPalette />)
-      await user.type(screen.getByPlaceholderText(/搜索命令/), 'EXE')
-      expect(screen.getByTestId('cmd-zone-executing')).toBeInTheDocument()
+      await user.type(screen.getByPlaceholderText(/搜索命令/), 'BOA')
+      expect(screen.getByTestId('cmd-zone-board')).toBeInTheDocument()
     })
 
-    it('@zone 前缀(ADR §7):"@executing" 等价 "executing"', async () => {
+    it('@zone 前缀(ADR §7):"@board" 等价 "board"', async () => {
       const user = userEvent.setup()
       render(<CommandPalette />)
-      await user.type(screen.getByPlaceholderText(/搜索命令/), '@executing')
-      expect(screen.getByTestId('cmd-zone-executing')).toBeInTheDocument()
+      await user.type(screen.getByPlaceholderText(/搜索命令/), '@board')
+      expect(screen.getByTestId('cmd-zone-board')).toBeInTheDocument()
     })
 
-    it('@zone 前缀中文场景:"@exe" 仍匹配 EXECUTING', async () => {
+    it('@zone 前缀中文场景:"@boa" 仍匹配 BOARD', async () => {
       const user = userEvent.setup()
       render(<CommandPalette />)
-      await user.type(screen.getByPlaceholderText(/搜索命令/), '@exe')
-      expect(screen.getByTestId('cmd-zone-executing')).toBeInTheDocument()
+      await user.type(screen.getByPlaceholderText(/搜索命令/), '@boa')
+      expect(screen.getByTestId('cmd-zone-board')).toBeInTheDocument()
     })
 
     it('纯 "@" 不触发搜索(剥掉后空 query)', async () => {
       const user = userEvent.setup()
       render(<CommandPalette />)
       await user.type(screen.getByPlaceholderText(/搜索命令/), '@')
-      expect(screen.queryByTestId('cmd-zone-executing')).toBeNull()
+      expect(screen.queryByTestId('cmd-zone-board')).toBeNull()
     })
 
     it('无匹配时不显示工位项', async () => {
       const user = userEvent.setup()
       render(<CommandPalette />)
       await user.type(screen.getByPlaceholderText(/搜索命令/), 'zzzzz')
-      expect(screen.queryByTestId('cmd-zone-executing')).toBeNull()
+      expect(screen.queryByTestId('cmd-zone-board')).toBeNull()
       expect(screen.queryByTestId('cmd-zone-drafting')).toBeNull()
     })
 
@@ -177,33 +187,33 @@ describe('CommandPalette 工位搜索(ADR-0012 §7 · issue 14)', () => {
       // 原始 ALL 中 "打开 design/02-api.md" 存在
       expect(screen.getByText(/打开 design\/02-api.md/)).toBeInTheDocument()
       // 工位不匹配
-      expect(screen.queryByTestId('cmd-zone-executing')).toBeNull()
+      expect(screen.queryByTestId('cmd-zone-board')).toBeNull()
     })
   })
 
   describe('工位项点击跳转', () => {
-    it('点击 EXECUTING 工位项后 router.push 到 /requirements/REF-001/executing/', async () => {
+    it('点击 BOARD 工位项后 router.push 到 /requirements/REF-001/board/', async () => {
       const user = userEvent.setup()
       render(<CommandPalette />)
-      await user.type(screen.getByPlaceholderText(/搜索命令/), 'exe')
-      await user.click(screen.getByTestId('cmd-zone-executing'))
-      expect(mockPush).toHaveBeenCalledWith('/requirements/REF-001/executing/')
+      await user.type(screen.getByPlaceholderText(/搜索命令/), 'boa')
+      await user.click(screen.getByTestId('cmd-zone-board'))
+      expect(mockPush).toHaveBeenCalledWith('/requirements/REF-001/board/')
     })
 
-    it('点击 WRAP-UP 工位项跳到 wrap-up route_segment(不是 wrapup id)', async () => {
+    it('点击 WRAP-UP 工位项跳到 wrap-up routeSegment(不是 wrapup id)', async () => {
       const user = userEvent.setup()
       render(<CommandPalette />)
       await user.type(screen.getByPlaceholderText(/搜索命令/), 'wrp')
       await user.click(screen.getByTestId('cmd-zone-wrapup'))
-      // route_segment 与 id 解耦:wrap-up route → wrapup id
+      // routeSegment 与 id 解耦:wrap-up route → wrapup id
       expect(mockPush).toHaveBeenCalledWith('/requirements/REF-001/wrap-up/')
     })
 
     it('点击工位项同时关闭命令面板', async () => {
       const user = userEvent.setup()
       render(<CommandPalette />)
-      await user.type(screen.getByPlaceholderText(/搜索命令/), 'exe')
-      await user.click(screen.getByTestId('cmd-zone-executing'))
+      await user.type(screen.getByPlaceholderText(/搜索命令/), 'boa')
+      await user.click(screen.getByTestId('cmd-zone-board'))
       expect(mockClose).toHaveBeenCalled()
     })
 
@@ -219,11 +229,11 @@ describe('CommandPalette 工位搜索(ADR-0012 §7 · issue 14)', () => {
     it('焦点在工位项上按 Enter 跳转(spec 验收:"选中后回车跳转")', async () => {
       const user = userEvent.setup()
       render(<CommandPalette />)
-      await user.type(screen.getByPlaceholderText(/搜索命令/), 'exe')
-      const item = screen.getByTestId('cmd-zone-executing')
+      await user.type(screen.getByPlaceholderText(/搜索命令/), 'boa')
+      const item = screen.getByTestId('cmd-zone-board')
       item.focus()
       await user.keyboard('{Enter}')
-      expect(mockPush).toHaveBeenCalledWith('/requirements/REF-001/executing/')
+      expect(mockPush).toHaveBeenCalledWith('/requirements/REF-001/board/')
     })
   })
 
@@ -231,8 +241,8 @@ describe('CommandPalette 工位搜索(ADR-0012 §7 · issue 14)', () => {
     it('输入 ">" 前缀不触发工位搜索(命令前缀优先)', async () => {
       const user = userEvent.setup()
       render(<CommandPalette />)
-      await user.type(screen.getByPlaceholderText(/搜索命令/), '>exe')
-      expect(screen.queryByTestId('cmd-zone-executing')).toBeNull()
+      await user.type(screen.getByPlaceholderText(/搜索命令/), '>boa')
+      expect(screen.queryByTestId('cmd-zone-board')).toBeNull()
     })
 
     it('AI 模式下工位搜索不出现(query 进 AI 提问分支)', async () => {
@@ -240,16 +250,16 @@ describe('CommandPalette 工位搜索(ADR-0012 §7 · issue 14)', () => {
       render(<CommandPalette />)
       // 模拟 ⌘I 切到 AI 模式
       fireEvent.keyDown(window, { key: 'i', metaKey: true })
-      await user.type(screen.getByPlaceholderText(/搜索命令/), 'exe')
-      expect(screen.queryByTestId('cmd-zone-executing')).toBeNull()
+      await user.type(screen.getByPlaceholderText(/搜索命令/), 'boa')
+      expect(screen.queryByTestId('cmd-zone-board')).toBeNull()
     })
 
     it('history 模式(点击"历史"按钮)不显示工位搜索', async () => {
       const user = userEvent.setup()
       render(<CommandPalette />)
       await user.click(screen.getByRole('button', { name: '历史' }))
-      await user.type(screen.getByPlaceholderText(/搜索命令/), 'exe')
-      expect(screen.queryByTestId('cmd-zone-executing')).toBeNull()
+      await user.type(screen.getByPlaceholderText(/搜索命令/), 'boa')
+      expect(screen.queryByTestId('cmd-zone-board')).toBeNull()
     })
 
     it('Overview 页(`/requirements/REF-001/`)点击 "Overview" 工位项跳到 /requirements/REF-001/', async () => {
@@ -266,29 +276,29 @@ describe('CommandPalette 工位搜索(ADR-0012 §7 · issue 14)', () => {
     it('面板关闭(overlay 关闭)时不渲染内容', () => {
       mockCmdKOpen = false
       render(<CommandPalette />)
-      expect(screen.queryByTestId('cmd-zone-executing')).toBeNull()
+      expect(screen.queryByTestId('cmd-zone-board')).toBeNull()
     })
   })
 
   describe('空 query 边界', () => {
     it('空 query 不渲染工位项(没有筛选输入不显示工位结果)', () => {
       render(<CommandPalette />)
-      expect(screen.queryByTestId('cmd-zone-executing')).toBeNull()
+      expect(screen.queryByTestId('cmd-zone-board')).toBeNull()
       expect(screen.queryByTestId('cmd-zone-drafting')).toBeNull()
     })
 
     it('Query 重新打开面板时清空(已有 effect 行为,验证工位项也跟随)', async () => {
       const user = userEvent.setup()
       const { rerender } = render(<CommandPalette />)
-      await user.type(screen.getByPlaceholderText(/搜索命令/), 'exe')
-      expect(screen.getByTestId('cmd-zone-executing')).toBeInTheDocument()
+      await user.type(screen.getByPlaceholderText(/搜索命令/), 'boa')
+      expect(screen.getByTestId('cmd-zone-board')).toBeInTheDocument()
 
       // 模拟关闭 → 重开
       mockCmdKOpen = false
       rerender(<CommandPalette />)
       mockCmdKOpen = true
       rerender(<CommandPalette />)
-      expect(screen.queryByTestId('cmd-zone-executing')).toBeNull()
+      expect(screen.queryByTestId('cmd-zone-board')).toBeNull()
     })
   })
 

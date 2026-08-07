@@ -7,6 +7,9 @@
  * 因为 requirements-root 只需要 `workspaceRoot: <path>` 这种 flat scalar,
  * 用 nested block 解析反而是过度授权(误把缩进后的字段当成 workspaceRoot 字段)。
  *
+ * 注:原 `designing.server.ts` 已随 ADR-0027(3 工位退役)删除,本测试继续覆盖
+ * 保留在 `yaml.server.ts` 的通用解析函数。
+ *
  * 测试范围:
  * - parseFlatMap: scalar 字段提取(config.yaml / meta.yaml 场景)
  * - parseNestedBlock: 完整版本(design/ 下 4 个 yaml 场景,保留以防 regression)
@@ -176,7 +179,8 @@ describe('parseNestedBlock', () => {
 })
 
 // ============================================================================
-// parseListYaml —— parseNestedBlock + entry adapter 的组合(designing.server.ts 内部用)
+// parseListYaml —— parseNestedBlock + entry adapter 的组合
+// (历史:原 designing.server.ts 内部用;designing 退役后保留为通用 yaml 工具)
 // ============================================================================
 
 describe('parseListYaml', () => {

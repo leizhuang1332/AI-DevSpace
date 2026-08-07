@@ -8,8 +8,8 @@
  *      顶层 scalar(由后端 `apps/agent/src/server.ts:43-45` 写入)
  *   2. `requirements/{id}/meta.yaml` —— `id` / `title` / `createdAt` 三个
  *      顶层 scalar(由后端 `RequirementService.createRequirement` 写入)
- *   3. `requirements/{id}/design/*.yaml` —— 嵌套块 / list / 块字符串 /
- *      多 entry adapter(由 designing.server.ts 解析)
+ *   3. `requirements/{id}/aux/<id>/<file>.md` frontmatter —— 简单 scalar(由
+ *      `drafting.server.ts` / `analyzing.server.ts` 解析)
  *
  * - 不引第三方 yaml 依赖(本期仅 server-side,且 schema 受控);容错:解析失败
  *   / 字段缺失 → 返回 null 或默认空对象,避免上层走空兜底时被脏数据毁全文件
@@ -19,15 +19,15 @@
  * - 项目当前未安装 `server-only` npm 包;若以后装了,把 `import 'server-only'`
  *   放到文件顶部一行即可获得编译期越界保护
  *
- * 被引用方:
- * - `designing.server.ts`:`parseNestedBlock` / `parseListYaml` / `stripQuotes`
+ * 被引用方(ADR-0027:`designing.server.ts` 已退役):
  * - `requirements-root.server.ts`:`parseFlatMap`
  * - `drafting.server.ts`:`parseFlatMap`(读 meta.yaml)
+ * - `analyzing.server.ts`:`parseMinimalFrontmatter` 等
  *
  * 命名:
  * - `parseFlatMap` 是本期 ticket 新增的"只取标量"对外 API(对应 config.yaml /
- *   meta.yaml 场景);`parseNestedBlock` 是历史重命名(原 designing.server.ts 内
- *   私有),保留向下兼容
+ *   meta.yaml 场景);`parseNestedBlock` 历史上由 `designing.server.ts` 内私有
+ *   使用,designing 退役后保留为通用 yaml 解析工具(ADR-0026/0027)。
  */
 
 import { existsSync, readFileSync } from 'node:fs'
@@ -116,8 +116,9 @@ export function parseFlatMap(raw: string, topKey: string): Record<string, string
  * scalar / list / 块字符串(`markdown: |`) / 多 entry adapter。
  *
  * 历史:原 `designing.server.ts` 内私有函数,ticket 05 / D-6.2 抽出。
- * 行为不变;只是把"读 fs → 解析 yaml → 适配字段"拆开,让 server-only loader
- * 各取所需。
+ * `designing.server.ts` 已随 ADR-0027(3 工位退役)删除,本函数保留为通用
+ * yaml 解析工具(供保留的 server-only loader 复用)。行为不变;只是把
+ * "读 fs → 解析 yaml → 适配字段"拆开,让 server-only loader 各取所需。
  *
  * 支持的形式:
  * - 顶层 scalar:`stage:` / `design_doc:` 后跟 2 空格缩进的标量字段
@@ -388,7 +389,8 @@ export function parseListYaml<T>(
 
 /**
  * 去除字符串两端单/双引号(用于 `"foo"` / `'foo'` 形式)。
- * 导出是为了让 designing.server.ts 的字段适配器也能复用(避免重复实现)。
+ * 导出是为了让 server-only loader 的字段适配器也能复用(避免重复实现)。
+ * (历史:原 designing.server.ts 复用,designing 退役后保留为通用工具。)
  */
 export function stripQuotes(s: string): string {
   if (s.length >= 2) {

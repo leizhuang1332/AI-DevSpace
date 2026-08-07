@@ -40,6 +40,13 @@ describe('ZoneBar', () => {
       expect(screen.getByTestId('zone-bar')).toBeInTheDocument()
     })
 
+    it('在 /requirements/REF-001/board/ 渲染(board section)', () => {
+      mockPathname = '/requirements/REF-001/board'
+      render(<ZoneBar />)
+      expect(screen.getByTestId('zone-bar')).toBeInTheDocument()
+      expect(screen.getByTestId('zone-bar').getAttribute('data-active-zone')).toBe('board')
+    })
+
     it('在 /requirements/ 不渲染', () => {
       mockPathname = '/requirements/REF-001'
       render(<ZoneBar />)
@@ -64,30 +71,41 @@ describe('ZoneBar', () => {
       expect(screen.queryByTestId('zone-bar')).toBeNull()
     })
 
-    it('未知 zone segment 不渲染(unknown-zone 不是合法工位)', () => {
+    it('退役 zone segment 不渲染(clarifying/designing/executing 不再合法)', () => {
+      mockPathname = '/requirements/REF-001/clarifying'
+      render(<ZoneBar />)
+      expect(screen.queryByTestId('zone-bar')).toBeNull()
+    })
+
+    it('未知 zone segment 不渲染', () => {
       mockPathname = '/requirements/REF-001/unknown-zone'
       render(<ZoneBar />)
       expect(screen.queryByTestId('zone-bar')).toBeNull()
     })
   })
 
-  describe('Tab 渲染', () => {
+  describe('Tab 渲染(ADR-0026 D4:4 section + 1 Overview)', () => {
     beforeEach(() => {
       mockPathname = '/requirements/REF-001/drafting'
     })
 
-    it('渲染 1 个 Overview Tab + 6 个工位 Tab', () => {
+    it('渲染 1 个 Overview Tab + 4 个 section Tab', () => {
       render(<ZoneBar />)
       expect(screen.getByTestId('zone-tab-overview')).toBeInTheDocument()
       expect(screen.getByTestId('zone-tab-drafting')).toBeInTheDocument()
+      expect(screen.getByTestId('zone-tab-board')).toBeInTheDocument()
       expect(screen.getByTestId('zone-tab-analyzing')).toBeInTheDocument()
-      expect(screen.getByTestId('zone-tab-clarifying')).toBeInTheDocument()
-      expect(screen.getByTestId('zone-tab-designing')).toBeInTheDocument()
-      expect(screen.getByTestId('zone-tab-executing')).toBeInTheDocument()
       expect(screen.getByTestId('zone-tab-wrapup')).toBeInTheDocument()
     })
 
-    it('Tab 顺序:Overview → DRAFTING → ANALYZING → CLARIFYING → DESIGNING → EXECUTING → WRAP-UP', () => {
+    it('退役 section Tab 不再渲染(clarifying/designing/executing)', () => {
+      render(<ZoneBar />)
+      expect(screen.queryByTestId('zone-tab-clarifying')).toBeNull()
+      expect(screen.queryByTestId('zone-tab-designing')).toBeNull()
+      expect(screen.queryByTestId('zone-tab-executing')).toBeNull()
+    })
+
+    it('Tab 顺序:Overview → DRAFTING → BOARD → ANALYZING → WRAP-UP', () => {
       const { container } = render(<ZoneBar />)
       const links = container.querySelectorAll('[data-testid^="zone-tab-"]')
       const order = Array.from(links).map((el) =>
@@ -96,18 +114,19 @@ describe('ZoneBar', () => {
       expect(order).toEqual([
         'overview',
         'drafting',
+        'board',
         'analyzing',
-        'clarifying',
-        'designing',
-        'executing',
         'wrapup',
       ])
     })
 
-    it('Tab href 指向正确的工位 URL', () => {
+    it('Tab href 指向正确的 section URL', () => {
       render(<ZoneBar />)
       const draftingTab = screen.getByTestId('zone-tab-drafting')
       expect(draftingTab.getAttribute('href')).toBe('/requirements/REF-001/drafting/')
+
+      const boardTab = screen.getByTestId('zone-tab-board')
+      expect(boardTab.getAttribute('href')).toBe('/requirements/REF-001/board/')
 
       const wrapupTab = screen.getByTestId('zone-tab-wrapup')
       expect(wrapupTab.getAttribute('href')).toBe('/requirements/REF-001/wrap-up/')
@@ -118,18 +137,18 @@ describe('ZoneBar', () => {
   })
 
   describe('激活态', () => {
-    it('当前工位的 data-active=true', () => {
-      mockPathname = '/requirements/REF-001/executing'
+    it('当前 section 的 data-active=true', () => {
+      mockPathname = '/requirements/REF-001/board'
       render(<ZoneBar />)
-      expect(screen.getByTestId('zone-bar').getAttribute('data-active-zone')).toBe('executing')
-      expect(screen.getByTestId('zone-tab-executing').getAttribute('data-active')).toBe('true')
+      expect(screen.getByTestId('zone-bar').getAttribute('data-active-zone')).toBe('board')
+      expect(screen.getByTestId('zone-tab-board').getAttribute('data-active')).toBe('true')
       expect(screen.getByTestId('zone-tab-drafting').getAttribute('data-active')).toBe('false')
     })
 
-    it('激活态随路由变化', () => {
-      mockPathname = '/requirements/REF-001/clarifying'
+    it('激活态随路由变化(analyzing)', () => {
+      mockPathname = '/requirements/REF-001/analyzing'
       render(<ZoneBar />)
-      expect(screen.getByTestId('zone-tab-clarifying').getAttribute('data-active')).toBe('true')
+      expect(screen.getByTestId('zone-tab-analyzing').getAttribute('data-active')).toBe('true')
     })
 
     it('激活态应用 ADR §6 视觉规格(brand-600 + 下划线 + 加粗)', () => {
@@ -147,24 +166,22 @@ describe('ZoneBar', () => {
     })
   })
 
-  describe('状态色点', () => {
+  describe('状态色点(ADR-0026 D2 + 决策 22)', () => {
     beforeEach(() => {
       mockPathname = '/requirements/REF-001/drafting'
     })
 
-    it('每个工位 Tab 含一个状态色点', () => {
+    it('每个 section Tab 含一个状态色点', () => {
       render(<ZoneBar />)
       expect(screen.getByTestId('zone-status-drafting').getAttribute('data-status-color')).toBe('gray')
-      expect(screen.getByTestId('zone-status-analyzing').getAttribute('data-status-color')).toBe('blue')
-      expect(screen.getByTestId('zone-status-clarifying').getAttribute('data-status-color')).toBe('purple-warn')
-      expect(screen.getByTestId('zone-status-designing').getAttribute('data-status-color')).toBe('yellow')
-      expect(screen.getByTestId('zone-status-executing').getAttribute('data-status-color')).toBe('green')
+      expect(screen.getByTestId('zone-status-board').getAttribute('data-status-color')).toBe('blue')
+      expect(screen.getByTestId('zone-status-analyzing').getAttribute('data-status-color')).toBe('purple-warn')
       expect(screen.getByTestId('zone-status-wrapup').getAttribute('data-status-color')).toBe('gray')
     })
 
-    it('CLARIFYING 状态色点含 ring(警示红圈,ADR §6 决策 22)', () => {
+    it('ANALYZING 状态色点含 ring(警示红圈,原 CLARIFYING 迁移至 analyzing,ADR-0026)', () => {
       render(<ZoneBar />)
-      const dot = screen.getByTestId('zone-status-clarifying')
+      const dot = screen.getByTestId('zone-status-analyzing')
       expect(dot.className).toMatch(/ring-/)
     })
 
@@ -174,9 +191,9 @@ describe('ZoneBar', () => {
       expect(dot.className).toContain('animate-pulse')
     })
 
-    it('非脉动工位的状态色点不含 animate-pulse', () => {
+    it('非脉动 section 的状态色点不含 animate-pulse', () => {
       render(<ZoneBar />)
-      for (const id of ['drafting', 'clarifying', 'designing', 'executing', 'wrapup']) {
+      for (const id of ['drafting', 'board', 'wrapup']) {
         const dot = screen.getByTestId(`zone-status-${id}`)
         expect(dot.className).not.toContain('animate-pulse')
       }

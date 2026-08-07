@@ -20,7 +20,7 @@ import type { RequirementStatusT } from '@ai-devspace/shared'
 export type ZoneCardState = 'todo' | 'done' | 'in_progress' | 'cur'
 
 export interface OverviewZoneCard {
-  /** 工位 id,与 ZONE_LIFECYCLE_ORDER 对齐 */
+  /** section id,与 REQUIREMENT_SECTIONS 对齐(drafting / board / analyzing / wrapup;ADR-0026) */
   zoneId: string
   /** 卡片文案,例如 "PRD 已写" */
   caption: string
@@ -190,10 +190,8 @@ const REFUND_OVERVIEW: Omit<OverviewData, 'requirementId'> = {
   },
   zoneCards: [
     { zoneId: 'drafting', caption: 'PRD 已写', meta: '3 节', state: 'done' },
+    { zoneId: 'board', caption: '5 列看板', meta: '7/12 卡', state: 'cur' },
     { zoneId: 'analyzing', caption: '已完成', meta: '5 子问题', state: 'done' },
-    { zoneId: 'clarifying', caption: '已澄清', meta: '3 轮', state: 'done' },
-    { zoneId: 'designing', caption: '方案 A 已选', meta: '3 候选', state: 'done' },
-    { zoneId: 'executing', caption: '当前进度', meta: '1/4 任务', state: 'cur' },
     { zoneId: 'wrapup', caption: '待归档', meta: '—', state: 'todo' },
   ],
   milestones: [
@@ -212,38 +210,17 @@ const REFUND_OVERVIEW: Omit<OverviewData, 'requirementId'> = {
       state: 'done',
     },
     {
-      id: 'clarifying',
-      name: 'CLARIFYING · 澄清',
-      ts: '2026-07-09 → 07-10',
-      sub: '3 轮问答 · 解决了幂等键冲突问题',
-      state: 'done',
-    },
-    {
-      id: 'designing',
-      name: 'DESIGNING · 选方案',
-      ts: '2026-07-10',
-      sub: '选择方案 A · 异步退款 · 接受 2 个取舍点',
-      state: 'done',
-    },
-    {
-      id: 'planning',
-      name: 'PLANNING · 任务拆分',
-      ts: '2026-07-11',
-      sub: '12 个任务 · 关键路径 7 个 · 估算 3 天',
-      state: 'done',
-    },
-    {
-      id: 'executing',
-      name: 'EXECUTING · 实施中',
+      id: 'board',
+      name: 'BOARD · 看板推进',
       ts: '2026-07-11 → 进行中',
-      sub: '已完成 7/12 任务 · PR #234 等待 review',
+      sub: '7/12 卡片推进中 · PR #234 等待 review',
       state: 'cur',
     },
     {
       id: 'wrapup',
       name: 'WRAP-UP · 归档',
       ts: null,
-      sub: '待 EXECUTING 完成后归档',
+      sub: '待 BOARD 推进完成后归档',
       state: 'todo',
     },
   ],
@@ -253,10 +230,8 @@ const REFUND_OVERVIEW: Omit<OverviewData, 'requirementId'> = {
     skillCalls: 23,
     snapshotCount: 7,
     zones: [
-      { zoneId: 'executing', percent: 78 },
-      { zoneId: 'designing', percent: 42 },
-      { zoneId: 'clarifying', percent: 28 },
-      { zoneId: 'analyzing', percent: 18 },
+      { zoneId: 'board', percent: 78 },
+      { zoneId: 'analyzing', percent: 42 },
       { zoneId: 'drafting', percent: 12 },
     ],
   },

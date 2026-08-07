@@ -3,10 +3,10 @@ import { ResourceTree } from '@/components/resource-tree'
 import { InlineRail } from '@/components/inline-rail'
 import type { DraftingSkill } from '@/lib/drafting'
 import type { WrapupTreeSummary } from '@/lib/wrapup'
-import type { ZoneMeta } from './zones'
+import type { SectionMeta } from './sections'
 
 /**
- * 根据 zone 的 has_resource_tree / has_inline_rail 决定 grid 列数。
+ * 根据 section 的 hasResourceTree / hasInlineRail 决定 grid 列数(ADR-0026 D2)。
  *
  * - 资源树(左 240px) + Inline 栏(右 120px):grid-cols-[240px_1fr_120px]
  * - 仅资源树:grid-cols-[240px_1fr]
@@ -15,9 +15,9 @@ import type { ZoneMeta } from './zones'
  *
  * 暴露为纯函数以便测试;ZoneShell 直接复用。
  */
-export function zoneShellGridClass(zone: ZoneMeta): string {
-  const tree = zone.has_resource_tree
-  const rail = zone.has_inline_rail
+export function zoneShellGridClass(zone: SectionMeta): string {
+  const tree = zone.hasResourceTree
+  const rail = zone.hasInlineRail
   if (tree && rail) return 'grid-cols-[240px_1fr_120px]'
   if (tree) return 'grid-cols-[240px_1fr]'
   if (rail) return 'grid-cols-[1fr_120px]'
@@ -33,13 +33,16 @@ export function zoneShellGridClass(zone: ZoneMeta): string {
  * 凡是 zone 需要函数回调(issue 18 Skill 点击),调用方(page.tsx)需通过
  * inlineRailSlot 注入 client wrapper 组件。
  *
- * issue 01 后:DRAFTING 工位不再渲染资源树(has_resource_tree=false),故本接口
+ * issue 01 后:DRAFTING 工位不再渲染资源树(hasResourceTree=false),故本接口
  * 不再有 `prdSections` / `DraftingPrdTreeView` 相关 prop;DRAFTING 的 PRD 大纲
  * 改由主区顶部锚点栏(issue 03)+ Inline 栏(候命 Skill)承载。
+ *
+ * 注:`zone` prop 类型从旧 `ZoneMeta`(snake_case)改为 `SectionMeta`
+ * (camelCase,ADR-0026);字段名随之改为 `hasResourceTree` / `hasInlineRail`。
  */
 export interface ZoneShellProps {
   id: string
-  zone: ZoneMeta
+  zone: SectionMeta
   children: ReactNode
   /**
    * DRAFTING 工位专用:候命 Skill 列表(issue 18)。
@@ -78,18 +81,18 @@ export function ZoneShell({
     <div
       data-testid="zone-shell"
       data-zone-id={zone.id}
-      data-has-resource-tree={String(zone.has_resource_tree)}
-      data-has-inline-rail={String(zone.has_inline_rail)}
+      data-has-resource-tree={String(zone.hasResourceTree)}
+      data-has-inline-rail={String(zone.hasInlineRail)}
       className={`grid min-h-[calc(100vh-${WORKSPACE_SHELL_OFFSET_PX}px)] bg-bg ${zoneShellGridClass(zone)}`}
     >
-      {zone.has_resource_tree && (
+      {zone.hasResourceTree && (
         <ResourceTree
           requirementId={id}
           wrapupSummary={wrapupSummary}
         />
       )}
       {children}
-      {zone.has_inline_rail &&
+      {zone.hasInlineRail &&
         (inlineRailSlot ?? (
           <InlineRail
             requirementId={id}

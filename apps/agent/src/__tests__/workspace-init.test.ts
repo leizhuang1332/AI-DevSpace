@@ -130,3 +130,57 @@ describe('initWorkspace - slice 7: workspaceRoot 注入', () => {
     expect(info.config.theme).toBe('dark')
   })
 })
+
+// ============================================================================
+// ADR-0026 D6.1: 一次性清理 ~/.aidevspace/zones/*.yaml(声明式注册表退役)
+// ============================================================================
+
+describe('initWorkspace - slice 8: zones 目录退役清理 (ADR-0026 D6.1)', () => {
+  it('全新安装无 zones 目录 → zonesDirRetired=false', async () => {
+    const r = await ws.initWorkspace()
+    expect(r.zonesDirRetired).toBe(false)
+    expect(existsSync(join(tmpRoot, 'zones'))).toBe(false)
+  })
+
+  it('老用户升级:残留 zones/ + *.yaml → 一次性删除,zonesDirRetired=true', async () => {
+    const { mkdirSync } = await import('node:fs')
+    mkdirSync(join(tmpRoot, 'zones'))
+    writeFileSync(join(tmpRoot, 'zones', 'drafting.yaml'), 'zone:\n  id: drafting\n', 'utf8')
+    writeFileSync(join(tmpRoot, 'zones', 'analyzing.yaml'), 'zone:\n  id: analyzing\n', 'utf8')
+
+    const r = await ws.initWorkspace()
+    expect(r.zonesDirRetired).toBe(true)
+    expect(existsSync(join(tmpRoot, 'zones'))).toBe(false)
+    expect(existsSync(join(tmpRoot, 'zones', 'drafting.yaml'))).toBe(false)
+  })
+
+  it('幂等:第二次启动 zones 已不存在 → zonesDirRetired=false,无副作用', async () => {
+    const { mkdirSync } = await import('node:fs')
+    mkdirSync(join(tmpRoot, 'zones'))
+    writeFileSync(join(tmpRoot, 'zones', 'drafting.yaml'), 'zone:\n  id: drafting\n', 'utf8')
+
+    const r1 = await ws.initWorkspace()
+    expect(r1.zonesDirRetired).toBe(true)
+
+    const r2 = await ws.initWorkspace()
+    expect(r2.zonesDirRetired).toBe(false)
+    // 其他初始化逻辑仍正常(config / 子目录)
+    expect(r2.existedDirs.length).toBeGreaterThanOrEqual(6)
+  })
+
+  it('清理 zones 不影响其他子目录 / config / gitignore', async () => {
+    const { mkdirSync } = await import('node:fs')
+    mkdirSync(join(tmpRoot, 'zones'))
+    writeFileSync(join(tmpRoot, 'zones', 'executing.yaml'), 'zone:\n  id: executing\n', 'utf8')
+
+    const r = await ws.initWorkspace()
+    expect(r.zonesDirRetired).toBe(true)
+    // 6 个合法子目录都在
+    for (const d of ['requirements', 'repos', 'knowledge', 'skills', 'analysis-skills', 'logs']) {
+      expect(existsSync(join(tmpRoot, d))).toBe(true)
+    }
+    // config + gitignore 正常写入
+    expect(existsSync(join(tmpRoot, 'config.yaml'))).toBe(true)
+    expect(existsSync(join(tmpRoot, '.gitignore'))).toBe(true)
+  })
+})

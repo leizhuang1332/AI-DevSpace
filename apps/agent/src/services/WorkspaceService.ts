@@ -7,6 +7,7 @@ import {
   stat,
   rename,
   readdir,
+  rm,
 } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import yaml from 'yaml'
@@ -42,6 +43,12 @@ export interface InitWorkspaceResult {
   configCreated: boolean
   configBackfilled: boolean
   gitignoreCreated: boolean
+  /**
+   * ADR-0026:一次性清理老用户升级时残留的 `~/.aidevspace/zones/*.yaml`
+   * (声明式注册表已退役)。true = 删除了 zones/ 目录(含 yaml),false = 无需清理。
+   * 失败不阻断启动(仅记日志),详见 `cleanupRetiredZonesDir()`。
+   */
+  zonesDirRetired: boolean
 }
 
 export class WorkspaceService {
@@ -109,7 +116,39 @@ export class WorkspaceService {
       }
     }
 
-    return { createdDirs, existedDirs, configCreated, configBackfilled, gitignoreCreated }
+    // ADR-0026:一次性清理老用户升级时残留的 ~/.aidevspace/zones/*.yaml
+    // (声明式注册表已退役,改为 web 端 SECTION_META hardcode)。失败不阻断。
+    const zonesDirRetired = await this.cleanupRetiredZonesDir()
+
+    return {
+      createdDirs,
+      existedDirs,
+      configCreated,
+      configBackfilled,
+      gitignoreCreated,
+      zonesDirRetired,
+    }
+  }
+
+  /**
+   * ADR-0026 D6.1:一次性清理 `~/.aidevspace/zones/` 目录(声明式注册表退役)。
+   *
+   * - 目录不存在 → 返 false(全新安装,合法空态)
+   * - 目录存在 → 递归 rm(含 *.yaml),返 true
+   * - rm 失败 → 静默吞掉(返 false),不阻断 agent 启动;老用户升级容错
+   *
+   * 幂等:目录被删后,下次启动 existsSync=false 直接返 false,无副作用。
+   */
+  private async cleanupRetiredZonesDir(): Promise<boolean> {
+    const zonesDir = join(this.root, 'zones')
+    if (!existsSync(zonesDir)) return false
+    try {
+      await rm(zonesDir, { recursive: true, force: true })
+      return true
+    } catch {
+      // 静默失败:不阻断启动;zones yaml 残留不影响新逻辑(无消费方)
+      return false
+    }
   }
 
   async getWorkspaceInfo(): Promise<WorkspaceInfo> {
