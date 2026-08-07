@@ -1,0 +1,90 @@
+apps/web/src/__tests__/wrapup-zone.test.tsx
+  s_85f7977decc4ab::t_301c0388a32017 334
+  s_85f7977decc4ab::t_e2d87813c59bef 350,355-356
+  s_85f7977decc4ab::t_37e50788dda867 428-429
+  s_85f7977decc4ab::t_434b036e7bd467 268-270,272-273,275
+apps/web/src/components/wrapup-zone.tsx
+  s_85f7977decc4ab::t_959ae801058187 810,818-819,822
+  s_85f7977decc4ab::t_aa526bc18b73cf 55
+  s_85f7977decc4ab::t_9b53ef86c8b60e 129
+  s_85f7977decc4ab::t_ce70b8e444428b 82,97,99-100
+apps/web/src/components/command-palette.tsx
+  s_85f7977decc4ab::t_994eb98eef8e58 4
+  s_85f7977decc4ab::t_d88f367a8a6123 48
+  s_85f7977decc4ab::t_795172948ca6e4 179-180,186,200,203-205,213-216,219,221-222
+  s_85f7977decc4ab::t_7a86e5a68ffed2 398
+apps/web/src/lib/yaml.server.ts
+  s_85f7977decc4ab::t_be9c14335eb16b 119-121
+  s_85f7977decc4ab::t_273399b8bb2acd 11-12,22,25,29-30
+  s_85f7977decc4ab::t_fef9c3439990d6 392-393
+apps/web/src/__tests__/yaml.server.test.ts
+  s_85f7977decc4ab::t_2a8ac755fc4eaf 182-183
+  s_85f7977decc4ab::t_feb2401fcdd989 10-12
+apps/web/src/__tests__/analyzing-designing-fs-loader.test.ts
+  s_85f7977decc4ab::t_6f701e362f85f6 2,16-17
+apps/web/src/lib/wrapup.ts
+  s_85f7977decc4ab::t_6a3587ea6b3b8f 134,136-137
+apps/web/src/components/zone-bar.tsx
+  s_85f7977decc4ab::t_30de3a40be0de1 6-7,9,11,14,18,27-30,39-41,62-65,69,72-73,82,85-86,89-90
+  s_85f7977decc4ab::t_aa8a8dca7f1fde 8
+apps/web/src/__tests__/overview-page.test.tsx
+  s_85f7977decc4ab::t_409d882e3dff36 247-248
+  s_85f7977decc4ab::t_36249d8e58e4ad 59,66-67,75-76
+  s_85f7977decc4ab::t_e5027667f43b12 135,137,139-140,148-152,158,161,163-164,167-168,176,186-187
+apps/web/src/__tests__/zone-bar.test.tsx
+  s_85f7977decc4ab::t_f79de5bc4d3b15 43-49,74-80,87,92,96,101-108,117,123,128-130,140-141,143-144,148-149,151,169,174,177-178,182,184,194,196,202
+apps/web/src/components/overview-page.tsx
+  s_85f7977decc4ab::t_21d3d930bf445a 3-4,6-8
+  s_85f7977decc4ab::t_f2d496a44db0da 5
+  s_85f7977decc4ab::t_508926c056ee41 348,360,366,370-371
+  s_85f7977decc4ab::t_717b1fc2432ab9 525,532
+  s_85f7977decc4ab::t_e5cd83adb9c964 306-308,322
+apps/web/src/__tests__/zone-shell.test.tsx
+  s_85f7977decc4ab::t_c2a244c097f9eb 39
+  s_85f7977decc4ab::t_ee160f87e08410 3,6-14,17-21,24-35,38,40,42-43,50,60-61,80,82,87,101,107,109,114-117,120-122,133,140-142,145,147,151-153,155
+apps/web/src/app/(workspace)/requirements/[id]/[zone]/layout.tsx
+  s_85f7977decc4ab::t_5f34a64801bb8d 3,13-15,24
+apps/web/src/lib/zone-shell.tsx
+  s_85f7977decc4ab::t_33c49a8b8aa844 84-85,88,95
+  s_85f7977decc4ab::t_623f2010ee676e 6,9,18-20,36,39-41,45
+apps/web/src/lib/requirements-root.server.ts
+  s_85f7977decc4ab::t_2af308865e737a 31
+apps/agent/src/__tests__/workspace-init.test.ts
+  s_85f7977decc4ab::t_a077fa437859ed 133-186
+apps/web/src/lib/requirement-overview.ts
+  s_85f7977decc4ab::t_ccd49f99e205ab 23
+  s_85f7977decc4ab::t_b9f2814b76bd33 193,213-214,216,223,233-234
+apps/agent/src/services/WorkspaceService.ts
+  s_85f7977decc4ab::t_ed199993a6b5ca 46-51
+  s_85f7977decc4ab::t_df27dfaaef3031 119-151
+  s_85f7977decc4ab::t_31c89a5b0a46b7 10
+packages/shared/src/zones.ts
+  s_85f7977decc4ab::t_06bc321f93653f 1-10
+apps/web/src/app/(workspace)/requirements/[id]/[zone]/page.tsx
+  s_85f7977decc4ab::t_228d03c8ef1f00 3-7,21,23-24,29-30,33-35,38-40,68,98-101,104-125,130-133,136,143,163,165,167,169,184,186,195-198,204,210
+apps/web/src/lib/__tests__/sections.test.ts
+  s_85f7977decc4ab::t_edb26750995d16 1-234
+apps/web/src/__tests__/command-palette-zones.test.tsx
+  s_85f7977decc4ab::t_8c2bf7e6b5538b 2,5,9-11,124-125
+  s_85f7977decc4ab::t_ffd58282a60461 102,104,107-109,112,119-123,126,129-130,133,137,147,150-151,154,157-158,161,164-165,172,179,190,195,198-200,203,208,215-216,232-233,236,244-245,253-254,261-262,279,286,293-294,301
+apps/agent/src/server.ts
+  s_85f7977decc4ab::t_64a32e301aaad0 126,129,131-132,135
+apps/web/src/lib/sections.ts
+  s_85f7977decc4ab::t_39daffac1302ac 1-225
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "5fa24728269e9a8b87a86f2ca36d06eaf161f726",
+  "prompts": {},
+  "sessions": {
+    "s_85f7977decc4ab": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "da3e1095-7d07-4070-b4f8-07f1ae90ddf0",
+        "model": "xopglm52"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
