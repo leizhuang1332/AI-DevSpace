@@ -1,0 +1,62 @@
+apps/web/src/lib/board-hooks.ts
+  s_17a696b8e7496e::t_75b345ee96f7a2 1-169
+apps/web/src/__tests__/board/board-card.test.tsx
+  s_17a696b8e7496e::t_cef9ccc2a7e37b 1-190
+apps/web/src/__tests__/lib/board.test.ts
+  s_17a696b8e7496e::t_48442cd754fde7 1-269
+.scratch/board-section/issues/07-web-board-page.md
+  s_17a696b8e7496e::t_50a460e6144b25 7-38
+apps/web/src/components/board/Column.tsx
+  s_17a696b8e7496e::t_cc10f21895aec4 1-113
+apps/web/src/__tests__/board/new-task-modal.test.tsx
+  s_17a696b8e7496e::t_9f0593b562d1a4 1-22,29-221
+  s_17a696b8e7496e::t_e0caf6b6ddd1d8 23-28
+apps/web/src/__tests__/board/board-section.test.tsx
+  s_17a696b8e7496e::t_96d299538d8782 1-27,29-47,54-60,62-106,109-213
+  s_17a696b8e7496e::t_2781dd87236704 107-108
+  s_17a696b8e7496e::t_1911dd151d13f1 61
+  s_17a696b8e7496e::t_4122e469992b78 48-53
+  s_17a696b8e7496e::t_bc0ae715b9fca4 28
+apps/web/src/components/board/BoardSection.tsx
+  s_17a696b8e7496e::t_cc9143da1f2a21 1-55,57-95,97-159
+  s_17a696b8e7496e::t_02104c9123ba0b 56
+  s_17a696b8e7496e::t_f67da91bc69a0e 96
+apps/web/src/lib/board.ts
+  s_17a696b8e7496e::t_5630e4bb499f22 1-266
+apps/web/src/lib/board.server.ts
+  s_17a696b8e7496e::t_acbd323f7c252e 4,9-12,16,18-19,22-26,28-30,36-37,39-40,42-43,49-60,62-65,68-69,71-72
+  s_17a696b8e7496e::t_3e7834c3ea541f 1-3,5-8,13-15,17,20-21,27,31-35,38,41,44-48,61,66-67,70,73-75
+apps/web/src/components/board/BoardToolbar.tsx
+  s_17a696b8e7496e::t_2bcffe7a69c30a 1-103
+apps/web/src/__tests__/board/board-toolbar.test.tsx
+  s_17a696b8e7496e::t_b15e401f590497 1-92
+apps/web/e2e/board.spec.ts
+  s_17a696b8e7496e::t_aa31a4c95fdc17 1-197
+apps/web/src/components/board/Card.tsx
+  s_17a696b8e7496e::t_cbdbeffa4debc1 1-198
+apps/web/src/__tests__/board/board-column.test.tsx
+  s_17a696b8e7496e::t_76f7168f7ebdca 81,84-85
+  s_17a696b8e7496e::t_dee4c333010738 1-80,82-83,86-144
+apps/web/src/components/board/NewTaskModal.tsx
+  s_17a696b8e7496e::t_96a20801c9c48d 1-242
+apps/web/src/app/(workspace)/requirements/[id]/[zone]/page.tsx
+  s_17a696b8e7496e::t_58e338fc4e6bd8 31-32
+  s_17a696b8e7496e::t_165cfc39ddfb5d 19-20
+  s_17a696b8e7496e::t_178ff12725ebf4 101-107,109,112-116
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "f2d1f553cab24cdbfabe3a8dd5154eae4df086dc",
+  "prompts": {},
+  "sessions": {
+    "s_17a696b8e7496e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e5451d02-396a-40a1-abba-0e24645c5b7b",
+        "model": "xopglm52"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
