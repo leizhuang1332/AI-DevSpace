@@ -34,7 +34,10 @@ beforeEach(async () => {
   writeFileSync(join(tmpRoot, 'config.yaml'), 'name: dev\n')
   app = await buildServer({
     workspaceRoot: tmpRoot,
-    logFilePath: join(tmpRoot, 'agent.log'),
+    // 测试不出 log 到 tmpRoot 内 —— pino transport (pino/file worker) 异步写是
+    // fire-and-forget,afterEach rmSync tmpRoot 后仍可能抛 ENOENT(c650535 同款)。
+    // 改用 tmpdir() 外的持久文件:Windows 上 /dev/null 不可靠,套件外单文件最稳。
+    logFilePath: join(tmpdir(), 'aidev-boardcards-test.log'),
   })
   await app.ready()
   token = readFileSync(join(tmpRoot, '.agent-token'), 'utf8')

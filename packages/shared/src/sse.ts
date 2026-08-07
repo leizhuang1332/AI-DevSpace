@@ -346,5 +346,72 @@ export type SseEvent =
       /** 错误原因原样(由 SDK 透传,前端可降级显示) */
       error: string
     }
+  // -------------------------------------------------------------------------
+  // PRD 拆解 Run 事件簇(issue 05 · ADR-0027 D4)
+  //
+  // 与 analysis_run 事件簇同构(reqId + runId + ts),但 runId 前缀 `prd-`,
+  // 产物落 `analysis/proposals/<run-id>/`。Run 在父 analyzing transcript 内
+  // 跑,产物落盘后 web 端 GET /runs/:runId 拉候选卡片。
+  // -------------------------------------------------------------------------
+  /**
+   * 新 PRD 拆解 Run 创建(POST /split-from-prd 201 后立即 publish)。
+   * Web 端据此把按钮切 loading → 轮询 GET /runs/:runId。
+   */
+  | {
+      type: 'prd_split_created'
+      reqId: string
+      runId: string
+      ts: number
+      granularity: import('./prd-split.js').PrdSplitGranularityT
+      expectedCount: number
+      createdAt: string
+    }
+  /**
+   * 单张候选卡片提交成功(propose_card 接受后 publish)。
+   * Web 端可据此前置追加候选卡(不等终态)。
+   */
+  | {
+      type: 'prd_split_proposal_reported'
+      reqId: string
+      runId: string
+      ts: number
+      proposal: import('./prd-split.js').PrdSplitProposal
+    }
+  /**
+   * Run 终态成功(cards.yaml 落盘 + meta succeeded)。
+   */
+  | {
+      type: 'prd_split_succeeded'
+      reqId: string
+      runId: string
+      ts: number
+      finishedAt: string
+      actualCount: number
+    }
+  /**
+   * Run 终态失败(SDK 抛 / 持久化失败等)。
+   */
+  | {
+      type: 'prd_split_failed'
+      reqId: string
+      runId: string
+      ts: number
+      finishedAt: string
+      error: string
+      actualCount: number
+    }
+  /**
+   * Run 被永久删除(DELETE /runs/:runId)。与 prd_split_failed 区分:
+   * 删除是用户主动操作,不是 Run 失败;web 端据此从历史列表移除该项。
+   */
+  | {
+      type: 'prd_split_deleted'
+      reqId: string
+      runId: string
+      ts: number
+      deletedAt: string
+      granularity: import('./prd-split.js').PrdSplitGranularityT
+      actualCount: number
+    }
 
 export const SSE_HEARTBEAT_MS = 30_000

@@ -48,6 +48,8 @@ import { TaskCardStore } from './services/board/TaskCardStore.js'
 import { boardCardRoutes } from './routes/board-cards.js'
 import { OverrideLog } from './services/board/OverrideLog.js'
 import { boardRoutes } from './routes/board.js'
+import { prdSplitRoutes } from './prd-split/PrdSplitRoute.js'
+import { PrdSplitService } from './prd-split/PrdSplitService.js'
 
 const ALLOWED_ORIGINS: string[] = ['http://localhost:3333', 'http://127.0.0.1:3333']
 
@@ -360,6 +362,25 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     overrideLog,
     requirementService,
   })
+
+  // issue 05 (ADR-0027 D4) —— PRD 拆解 Run:POST /split-from-prd +
+  // GET/DELETE runs。直接调 provider.runAnalysisQuery(底层 SDK query
+  // 入口),自带 propose_card 业务工具 + 自管 analysis/proposals/<run-id>/
+  // 产物。**不动** ClaudeCodeProvider(ADR-0023 zero-touch)。
+  const prdSplitService = new PrdSplitService({ root: workspaceRoot })
+  // boot 时收敛 orphan running Run(镜像 analysis run reconcileRunningRuns)
+  try {
+    const reconcile = await prdSplitService.reconcileOrphanRuns()
+    if (reconcile.recovered.length > 0) {
+      fastify.log.warn(
+        { count: reconcile.recovered.length, runs: reconcile.recovered },
+        'prd split: orphan runs recovered on boot',
+      )
+    }
+  } catch (err) {
+    fastify.log.error({ err }, 'prd split: orphan recovery failed on boot')
+  }
+  await fastify.register(prdSplitRoutes, { hub, provider, workspaceRoot })
 
   // 7. 启动 / 配置变更日志
   globalLogger.agentStarted({ root: workspaceRoot, version: opts.agentVersion ?? '0.0.0' })
