@@ -11,8 +11,9 @@
  * - summary(2 行 line-clamp,content 首 80 字)
  * - 底部 meta 行:priority badge + 右侧(source 小标 + labels chip + assignee 头像)
  *
- * 本期卡片点击 = no-op(详情页留 ticket 08,ADR-0027 D5 toggle 双态)。
- * `onClick` prop 留 optional,默认 undefined(不渲染成可点击)。
+ * 本期卡片点击(issue 08):由 BoardSection 注入 `onClick` → router.push 进
+ * `/requirements/[id]/board/[cardId]` 详情页(ADR-0027 D5 toggle 双态)。
+ * `onClick` prop 仍 optional —— 无 onClick 时卡片不可点击(测试 / 静态展示用)。
  */
 
 import { useState } from 'react'

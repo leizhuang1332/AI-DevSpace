@@ -9,7 +9,7 @@
  * - 左:`[REF-XX Board ▾]` 视图切换 chip(本期静态显示 requirementId,▾ 不响应)
  *   + 4 filter chips(全部 / 我的 / 高优先级 / PRD 拆;active = brand-50/brand-600)
  * - 右:`[+ 新任务]` 按钮(触发 NewTaskModal)+ `[+ 从 PRD 拆]` 按钮
- *   (**本期灰显 disabled** + tooltip「即将上线」,留 ticket 08 实装 modal 触发)
+ *   (issue 08 实装:触发 SplitFromPrdModal → POST /split-from-prd)
  *
  * Filter / Display 全走 Cmd+K 命令面板(本期 chips 是快捷入口,不接命令面板)。
  */
@@ -26,7 +26,7 @@ export interface BoardToolbarProps {
   onFilterChange: (filter: BoardFilter) => void
   /** `[+ 新任务]` 按钮触发(打开 NewTaskModal) */
   onNewTask: () => void
-  /** `[+ 从 PRD 拆]` 触发 —— 本期不响应(disabled),留 optional 保持类型完整 */
+  /** `[+ 从 PRD 拆]` 触发(issue 08:打开 SplitFromPrdModal) */
   onSplitFromPrd?: () => void
 }
 
@@ -35,6 +35,7 @@ export function BoardToolbar({
   filter,
   onFilterChange,
   onNewTask,
+  onSplitFromPrd,
 }: BoardToolbarProps) {
   return (
     <div
@@ -90,10 +91,15 @@ export function BoardToolbar({
         <button
           type="button"
           data-testid="board-split-from-prd"
-          disabled
-          title="即将上线(ticket 08 实装触发)"
-          aria-disabled="true"
-          className="px-3 py-1 rounded-md text-sm font-medium bg-brand text-white border border-brand opacity-50 cursor-not-allowed"
+          onClick={onSplitFromPrd}
+          disabled={!onSplitFromPrd}
+          title={onSplitFromPrd ? '从 PRD 智能拆分卡片' : '即将上线'}
+          aria-disabled={!onSplitFromPrd ? 'true' : 'false'}
+          className={`px-3 py-1 rounded-md text-sm font-medium border border-brand ${
+            onSplitFromPrd
+              ? 'bg-brand text-white hover:bg-brand-600'
+              : 'bg-brand text-white opacity-50 cursor-not-allowed'
+          }`}
         >
           + 从 PRD 拆
         </button>

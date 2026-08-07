@@ -264,3 +264,92 @@ export function assigneeInitial(assignee: string | null): string {
   if (!assignee || assignee.length === 0) return '+'
   return assignee.slice(0, 2).toUpperCase()
 }
+
+// ---------------------------------------------------------------------------
+// 卡片详情页派生函数(issue 08 / ADR-0027 D5)
+// ---------------------------------------------------------------------------
+
+/**
+ * 过滤某张卡的子任务(parent_id 指向该卡的卡)。
+ *
+ * 子任务语义(ADR-0024 D4):TaskCard.parent_id 可指向父 Requirement(根级卡)
+ * 或父 TaskCard(子任务)。create 时 parent_id 强制 = reqId,需 PATCH 挂子才生效。
+ * 本期只读展示,不改 parent_id。
+ *
+ * 返回新数组,不修改入参。
+ */
+export function filterSubtasks(
+  cards: readonly TaskCard[],
+  cardId: string,
+): TaskCard[] {
+  return cards.filter((c) => c.parent_id === cardId)
+}
+
+/**
+ * 取本卡依赖的卡(depends_on[] → 在全量列表里 find)。
+ *
+ * 「依赖卡」= 本卡 depends_on 数组里指向的卡(本卡等待它们完成)。
+ * depends_on 里的 id 在列表里找不到(可能已归档 / 删除)→ 跳过。
+ */
+export function filterDependencies(
+  cards: readonly TaskCard[],
+  card: TaskCard,
+): TaskCard[] {
+  return card.depends_on
+    .map((id) => cards.find((c) => c.id === id))
+    .filter((c): c is TaskCard => Boolean(c))
+}
+
+/**
+ * 取「阻塞」方向的卡(谁依赖本卡 = 本卡阻塞了谁)。
+ *
+ * 与 `filterDependencies` 反向:遍历全量卡,谁的 depends_on 含本卡 id → 阻塞了它。
+ */
+export function filterBlockedBy(
+  cards: readonly TaskCard[],
+  cardId: string,
+): TaskCard[] {
+  return cards.filter((c) => c.depends_on.includes(cardId))
+}
+
+/**
+ * 派生父 Requirement 进度(done 卡数 / 活跃卡总数)。
+ *
+ * 进度条文案「N / M 卡」来自卡片派生(非 Requirement.progress 字段),
+ * 对照 board-detail-final.html 「5 / 12 卡」。
+ * archived 卡不计数(只算活跃卡)。空列表 → {done:0, total:0}(UI 走 0%)。
+ */
+export function computeParentProgress(
+  cards: readonly TaskCard[],
+): { done: number; total: number } {
+  const active = cards.filter((c) => !c.is_archived)
+  const done = active.filter((c) => c.status === 'done').length
+  return { done, total: active.length }
+}
+
+/**
+ * 相对时间格式化(「刚刚」/「N 分钟前」/「N 小时前」/「N 天前」)。
+ *
+ * - < 1 分钟 → 「刚刚」
+ * - < 1 小时 → 「N 分钟前」
+ * - < 24 小时 → 「N 小时前」
+ * - 否则 → 「N 天前」
+ * - 未来时间 / 解析失败 → 原样 ISO 串(防御性)
+ *
+ * 详情页 updated chip 用(对照 board-detail-final.html 「2 天前」)。
+ */
+export function formatRelativeTime(iso: string): string {
+  const ts = Date.parse(iso)
+  if (!Number.isFinite(ts)) return iso
+  const now = Date.now()
+  const diffMs = now - ts
+  if (diffMs < 0) return iso // 未来时间,防御性返原值
+  const sec = Math.floor(diffMs / 1000)
+  if (sec < 60) return '刚刚'
+  const min = Math.floor(sec / 60)
+  if (min < 60) return `${min} 分钟前`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr} 小时前`
+  const day = Math.floor(hr / 24)
+  return `${day} 天前`
+}

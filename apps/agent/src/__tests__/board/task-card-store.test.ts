@@ -103,6 +103,28 @@ describe('TaskCardStore.create', () => {
     expect(card.title).toBe('开发退款')
   })
 
+  it('defaults source to manual when not provided', () => {
+    seedRequirement()
+    const card = store.create('req-001-test', { title: '普通卡' })
+    expect(card.source).toBe(TaskCardSource.MANUAL)
+  })
+
+  it('passes through source=prd_split when explicitly provided (issue 08 PRD 拆落地)', () => {
+    seedRequirement()
+    const card = store.create('req-001-test', {
+      title: 'PRD 拆候选',
+      content: '从 PRD 拆出来的卡',
+      source: TaskCardSource.PRD_SPLIT,
+      priority: TaskCardPriority.HIGH,
+      labels: ['security'],
+    })
+    expect(card.source).toBe(TaskCardSource.PRD_SPLIT)
+    // 落盘也一致
+    const file = join(tmpRoot, 'requirements', 'req-001-test', 'board', 'tasks', `${card.id}.json`)
+    const onDisk = JSON.parse(readFileSync(file, 'utf8')) as TaskCard
+    expect(onDisk.source).toBe(TaskCardSource.PRD_SPLIT)
+  })
+
   it('rejects empty title via schema', () => {
     seedRequirement()
     expect(() => store.create('req-001-test', { title: '   ' })).toThrow(

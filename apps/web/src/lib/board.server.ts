@@ -22,7 +22,11 @@
 import { cookies } from 'next/headers'
 import type {
   BoardCardListResponse,
+  RequirementListResponse,
+  RequirementSummary,
   TaskCard,
+  TaskCardTranscript,
+  TaskCardTranscriptResponse,
 } from '@ai-devspace/shared'
 import type { BoardCardListData } from './board'
 
@@ -72,4 +76,97 @@ export async function getBoardData(
     // agent 不可达 / fetch 抛错 → 空态(决策 30 容错)
     return { requirementId, cards: [], total: 0 }
   }
+}
+
+// ---------------------------------------------------------------------------
+// 卡片详情页 SSR(issue 08 / ADR-0027 D5 + ADR-0028 D5)
+// ---------------------------------------------------------------------------
+
+/**
+ * SSR 拉单卡详情。失败 → null(不阻塞 SSR,客户端 React Query 兜底重拉)。
+ *
+ * card 不存在 → null(让 page.tsx 走 notFound())。
+ */
+export async function getCardDetail(
+  requirementId: string,
+  cardId: string,
+): Promise<TaskCard | null> {
+  try {
+    const token = cookies().get('aidevspace_token')?.value
+    const headers: Record<string, string> = {}
+    if (token) {
+      headers.Cookie = `aidevspace_token=${token}`
+    }
+    const res = await fetch(
+      `${AGENT_BASE}/api/requirement/${encodeURIComponent(requirementId)}/board/cards/${encodeURIComponent(cardId)}`,
+      { headers, cache: 'no-store' },
+    )
+    if (!res.ok) return null
+    const raw = (await res.json()) as { card?: TaskCard }
+    return raw.card ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * SSR 拉 TaskCard transcript。失败 → null(UI 走空态,客户端 React Query 重拉)。
+ */
+export async function getCardTranscriptInitial(
+  requirementId: string,
+  cardId: string,
+): Promise<TaskCardTranscript | null> {
+  try {
+    const token = cookies().get('aidevspace_token')?.value
+    const headers: Record<string, string> = {}
+    if (token) {
+      headers.Cookie = `aidevspace_token=${token}`
+    }
+    const res = await fetch(
+      `${AGENT_BASE}/api/requirement/${encodeURIComponent(requirementId)}/board/cards/${encodeURIComponent(cardId)}/transcript`,
+      { headers, cache: 'no-store' },
+    )
+    if (!res.ok) return null
+    const raw = (await res.json()) as TaskCardTranscriptResponse
+    return raw.transcript ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * SSR 拉父 Requirement summary(走 list 端点 + find,因 detail 端点不含 status)。
+ *
+ * 容错降级:agent 不可达 / 找不到 → null(UI crumb 走 reqId 兜底)。
+ */
+export async function getRequirementSummaryForBoard(
+  requirementId: string,
+): Promise<RequirementSummary | null> {
+  try {
+    const token = cookies().get('aidevspace_token')?.value
+    const headers: Record<string, string> = {}
+    if (token) {
+      headers.Cookie = `aidevspace_token=${token}`
+    }
+    const res = await fetch(`${AGENT_BASE}/api/requirements`, {
+      headers,
+      cache: 'no-store',
+    })
+    if (!res.ok) return null
+    const raw = (await res.json()) as RequirementListResponse
+    return raw.requirements.find((r) => r.id === requirementId) ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * SSR 拉全卡列表(子任务/依赖派生用)。复用 getBoardData 的 fetch 范式。
+ * 失败 → 空数组(不阻塞 SSR)。
+ */
+export async function getBoardCardsForDetail(
+  requirementId: string,
+): Promise<TaskCard[]> {
+  const data = await getBoardData(requirementId)
+  return data.cards
 }

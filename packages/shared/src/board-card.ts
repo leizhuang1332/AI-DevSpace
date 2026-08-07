@@ -94,7 +94,10 @@ export type BoardCardListFilter = z.infer<typeof BoardCardListFilterSchema>
  *
  * manual 创建语义:
  * - `parent_id` 由服务端强制写为 `reqId`(`boardRoutes` 写入前覆盖)
- * - `source` 由服务端强制写为 `manual`(忽略客户端传入,防越权)
+ * - `source` 由服务端透传(默认 `manual`);issue 08 PRD 拆候选落地时
+ *   web 端传 `source='prd_split'`,落盘为 PRD 拆卡片(与 manual 区分,
+ *   便于 board 过滤 + 审计)。服务端不强制覆盖为 manual —— 信任调用方,
+ *   与 issue 05 PrdSplitProposal 注释「web 08 处理 source=prd_split」对齐。
  * - 其余字段允许覆盖
  */
 export const BoardCardCreateRequestSchema = z.object({
@@ -106,6 +109,7 @@ export const BoardCardCreateRequestSchema = z.object({
   labels: z.array(z.string()).optional(),
   depends_on: z.array(z.string()).optional(),
   order_index: z.number().nullable().optional(),
+  source: TaskCardSourceSchema.optional(),
 })
 export type BoardCardCreateRequest = z.infer<typeof BoardCardCreateRequestSchema>
 

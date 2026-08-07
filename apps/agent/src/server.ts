@@ -47,6 +47,8 @@ import { TaskCardStore } from './services/board/TaskCardStore.js'
 import { boardCardRoutes } from './routes/board-cards.js'
 import { OverrideLog } from './services/board/OverrideLog.js'
 import { boardRoutes } from './routes/board.js'
+import { boardTranscriptRoutes } from './routes/board-transcript.js'
+import { TaskCardTranscriptService } from './services/board/TaskCardTranscript.js'
 import { prdSplitRoutes } from './prd-split/PrdSplitRoute.js'
 import { PrdSplitService } from './prd-split/PrdSplitService.js'
 
@@ -358,6 +360,16 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     fastify.log.error({ err }, 'prd split: orphan recovery failed on boot')
   }
   await fastify.register(prdSplitRoutes, { hub, provider, workspaceRoot })
+
+  // issue 08 (ADR-0028 D5) —— TaskCard transcript HTTP 端点:
+  // GET /board/cards/:cardId/transcript + POST .../transcript/messages。
+  // 纯文件 IO(读写 transcript.yaml),零触达 Run 路径(守门 ADR-0023 zero-touch)。
+  // role 强制 'user' + tool_calls 强制 [](服务层守门)。
+  const taskCardTranscriptService = new TaskCardTranscriptService(workspaceRoot)
+  await fastify.register(boardTranscriptRoutes, {
+    taskCardStore: taskCardStore,
+    transcriptService: taskCardTranscriptService,
+  })
 
   // 7. 启动 / 配置变更日志
   globalLogger.agentStarted({ root: workspaceRoot, version: opts.agentVersion ?? '0.0.0' })

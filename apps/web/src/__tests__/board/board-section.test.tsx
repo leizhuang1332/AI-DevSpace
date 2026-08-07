@@ -53,12 +53,38 @@ vi.mock('@/lib/board-hooks', () => ({
   }),
 }))
 
+// ---- mock next/navigation(BoardSection 用 useRouter 做卡片点击导航)----
+const mockPush = vi.fn()
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: mockPush }),
+}))
+
+// ---- mock board-detail-hooks(SplitFromPrdModal / banner / review 依赖)----
+vi.mock('@/lib/board-detail-hooks', () => ({
+  useStartPrdSplit: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+    isError: false,
+    error: null,
+  }),
+  usePrdSplitRunDetail: () => ({ detail: null, isError: false, isLoading: false }),
+  usePrdSplitRuns: () => ({ runs: [], isLoading: false, isError: false }),
+  useLandPrdSplitCard: () => ({
+    mutate: vi.fn(),
+    mutateAsync: vi.fn(),
+    isPending: false,
+    isError: false,
+    error: null,
+  }),
+}))
+
 afterEach(() => {
   cleanup()
   mockCards = []
   mockIsError = false
   mockArchiveMutate.mockClear()
   mockCreateMutate.mockClear()
+  mockPush.mockClear()
 })
 
 function makeWrapper() {

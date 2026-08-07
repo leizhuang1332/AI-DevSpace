@@ -1,14 +1,15 @@
 /**
- * E2E: board section 看板页 + Card 形态(issue 07 / ADR-0027)
+ * E2E: board section 看板页 + Card 形态 + 卡片详情页(issue 07 + 08 / ADR-0027)
  *
- * 验收(issue 07 spec checklist):
+ * 验收(issue 07 + 08 spec checklist):
  * - 创建 Requirement → 切到 board section → 看到 5 列看板
  * - 点 [+ 新任务] → 填表 → 提交 → 卡片出现在 backlog 列(默认 status=backlog)
  * - 5 列看板显示该卡(board-card testid + data-status=backlog)
  * - toolbar 4 filter chips 切换(全部/我的/高优先级/PRD 拆)
- * - [+ 从 PRD 拆] 按钮本期 disabled(灰显,留 ticket 08)
+ * - 点卡片 → 进详情页 → toggle 双态切换(property ↔ transcript,issue 08)
  *
  * 不触发 Run(守门 zero-touch,ADR-0023);manual 卡创建直接 POST /board/cards。
+ * StatusConstraintModal 三选项覆盖放 agent 集成测试(父 status 派生难造)。
  *
  * Skip 行为(沿用 analyzing-real-run.spec.ts · ADR-0020 D11):
  * - web(3333)/agent(7777)不可达 → test.skip(),不 fail
@@ -193,5 +194,81 @@ test.describe('board section e2e', () => {
     // 9. 回全部 filter → 卡重新可见
     await page.getByTestId('board-filter-chip-all').click()
     await expect(card).toBeVisible()
+  })
+
+  test('点 card → 进详情 → toggle 双态切换(issue 08)', async ({
+    page,
+    request,
+  }) => {
+    const token = await bootstrapToken(request)
+    const reqId = await createRequirement(
+      request,
+      token,
+      `board-detail-e2e-${Date.now()}`,
+    )
+
+    await page.context().addCookies([
+      {
+        name: 'aidevspace_token',
+        value: token,
+        domain: new URL(WEB_URL).hostname,
+        path: '/',
+        httpOnly: false,
+        sameSite: 'Lax',
+      },
+    ])
+
+    // 1. 导航到 board section + 创建一张 manual 卡
+    await page.goto(`${WEB_URL}/requirements/${encodeURIComponent(reqId)}/board/`)
+    await expect(page.getByTestId('board-section')).toBeVisible({
+      timeout: 30_000,
+    })
+    await page.getByTestId('board-new-task').click()
+    const cardTitle = `detail-card-${Date.now()}`
+    await page.getByTestId('board-new-task-title').fill(cardTitle)
+    await page.getByTestId('board-new-task-content').fill('详情页 e2e 内容')
+    await page.getByTestId('board-new-task-submit').click()
+    await expect(page.getByTestId('board-new-task-modal')).toBeHidden({
+      timeout: 10_000,
+    })
+
+    // 2. 点卡片 → URL 跳 /board/[cardId] + 详情页渲染
+    const card = page.getByTestId('board-card').filter({ hasText: cardTitle })
+    await expect(card).toBeVisible({ timeout: 15_000 })
+    await card.click()
+
+    await expect(page).toHaveURL(/\/board\/[0-9A-HJKMNP-TV-Z]{26}\/?$/, {
+      timeout: 15_000,
+    })
+    await expect(page.getByTestId('board-card-detail-page')).toBeVisible({
+      timeout: 15_000,
+    })
+
+    // 默认态 = property
+    await expect(page.getByTestId('board-card-detail-page')).toHaveAttribute(
+      'data-right-panel',
+      'property',
+    )
+    await expect(page.getByTestId('board-detail-side-property')).toBeVisible()
+
+    // 3. 点 [在对话中打开] → 切到 transcript
+    await page.getByTestId('board-detail-toggle-transcript').click()
+    await expect(page.getByTestId('board-card-detail-page')).toHaveAttribute(
+      'data-right-panel',
+      'transcript',
+    )
+    await expect(page.getByTestId('board-detail-transcript-panel')).toBeVisible()
+
+    // 4. 点 ✕ → 切回 property
+    await page.getByTestId('board-detail-transcript-close').click()
+    await expect(page.getByTestId('board-card-detail-page')).toHaveAttribute(
+      'data-right-panel',
+      'property',
+    )
+    await expect(page.getByTestId('board-detail-side-property')).toBeVisible()
+
+    // 5. crumb 点击回 board
+    // (找到 crumb 中的 Board 链接 — 用 board filter 路径校验)
+    await expect(page.getByTestId('board-card-detail-crumb')).toBeVisible()
   })
 })

@@ -18,6 +18,11 @@ import {
   STATUS_COLUMN_ORDER,
   PRIORITY_BADGE,
   SOURCE_LABEL,
+  filterSubtasks,
+  filterDependencies,
+  filterBlockedBy,
+  computeParentProgress,
+  formatRelativeTime,
   type BoardFilter,
 } from '@/lib/board'
 import type { TaskCard } from '@ai-devspace/shared'
@@ -265,5 +270,119 @@ describe('BoardFilter type', () => {
   it('4 个 filter 字面量', () => {
     const filters: BoardFilter[] = ['all', 'mine', 'high-priority', 'prd-split']
     expect(filters).toHaveLength(4)
+  })
+})
+
+// ============================================================================
+// filterSubtasks / filterDependencies / filterBlockedBy (issue 08)
+// ============================================================================
+
+describe('filterSubtasks', () => {
+  it('返回 parent_id 指向该卡的卡片', () => {
+    const parent = makeCard({ id: 'PARENT0000000000000000AA', parent_id: 'req-1' })
+    const child1 = makeCard({ id: 'CHILD000000000000000001A', parent_id: 'PARENT0000000000000000AA' })
+    const child2 = makeCard({ id: 'CHILD000000000000000002A', parent_id: 'PARENT0000000000000000AA' })
+    const other = makeCard({ id: 'OTHER00000000000000000AA', parent_id: 'req-1' })
+    const cards = [parent, child1, child2, other]
+    expect(filterSubtasks(cards, 'PARENT0000000000000000AA')).toEqual([child1, child2])
+  })
+
+  it('无子任务 → 空数组', () => {
+    expect(filterSubtasks([], 'nope')).toEqual([])
+  })
+
+  it('不改原数组', () => {
+    const cards = [makeCard({ parent_id: 'p1' })]
+    const snapshot = [...cards]
+    filterSubtasks(cards, 'p1')
+    expect(cards).toEqual(snapshot)
+  })
+})
+
+describe('filterDependencies', () => {
+  it('返回 depends_on 指向的卡(在列表里 find)', () => {
+    const dep1 = makeCard({ id: 'DEP1000000000000000000AA' })
+    const dep2 = makeCard({ id: 'DEP2000000000000000000AA' })
+    const card = makeCard({ id: 'MAIN000000000000000000AA', depends_on: ['DEP1000000000000000000AA', 'DEP2000000000000000000AA'] })
+    expect(filterDependencies([dep1, dep2], card)).toEqual([dep1, dep2])
+  })
+
+  it('depends_on 里的 id 找不到 → 跳过(返回空)', () => {
+    const dep1 = makeCard({ id: 'DEP1000000000000000000AA' })
+    const missing = makeCard({ id: 'MAIN000000000000000000AA', depends_on: ['NOPE'] })
+    // 'NOPE' 不在 [dep1] 里 → 过滤后空数组
+    expect(filterDependencies([dep1], missing)).toEqual([])
+  })
+
+  it('空 depends_on → 空数组', () => {
+    const card = makeCard({ depends_on: [] })
+    expect(filterDependencies([], card)).toEqual([])
+  })
+})
+
+describe('filterBlockedBy', () => {
+  it('返回 depends_on 含本卡 id 的卡(反向:谁依赖我)', () => {
+    const me = makeCard({ id: 'ME00000000000000000000AA' })
+    const blocked1 = makeCard({ id: 'BLK1000000000000000000AA', depends_on: ['ME00000000000000000000AA'] })
+    const blocked2 = makeCard({ id: 'BLK2000000000000000000AA', depends_on: ['ME00000000000000000000AA', 'other'] })
+    const unrelated = makeCard({ id: 'UNRL00000000000000000AAA', depends_on: ['other'] })
+    const cards = [me, blocked1, blocked2, unrelated]
+    expect(filterBlockedBy(cards, 'ME00000000000000000000AA')).toEqual([blocked1, blocked2])
+  })
+})
+
+describe('computeParentProgress', () => {
+  it('done 卡数 / 活跃卡总数', () => {
+    const cards = [
+      makeCard({ id: 'a', status: 'done', is_archived: false }),
+      makeCard({ id: 'b', status: 'done', is_archived: false }),
+      makeCard({ id: 'c', status: 'in_progress', is_archived: false }),
+      makeCard({ id: 'd', status: 'backlog', is_archived: false }),
+    ]
+    expect(computeParentProgress(cards)).toEqual({ done: 2, total: 4 })
+  })
+
+  it('archived 卡不计入总数', () => {
+    const cards = [
+      makeCard({ id: 'a', status: 'done', is_archived: false }),
+      makeCard({ id: 'b', status: 'done', is_archived: true }),
+      makeCard({ id: 'c', status: 'backlog', is_archived: false }),
+    ]
+    expect(computeParentProgress(cards)).toEqual({ done: 1, total: 2 })
+  })
+
+  it('空列表 → {done:0, total:0}', () => {
+    expect(computeParentProgress([])).toEqual({ done: 0, total: 0 })
+  })
+})
+
+describe('formatRelativeTime', () => {
+  it('< 1 分钟 → 刚刚', () => {
+    const iso = new Date(Date.now() - 10_000).toISOString()
+    expect(formatRelativeTime(iso)).toBe('刚刚')
+  })
+
+  it('< 1 小时 → N 分钟前', () => {
+    const iso = new Date(Date.now() - 5 * 60_000).toISOString()
+    expect(formatRelativeTime(iso)).toBe('5 分钟前')
+  })
+
+  it('< 24 小时 → N 小时前', () => {
+    const iso = new Date(Date.now() - 3 * 3_600_000).toISOString()
+    expect(formatRelativeTime(iso)).toBe('3 小时前')
+  })
+
+  it('>= 24 小时 → N 天前', () => {
+    const iso = new Date(Date.now() - 2 * 86_400_000).toISOString()
+    expect(formatRelativeTime(iso)).toBe('2 天前')
+  })
+
+  it('解析失败 → 原样返回', () => {
+    expect(formatRelativeTime('not-a-date')).toBe('not-a-date')
+  })
+
+  it('未来时间 → 原样返回(防御性)', () => {
+    const iso = new Date(Date.now() + 86_400_000).toISOString()
+    expect(formatRelativeTime(iso)).toBe(iso)
   })
 })

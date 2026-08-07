@@ -1,11 +1,11 @@
 /**
- * BoardToolbar 组件测试 — issue 07 / ADR-0027 D3
+ * BoardToolbar 组件测试 — issue 07 + 08 / ADR-0027 D3
  *
  * 验收(对照 `board-color-options.html` .toolbar):
  * - 左:视图切换 chip(显示 requirementId)+ 4 filter chips
  * - filter chip active 切换(onFilterChange 调用)
  * - 右:[+ 新任务] 触发 onNewTask
- * - 右:[+ 从 PRD 拆] **disabled**(本期灰显,留 ticket 08)
+ * - 右:[+ 从 PRD 拆] 按钮:无 onSplitFromPrd → disabled(默认);有 → enabled + 触发(issue 08 接通)
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest'
@@ -15,12 +15,13 @@ import type { BoardFilter } from '@/lib/board'
 
 afterEach(() => cleanup())
 
-function renderToolbar(overrides: { filter?: BoardFilter; onFilterChange?: (f: BoardFilter) => void; onNewTask?: () => void } = {}) {
+function renderToolbar(overrides: { filter?: BoardFilter; onFilterChange?: (f: BoardFilter) => void; onNewTask?: () => void; onSplitFromPrd?: () => void } = {}) {
   const props = {
     requirementId: 'req-007',
     filter: (overrides.filter ?? 'all') as BoardFilter,
     onFilterChange: overrides.onFilterChange ?? vi.fn(),
     onNewTask: overrides.onNewTask ?? vi.fn(),
+    ...(overrides.onSplitFromPrd ? { onSplitFromPrd: overrides.onSplitFromPrd } : {}),
   }
   return { ...props, ...render(<BoardToolbar {...props} />) }
 }
@@ -68,11 +69,29 @@ describe('BoardToolbar · 右侧操作按钮', () => {
     expect(onNewTask).toHaveBeenCalledOnce()
   })
 
-  it('[+ 从 PRD 拆] 按钮 → disabled(本期灰显)', () => {
+  it('[+ 从 PRD 拆] 按钮 → 无 onSplitFromPrd 时 disabled(默认灰显)', () => {
     renderToolbar()
     const btn = screen.getByTestId('board-split-from-prd') as HTMLButtonElement
     expect(btn.disabled).toBe(true)
     expect(btn.getAttribute('aria-disabled')).toBe('true')
+    expect(btn.title).toContain('即将上线')
+  })
+
+  it('[+ 从 PRD 拆] 按钮 → 有 onSplitFromPrd 时 enabled(issue 08 接通)', () => {
+    const onSplitFromPrd = vi.fn()
+    renderToolbar({ onSplitFromPrd })
+    const btn = screen.getByTestId('board-split-from-prd') as HTMLButtonElement
+    expect(btn.disabled).toBe(false)
+    expect(btn.getAttribute('aria-disabled')).toBe('false')
+    expect(btn.title).toContain('从 PRD')
+  })
+
+  it('[+ 从 PRD 拆] enabled 按钮 → 点击触发 onSplitFromPrd', () => {
+    const onSplitFromPrd = vi.fn()
+    renderToolbar({ onSplitFromPrd })
+    const btn = screen.getByTestId('board-split-from-prd') as HTMLButtonElement
+    fireEvent.click(btn)
+    expect(onSplitFromPrd).toHaveBeenCalledOnce()
   })
 
   it('[+ 从 PRD 拆] disabled 按钮 → 点击无副作用(不触发任何回调)', () => {
@@ -82,11 +101,5 @@ describe('BoardToolbar · 右侧操作按钮', () => {
     fireEvent.click(btn)
     // onNewTask 不该被 PRD 拆按钮触发
     expect(onNewTask).not.toHaveBeenCalled()
-  })
-
-  it('[+ 从 PRD 拆] 有 title 提示「即将上线」', () => {
-    renderToolbar()
-    const btn = screen.getByTestId('board-split-from-prd') as HTMLButtonElement
-    expect(btn.title).toContain('即将上线')
   })
 })

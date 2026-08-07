@@ -150,3 +150,46 @@ export const TaskCardTranscriptSchema = z.object({
   messages: z.array(TranscriptMessageSchema).default([]),
 })
 export type TaskCardTranscript = z.infer<typeof TaskCardTranscriptSchema>
+
+// ---------------------------------------------------------------------------
+// HTTP 路由契约(issue 08 / ADR-0028 D5)— agent 端 board-transcript route 用
+// ---------------------------------------------------------------------------
+
+/**
+ * POST `/api/requirement/:id/board/cards/:cardId/transcript/messages` body。
+ *
+ * 守门(ADR-0028 D2):
+ * - **不含 `role` 字段** —— 路由层强制 `role='user'`,caller 传 role 也会被忽略。
+ *   TaskCard transcript 仅描述 / 不挂 Run;assistant 消息只能由 Run 路径写入,
+ *   而本路由是 web 详情页用户输入入口,永远是 user 消息。
+ * - `content` 必填非空(空消息无意义)
+ * - `refs` 可选(`#[id]` 引用解析产物,如 prd_section / run_id / asset)
+ */
+export const TranscriptMessageCreateBodySchema = z.object({
+  content: z.string().trim().min(1, 'content must not be empty'),
+  refs: z.array(TranscriptRefSchema).optional().default([]),
+})
+export type TranscriptMessageCreateBody = z.infer<
+  typeof TranscriptMessageCreateBodySchema
+>
+
+/**
+ * GET `/api/requirement/:id/board/cards/:cardId/transcript` 响应。
+ *
+ * transcript 文件不存在 → `transcript: null`(UI 走空态,不阻塞渲染)。
+ * 文件存在但解析失败 → 同样 null(给前端脏数据不如给空态)。
+ */
+export const TaskCardTranscriptResponseSchema = z.object({
+  transcript: TaskCardTranscriptSchema.nullable(),
+})
+export type TaskCardTranscriptResponse = z.infer<
+  typeof TaskCardTranscriptResponseSchema
+>
+
+/** POST .../transcript/messages 200 响应 —— 追加后的完整 transcript */
+export const TranscriptMessageCreateResponseSchema = z.object({
+  transcript: TaskCardTranscriptSchema,
+})
+export type TranscriptMessageCreateResponse = z.infer<
+  typeof TranscriptMessageCreateResponseSchema
+>

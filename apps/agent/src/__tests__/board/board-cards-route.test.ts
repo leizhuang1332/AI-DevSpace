@@ -264,6 +264,26 @@ describe('POST /api/requirement/:id/board/cards', () => {
     expect(body.card.labels).toEqual(['p0'])
   })
 
+  it('201 + source=prd_split when explicitly provided (issue 08 PRD 拆落地)', async () => {
+    seedRequirement('req-001-test')
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/requirement/req-001-test/board/cards',
+      headers: { ...authHeaders(), 'content-type': 'application/json' },
+      payload: {
+        title: 'PRD 拆候选',
+        content: '从 PRD 拆出来的卡',
+        source: 'prd_split',
+        priority: 'high',
+        labels: ['security'],
+      },
+    })
+    expect(res.statusCode).toBe(201)
+    const body = res.json() as { card: { source: string; parent_id: string } }
+    expect(body.card.source).toBe('prd_split')
+    expect(body.card.parent_id).toBe('req-001-test')
+  })
+
   it('400 E_INVALID_BODY for missing title', async () => {
     seedRequirement('req-001-test')
     const res = await app.inject({

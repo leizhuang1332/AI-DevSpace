@@ -68,7 +68,13 @@ export class TaskCardStoreError extends Error {
 // 输入 / 选项
 // ---------------------------------------------------------------------------
 
-/** 最小创建入参(manual 卡片);服务端强制 parent_id=reqId, source='manual'。 */
+/**
+ * 最小创建入参(manual 卡片);服务端强制 parent_id=reqId, source 默认 manual。
+ *
+ * `source`:缺省 `manual`(常规 manual 创建);issue 08 PRD 拆候选落地时
+ * web 端显式传 `source='prd_split'`,与 manual 卡区分(便于 board 过滤 + 审计)。
+ * 测试 / seed 场景允许显式传 `id`;真实生产路径永远不传。
+ */
 export interface CreateTaskCardInput {
   title: string
   status?: TaskCardStatusT
@@ -78,6 +84,8 @@ export interface CreateTaskCardInput {
   labels?: string[]
   depends_on?: string[]
   order_index?: number | null
+  /** 卡片来源(缺省 manual;PRD 拆落地传 prd_split) */
+  source?: TaskCardSourceT
   /**
    * 测试 / seed 场景允许显式传 `id`;缺省由 `create` 内部生成 26 位 ULID。
    * 真实生产路径永远不传。
@@ -280,9 +288,10 @@ export class TaskCardStore {
   // -------------------------------------------------------------------------
 
   /**
-   * manual 创建一张 TaskCard。
+   * 创建一张 TaskCard。
    *
-   * 默认 source='manual';`parent_id` 默认 = reqId(根级卡片归属)。
+   * 默认 `source='manual'`;`parent_id` 默认 = reqId(根级卡片归属)。
+   * issue 08 PRD 拆候选落地时,web 端传 `source='prd_split'`,落盘为 PRD 拆卡片。
    * 测试 / seed 场景允许显式传 `id`。
    *
    * @throws {TaskCardStoreError} E_REQUIREMENT_NOT_FOUND req 目录不存在
@@ -316,7 +325,7 @@ export class TaskCardStore {
       labels: input.labels ?? [],
       depends_on: input.depends_on ?? [],
       order_index: input.order_index ?? null,
-      source: TaskCardSource.MANUAL,
+      source: input.source ?? TaskCardSource.MANUAL,
       is_archived: false,
       created_at: now,
       updated_at: now,
