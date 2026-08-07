@@ -355,10 +355,28 @@ export class PrdSplitService {
   // 终态转换
   // -------------------------------------------------------------------------
 
+  /**
+   * issue 13(0 卡静音成功修复):
+   * 模型 zero-call end_turn 时 candidates 为 0 → 仍走 succeeded 会导致 banner
+   * 显示「建议卡片组 0 条」+ 无任何错误反馈。这里强制 0 卡 → failed,让
+   * web 端 banner 与 prd_split_failed SSE 接管,用户看到明确错误提示。
+   *
+   * 真因对应:fix #2-A。配合 PrdSplitRunner 的 transitionToSucceeded 失败
+   * 兜底(发布 prd_split_failed + releaseLock)使用。
+   */
   transitionToSucceeded(
     requirementId: string,
     runId: string,
   ): { ok: true; run: PrdSplitRunMeta } | { ok: false; reason: string } {
+    const cards = this.readCards(requirementId, runId)
+    if (cards.length === 0) {
+      return this.transitionTo(
+        requirementId,
+        runId,
+        'failed',
+        'model produced 0 candidates (propose_card was never invoked before end_turn)',
+      )
+    }
     return this.transitionTo(requirementId, runId, 'succeeded', null)
   }
 

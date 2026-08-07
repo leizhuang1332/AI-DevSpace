@@ -144,6 +144,14 @@ export interface AnalysisQueryInput {
   allowedTools: ReadonlyArray<string>
   /** 业务工具名 → handler;handler 同步处理 + 返回 tool_result 喂回模型 */
   businessTools: Record<string, (toolUseId: string, args: unknown) => unknown>
+  /**
+   * 业务工具 description 覆盖(可选,key 为 tool 名)。issue 13 真因:
+   * - 默认 description 是 `平台业务工具:<name>。由 handler 在平台进程内执行持久化`,
+   *   对 PrdSplitRunner 这种"自定义身份"路径语义错位 → 模型谨慎 end_turn
+   * - caller 注入对齐 system prompt 语义(BOARD 工位 / Analysis Run 工位)
+   *   由 runner 各自负责;不传走默认
+   */
+  businessToolDescriptions?: Record<string, string>
   /** SDK envelope 流式回调(由 AnalysisAgentRunner 落到 log + SSE) */
   onEvent: (envelope: unknown) => void
 }

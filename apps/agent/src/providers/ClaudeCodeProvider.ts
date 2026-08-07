@@ -475,6 +475,10 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
       cwd: string
       allowedTools: ReadonlyArray<string>
       businessTools: Record<string, (toolUseId: string, args: unknown) => unknown>
+      /** 业务工具 description 覆盖(可选,key 为 tool 名)。issue 13 引入:
+       *  caller(如 PrdSplitRunner)注入与自身 system prompt 语义对齐的 description,
+       *  避免模型读到「Analysis Run」字样错配不调用工具。不传走默认。 */
+      businessToolDescriptions?: Record<string, string>
       onEvent: (envelope: unknown) => void
     }) => {
       try {
@@ -521,13 +525,19 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
         // 状态共享容易在并发 attempt 上产生 race。改成 runAnalysisQuery
         // 闭包内局部变量,每次 Run 启动时归零,闭包结束自动释放。
         let perRunCounter = 0
+        // issue 13:description caller 注入优先,默认走通用表述。
+        // 旧硬编码「Analysis Run 业务工具:... 由 AnalysisAgentRunner 在 handler
+        // 内执行持久化」会让 PrdSplitRunner 路径的 propose_card 拿到错位 description,
+        // 模型读 metadata 后谨慎 end_turn → 0 卡静音成功。
+        const defaultDescription = (name: string): string =>
+          `平台业务工具:${name}。由对应 runner 在 handler 内执行持久化与 SSE 推送。`
         const mcpServer = sdkModule.createSdkMcpServer({
           name: 'analysis-run-tools',
           version: '1.0.0',
           tools: Object.entries(input.businessTools).map(([name, handler]) =>
             sdkModule.tool(
               name,
-              `Analysis Run 业务工具:${name}。由 AnalysisAgentRunner 在 handler 内执行持久化。`,
+              input.businessToolDescriptions?.[name] ?? defaultDescription(name),
               name === 'report_analysis_issue' ? reportIssueArgsShape : emptyArgsShape,
               async (args: unknown) => {
                 // 这里无法拿 SDK 端 tool_use_id(SDK 不透传)——

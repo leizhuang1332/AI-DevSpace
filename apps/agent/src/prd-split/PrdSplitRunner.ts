@@ -29,6 +29,18 @@ import type { PrdSplitService } from './PrdSplitService.js'
 /** 业务工具 name 常量 —— SDK allowedTools + handler dispatch 共同使用 */
 export const TOOL_PROPOSE_CARD = 'propose_card'
 
+/**
+ * BOARD 工位语义 description(issue 13 修复):
+ *
+ * 旧硬编码 `Analysis Run 业务工具:propose_card。由 AnalysisAgentRunner 在 handler
+ * 内执行持久化`,在 PrdSplitRunner 路径下语义错位 —— system prompt 说的是 BOARD
+ * 工位 PRD 拆解助手,但工具 metadata 自称 Analysis Run,模型会谨慎 end_turn。
+ *
+ * 现 caller 注入后,工具描述与 system prompt 身份一致,模型能正确识别。
+ */
+export const BOARD_PROPOSE_CARD_DESCRIPTION =
+  'BOARD 工位 PRD 拆解 Run 业务工具:propose_card。由 PrdSplitRunner 在 handler 内执行候选卡片持久化(写 cards.yaml 并 publish SSE);不支持 status 字段、不接受 suggested_status。建议每识别一张候选卡片立即调用一次。'
+
 /** propose_card handler 入参(由 handler 本地 Zod 校验,wrapper 不过滤) */
 export interface ProposeCardArgs {
   title: string
@@ -109,9 +121,75 @@ export async function runPrdSplitQuery(
     businessTools: {
       [TOOL_PROPOSE_CARD]: proposeCardHandler,
     },
-    // 本期不落 run log;onEvent 仅作可选 SSE 推送(模型 thinking 文本)
-    onEvent: () => {
-      /* no-op:cards.yaml 是唯一 artifact */
+    // issue 13:BOARD 工位语义 description(对齐 system prompt 身份,避免
+    // 默认 Analysis Run 字样让模型谨慎 end_turn → 0 卡静音成功)
+    businessToolDescriptions: {
+      [TOOL_PROPOSE_CARD]: BOARD_PROPOSE_CARD_DESCRIPTION,
+    },
+    // issue 13:onEvent 改为 stderr 日志(可观测 envelope 流向,辅助排障)
+    //
+    // 0 卡诊断关键信号:
+    // - 看到 type=assistant + content 含 propose_card → 模型真的在调
+    // - 看到 type=assistant 没 propose_card 内容,但 text 字段是结束语
+    //   → 模型读了 description 仍选择不调(描述修复未生效或语义模糊)
+    // - 看不到 type=assistant → SDK 层 / model 层根本没发起对话
+    // - type=tool_use.name=propose_card + type=tool_result → wrapper 链通
+    onEvent: (env) => {
+      const m = env as { kind?: string; raw?: Record<string, unknown> }
+      if (m.kind !== 'raw' || !m.raw) return
+      const type = m.raw['type']
+      if (type === 'assistant') {
+        // assistant message 含多个 content block;关心 thinking / text / tool_use
+        const message = (m.raw as { message?: { content?: unknown[] } }).message
+        const content = Array.isArray(message?.content) ? message!.content : []
+        const summary = content
+          .map((b) => {
+            const block = b as Record<string, unknown>
+            if (block['type'] === 'text') {
+              const t = String(block['text'] ?? '')
+              return `text(${t.slice(0, 200)})${t.length > 200 ? '...' : ''}`
+            }
+            if (block['type'] === 'thinking') {
+              const t = String(block['thinking'] ?? '')
+              return `thinking(${t.slice(0, 120)}...)`
+            }
+            if (block['type'] === 'tool_use') {
+              return `tool_use(name=${String(block['name'] ?? '')}, toolUseId=${String(block['id'] ?? '').slice(0, 40)})`
+            }
+            return `block(${block['type']})`
+          })
+          .join(' | ')
+        process.stderr.write(
+          `[prd-split sdk] runId=${runId} ASSISTANT ${summary || '(empty)'}\n`,
+        )
+      } else if (type === 'user') {
+        // user message 一般是 tool_result 回喂
+        const message = (m.raw as { message?: { content?: unknown[] } }).message
+        const content = Array.isArray(message?.content) ? message!.content : []
+        const ids = content
+          .filter(
+            (b) =>
+              typeof b === 'object' &&
+              b !== null &&
+              (b as Record<string, unknown>)['type'] === 'tool_result',
+          )
+          .map((b) =>
+            String((b as Record<string, unknown>)['tool_use_id'] ?? '').slice(
+              0,
+              40,
+            ),
+          )
+          .join(',')
+        process.stderr.write(
+          ids
+            ? `[prd-split sdk] runId=${runId} USER tool_result toolUseIds=${ids}\n`
+            : '',
+        )
+      } else if (type === 'result') {
+        process.stderr.write(
+          `[prd-split sdk] runId=${runId} RESULT subtype=${String(m.raw['subtype'] ?? '')}\n`,
+        )
+      }
     },
   }
 
@@ -176,6 +254,24 @@ export async function runPrdSplitQuery(
     }
     await service.releaseLock(requirementId).catch(() => {})
     return { ok: false, error: succeeded.reason }
+  }
+  // issue 13 修复#2-A 联动:0 卡回退路径里 transitionToSucceeded 内部已写
+  // status='failed'(返 ok:true 但 run.status 是 failed)。这里识别语义、
+  // 重新映射 SSE 事件,避免发布 prd_split_succeeded + actualCount=0 的错位。
+  if (succeeded.run.status !== 'succeeded') {
+    const errorMsg =
+      succeeded.run.error ?? 'model produced 0 candidates (propose_card never invoked)'
+    hub.publish(requirementId, {
+      type: 'prd_split_failed',
+      reqId: requirementId,
+      runId,
+      ts: Date.now(),
+      finishedAt: succeeded.run.finished_at ?? new Date().toISOString(),
+      error: errorMsg,
+      actualCount: succeeded.run.actual_count,
+    })
+    await service.releaseLock(requirementId).catch(() => {})
+    return { ok: false, error: errorMsg }
   }
   hub.publish(requirementId, {
     type: 'prd_split_succeeded',
