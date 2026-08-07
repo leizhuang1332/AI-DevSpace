@@ -105,7 +105,7 @@ describe('ZoneBar', () => {
       expect(screen.queryByTestId('zone-tab-executing')).toBeNull()
     })
 
-    it('Tab 顺序:Overview → DRAFTING → BOARD → ANALYZING → WRAP-UP', () => {
+    it('Tab 顺序:Overview → DRAFTING → ANALYZING → BOARD → WRAP-UP', () => {
       const { container } = render(<ZoneBar />)
       const links = container.querySelectorAll('[data-testid^="zone-tab-"]')
       const order = Array.from(links).map((el) =>
@@ -114,8 +114,8 @@ describe('ZoneBar', () => {
       expect(order).toEqual([
         'overview',
         'drafting',
-        'board',
         'analyzing',
+        'board',
         'wrapup',
       ])
     })

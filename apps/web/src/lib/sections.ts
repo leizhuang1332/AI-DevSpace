@@ -62,8 +62,8 @@ export interface SectionMeta {
 /** 4 section 集合(hardcode 枚举,ADR-0026 D2) */
 export const REQUIREMENT_SECTIONS = [
   'drafting',
-  'board',
   'analyzing',
+  'board',
   'wrapup',
 ] as const
 export type RequirementSection = (typeof REQUIREMENT_SECTIONS)[number]

@@ -15,7 +15,7 @@ import {
  *
  * 规则:
  * - 仅在 /requirements/<id>/<zone>/ 路由下渲染(其他路由返回 null)
- * - 5 Tab 顺序:Overview → DRAFTING → BOARD → ANALYZING → WRAP-UP
+ * - 5 Tab 顺序:Overview → DRAFTING → ANALYZING → BOARD → WRAP-UP
  * - 当前工位激活态:紫色 2px 底部下划线 + brand-600 文字色 + 加粗(ADR §6)
  * - ANALYZING 状态点脉动(ADR §6 决策 49)
  *

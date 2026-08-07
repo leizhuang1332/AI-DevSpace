@@ -19,8 +19,8 @@ describe('SECTION_META', () => {
   it('导出 4 个 section 元数据', () => {
     expect(REQUIREMENT_SECTIONS).toEqual([
       'drafting',
-      'board',
       'analyzing',
+      'board',
       'wrapup',
     ])
     expect(SECTION_LIFECYCLE_ORDER).toEqual(REQUIREMENT_SECTIONS)
@@ -135,11 +135,11 @@ describe('SECTION_STATUS_COLOR_CLASS / SECTION_STATUS_COLOR_LABEL', () => {
 // ============================================================================
 
 describe('REQUIREMENT_SECTIONS', () => {
-  it('顺序为 drafting → board → analyzing → wrapup', () => {
+  it('顺序为 drafting → analyzing → board → wrapup', () => {
     expect(REQUIREMENT_SECTIONS).toEqual([
       'drafting',
-      'board',
       'analyzing',
+      'board',
       'wrapup',
     ])
   })
