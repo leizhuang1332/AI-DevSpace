@@ -1,0 +1,126 @@
+apps/web/src/components/board/detail/CardSideProperty.tsx
+  s_b00a55460392ac::t_3b7cf202a7781e 1-17,19-304
+  s_b00a55460392ac::t_f8249aab0e69e3 18
+apps/web/src/components/board/detail/PrdSplitResultBanner.tsx
+  s_b00a55460392ac::t_01f03585750c86 1-119
+apps/web/src/__tests__/lib/board.test.ts
+  s_b00a55460392ac::t_d18b2f30ed65d7 308-314
+  s_b00a55460392ac::t_689be314d3dd3c 21-25
+  s_b00a55460392ac::t_de56589af045e2 275-307,315-388
+.scratch/board-section/issues/08-web-card-detail-page.md
+  s_b00a55460392ac::t_5f831e0fd9387f 7-9
+  s_b00a55460392ac::t_ae90b74728226f 10-46
+apps/web/src/lib/board.ts
+  s_b00a55460392ac::t_eb5905a330077f 267-355
+apps/web/src/__tests__/board/board-toolbar.test.tsx
+  s_b00a55460392ac::t_20fe502ff05c2f 2,8
+  s_b00a55460392ac::t_fe8777e9b2a6e8 72,77-94
+  s_b00a55460392ac::t_ad9f8d35264a1d 18,24
+apps/web/package.json
+  s_b00a55460392ac::t_355b7a287386fb 23-24
+apps/agent/src/__tests__/board/task-card-store.test.ts
+  s_b00a55460392ac::t_87cdfd7fd7e065 106-127
+apps/web/src/__tests__/board/card-side-property.test.tsx
+  s_b00a55460392ac::t_28a6e5ab5d5dd1 1-134
+apps/web/src/lib/board.server.ts
+  s_b00a55460392ac::t_a67fc4554fedfd 25-26,28-29
+  s_b00a55460392ac::t_e6317b50e4716d 80-172
+packages/shared/src/task-card-transcript.ts
+  s_b00a55460392ac::t_cbbee732ec3a55 152-195
+apps/web/src/components/board/detail/CardDetail.tsx
+  s_b00a55460392ac::t_f43e5ab9718a92 1-328
+apps/web/src/__tests__/board/prd-split-review-modal.test.tsx
+  s_b00a55460392ac::t_43d6911380aed3 1-223
+apps/web/src/components/board/BoardSection.tsx
+  s_b00a55460392ac::t_2e856a4ccd18f4 194
+  s_b00a55460392ac::t_10b6123e9d6fed 55,60-63,91-112
+  s_b00a55460392ac::t_80cddb1a733b04 4,12-14,20,22-23,27,38-40,113-114,156
+  s_b00a55460392ac::t_ad935532cadc5a 142,145-155
+  s_b00a55460392ac::t_fb9881fca84b68 209-223
+apps/agent/src/services/board/TaskCardStore.ts
+  s_b00a55460392ac::t_4105288dfa292e 291,293-294
+  s_b00a55460392ac::t_333b1a5bd8e318 71-77,87-88
+  s_b00a55460392ac::t_2d9189ae4744b6 328
+apps/web/e2e/board.spec.ts
+  s_b00a55460392ac::t_654ae7b1ec6cda 2,4,9,12
+  s_b00a55460392ac::t_865ef57e8e733b 198-273
+apps/agent/src/server.ts
+  s_b00a55460392ac::t_b0a31ca1d37b2f 50-51
+  s_b00a55460392ac::t_31be802155cf5b 364-373
+apps/agent/src/__tests__/board/board-transcript-route.test.ts
+  s_b00a55460392ac::t_cd37e39b4988b4 1-261
+apps/web/src/__tests__/board/card-transcript-panel.test.tsx
+  s_b00a55460392ac::t_9d8b634c0d8fd8 1-219
+apps/web/src/components/board/BoardToolbar.tsx
+  s_b00a55460392ac::t_3e1e806d427e29 29,38
+  s_b00a55460392ac::t_d23fb3780dcd5d 12
+  s_b00a55460392ac::t_e3ed492d4a3836 94-102
+apps/web/src/__tests__/board/prd-split-result-banner.test.tsx
+  s_b00a55460392ac::t_8248b72be17f12 1-170
+apps/web/src/components/board/detail/PrdSplitReviewModal.tsx
+  s_b00a55460392ac::t_d503b67a7781f0 1-63,67-224
+  s_b00a55460392ac::t_f07cca5807d8e5 64-66
+apps/web/src/components/board/Card.tsx
+  s_b00a55460392ac::t_1e06257734e78a 14-16
+apps/web/src/__tests__/board/split-from-prd-modal.test.tsx
+  s_b00a55460392ac::t_caf2ae431e5862 1-142
+apps/agent/src/routes/board-transcript.ts
+  s_b00a55460392ac::t_f055d228ee4a6e 1-29,31-145
+  s_b00a55460392ac::t_69126a59277f17 30
+apps/web/src/components/board/detail/StatusConstraintModal.tsx
+  s_b00a55460392ac::t_bec37b973529d3 1-152
+apps/web/src/__tests__/board/card-detail.test.tsx
+  s_b00a55460392ac::t_f339327d310d3f 1-59,62-66,75-79,81-176
+  s_b00a55460392ac::t_ef54c12312b456 60-61,67-74,80
+apps/web/src/components/board/detail/SplitFromPrdModal.tsx
+  s_b00a55460392ac::t_f02805fb78de00 1-218
+apps/web/src/components/board/detail/BoardCardDetailPage.tsx
+  s_b00a55460392ac::t_f3323e8356e0d5 154-155
+  s_b00a55460392ac::t_2535a4f850ec54 42
+  s_b00a55460392ac::t_31a86403a15f28 1-41,43-153,156-262
+packages/shared/src/board-card.ts
+  s_b00a55460392ac::t_4c524f5babbc56 97-100,112
+apps/web/src/__tests__/board/status-constraint-modal.test.tsx
+  s_b00a55460392ac::t_40143b4860b39c 1-138
+apps/web/src/__tests__/board/board-card-detail-page.test.tsx
+  s_b00a55460392ac::t_cd0ca664266cb7 20
+  s_b00a55460392ac::t_43a360c2080283 48
+  s_b00a55460392ac::t_ecf1300ea92e6f 1-19,21-47,49-314
+apps/web/src/app/(workspace)/requirements/[id]/board/[cardId]/layout.tsx
+  s_b00a55460392ac::t_3fe62362487d7d 1-18
+apps/web/src/components/board/detail/MarkdownContent.tsx
+  s_b00a55460392ac::t_38603ddaec1c35 1-138
+apps/web/src/lib/board-detail-hooks.ts
+  s_b00a55460392ac::t_8eed357e65d169 87,90-93,95-97,102
+  s_b00a55460392ac::t_2337d593015634 1-24,26-86,88-89,94,98-101,103-369
+  s_b00a55460392ac::t_27bfed8be89920 25
+apps/web/src/components/board/detail/CardTranscriptPanel.tsx
+  s_b00a55460392ac::t_897cbd31d24cb2 1-154
+apps/web/src/app/(workspace)/requirements/[id]/board/[cardId]/page.tsx
+  s_b00a55460392ac::t_1f6aca48cbee80 1-73
+apps/web/src/__tests__/board/board-section.test.tsx
+  s_b00a55460392ac::t_3bef70736db587 87
+  s_b00a55460392ac::t_1b070d21a0a1fc 56-80
+apps/web/src/components/board/detail/CardTranscriptInput.tsx
+  s_b00a55460392ac::t_ebd9c7eb0bb57e 1-98
+apps/agent/src/__tests__/board/board-cards-route.test.ts
+  s_b00a55460392ac::t_e434701adfac40 267-286
+pnpm-lock.yaml
+  s_b00a55460392ac::t_dcc7c5845b1495 108-113,1107-1112,1116-1118,1122-1127,1142-1147,1207-1209,1340-1342,1429-1431,1440-1451,1484-1486,1568-1570,1602-1604,1684-1687,1730-1732,1770-1772,1940-1945,1954-1956,2009-2011,2024-2029,2038-2040,2049-2051,2056-2059,2157-2159,2188-2190,2195-2239,2252-2335,2482-2484,2639-2641,2683-2688,2719-2730,2866-2868,2899-2901,2914-2919,3028-3033,3087-3104,3125-3130,3273-3275,3973-3980,3983-3986,3989-3994,4010-4013,4105-4106,4243-4244,4336-4337,4351-4358,4393-4394,4453-4456,4475-4478,4589-4590,4659-4660,4717-4718,4897-4920,4927-4928,4980-4981,4988-4994,5003-5004,5011-5012,5015-5016,5122-5123,5161-5162,5165-5317,5324-5514,5646-5655,5792-5793,5839-5856,5894-5927,6101-6102,6128-6132,6141-6148,6272-6275,6332-6364,6381-6390,6503-6504
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "f2c4a13b2b880b14364fbf3c133a7c0b968c0a70",
+  "prompts": {},
+  "sessions": {
+    "s_b00a55460392ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5b13da5e-86c7-4850-bd91-389b36b5928a",
+        "model": "xopglm52"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
