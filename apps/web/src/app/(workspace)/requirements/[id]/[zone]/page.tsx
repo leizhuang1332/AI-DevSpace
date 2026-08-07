@@ -16,6 +16,8 @@ import {
 } from '@/lib/wrapup'
 import { WrapupZone } from '@/components/wrapup-zone'
 import { ZoneShell } from '@/lib/zone-shell'
+import { getBoardData } from '@/lib/board.server'
+import { BoardSection } from '@/components/board/BoardSection'
 
 /**
  * 工位主区(ADR-0026 D3:4 section contract)。
@@ -26,7 +28,8 @@ import { ZoneShell } from '@/lib/zone-shell'
  *   候命 Skill 列表)可以注入到 InlineRail
  * - DRAFTING 工位(issue 18 / issue 01 重新设计)渲染 `<DraftingZone />` Form 居中
  *   布局,主区仅 1 列 + 右侧 Inline 栏(Skill 候命)
- * - BOARD section(ADR-0027)本期占位页,真实 5 列看板 UI 留后续 PRD phase
+ * - BOARD section(ADR-0027 · issue 07)渲染 `<BoardSection />` 5 列看板
+ *   (backlog / todo / in_progress / in_review / done)+ toolbar + manual 创建
  * - ANALYZING 工位(issue 08 · ADR-0021)渲染 `<AnalyzingZone />` Analysis Run + Issue + Response
  * - WRAP-UP 工位(issue 22)渲染 `<WrapupZone />` Archive 形态
  *
@@ -95,34 +98,22 @@ export default async function ZonePage({
     )
   }
 
-  // BOARD section(ADR-0027 D2):本期占位页,真实 5 列看板 UI(列布局 / 卡片 /
-  // 详情页 / PRD 拆解 modal)留后续 PRD phase。占位页让 `/requirements/[id]/board/`
-  // 可访问不 404,ZoneBar 的 BOARD Tab 激活态正确。
+  // BOARD section(ADR-0027 D2-D3 · issue 07):5 列看板(backlog / todo /
+  // in_progress / in_review / done),按 TaskCard.status 分组;toolbar 4 chip
+  // 过滤(全部 / 我的 / 高优先级 / PRD 拆)+ `[+ 新任务]` manual 创建 +
+  // `[+ 从 PRD 拆]`(本期灰显,留 ticket 08 实装 modal 触发)。
+  // SSR 走 `getBoardData` 拉 agent HTTP,失败降级空态;客户端 React Query
+  // (`['board', reqId, ...filters]`)接管后续重拉。
+  // 卡片点击 no-op(详情页 `/board/[cardId]/` 留 ticket 08,ADR-0027 D5 toggle)。
   if (zone.id === 'board') {
+    const data = await getBoardData(requirementId)
     return (
       <ZoneShell id={requirementId} zone={zone}>
-        <main
-          data-testid="zone-page"
-          data-zone-id={zone.id}
-          className="overflow-auto p-8"
-        >
-          <header className="max-w-[880px]">
-            <div className="flex items-center gap-3 mb-2">
-              <span className="text-2xl">{zone.icon}</span>
-              <h1 className="text-2xl font-semibold tracking-tight">
-                {zone.label}{' '}
-                <span className="text-text-3 text-lg font-normal">
-                  · {zone.displayName}
-                </span>
-              </h1>
-            </div>
-            <p className="text-text-2 mb-6">{zone.description}</p>
-            <p className="text-text-3 text-xs">
-              BOARD section 即将上线 —— 5 列看板(backlog / todo / in_progress /
-              in_review / done)+ 卡片详情页 + PRD 拆解(ADR-0027)。
-            </p>
-          </header>
-        </main>
+        <BoardSection
+          requirementId={requirementId}
+          initialCards={data.cards}
+          initialTotal={data.total}
+        />
       </ZoneShell>
     )
   }
