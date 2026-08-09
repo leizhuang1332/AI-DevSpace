@@ -1,0 +1,688 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Board chat · Sub-agent 容器/嵌套/状态 方案对比 · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{
+  --brand:#5e6ad2; --brand-50:#eef0fb; --brand-100:#e0e7ff; --brand-500:#5e6ad2; --brand-600:#525bc7; --brand-700:#4147a3;
+  --success:#16a34a; --warning:#f59e0b; --error:#ef4444; --info:#64748b;
+  --bg:#fbfbfd; --bg-elevated:#ffffff; --bg-subtle:#f5f5f7; --bg-hover:#f1f1f3;
+  --border:#ebebef; --border-strong:#d8d8de;
+  --text-1:#0f172a; --text-2:#475569; --text-3:#94a3b8;
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px; --space-6:24px; --space-8:32px;
+  --text-xs:11px; --text-sm:12px; --text-base:13px; --text-md:14px; --text-lg:16px; --text-xl:18px; --text-2xl:20px;
+  --radius-sm:4px; --radius-md:6px; --radius-lg:8px; --radius-xl:12px;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.04); --shadow-md:0 2px 4px rgba(0,0,0,.06); --shadow-lg:0 4px 12px rgba(0,0,0,.08);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--text-1);font-family:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased}
+.page-wrap{padding:var(--space-8);max-width:1480px;margin:0 auto}
+.nav{display:flex;gap:var(--space-3);margin-bottom:var(--space-6);font-size:var(--text-sm)}
+.nav a{color:var(--text-2);text-decoration:none;padding:6px 12px;border-radius:var(--radius-md)}
+.nav a:hover{background:var(--bg-subtle);color:var(--text-1)}
+.nav a.cur{background:var(--brand-50);color:var(--brand-600);font-weight:500}
+h1{font-size:var(--text-2xl);font-weight:600;letter-spacing:-0.02em;margin-bottom:var(--space-2)}
+.sub{color:var(--text-3);font-size:var(--text-sm);margin-bottom:var(--space-8);line-height:1.7}
+.sub code{font-family:'JetBrains Mono',monospace;background:var(--bg-subtle);padding:1px 6px;border-radius:var(--radius-sm);font-size:12px;color:var(--brand-700)}
+
+/* 方案条目: 一行一方案, 全尺寸 */
+.scheme{margin-bottom:var(--space-8);background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-xl);overflow:hidden;box-shadow:var(--shadow-sm)}
+.scheme header{padding:var(--space-5) var(--space-6);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:var(--space-4)}
+.scheme header h2{font-size:var(--text-lg);font-weight:600;flex:1}
+.scheme header .desc{color:var(--text-3);font-size:var(--text-sm);flex:2}
+.scheme header .tag{font-size:var(--text-xs);padding:3px 8px;border-radius:var(--radius-md);font-weight:500;background:var(--brand-50);color:var(--brand-600)}
+
+/* 模拟 chat panel 容器 */
+.chat-panel{border:1px solid var(--border);background:var(--bg-elevated);overflow:hidden;margin:var(--space-4) var(--space-6) var(--space-6);border-radius:var(--radius-lg)}
+
+/* 顶部 UsageBar */
+.usage-bar{display:flex;align-items:center;gap:var(--space-3);padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--border);background:var(--bg-subtle);font-size:var(--text-xs);color:var(--text-2)}
+.usage-bar .model-pill{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-md);font-weight:500;color:var(--text-1)}
+.usage-bar .model-pill .dot{width:6px;height:6px;border-radius:50%;background:var(--brand)}
+.usage-bar .stat{font-family:'JetBrains Mono',monospace}
+.usage-bar .stat strong{color:var(--text-1);font-weight:600}
+.usage-bar .sub-line{color:var(--text-3);font-size:var(--text-xs);margin-left:auto}
+.usage-bar .toggle{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg-elevated);color:var(--text-2)}
+.usage-bar .toggle .sw{width:22px;height:14px;background:var(--border-strong);border-radius:7px;position:relative}
+.usage-bar .toggle .sw i{width:10px;height:10px;background:#fff;border-radius:50%;position:absolute;top:2px;left:2px;transition:.15s}
+.usage-bar .toggle.on .sw{background:var(--brand)}
+.usage-bar .toggle.on .sw i{left:10px}
+
+/* Sticky Active Bar --- Q11 (s1) */
+.sticky-active{display:flex;align-items:center;gap:var(--space-2);padding:var(--space-2) var(--space-4);background:var(--brand-50);border-bottom:1px solid var(--brand-100);font-size:var(--text-xs);color:var(--brand-700);font-weight:500}
+.sticky-active .icon{animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* 消息流 */
+.msgs{padding:var(--space-4) var(--space-5);display:flex;flex-direction:column;gap:var(--space-3);max-height:520px;overflow-y:auto;background:var(--bg-elevated)}
+.msg{display:flex;flex-direction:column;gap:6px}
+.msg .head{display:flex;align-items:center;gap:var(--space-2);font-size:var(--text-xs);color:var(--text-3)}
+.msg .head .role{font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--text-2)}
+.msg.user .head .role{color:var(--brand-700)}
+.msg.assistant .head .role{color:var(--brand-700)}
+.msg .body{padding:var(--space-3) var(--space-4);border-radius:var(--radius-md);font-size:var(--text-sm);line-height:1.65}
+.msg.user .body{background:var(--bg-subtle);color:var(--text-1)}
+.msg.assistant .body{background:var(--brand-50);color:var(--text-1);white-space:pre-wrap}
+
+/* 容器形态 c1: 嵌入 assistant message 内的 <details> */
+details.task{display:block;margin-top:var(--space-2);border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg-elevated);overflow:hidden}
+details.task[open]{box-shadow:var(--shadow-sm)}
+details.task>summary{padding:var(--space-2) var(--space-3);cursor:pointer;display:flex;align-items:center;gap:var(--space-2);font-size:var(--text-xs);font-weight:600;list-style:none;background:var(--bg-subtle);user-select:none}
+details.task>summary::-webkit-details-marker{display:none}
+details.task>summary .icon{font-size:13px;width:18px;text-align:center}
+details.task>summary .desc{flex:1;color:var(--text-1)}
+details.task>summary .meta{font-family:'JetBrains Mono',monospace;color:var(--text-3);font-weight:400;font-size:11px}
+details.task .task-body{padding:var(--space-3) var(--space-4);border-top:1px solid var(--border);font-size:var(--text-xs);color:var(--text-2);display:flex;flex-direction:column;gap:var(--space-2)}
+details.task .task-body .summary-line{padding:var(--space-2) var(--space-3);background:var(--bg-subtle);border-radius:var(--radius-sm);font-style:italic;color:var(--text-2)}
+details.task .task-body .tool-list{display:flex;flex-direction:column;gap:4px;padding-left:var(--space-3);border-left:2px solid var(--border)}
+details.task .task-body .tool-list .tool{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-3)}
+details.task .task-body .tool-list .tool .name{color:var(--brand-700);font-weight:600}
+
+/* 状态色 v1 4 状态 */
+details.task.started>summary .icon{color:var(--text-3)}
+details.task.running>summary{background:var(--brand-50);color:var(--brand-700)}
+details.task.running>summary .icon{color:var(--brand);animation:spin 1.4s linear infinite}
+@keyframes spin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
+details.task.completed>summary .icon{color:var(--success)}
+details.task.failed>summary{background:#fef2f2}
+details.task.failed>summary .icon{color:var(--error)}
+
+/* 状态色 v2 2 状态 */
+details.task.active>summary{background:var(--brand-50);color:var(--brand-700)}
+details.task.active>summary .icon{color:var(--brand);animation:spin 1.4s linear infinite}
+details.task.final>summary .icon{color:var(--success)}
+details.task.final.failed>summary .icon{color:var(--error)}
+
+/* 进度条 v3 */
+.progress-bar{height:6px;background:var(--bg-subtle);border-radius:3px;overflow:hidden;margin-top:var(--space-2)}
+.progress-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--brand),var(--brand-700));border-radius:3px;transition:width .4s ease-out}
+
+/* 容器形态 c2: 独立气泡 */
+.bubble.task-bubble{border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg-elevated);padding:0;overflow:hidden}
+.bubble.task-bubble .head{padding:var(--space-2) var(--space-3);background:var(--bg-subtle);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:var(--space-2);font-size:var(--text-xs)}
+.bubble.task-bubble .body{padding:var(--space-3) var(--space-4);font-size:var(--text-xs);color:var(--text-2)}
+
+/* 容器形态 c3: 独立 sidebar */
+.layout-with-sidebar{display:grid;grid-template-columns:1fr 280px;gap:0;min-height:520px}
+.layout-with-sidebar .msgs-side{max-height:520px;overflow-y:auto;padding:var(--space-4) var(--space-5);background:var(--bg-elevated)}
+.layout-with-sidebar .sidebar{border-left:1px solid var(--border);background:var(--bg-subtle);padding:var(--space-3);display:flex;flex-direction:column;gap:var(--space-2);max-height:520px;overflow-y:auto}
+.sidebar h4{font-size:var(--text-xs);font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:var(--space-2)}
+.sidebar .task-card{padding:var(--space-2) var(--space-3);border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg-elevated);font-size:var(--text-xs);display:flex;flex-direction:column;gap:4px}
+.sidebar .task-card .head{display:flex;align-items:center;gap:6px;font-weight:600;color:var(--text-1)}
+.sidebar .task-card .summary{color:var(--text-2);font-style:italic;line-height:1.5}
+.sidebar .task-card.active{border-color:var(--brand);background:var(--brand-50)}
+.sidebar .task-card.completed{border-color:#86efac}
+.sidebar .task-card.failed{border-color:#fca5a5;background:#fef2f2}
+.sidebar .task-card .nest-indent{padding-left:var(--space-3);border-left:2px solid var(--border);margin-top:4px}
+.sidebar .task-card .tool-list{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-3)}
+
+/* 嵌套深度 d1/d2 视觉对比 */
+.nest-d1 details.task{margin-left:0}
+.nest-d2 details.task{margin-left:var(--space-4);border-left:2px solid var(--brand-100)}
+.nest-d2 details.task details.task{margin-left:var(--space-4);border-left:2px solid var(--brand-100)}
+
+/* 边框标识 */
+.scheme header .tag-tag{cursor:default}
+</style>
+</head>
+<body>
+<div class="page-wrap">
+
+<div class="nav">
+  <a href="board-detail-final.html">← board 详情页(对照)</a>
+  <a class="cur">board chat · sub-agent 方案对比</a>
+</div>
+
+<h1>Board chat · Sub-agent 容器形态 / 嵌套深度 / 视觉状态</h1>
+<p class="sub">
+本页对比 <code>board chat panel</code> 在 SDK 启动 sub-agent 时的 3 维度方案:容器形态 (c1/c2/c3) × 嵌套深度 (d1/d2) × 视觉状态 (v1/v2/v3)。每个方案全尺寸一行展示,纵列纵列纵列。
+</p>
+
+<!-- ============================================================ -->
+<!-- 方案 A — c1 嵌入 + d2 嵌套缩进 + v1 4 状态 -->
+<!-- ============================================================ -->
+<section class="scheme">
+  <header>
+    <h2>A. (c1) 嵌入 assistant + (d2) 嵌套缩进 + (v1) 4 状态</h2>
+    <span class="desc">sub-agent 块作 assistant message 内的 <code>&lt;details&gt;</code> 子块,sub-sub-agent 缩进 1 级,4 状态视觉(启动/进度/完成/失败)</span>
+    <span class="tag">推荐</span>
+  </header>
+
+  <div class="chat-panel">
+    <div class="usage-bar">
+      <span class="model-pill"><span class="dot"></span> Sonnet 5</span>
+      <span class="stat">tokens <strong>12,345</strong></span>
+      <span class="stat">cost <strong>$0.082</strong></span>
+      <span class="stat">turn <strong>3</strong></span>
+      <span class="sub-line">含 1 sub-agent: 1,234 tokens / $0.012</span>
+      <span class="toggle"><span class="sw"><i></i></span> auto-allow</span>
+    </div>
+
+    <div class="sticky-active">
+      <span class="icon">🤖</span>
+      <span>Active: 分析 dashboard 性能</span>
+    </div>
+
+    <div class="msgs nest-d2">
+      <div class="msg user">
+        <div class="head"><span class="role">用户</span><span>12:34</span></div>
+        <div class="body">看下 dashboard 性能怎么样</div>
+      </div>
+
+      <div class="msg assistant">
+        <div class="head"><span class="role">AI</span><span>12:34</span></div>
+        <div class="body">我启动一个 sub-agent 分析 dashboard 性能指标,你不用等可以继续。</div>
+
+        <details class="task started" open>
+          <summary>
+            <span class="icon">▶</span>
+            <span class="desc">Sub-agent: 分析 dashboard 性能</span>
+            <span class="meta">启动</span>
+          </summary>
+          <div class="task-body">
+            <div class="summary-line">读取 dashboard 配置文件...</div>
+          </div>
+        </details>
+
+        <details class="task running" open>
+          <summary>
+            <span class="icon">⏱️</span>
+            <span class="desc">Sub-sub-agent: 查 DB 慢查询</span>
+            <span class="meta">12s · Sonnet 5</span>
+          </summary>
+          <div class="task-body">
+            <div class="summary-line">30s-summary: 正在分析 pg_stat_statements, 已排查 47 个 query</div>
+            <div class="tool-list">
+              <div class="tool"><span class="name">Read</span> dashboard/metrics.yaml</div>
+              <div class="tool"><span class="name">Bash</span> psql -c "SELECT ..."</div>
+              <div class="tool"><span class="name">Grep</span> "slow_query" src/</div>
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <div class="msg user">
+        <div class="head"><span class="role">用户</span><span>12:36</span></div>
+        <div class="body">顺便看下错误日志</div>
+      </div>
+
+      <div class="msg assistant">
+        <div class="head"><span class="role">AI</span><span>12:36</span></div>
+        <div class="body">好,启动第二个 sub-agent 查错误日志。</div>
+
+        <details class="task completed" open>
+          <summary>
+            <span class="icon">✅</span>
+            <span class="desc">Sub-agent: 分析 dashboard 性能</span>
+            <span class="meta">1m 23s · $0.041</span>
+          </summary>
+          <div class="task-body">
+            <div class="summary-line">完成分析, 发现 3 个瓶颈: dashboard 加载 1.4s、metric 同步 800ms、CDN 静态资源 400ms</div>
+            <div class="tool-list">
+              <div class="tool"><span class="name">Read</span> docker-compose.yml</div>
+              <div class="tool"><span class="name">Bash</span> tail -100 logs/dashboard.log</div>
+            </div>
+          </div>
+        </details>
+
+        <details class="task running" open>
+          <summary>
+            <span class="icon">⏱️</span>
+            <span class="desc">Sub-agent: 查错误日志</span>
+            <span class="meta">8s · Sonnet 5</span>
+          </summary>
+          <div class="task-body">
+            <div class="summary-line">30s-summary: 正在 grep 错误模式, 已扫描 12k 行</div>
+            <div class="tool-list">
+              <div class="tool"><span class="name">Bash</span> grep -i error var/log/</div>
+            </div>
+          </div>
+        </details>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- 方案 B — c1 嵌入 + d2 嵌套缩进 + v2 2 状态 -->
+<!-- ============================================================ -->
+<section class="scheme">
+  <header>
+    <h2>B. (c1) 嵌入 assistant + (d2) 嵌套缩进 + (v2) 2 状态</h2>
+    <span class="desc">同方案 A,但只 2 状态(运行中 / 终态),无进度细节</span>
+  </header>
+
+  <div class="chat-panel">
+    <div class="usage-bar">
+      <span class="model-pill"><span class="dot"></span> Sonnet 5</span>
+      <span class="stat">tokens <strong>12,345</strong></span>
+      <span class="stat">cost <strong>$0.082</strong></span>
+      <span class="stat">turn <strong>3</strong></span>
+      <span class="sub-line">含 1 sub-agent</span>
+    </div>
+
+    <div class="msgs nest-d2">
+      <div class="msg user">
+        <div class="head"><span class="role">用户</span><span>12:34</span></div>
+        <div class="body">看下 dashboard 性能</div>
+      </div>
+
+      <div class="msg assistant">
+        <div class="head"><span class="role">AI</span><span>12:34</span></div>
+        <div class="body">我启动一个 sub-agent 分析 dashboard 性能。</div>
+
+        <details class="task active" open>
+          <summary>
+            <span class="icon">⏱️</span>
+            <span class="desc">Sub-agent: 分析 dashboard 性能</span>
+          </summary>
+          <div class="task-body">
+            <div>正在跑...</div>
+          </div>
+        </details>
+
+        <details class="task final" open>
+          <summary>
+            <span class="icon">✅</span>
+            <span class="desc">Sub-sub-agent: 查 DB 慢查询</span>
+          </summary>
+          <div class="task-body">
+            <div>完成</div>
+          </div>
+        </details>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- 方案 C — c1 嵌入 + d2 嵌套缩进 + v3 进度条 % -->
+<!-- ============================================================ -->
+<section class="scheme">
+  <header>
+    <h2>C. (c1) 嵌入 assistant + (d2) 嵌套缩进 + (v3) 进度条 %</h2>
+    <span class="desc">sub-agent 块底加进度条。⚠️ SDK 0.3.206 不直接暴露 0-100% 进度,只能基于 tool calls count 推算</span>
+  </header>
+
+  <div class="chat-panel">
+    <div class="usage-bar">
+      <span class="model-pill"><span class="dot"></span> Sonnet 5</span>
+      <span class="stat">tokens <strong>9,876</strong></span>
+      <span class="stat">cost <strong>$0.071</strong></span>
+      <span class="stat">turn <strong>2</strong></span>
+    </div>
+
+    <div class="msgs nest-d2">
+      <div class="msg user">
+        <div class="head"><span class="role">用户</span><span>12:34</span></div>
+        <div class="body">看下 dashboard 性能</div>
+      </div>
+
+      <div class="msg assistant">
+        <div class="head"><span class="role">AI</span><span>12:34</span></div>
+        <div class="body">我启动一个 sub-agent 分析 dashboard 性能。</div>
+
+        <details class="task running" open>
+          <summary>
+            <span class="icon">⏱️</span>
+            <span class="desc">Sub-agent: 分析 dashboard 性能</span>
+            <span class="meta">12s · 推算 60%</span>
+          </summary>
+          <div class="task-body">
+            <div class="summary-line">正在分析 pg_stat_statements, 已查询 47 个 metric</div>
+            <div class="tool-list">
+              <div class="tool"><span class="name">Read</span> dashboard/metrics.yaml</div>
+              <div class="tool"><span class="name">Bash</span> psql -c "SELECT ..."</div>
+              <div class="tool"><span class="name">Grep</span> "slow_query" src/</div>
+            </div>
+            <div class="progress-bar"><i style="width:60%"></i></div>
+          </div>
+        </details>
+
+        <details class="task completed" open>
+          <summary>
+            <span class="icon">✅</span>
+            <span class="desc">Sub-sub-agent: 查 DB 慢查询</span>
+            <span class="meta">1m 23s · 100%</span>
+          </summary>
+          <div class="task-body">
+            <div class="summary-line">完成</div>
+            <div class="progress-bar"><i style="width:100%"></i></div>
+          </div>
+        </details>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- 方案 D — c1 嵌入 + d1 平铺(无缩进) -->
+<!-- ============================================================ -->
+<section class="scheme">
+  <header>
+    <h2>D. (c1) 嵌入 assistant + (d1) 平铺 + (v1) 4 状态</h2>
+    <span class="desc">sub-agent 块都同缩进(不体现嵌套),4 状态视觉</span>
+  </header>
+
+  <div class="chat-panel">
+    <div class="usage-bar">
+      <span class="model-pill"><span class="dot"></span> Sonnet 5</span>
+      <span class="stat">tokens <strong>9,876</strong></span>
+      <span class="stat">cost <strong>$0.071</strong></span>
+    </div>
+
+    <div class="msgs nest-d1">
+      <div class="msg user">
+        <div class="head"><span class="role">用户</span><span>12:34</span></div>
+        <div class="body">看下 dashboard 性能</div>
+      </div>
+
+      <div class="msg assistant">
+        <div class="head"><span class="role">AI</span><span>12:34</span></div>
+        <div class="body">我启动一个 sub-agent 分析 dashboard 性能。</div>
+
+        <details class="task running" open>
+          <summary>
+            <span class="icon">⏱️</span>
+            <span class="desc">Sub-agent: 分析 dashboard 性能</span>
+            <span class="meta">12s</span>
+          </summary>
+          <div class="task-body">
+            <div class="summary-line">30s-summary: 正在分析 pg_stat_statements</div>
+          </div>
+        </details>
+
+        <details class="task running" open>
+          <summary>
+            <span class="icon">⏱️</span>
+            <span class="desc">Sub-agent: 查 DB 慢查询(嵌套在某 sub-agent 里)</span>
+            <span class="meta">8s</span>
+          </summary>
+          <div class="task-body">
+            <div class="summary-line">⚠️ 此 sub-agent 实际是上面那个的 sub-sub,但视觉上同缩进</div>
+          </div>
+        </details>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- 方案 E — c2 独立气泡 + (v1) 4 状态(无 nested) -->
+<!-- ============================================================ -->
+<section class="scheme">
+  <header>
+    <h2>E. (c2) 独立气泡 + (v1) 4 状态</h2>
+    <span class="desc">每个 sub-agent 独立气泡(类似 user/assistant 气泡),跟 user/assistant 同一消息流</span>
+  </header>
+
+  <div class="chat-panel">
+    <div class="usage-bar">
+      <span class="model-pill"><span class="dot"></span> Sonnet 5</span>
+      <span class="stat">tokens <strong>9,876</strong></span>
+      <span class="stat">cost <strong>$0.071</strong></span>
+    </div>
+
+    <div class="msgs">
+      <div class="msg user">
+        <div class="head"><span class="role">用户</span><span>12:34</span></div>
+        <div class="body">看下 dashboard 性能</div>
+      </div>
+
+      <div class="msg assistant">
+        <div class="head"><span class="role">AI</span><span>12:34</span></div>
+        <div class="body">我启动一个 sub-agent 分析 dashboard 性能。</div>
+      </div>
+
+      <div class="bubble task-bubble">
+        <div class="head">
+          <span style="font-size:13px">⏱️</span>
+          <span style="font-weight:600;color:var(--text-1)">Sub-agent: 分析 dashboard 性能</span>
+          <span style="margin-left:auto;color:var(--text-3);font-family:'JetBrains Mono',monospace;font-size:11px">12s · Sonnet 5</span>
+        </div>
+        <div class="body">
+          <div style="font-style:italic;color:var(--text-2);margin-bottom:var(--space-2)">30s-summary: 正在分析 pg_stat_statements</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-3);padding-left:var(--space-3);border-left:2px solid var(--border)">
+            Read dashboard/metrics.yaml<br>
+            Bash psql -c "SELECT ..."<br>
+            Grep "slow_query" src/
+          </div>
+        </div>
+      </div>
+
+      <div class="msg user">
+        <div class="head"><span class="role">用户</span><span>12:36</span></div>
+        <div class="body">顺便看下错误日志</div>
+      </div>
+
+      <div class="msg assistant">
+        <div class="head"><span class="role">AI</span><span>12:36</span></div>
+        <div class="body">好,启动第二个 sub-agent 查错误日志。</div>
+      </div>
+
+      <div class="bubble task-bubble">
+        <div class="head">
+          <span style="font-size:13px">✅</span>
+          <span style="font-weight:600;color:var(--text-1)">Sub-agent: 分析 dashboard 性能</span>
+          <span style="margin-left:auto;color:var(--text-3);font-family:'JetBrains Mono',monospace;font-size:11px">1m 23s · $0.041</span>
+        </div>
+        <div class="body">
+          <div style="font-style:italic;color:var(--text-2)">完成分析, 发现 3 个瓶颈</div>
+        </div>
+      </div>
+
+      <div class="bubble task-bubble">
+        <div class="head">
+          <span style="font-size:13px">⏱️</span>
+          <span style="font-weight:600;color:var(--text-1)">Sub-agent: 查错误日志</span>
+          <span style="margin-left:auto;color:var(--text-3);font-family:'JetBrains Mono',monospace;font-size:11px">8s</span>
+        </div>
+        <div class="body">
+          <div style="font-style:italic;color:var(--text-2)">30s-summary: 正在 grep 错误模式</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- 方案 F — c2 独立气泡 + (v2) 2 状态 -->
+<!-- ============================================================ -->
+<section class="scheme">
+  <header>
+    <h2>F. (c2) 独立气泡 + (v2) 2 状态</h2>
+    <span class="desc">同 E,但只 2 状态(运行中 / 终态),UI 最简</span>
+  </header>
+
+  <div class="chat-panel">
+    <div class="usage-bar">
+      <span class="model-pill"><span class="dot"></span> Sonnet 5</span>
+      <span class="stat">tokens <strong>9,876</strong></span>
+    </div>
+
+    <div class="msgs">
+      <div class="msg user">
+        <div class="head"><span class="role">用户</span><span>12:34</span></div>
+        <div class="body">看下 dashboard 性能</div>
+      </div>
+
+      <div class="msg assistant">
+        <div class="head"><span class="role">AI</span><span>12:34</span></div>
+        <div class="body">我启动 sub-agent 分析。</div>
+      </div>
+
+      <div class="bubble task-bubble">
+        <div class="head">
+          <span style="font-size:13px">⏱️</span>
+          <span style="font-weight:600;color:var(--text-1)">Sub-agent: 分析 dashboard 性能</span>
+        </div>
+        <div class="body">正在跑...</div>
+      </div>
+
+      <div class="bubble task-bubble">
+        <div class="head">
+          <span style="font-size:13px">✅</span>
+          <span style="font-weight:600;color:var(--text-1)">Sub-agent: 分析 dashboard 性能</span>
+        </div>
+        <div class="body">完成</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- 方案 G — c3 独立 sidebar + (v1) 4 状态 -->
+<!-- ============================================================ -->
+<section class="scheme">
+  <header>
+    <h2>G. (c3) 独立 sidebar + (v1) 4 状态</h2>
+    <span class="desc">transcript 区域右侧独立 sidebar,列出当前所有 sub-agent。优点:主消息流纯净,缺点:占用右侧空间</span>
+  </header>
+
+  <div class="chat-panel">
+    <div class="usage-bar">
+      <span class="model-pill"><span class="dot"></span> Sonnet 5</span>
+      <span class="stat">tokens <strong>9,876</strong></span>
+      <span class="stat">cost <strong>$0.071</strong></span>
+    </div>
+
+    <div class="layout-with-sidebar">
+      <div class="msgs-side">
+        <div class="msg user">
+          <div class="head"><span class="role">用户</span><span>12:34</span></div>
+          <div class="body">看下 dashboard 性能</div>
+        </div>
+
+        <div class="msg assistant">
+          <div class="head"><span class="role">AI</span><span>12:34</span></div>
+          <div class="body">我启动一个 sub-agent 分析 dashboard 性能。详见右侧 sidebar。</div>
+        </div>
+
+        <div class="msg user">
+          <div class="head"><span class="role">用户</span><span>12:36</span></div>
+          <div class="body">顺便看下错误日志</div>
+        </div>
+
+        <div class="msg assistant">
+          <div class="head"><span class="role">AI</span><span>12:36</span></div>
+          <div class="body">好,启动第二个 sub-agent 查错误日志。</div>
+        </div>
+      </div>
+
+      <div class="sidebar">
+        <h4>🤖 Sub-agents (2)</h4>
+
+        <div class="task-card active">
+          <div class="head">
+            <span>⏱️</span>
+            <span>查错误日志</span>
+          </div>
+          <div class="summary">30s-summary: 正在 grep 错误模式, 已扫描 12k 行</div>
+          <div class="tool-list">Bash grep -i error var/log/</div>
+        </div>
+
+        <div class="task-card completed">
+          <div class="head">
+            <span>✅</span>
+            <span>分析 dashboard 性能</span>
+          </div>
+          <div class="summary">完成, 发现 3 个瓶颈。详见 transcript 区对话</div>
+          <div class="nest-indent">
+            <div class="task-card completed" style="margin:0">
+              <div class="head">
+                <span>✅</span>
+                <span>查 DB 慢查询</span>
+              </div>
+              <div class="summary">完成 · 47 个 query</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- 方案 H — c3 独立 sidebar + (v3) 进度条 % -->
+<!-- ============================================================ -->
+<section class="scheme">
+  <header>
+    <h2>H. (c3) 独立 sidebar + (v3) 进度条 %</h2>
+    <span class="desc">同 G,但 sidebar 内的卡片底加进度条</span>
+  </header>
+
+  <div class="chat-panel">
+    <div class="usage-bar">
+      <span class="model-pill"><span class="dot"></span> Sonnet 5</span>
+      <span class="stat">tokens <strong>9,876</strong></span>
+    </div>
+
+    <div class="layout-with-sidebar">
+      <div class="msgs-side">
+        <div class="msg user">
+          <div class="head"><span class="role">用户</span><span>12:34</span></div>
+          <div class="body">看下 dashboard 性能</div>
+        </div>
+
+        <div class="msg assistant">
+          <div class="head"><span class="role">AI</span><span>12:34</span></div>
+          <div class="body">我启动 sub-agent 分析。</div>
+        </div>
+      </div>
+
+      <div class="sidebar">
+        <h4>🤖 Sub-agents (1)</h4>
+
+        <div class="task-card active">
+          <div class="head">
+            <span>⏱️</span>
+            <span>分析 dashboard 性能</span>
+          </div>
+          <div class="summary">正在分析 pg_stat_statements</div>
+          <div class="progress-bar"><i style="width:60%"></i></div>
+        </div>
+
+        <div class="task-card completed">
+          <div class="head">
+            <span>✅</span>
+            <span>查 DB 慢查询</span>
+          </div>
+          <div class="summary">完成</div>
+          <div class="progress-bar"><i style="width:100%"></i></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- 方案决策汇总 -->
+<!-- ============================================================ -->
+<section class="scheme">
+  <header>
+    <h2>📋 决策汇总</h2>
+    <span class="desc">3 维度 × 多候选 = 8 个方案。Q11 等你确认 (容器 / 嵌套 / 状态) 3 个选择</span>
+  </header>
+  <div style="padding:var(--space-5) var(--space-6);font-size:var(--text-sm);line-height:1.8;color:var(--text-2)">
+    <div style="display:grid;grid-template-columns:200px 1fr;gap:var(--space-2) var(--space-4);margin-bottom:var(--space-3)">
+      <div><strong>方案 A</strong></div><div>(c1) 嵌入 + (d2) 嵌套缩进 + (v1) 4 状态 — <strong>推荐</strong></div>
+      <div><strong>方案 B</strong></div><div>(c1) 嵌入 + (d2) 嵌套缩进 + (v2) 2 状态</div>
+      <div><strong>方案 C</strong></div><div>(c1) 嵌入 + (d2) 嵌套缩进 + (v3) 进度条</div>
+      <div><strong>方案 D</strong></div><div>(c1) 嵌入 + (d1) 平铺 + (v1) 4 状态</div>
+      <div><strong>方案 E</strong></div><div>(c2) 独立气泡 + (v1) 4 状态</div>
+      <div><strong>方案 F</strong></div><div>(c2) 独立气泡 + (v2) 2 状态</div>
+      <div><strong>方案 G</strong></div><div>(c3) 独立 sidebar + (v1) 4 状态</div>
+      <div><strong>方案 H</strong></div><div>(c3) 独立 sidebar + (v3) 进度条</div>
+    </div>
+    <div style="margin-top:var(--space-4);padding:var(--space-3) var(--space-4);background:var(--bg-subtle);border-radius:var(--radius-md);font-size:var(--text-xs);color:var(--text-3)">
+      ⚠️ <strong>(v3) 进度条 % 风险</strong>:SDK 0.3.206 不直接暴露 0-100% 进度,只能基于 tool calls count 推算。30s-summary 是 present-tense summary(不是 %)。
+    </div>
+  </div>
+</section>
+
+</div>
+</body>
+</html>
