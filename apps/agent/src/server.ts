@@ -49,6 +49,8 @@ import { OverrideLog } from './services/board/OverrideLog.js'
 import { boardRoutes } from './routes/board.js'
 import { boardTranscriptRoutes } from './routes/board-transcript.js'
 import { TaskCardTranscriptService } from './services/board/TaskCardTranscript.js'
+import { ChatSessionService } from './services/board/ChatSessionService.js'
+import { boardChatRoutes } from './routes/board-chat.js'
 import { prdSplitRoutes } from './prd-split/PrdSplitRoute.js'
 import { PrdSplitService } from './prd-split/PrdSplitService.js'
 
@@ -369,6 +371,18 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   await fastify.register(boardTranscriptRoutes, {
     taskCardStore: taskCardStore,
     transcriptService: taskCardTranscriptService,
+  })
+
+  // issue 05 (ADR-0029 D9 + D10) —— board chat HTTP + SSE 端点:
+  // 7 条端点(start / query SSE / snapshot / model / plan-mode / permission / cost-cap)。
+  // 走 Provider.runChatQuery(独立命名空间,守门 ADR-0023 zero-touch);
+  // SSE per-query 严格单 tab lock。
+  const chatSessionService = new ChatSessionService({ workspaceRoot })
+  await fastify.register(boardChatRoutes, {
+    workspaceRoot,
+    taskCardStore,
+    chatSessionService,
+    provider,
   })
 
   // 7. 启动 / 配置变更日志
