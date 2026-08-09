@@ -37,7 +37,6 @@ import {
   useParentRequirement,
   useUpdateCardStatus,
   useCardTranscript,
-  useSendTranscriptMessage,
 } from '@/lib/board-detail-hooks'
 import { useArchiveBoardCard } from '@/lib/board-hooks'
 import { CardDetail } from './CardDetail'
@@ -55,6 +54,8 @@ export interface BoardCardDetailPageProps {
   initialCards?: TaskCard[]
   initialTranscript?: TaskCardTranscript | null
   initialParentSummary?: RequirementSummary | null
+  /** 旧 transcript.yaml 是否存在(传给 CardTranscriptPanel 折叠 banner) */
+  hasLegacyTranscript?: boolean
 }
 
 interface ModalState {
@@ -71,6 +72,7 @@ export function BoardCardDetailPage({
   initialCards,
   initialTranscript,
   initialParentSummary,
+  hasLegacyTranscript = false,
 }: BoardCardDetailPageProps) {
   const router = useRouter()
 
@@ -93,14 +95,12 @@ export function BoardCardDetailPage({
     requirementId,
     initialParentSummary,
   )
-  const { transcript } = useCardTranscript(
-    requirementId,
-    cardId,
-    initialTranscript,
-  )
+  // 老 transcript.yaml 仍可读(物理不删,ADR-0029 D12 决策),但 chat 路径走
+  // SDK session。CardTranscriptPanel 内部接管新 chat 流;transcript 仅作为
+  // legacy banner 判定线索(hasLegacyTranscript 由父组件提供)。
+  useCardTranscript(requirementId, cardId, initialTranscript)
   const statusMutation = useUpdateCardStatus(requirementId)
   const archiveMutation = useArchiveBoardCard(requirementId)
-  const sendMutation = useSendTranscriptMessage(requirementId, cardId)
 
   // status 变更流(Guard → 可能弹 Modal)
   const handleStatusChange = useCallback(
@@ -149,13 +149,8 @@ export function BoardCardDetailPage({
     setModal((m) => ({ ...m, open: false }))
   }, [])
 
-  // 发送 transcript 消息
-  const handleSendTranscript = useCallback(
-    async (content: string): Promise<void> => {
-      await sendMutation.mutateAsync({ content })
-    },
-    [sendMutation],
-  )
+  // 发送 transcript 消息 —— 由 CardTranscriptPanel 内部用 SDK session 流接管
+  // (issue 07 / ADR-0029 D9 + D10)。此处不再有顶层 sendMutation。
 
   // archive
   const handleArchive = useCallback(() => {
@@ -233,15 +228,9 @@ export function BoardCardDetailPage({
           ) : (
             <CardTranscriptPanel
               card={card}
-              transcript={transcript}
-              onSend={handleSendTranscript}
+              requirementId={requirementId}
               onClose={() => setRightPanel('property')}
-              isPending={sendMutation.isPending}
-              error={
-                sendMutation.isError
-                  ? String(sendMutation.error ?? '发送失败')
-                  : null
-              }
+              hasLegacyTranscript={hasLegacyTranscript}
             />
           )}
         </div>

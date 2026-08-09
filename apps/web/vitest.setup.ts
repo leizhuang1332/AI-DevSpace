@@ -80,3 +80,43 @@ globalThis.setMatchMedia = (query: string, value: boolean): void => {
 globalThis.resetMatchMedia = (): void => {
   matchers.clear()
 }
+
+// ---------------------------------------------------------------------------
+// window.localStorage 桩(jsdom v25 在 --localstorage-file 缺路径时会关掉
+// localStorage;测试需 localStorage.getItem 跑断言,用内存 Map 桩一份)。
+// 仅在 jsdom 缺 getItem 时挂桩,否则不覆盖原生实现。
+// ---------------------------------------------------------------------------
+
+const storageStore = new Map<string, string>()
+
+const localStorageStub = {
+  getItem(key: string): string | null {
+    return storageStore.has(key) ? (storageStore.get(key) as string) : null
+  },
+  setItem(key: string, value: string): void {
+    storageStore.set(key, String(value))
+  },
+  removeItem(key: string): void {
+    storageStore.delete(key)
+  },
+  clear(): void {
+    storageStore.clear()
+  },
+  key(index: number): string | null {
+    return Array.from(storageStore.keys())[index] ?? null
+  },
+  get length(): number {
+    return storageStore.size
+  },
+}
+
+if (
+  typeof window !== 'undefined' &&
+  typeof window.localStorage?.getItem !== 'function'
+) {
+  Object.defineProperty(window, 'localStorage', {
+    writable: true,
+    configurable: true,
+    value: localStorageStub,
+  })
+}

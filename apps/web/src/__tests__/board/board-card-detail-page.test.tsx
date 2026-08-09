@@ -1,5 +1,5 @@
 /**
- * BoardCardDetailPage 组件测试 — issue 08 / ADR-0027 D5 + ADR-0028 D5
+ * BoardCardDetailPage 组件测试 — issue 07 / ADR-0027 D5 + ADR-0028 D5 + ADR-0029
  *
  * 验收:
  * - 渲染 card + crumb + 左主区 + 右栏默认态(property)
@@ -8,23 +8,32 @@
  * - toggle 不持久化(不写 localStorage)
  * - status 变更 → statusMutation mutate;res.ok=false → 弹 StatusConstraintModal
  * - StatusConstraintModal 选项 A/B/C
- * - 发送 transcript 消息 → sendMutation
+ * - 切到 chat panel 后 SDK session 输入 + 发送走 stream hook
  *
- * mock:vi.mock board-detail-hooks(全部 hooks)+ next/navigation useRouter
+ * mock:vi.mock board-detail-hooks + board-chat-hooks + next/navigation useRouter
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactNode } from 'react'
+import type {
+  TaskCard,
+  TaskCardTranscript,
+  ChatSessionMeta,
+  ChatSessionSnapshotResponse,
+  ChatSessionEvent,
+} from '@ai-devspace/shared'
 import { BoardCardDetailPage } from '@/components/board/detail/BoardCardDetailPage'
-import type { TaskCard, TaskCardTranscript } from '@ai-devspace/shared'
 
+const REQ_ID = 'req-1'
 const CARD_ID = '01J7X3K2P5EVR0Z3YQJD8HFKX9'
+const SESSION_ID = 'sess-1'
 
 function makeCard(overrides: Partial<TaskCard> = {}): TaskCard {
   return {
     id: CARD_ID,
-    parent_id: 'req-1',
+    parent_id: REQ_ID,
     status: 'in_progress',
     title: '测试卡',
     content: '内容',
@@ -39,6 +48,30 @@ function makeCard(overrides: Partial<TaskCard> = {}): TaskCard {
     updated_at: '2026-08-07T00:00:00Z',
     completed_at: null,
     ...overrides,
+  }
+}
+
+function makeMeta(): ChatSessionMeta {
+  return {
+    sessionId: SESSION_ID,
+    requirementId: REQ_ID,
+    cardId: CARD_ID,
+    cwd: `/tmp/board/tasks/${CARD_ID}`,
+    additionalDirectories: [],
+    model: 'claude-sonnet-5',
+    permissionMode: 'default',
+    permissionPromptToolName: 'mcp__boardchat__user_confirm',
+    mcpServers: [],
+    createdAt: '2026-08-07T00:00:00Z',
+    lastQueryAt: '2026-08-07T00:00:00Z',
+    queryCount: 0,
+    ownerUserId: 'user-1',
+    cumulativeUsage: {
+      cumulativeCostUsd: 0,
+      cumulativeInputTokens: 0,
+      cumulativeOutputTokens: 0,
+      cumulativeCacheReadTokens: 0,
+    },
   }
 }
 
@@ -61,14 +94,6 @@ const mockArchiveMutation = {
   isError: false,
   error: null,
 }
-const mockSendMutate = vi.fn().mockResolvedValue(undefined)
-const mockSendMutation = {
-  mutate: mockSendMutate,
-  mutateAsync: mockSendMutate,
-  isPending: false,
-  isError: false,
-  error: null,
-}
 
 vi.mock('@/lib/board-detail-hooks', () => ({
   useBoardCardDetail: () => ({ card: mockCard, isLoading: false, isError: false, error: null }),
@@ -81,7 +106,34 @@ vi.mock('@/lib/board-detail-hooks', () => ({
   useCardTranscript: () => ({ transcript: mockTranscript, isLoading: false, isError: false }),
   useUpdateCardStatus: () => mockStatusMutation,
   useArchiveBoardCard: () => mockArchiveMutation,
-  useSendTranscriptMessage: () => mockSendMutation,
+}))
+
+// ---- 受控 mock:board-chat-hooks(简化版)----
+const mockSnapshot: ChatSessionSnapshotResponse = { meta: makeMeta(), events: [] as ChatSessionEvent[] }
+const mockStreamSend = vi.fn().mockResolvedValue(undefined)
+const mockStart = vi.fn().mockResolvedValue({ meta: makeMeta() })
+
+vi.mock('@/lib/board-chat-hooks', () => ({
+  useChatSessionSnapshot: () => ({
+    snapshot: mockSnapshot,
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+  useChatSessionStream: () => ({
+    events: [],
+    status: 'idle',
+    send: mockStreamSend,
+    abort: vi.fn(),
+  }),
+  useChatSessionLock: () => ({ lockedByOtherTab: false }),
+  useChatSessionStart: () => ({ mutateAsync: mockStart, isPending: false }),
+  useChatQuery: () => ({ mutateAsync: mockStreamSend, isPending: false }),
+  useChatPermission: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useChatModelSwitch: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useChatPlanMode: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useChatCostCap: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }))
 
 const mockPush = vi.fn()
@@ -96,17 +148,16 @@ afterEach(() => {
   mockTranscript = null
   mockStatusMutate.mockClear()
   mockArchiveMutate.mockClear()
-  mockSendMutate.mockClear()
+  mockStreamSend.mockClear()
   mockPush.mockClear()
   mockStatusMutation.isPending = false
-  mockSendMutation.isPending = false
 })
 
 function makeWrapper() {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  return ({ children }: { children: React.ReactNode }) => (
+  return ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={qc}>{children}</QueryClientProvider>
   )
 }
@@ -114,7 +165,7 @@ function makeWrapper() {
 function renderPage(props: Partial<React.ComponentProps<typeof BoardCardDetailPage>> = {}) {
   return render(
     <BoardCardDetailPage
-      requirementId="req-1"
+      requirementId={REQ_ID}
       cardId={CARD_ID}
       initialCard={mockCard ?? undefined}
       {...props}
@@ -144,7 +195,7 @@ describe('BoardCardDetailPage · 渲染', () => {
 })
 
 describe('BoardCardDetailPage · toggle', () => {
-  it('点 [在对话中打开] → data-right-panel=transcript', () => {
+  it('点 [在对话中打开] → data-right-panel=transcript + board-chat-panel', () => {
     mockCard = makeCard()
     renderPage()
     fireEvent.click(screen.getByTestId('board-detail-toggle-transcript'))
@@ -152,20 +203,18 @@ describe('BoardCardDetailPage · toggle', () => {
       'data-right-panel',
       'transcript',
     )
-    expect(screen.getByTestId('board-detail-transcript-panel')).toBeInTheDocument()
+    expect(screen.getByTestId('board-chat-panel')).toBeInTheDocument()
   })
 
   it('点 ✕ → data-right-panel=property', () => {
     mockCard = makeCard()
     renderPage()
-    // 先展开
     fireEvent.click(screen.getByTestId('board-detail-toggle-transcript'))
     expect(screen.getByTestId('board-card-detail-page')).toHaveAttribute(
       'data-right-panel',
       'transcript',
     )
-    // 收起
-    fireEvent.click(screen.getByTestId('board-detail-transcript-close'))
+    fireEvent.click(screen.getByTestId('board-chat-close'))
     expect(screen.getByTestId('board-card-detail-page')).toHaveAttribute(
       'data-right-panel',
       'property',
@@ -176,10 +225,7 @@ describe('BoardCardDetailPage · toggle', () => {
     mockCard = makeCard()
     renderPage()
     fireEvent.click(screen.getByTestId('board-detail-toggle-transcript'))
-    fireEvent.click(screen.getByTestId('board-detail-transcript-close'))
-    // 全程不写 localStorage
-    // (vi mock 掉了 localStorage 的 setItem,若调过会 throw;不 throw 即未写)
-    // 显式断言:localStorage 没有写 board-card-side-state key
+    fireEvent.click(screen.getByTestId('board-chat-close'))
     expect(window.localStorage.getItem('board-card-side-state')).toBeNull()
   })
 
@@ -206,7 +252,6 @@ describe('BoardCardDetailPage · status 冲突流', () => {
 
   it('res.ok=false → 弹 StatusConstraintModal', async () => {
     mockCard = makeCard({ status: 'backlog' })
-    // 模拟 Guard 冲突响应
     mockStatusMutate.mockImplementation((_input, opts) => {
       opts?.onSuccess?.({
         ok: false,
@@ -229,7 +274,6 @@ describe('BoardCardDetailPage · status 冲突流', () => {
   it('选项 A 强制切换 → mutate {override:true}', async () => {
     mockCard = makeCard({ status: 'backlog' })
     mockStatusMutate.mockImplementation((_input, opts) => {
-      // 第一次(override:false)返冲突
       if (_input.override === false) {
         opts?.onSuccess?.({
           ok: false,
@@ -237,7 +281,6 @@ describe('BoardCardDetailPage · status 冲突流', () => {
           parent_status: 'implementing',
         })
       } else {
-        // 第二次(override:true)成功
         opts?.onSuccess?.()
       }
     })
@@ -298,17 +341,18 @@ describe('BoardCardDetailPage · status 冲突流', () => {
   })
 })
 
-describe('BoardCardDetailPage · transcript 发送', () => {
-  it('发送消息 → sendMutation mutateAsync', async () => {
+describe('BoardCardDetailPage · chat 发送', () => {
+  it('切到 chat + 输入 + 发送 → stream.send(content)', async () => {
     mockCard = makeCard()
     renderPage()
-    // 先展开 transcript
     fireEvent.click(screen.getByTestId('board-detail-toggle-transcript'))
-    const input = screen.getByTestId('board-detail-transcript-input') as HTMLTextAreaElement
-    fireEvent.change(input, { target: { value: '测试消息' } })
-    fireEvent.click(screen.getByTestId('board-detail-transcript-send'))
+    const ta = screen.getByTestId('board-chat-textarea') as HTMLTextAreaElement
+    fireEvent.change(ta, { target: { value: '测试消息' } })
+    fireEvent.click(screen.getByTestId('board-chat-send'))
     await waitFor(() => {
-      expect(mockSendMutate).toHaveBeenCalledWith({ content: '测试消息' })
+      expect(mockStreamSend).toHaveBeenCalledWith(
+        expect.objectContaining({ content: '测试消息' }),
+      )
     })
   })
 })

@@ -1,90 +1,289 @@
 'use client'
 
 /**
- * board 卡片详情页 — 右栏展开态 CardTranscriptPanel(issue 08 / ADR-0028 D5)
+ * board 卡片详情页 — 右栏展开态 Chat Transcript Panel(issue 07 / ADR-0029)
  *
- * 视觉对照基线:`docs/design/pages/board-detail-final.html` .side-toggled 块。
+ * 这是 web 端 Claude Code CLI 可视化镜像 —— 集成 SDK session + SSE 实时事件
+ * + 9 类事件 dispatch + 串起 UsageBar / MessageStream / PermissionPrompt /
+ * PlanModePrompt / CostCapModal / SubAgentBlock / ToolCallBubble。
  *
- * 结构:
- * - head:「💬 AI 协作 · {shortCardId} transcript」+ 物理独立 badge + ✕ 收起
- * - 消息流(transcript.messages → .msg.user / .msg.assistant)
- *   - refs 用 renderRef 简单渲染(📎 Run #id / 📄 PRD §x-y / 🖼️ Asset name)
- * - 底部 <CardTranscriptInput>(textarea + 📎 引用 + 发送 ⌘+↵)
+ * 形态:
+ * - 顶部:locked-by-other-tab banner(单 tab lock) + 旧 transcript 折叠 banner(D12)
+ * - <UsageBar> 模型 / tokens / cost / turns + plan mode toggle + model dropdown
+ * - <MessageStream> user/assistant 气泡 + 嵌入 SubAgent + ToolCallBubble
+ * - <CardTranscriptInput> textarea + 发送
  *
- * 守门(ADR-0028 D2):
- * - 本面板**不渲染 [+ Run] 按钮**(只发文本)
- * - assistant 消息只读(来自历史 transcript.yaml,UI 不生成 assistant)
+ * Modal 由事件流驱动:
+ * - chat_permission_request → <PermissionPrompt>
+ * - chat_complete(cost >= $5) → <CostCapModal>
+ * - 切昂贵 model → <ModelSwitchConfirm>
+ *
+ * 数据流:
+ * - snapshot hook 拿 meta + 历史 events
+ * - stream hook(send) 触发新 query,live events 累计
+ * - mutations 触发后 invalidate snapshot,UI 重拉 meta
  */
 
-import type { TaskCard, TaskCardTranscript, TranscriptRef } from '@ai-devspace/shared'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import type {
+  ChatDecisionWithReason,
+  ChatPermissionResolved,
+  ChatSessionMeta,
+  TaskCard,
+} from '@ai-devspace/shared'
 import { shortCardId } from '@/lib/board'
+import {
+  useChatSessionSnapshot,
+  useChatSessionStream,
+  useChatSessionLock,
+  useChatSessionStart,
+  useChatPermission,
+  useChatModelSwitch,
+  useChatPlanMode,
+  useChatCostCap,
+} from '@/lib/board-chat-hooks'
+import { UsageBar } from './chat/UsageBar'
+import { MessageStream } from './chat/MessageStream'
+import {
+  PermissionPrompt,
+  type PermissionDecisionKind,
+} from './chat/PermissionPrompt'
+import { PlanModePrompt } from './chat/PlanModePrompt'
+import { CostCapModal } from './chat/CostCapModal'
+import { ModelSwitchConfirm } from './chat/ModelSwitchConfirm'
 import { CardTranscriptInput } from './CardTranscriptInput'
+
+const EXPENSIVE_MODEL_THRESHOLD = (m: string): boolean => m.includes('opus')
 
 export interface CardTranscriptPanelProps {
   card: TaskCard
-  transcript: TaskCardTranscript | null
-  /** 发送消息(走 useSendTranscriptMessage) */
-  onSend: (content: string) => void | Promise<void>
-  /** 收起 → 回默认态 */
+  requirementId: string
   onClose: () => void
-  /** 发送中 */
-  isPending?: boolean
-  /** 发送错误 */
-  error?: string | null
-}
-
-/** 渲染 TranscriptRef 为可读字符串(镜像 agent 端 renderRefAsReadable,web 端不引 agent 包)。 */
-function renderRef(ref: TranscriptRef): string {
-  switch (ref.kind) {
-    case 'run_id': {
-      const id = ref.run_id.startsWith('run-')
-        ? ref.run_id.slice('run-'.length)
-        : ref.run_id
-      return `📎 Run #${id}`
-    }
-    case 'prd_section': {
-      const [start, end] = ref.line_range ?? [0, 0]
-      return `📄 PRD §${start}-${end}`
-    }
-    case 'asset': {
-      return `🖼️ Asset ${ref.name}`
-    }
-  }
+  /** 旧 transcript.yaml 是否存在(用于折叠 banner) */
+  hasLegacyTranscript?: boolean
+  /** 初始 session meta(SSR 首屏注入,可选) */
+  initialMeta?: ChatSessionMeta | null
 }
 
 export function CardTranscriptPanel({
   card,
-  transcript,
-  onSend,
+  requirementId,
   onClose,
-  isPending,
-  error,
-}: CardTranscriptPanelProps) {
-  const messages = transcript?.messages ?? []
+  hasLegacyTranscript = false,
+  initialMeta = null,
+}: CardTranscriptPanelProps): ReactNode {
+  // ---- 数据 hooks ----
+  const snapshotQ = useChatSessionSnapshot(requirementId, card.id)
+  const startMutation = useChatSessionStart(requirementId, card.id)
+
+  // 优先拿 snapshot.meta(initialMeta 仅作 fallback)
+  const meta: ChatSessionMeta | null =
+    snapshotQ.snapshot?.meta ?? initialMeta ?? null
+
+  const stream = useChatSessionStream(requirementId, card.id, meta)
+  const lock = useChatSessionLock(requirementId, card.id, stream.status)
+
+  const permissionMutation = useChatPermission(
+    requirementId,
+    card.id,
+    meta?.sessionId ?? null,
+  )
+  const modelMutation = useChatModelSwitch(
+    requirementId,
+    card.id,
+    meta?.sessionId ?? null,
+  )
+  const planModeMutation = useChatPlanMode(
+    requirementId,
+    card.id,
+    meta?.sessionId ?? null,
+  )
+  const costCapMutation = useChatCostCap(
+    requirementId,
+    card.id,
+    meta?.sessionId ?? null,
+  )
+
+  // ---- 合并 snapshot 历史 events + live events ----
+  const allEvents = useMemo(() => {
+    const snapshot = snapshotQ.snapshot?.events ?? []
+    return [...snapshot, ...stream.events]
+  }, [snapshotQ.snapshot?.events, stream.events])
+
+  // ---- 派生 sub-agent tokens(本期简化:0;后续可解析 task_* 累计) ----
+  const subAgentTokens = 0
+
+  // ---- session 累计 duration(自 createdAt 到 lastQueryAt 的毫秒数) ----
+  const durationMs = useMemo(() => {
+    if (!meta) return 0
+    const t0 = Date.parse(meta.createdAt)
+    const t1 = Date.parse(meta.lastQueryAt)
+    if (Number.isNaN(t0) || Number.isNaN(t1)) return 0
+    return Math.max(0, t1 - t0)
+  }, [meta])
+
+  // ---- Model switch confirm state ----
+  const [pendingModel, setPendingModel] = useState<string | null>(null)
+
+  const handleModelChange = useCallback(
+    (next: string) => {
+      if (!meta) return
+      if (next === meta.model) return
+      if (EXPENSIVE_MODEL_THRESHOLD(next) && !EXPENSIVE_MODEL_THRESHOLD(meta.model)) {
+        setPendingModel(next)
+      } else {
+        void modelMutation.mutateAsync({
+          model: next,
+          expectedCostMultiplier: EXPENSIVE_MODEL_THRESHOLD(next) ? 5 : 1,
+        })
+      }
+    },
+    [meta, modelMutation],
+  )
+
+  const handleModelConfirm = useCallback(() => {
+    if (!pendingModel) return
+    void modelMutation
+      .mutateAsync({
+        model: pendingModel,
+        expectedCostMultiplier: 5,
+      })
+      .finally(() => setPendingModel(null))
+  }, [pendingModel, modelMutation])
+
+  const handleModelCancel = useCallback(() => {
+    setPendingModel(null)
+  }, [])
+
+  // ---- Plan mode toggle ----
+  const handlePlanToggle = useCallback(
+    (enabled: boolean) => {
+      void planModeMutation.mutateAsync({ enabled })
+    },
+    [planModeMutation],
+  )
+
+  // ---- Permission resolve ----
+  const handlePermissionResolve = useCallback(
+    (
+      _kind: PermissionDecisionKind,
+      payload: {
+        decision: ChatDecisionWithReason
+        updatedPermissions: ChatPermissionResolved
+      },
+    ) => {
+      if (!stream.pendingPermission) return
+      void permissionMutation.mutateAsync({
+        requestId: stream.pendingPermission.requestId,
+        decision: payload.decision,
+        updatedPermissions: payload.updatedPermissions,
+      })
+    },
+    [permissionMutation, stream.pendingPermission],
+  )
+
+  // ---- Cost cap resolve ----
+  const handleCostCapResolve = useCallback(
+    (resolve: 'continue_once' | 'continue_session' | 'pause' | 'new_session') => {
+      void costCapMutation.mutateAsync({ resolve })
+    },
+    [costCapMutation],
+  )
+
+  // ---- 发送消息:有 session → stream.send;无 session → 先 startMutation(同步触发
+  // snapshot invalidate),然后 useEffect 监听 meta 出现再 stream.send —— 避免
+  // refetch 后闭包内 meta 仍为 null 的 race ----
+  const pendingStartRef = useRef<string | null>(null)
+  const handleSend = useCallback(
+    async (content: string): Promise<void> => {
+      if (lock.lockedByOtherTab) return
+      if (!meta) {
+        // 启动 session 后 snapshot 会刷新;把内容记到 ref,等 meta 出现再 send
+        pendingStartRef.current = content
+        await startMutation.mutateAsync({ content })
+        // 注意:不要在 await 之后立即 stream.send(meta 仍是旧闭包值)
+        return
+      }
+      await stream.send({ content, cardId: card.id })
+    },
+    [lock.lockedByOtherTab, meta, startMutation, stream, card.id],
+  )
+
+  // 监听 snapshot 拿到新 meta 后自动触发 send(start 模式)
+  useEffect(() => {
+    if (!pendingStartRef.current) return
+    if (lock.lockedByOtherTab) return
+    if (!meta) return
+    const text = pendingStartRef.current
+    pendingStartRef.current = null
+    void stream.send({ content: text, cardId: card.id })
+  }, [meta, lock.lockedByOtherTab, stream, card.id])
+
+  // ---- plan mode modal:plan mode on + AI 给出 plan → PlanModePrompt 弹 ----
+  // 触发条件:assistant message 含 kind:'plan' block(本期 agent SDK 不直接返
+  // 这种 block,所以保留接口位,等 SDK 协议层补 plan 事件时再启用)
+  const pendingPlan = useMemo(() => {
+    const last = [...stream.events].reverse().find(
+      (e) => e.kind === 'chat_message_assistant',
+    )
+    if (!last || last.kind !== 'chat_message_assistant') return null
+    for (const c of last.content) {
+      if (c.kind === 'text' && c.text.startsWith('## Plan\n')) {
+        return c.text
+      }
+    }
+    return null
+  }, [stream.events])
+  const handlePlanAccept = useCallback(() => {
+    // 接受后切回 default mode(由 plan mode UI 控制;mutation 已暴露)
+    void planModeMutation.mutateAsync({ enabled: false })
+  }, [planModeMutation])
+  const handlePlanReject = useCallback((_reason: string) => {
+    // reject 反馈到 chat 流:在 tool result 路径里走(本期简化:不发送)
+  }, [])
+  const handlePlanModify = useCallback((newPrompt: string) => {
+    void stream.send({ content: newPrompt, cardId: card.id })
+  }, [stream, card.id])
+
+  const planToggleDisabled =
+    meta?.permissionMode === 'bypassPermissions' || lock.lockedByOtherTab
 
   return (
     <div
-      data-testid="board-detail-transcript-panel"
+      data-testid="board-chat-panel"
+      data-card-id={card.id}
+      data-requirement-id={requirementId}
+      data-locked-by-other={lock.lockedByOtherTab ? 'true' : 'false'}
       className="p-4 bg-bg-elevated flex flex-col gap-2 min-h-[600px] min-w-0"
       style={{ animation: 'expand .25s ease-out' }}
     >
+      {/* 单 tab lock banner */}
+      {lock.lockedByOtherTab && (
+        <div
+          data-testid="board-chat-lock-banner"
+          className="text-xs text-warning bg-warning/10 px-2 py-1 rounded"
+        >
+          ⚠️ 已在另一 tab 打开 —— 当前为只读模式;关闭其他 tab 后刷新可继续对话
+        </div>
+      )}
+
       {/* head */}
       <div
-        data-testid="board-detail-transcript-head"
+        data-testid="board-chat-head"
         className="flex items-center gap-2 pb-2 border-b border-border"
       >
         <h3 className="text-sm font-semibold flex-1">
-          💬 AI 协作 · {shortCardId(card.id)} transcript
+          💬 AI 协作 · {shortCardId(card.id)} chat
         </h3>
         <span
-          data-testid="board-detail-transcript-badge"
+          data-testid="board-chat-badge"
           className="text-[10px] text-text-3 bg-bg-subtle px-1.5 py-0.5 rounded-sm font-medium"
         >
-          物理独立 · 仅描述
+          SDK session
         </span>
         <button
           type="button"
-          data-testid="board-detail-transcript-close"
+          data-testid="board-chat-close"
           onClick={onClose}
           aria-label="收起回到属性"
           title="收起回到属性"
@@ -94,61 +293,116 @@ export function CardTranscriptPanel({
         </button>
       </div>
 
-      {/* 消息流 */}
+      {/* 顶部 banner:首次进入提示 + 旧 transcript 折叠 */}
       <div
-        data-testid="board-detail-transcript-msgs"
-        className="flex flex-col gap-3 flex-1 py-3 overflow-auto"
+        data-testid="board-chat-banner"
+        className="text-xs text-text-3 bg-bg-subtle px-2 py-1.5 rounded flex items-start gap-2"
       >
-        {messages.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center text-xs text-text-3 text-center px-4">
-            还没有对话。在下方输入框继续对话 —— 只能描述 / 提问,不可发 Run。
-          </div>
-        ) : (
-          messages.map((msg, idx) => (
-            <div
-              key={`${msg.ts}-${idx}`}
-              data-testid="board-detail-transcript-msg"
-              data-role={msg.role}
-              className={`p-3 rounded-md text-sm leading-relaxed ${
-                msg.role === 'user'
-                  ? 'bg-bg-subtle'
-                  : 'bg-brand-50 text-text-2'
-              }`}
-            >
-              <div className="flex items-center gap-2 mb-1.5 text-xs text-text-3">
-                <span
-                  className="font-semibold uppercase tracking-wide"
-                  style={{
-                    color: msg.role === 'user' ? 'var(--brand-700)' : 'var(--brand-700)',
-                  }}
-                >
-                  {msg.role === 'user' ? '用户' : 'AI'}
-                </span>
-                <span className="ml-auto font-mono text-[10px]">
-                  {msg.ts.slice(11, 16)}
-                </span>
-              </div>
-              <div className="text-text-2 whitespace-pre-wrap">{msg.content}</div>
-              {msg.refs.length > 0 && (
-                <div className="mt-1.5 pt-1.5 border-t border-border flex flex-col gap-0.5">
-                  {msg.refs.map((ref, ridx) => (
-                    <span
-                      key={ridx}
-                      data-testid="board-detail-transcript-ref"
-                      className="text-brand-600 text-xs font-mono"
-                    >
-                      {renderRef(ref)}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))
-        )}
+        <span>📦</span>
+        <span>
+          这是 Claude Code SDK session,跟下方旧 transcript.yaml 是两套形态 —— chat 走 SDK
+          sessionId 续接,旧 transcript 保持只读折叠。
+        </span>
       </div>
+      {hasLegacyTranscript && (
+        <details
+          data-testid="board-chat-legacy-fold"
+          className="text-xs text-text-3 bg-bg-subtle px-2 py-1.5 rounded"
+        >
+          <summary className="cursor-pointer">
+            📁 旧 transcript.yaml 存档(描述型,只读)
+          </summary>
+          <div className="mt-1 text-[11px] text-text-3">
+            旧 transcript 物理路径仍在
+            <code className="font-mono"> board/tasks/{shortCardId(card.id)}/transcript.yaml </code>
+            ,可手动查阅但不参与 chat。
+          </div>
+        </details>
+      )}
+
+      {/* UsageBar */}
+      {meta ? (
+        <UsageBar
+          meta={meta}
+          planToggleDisabled={planToggleDisabled}
+          subAgentTokens={subAgentTokens}
+          durationMs={durationMs}
+          onPlanToggle={handlePlanToggle}
+          onModelChange={handleModelChange}
+        />
+      ) : (
+        <div
+          data-testid="board-chat-usage-bar-loading"
+          className="text-xs text-text-3 px-3 py-2 border border-border rounded-md bg-bg-elevated"
+        >
+          {snapshotQ.isLoading ? '加载 session…' : '尚无 session —— 发消息自动启动 SDK session'}
+        </div>
+      )}
+
+      {/* 消息流 */}
+      <MessageStream events={allEvents} />
 
       {/* 输入框 */}
-      <CardTranscriptInput onSend={onSend} isPending={isPending} error={error} />
+      <CardTranscriptInput
+        onSend={handleSend}
+        isPending={
+          stream.status === 'streaming' ||
+          startMutation.isPending ||
+          modelMutation.isPending
+        }
+        error={
+          stream.error
+            ? String(stream.error)
+            : snapshotQ.isError
+              ? '加载 session 失败,请刷新页面'
+              : null
+        }
+        disabled={lock.lockedByOtherTab || !meta}
+        placeholder={
+          lock.lockedByOtherTab
+            ? '已在另一 tab 打开,当前 tab 锁定'
+            : meta
+              ? '输入消息…⌘+↵ 发送'
+              : '输入消息…首次发送会自动启动 SDK session'
+        }
+        testIdPrefix="board-chat"
+      />
+
+      {/* Modal:Permission */}
+      {stream.pendingPermission && (
+        <PermissionPrompt
+          request={stream.pendingPermission}
+          onResolve={handlePermissionResolve}
+        />
+      )}
+
+      {/* Modal:CostCap */}
+      {stream.pendingCostCap && meta && (
+        <CostCapModal
+          costUsd={meta.cumulativeUsage.cumulativeCostUsd}
+          onResolve={handleCostCapResolve}
+        />
+      )}
+
+      {/* Modal:ModelSwitchConfirm */}
+      {pendingModel && meta && (
+        <ModelSwitchConfirm
+          from={meta.model}
+          to={pendingModel}
+          onConfirm={handleModelConfirm}
+          onCancel={handleModelCancel}
+        />
+      )}
+
+      {/* Modal:PlanModePrompt */}
+      {pendingPlan && (
+        <PlanModePrompt
+          planMarkdown={pendingPlan}
+          onAccept={handlePlanAccept}
+          onReject={handlePlanReject}
+          onModify={handlePlanModify}
+        />
+      )}
     </div>
   )
 }
