@@ -262,6 +262,12 @@ export type ChatStreamEvent =
       displayName?: string
       title?: string
       description?: string
+      /**
+       * true = 命中敏感模式(rm -rf /, chmod 777, mkfs, dd, git push --force,
+       * curl | sh),UI 必须强制弹 modal;不能被 route 层 auto-allow 旁路
+       * (issue 04 · ADR-0029 D5 敏感模式永弹)
+       */
+      forced?: boolean
     }
   | { kind: 'permission_resolved'; ts: number; requestId: string }
   | { kind: 'task_started'; ts: number; taskId: string; description: string; agentType: string }

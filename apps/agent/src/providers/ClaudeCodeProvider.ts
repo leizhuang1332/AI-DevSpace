@@ -748,6 +748,115 @@ export const CHAT_PERMISSION_PROMPT_TOOL_NAME =
 /** board chat MCP server 名称 —— SDK 拼成 `mcp__<name>__<toolName>` */
 export const CHAT_MCP_SERVER_NAME = 'boardchat' as const
 
+// ============================================================================
+// 敏感模式(ADR-0029 D5 决策 31 + issue 04)
+// 硬编码黑名单:handler 端拦截,即使 auto-allow / permit cache 命中也强制弹 modal
+// 永弹语义:任何匹配项 → SSE permission_request.forced=true → UI 强制弹 modal
+// ============================================================================
+
+/** 敏感模式列表(issue 04):rm -rf /, chmod 777, mkfs, dd, git push --force, curl | sh
+ *
+ * 命中字段:主要 Bash command;Write / Edit 的 content 字段同样扫描(防止把
+ * 危险 shell 写到文件然后用其它方式执行)。
+ *
+ * 注意:每条正则都用 \b 词边界;允许中间有额外短选项(`-[a-z]+`)。 */
+export const SENSITIVE_PATTERNS: ReadonlyArray<{
+  /** 匹配规则 —— 任意字段内容命中即视为敏感 */
+  pattern: RegExp
+  /** 命中后给 UI 的提示(description 文本) */
+  description: string
+}> = [
+  { pattern: /\brm\s+(-\w+\s+)*-\w*r\w*f\w*\s+\//, description: 'rm -rf /' },
+  { pattern: /\bchmod\s+777\b/, description: 'chmod 777' },
+  { pattern: /\bmkfs(\.\w+)?\b/, description: 'mkfs(格式化磁盘)' },
+  { pattern: /\bdd\b[^\n|]*\bof=\/dev\//, description: 'dd of=/dev/(磁盘覆写)' },
+  { pattern: /\bgit\s+push\b[^\n|]*--force\b/, description: 'git push --force' },
+  { pattern: /\bcurl\b[^\n|]*\|\s*(ba)?sh\b/, description: 'curl | sh(远程脚本执行)' },
+]
+
+/** 检测 args 中是否含敏感模式;命中返 description,未命中返 null。
+ *
+ * 扫描字段:
+ * - `command` —— Bash 主命令
+ * - `content` —— Write / Edit / MultiEdit 写入内容(防止把危险 shell 嵌入文件)
+ * - `new_string` —— Edit 替换字符串
+ * - 整个 JSON 序列化后字符串 —— 兜底(防止写到自定义字段) */
+export function detectSensitivePattern(input: unknown): string | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null
+  const obj = input as Record<string, unknown>
+  const candidates: string[] = []
+  // Bash: command 字段
+  if (typeof obj['command'] === 'string') candidates.push(obj['command'] as string)
+  // Write / Edit / MultiEdit: content / new_string 字段
+  if (typeof obj['content'] === 'string') candidates.push(obj['content'] as string)
+  if (typeof obj['new_string'] === 'string') candidates.push(obj['new_string'] as string)
+  // 兜底:全 JSON 字符串(防止写到自定义字段)
+  try {
+    candidates.push(JSON.stringify(input))
+  } catch {
+    /* circular ref 等极端情况跳过 */
+  }
+  for (const text of candidates) {
+    for (const { pattern, description } of SENSITIVE_PATTERNS) {
+      if (pattern.test(text)) return description
+    }
+  }
+  return null
+}
+
+/** per-call cache key:`toolName + JSON.stringify(inputArgs)` */
+function permitCacheKey(toolName: string, input: Record<string, unknown>): string {
+  return `${toolName}::${JSON.stringify(input)}`
+}
+
+/** Plan mode 下 SDK 的退出工具 —— 走到 handler 时返 `setMode: 'default'` 切回默认 mode */
+const EXIT_PLAN_MODE_TOOL_NAME = 'ExitPlanMode' as const
+
+/** 从 SDK 透传的 rawArgs 解出 user_confirm handler 入参形态。
+ *
+ * 抽 helper 解 Repeated Switches / Data Clumps:6 字段在 handler 闭包内多处使用
+ * (SSE emit / handler call / cache key / SSE resolved),集中一处转换,语义清晰
+ * 且容错统一。缺字段返空串 / 空对象,handler 仍能跑(fail-closed 防御)。 */
+function extractPermissionRequest(
+  rawArgs: unknown,
+  fallbackToolUseId: string,
+): {
+  toolName: string
+  requestId: string
+  input: Record<string, unknown>
+  displayName?: string
+  title?: string
+  description?: string
+} {
+  const args = (rawArgs ?? {}) as Record<string, unknown>
+  const toolName =
+    typeof args['toolName'] === 'string' ? (args['toolName'] as string) : ''
+  const requestId =
+    typeof args['requestId'] === 'string'
+      ? (args['requestId'] as string)
+      : fallbackToolUseId
+  const input =
+    typeof args['input'] === 'object' &&
+    args['input'] !== null &&
+    !Array.isArray(args['input'])
+      ? (args['input'] as Record<string, unknown>)
+      : {}
+  return {
+    toolName,
+    requestId,
+    input,
+    displayName:
+      typeof args['displayName'] === 'string'
+        ? (args['displayName'] as string)
+        : undefined,
+    title: typeof args['title'] === 'string' ? (args['title'] as string) : undefined,
+    description:
+      typeof args['description'] === 'string'
+        ? (args['description'] as string)
+        : undefined,
+  }
+}
+
 /**
  * Board chat 路径:per-TaskCard SDK session 直 query,不进 AISession 包装。
  *
@@ -798,6 +907,17 @@ async function chatQuery(input: ChatQueryInput): Promise<ChatQueryResult> {
 
   // 1) 注册 user_confirm MCP tool —— 独立 per-query counter(不共享 analysis-run)
   let perChatQueryCounter = 0
+  // In-memory permit cache(per chat query 闭包):同 (toolName, args) 二次确认
+  // → 自动 allow,不调 userConfirmHandler(issue 04 · ADR-0029 D5)
+  const permitCache = new Map<
+    string,
+    {
+      behavior: 'allow'
+      updatedPermissions?: ReadonlyArray<unknown>
+      reason?: string
+    }
+  >()
+
   const userConfirmTool = sdkModule.tool(
     'user_confirm',
     'Board chat permission gate. Asks the user via SSE before the SDK executes ' +
@@ -811,46 +931,121 @@ async function chatQuery(input: ChatQueryInput): Promise<ChatQueryResult> {
         title: z.string().optional(),
         description: z.string().optional(),
         cwd: z.string().optional(),
+        /** 候选决议(SDK 0.3.206 在某些模式下携带)—— schema 接受即可,不强制使用 */
+        suggestions: z.array(z.unknown()).optional(),
       })
       .passthrough()
       .shape,
+    /**
+     * user_confirm MCP tool handler —— issue 04 锁定契约:
+     *
+     * 1. 推 SSE `chat_permission_request` 在调 userConfirmHandler 前
+     *    (便于 web 弹 modal;route 层收到即阻塞等决议)
+     * 2. 敏感模式永弹:args 命中 SENSITIVE_PATTERNS → SSE permission_request.forced=true,
+     *    跳过 permit cache,永远走 userConfirmHandler(即使之前 allow 过)
+     * 3. In-memory permit cache:同 (toolName, args) 第二次 → 直接返 cached allow,
+     *    不调 userConfirmHandler(deny 不写入 cache)
+     * 4. Plan mode ExitPlanMode 协议:`permissionMode === 'plan'` 且 toolName === 'ExitPlanMode'
+     *    → 返 `{behavior: 'allow', setMode: 'default'}`,不调 userConfirmHandler
+     * 5. fail-closed:任何路径都返非空 CallToolResult(null = SDK 永久阻塞)
+     */
     async (rawArgs: unknown) => {
       // 生成 per-call toolUseId(独立 counter)
       const toolUseId = `mcp-user_confirm-${++perChatQueryCounter}`
-      const args = (rawArgs ?? {}) as Record<string, unknown>
-      // SDK 在 PreToolUse hook 拦截写工具时,把待执行工具上下文打包给我们的 handler
-      const decision = await input.userConfirmHandler({
-        requestId: typeof args['requestId'] === 'string' ? (args['requestId'] as string) : toolUseId,
-        toolName: typeof args['toolName'] === 'string' ? (args['toolName'] as string) : '',
-        input:
-          typeof args['input'] === 'object' && args['input'] !== null && !Array.isArray(args['input'])
-            ? (args['input'] as Record<string, unknown>)
-            : {},
-        displayName:
-          typeof args['displayName'] === 'string' ? (args['displayName'] as string) : undefined,
-        title: typeof args['title'] === 'string' ? (args['title'] as string) : undefined,
-        description:
-          typeof args['description'] === 'string' ? (args['description'] as string) : undefined,
-      })
+      const ts = Date.now()
+      const req = extractPermissionRequest(rawArgs, toolUseId)
+      const { toolName, requestId, input: inputArgs } = req
 
-      // 把决议 + toolUseId 推给 caller(便于 SSE 透传 + audit 落盘)
+      // ---- Plan mode ExitPlanMode 协议(issue 04 锁定) -----------------
+      // SDK 在用户接受 plan 时调我们 handler 退出 plan mode,返
+      // `{behavior: 'allow', setMode: 'default'}` 切回默认 mode。
+      // 此路径不调 userConfirmHandler(SDK-internal 流程)。
+      if (input.permissionMode === 'plan' && toolName === EXIT_PLAN_MODE_TOOL_NAME) {
+        const planPayload = {
+          behavior: 'allow' as const,
+          setMode: 'default' as const,
+          toolUseId,
+        }
+        input.onEvent({ kind: 'permission_resolved', ts, requestId })
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(planPayload) }],
+        }
+      }
+
+      // ---- 敏感模式检测(issue 04 锁定) --------------------------------
+      // 命中 SENSITIVE_PATTERNS → forced:true + 跳过 permit cache,永远走真路径
+      const sensitiveMatch = detectSensitivePattern(inputArgs)
+      const isSensitive = sensitiveMatch !== null
+
+      // ---- Permit cache 检查(非敏感模式才走 cache) -------------------
+      if (!isSensitive) {
+        const cached = permitCache.get(permitCacheKey(toolName, inputArgs))
+        if (cached) {
+          // cache 命中:直接返 cached allow + 推 permission_resolved SSE
+          // (不发 permission_request,因为没真向 web 弹 modal)
+          input.onEvent({ kind: 'permission_resolved', ts, requestId })
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: JSON.stringify({ ...cached, toolUseId }),
+              },
+            ],
+          }
+        }
+      }
+
+      // ---- 推 SSE permission_request(在调 userConfirmHandler 前) -----
+      // route 层收到此事件即阻塞等决议(POST /chat/.../permission)。
       input.onEvent({
-        kind: 'permission_resolved',
-        ts: Date.now(),
-        requestId:
-          typeof args['requestId'] === 'string' ? (args['requestId'] as string) : toolUseId,
+        kind: 'permission_request',
+        ts,
+        requestId,
+        toolName,
+        input: inputArgs,
+        displayName: req.displayName,
+        title: req.title,
+        description: req.description,
+        ...(isSensitive && { forced: true }),
       })
 
-      // 返 CallToolResult 形态(content: MCP 内容块数组)
+      // ---- 调 caller-provided handler + fail-closed 防御 ------------
+      // handler throw → 返 deny 决议(SDK 拿到非 null CallToolResult,不阻塞)
+      let decision: Awaited<ReturnType<typeof input.userConfirmHandler>>
+      try {
+        decision = await input.userConfirmHandler({
+          requestId,
+          toolName,
+          input: inputArgs,
+          displayName: req.displayName,
+          title: req.title,
+          description: req.description,
+        })
+      } catch (handlerErr) {
+        const message =
+          handlerErr instanceof Error ? handlerErr.message : String(handlerErr)
+        decision = { behavior: 'deny', message }
+      }
+
+      // ---- Permit cache 写入(allow + 非敏感才写入) ------------------
+      if (decision.behavior === 'allow' && !isSensitive) {
+        permitCache.set(permitCacheKey(toolName, inputArgs), {
+          behavior: 'allow',
+          updatedPermissions: decision.updatedPermissions,
+          reason: decision.reason,
+        })
+      }
+
+      // ---- 推 SSE permission_resolved(决议已落) ----------------------
+      input.onEvent({ kind: 'permission_resolved', ts, requestId })
+
+      // ---- 返 CallToolResult 形态(content: MCP 内容块数组) -----------
       // SDK 0.3.206 期望 {behavior: 'allow'|'deny', ...} 直接暴露在 content 中;
-      // 这里用 JSON 文本块序列化 decision + toolUseId
+      // 这里用 JSON 文本块序列化 decision + toolUseId。
       const resultPayload = { ...decision, toolUseId }
       return {
         content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(resultPayload),
-          },
+          { type: 'text' as const, text: JSON.stringify(resultPayload) },
         ],
       }
     },

@@ -471,6 +471,11 @@ export const ChatSessionEventSchema = z.discriminatedUnion('kind', [
     title: z.string().optional(),
     description: z.string().optional(),
     cwd: z.string().min(1).optional(),
+    /**
+     * true = 命中敏感模式(rm -rf /, chmod 777, mkfs, dd, git push --force,
+     * curl | sh),UI 必须强制弹 modal(issue 04 · ADR-0029 D5)
+     */
+    forced: z.boolean().optional(),
   }),
   // 7) chat_permission_resolved —— handler 决议后推
   z.object({
