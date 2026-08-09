@@ -23,6 +23,9 @@ import type { AnyZodRawShape } from '@anthropic-ai/claude-agent-sdk'
 import type {
   AIProvider,
   AISession as IAISession,
+  ChatQueryCapableProvider,
+  ChatQueryInput,
+  ChatQueryResult,
   CreateSessionOptions,
   ModelSelection,
 } from './AIProvider.js'
@@ -688,8 +691,73 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
       providerSemaphore?.close()
       cachedQuery = null
     },
+
+    /**
+     * board chat 路径(ADR-0029 D4) —— 独立命名空间,不进入 runAnalysisQuery
+     * 闭包;per query 独立 counter,守门契约见 ADR-0023 D11。
+     *
+     * 当前 commit:RED 守门占位,issue 03+04 实现走 GREEN。
+     */
+    runChatQuery,
   }
 }
 
 /** 类型辅助 —— 重导出供 route 直接消费 */
 export type { ModelRole, ProviderIndex }
+
+// ============================================================================
+// Board chat 路径(issue 03 · ADR-0029 D4 / D9 / D10 / D11)
+//
+// 守门契约(ADR-0023 D11 + ADR-0029 D11):
+// - 本方法签名锁定后,任何修改必先 RED 后 GREEN
+// - chat 路径**不**进入 runAnalysisQuery 闭包,不污染 `perRunCounter`
+//   (issue 02 守门 contract)
+// - chat 路径**不**复用 analysis-run-tools MCP server,独立 boardchat 命名空间
+// - provider 内**新增**字段:session.json 17 项元数据走 ChatSessionService,
+//   不在 Provider 内自行落盘(Provider 只负责 SDK query 协议层)
+//
+// 当前 commit 状态:RED 守门 — 占位实现,throw not-implemented;
+// 后续 issue 03 (ChatSessionService) + 04 (MCP permission handler)
+// + 05 (board chat route) 实现走 GREEN。
+// ============================================================================
+
+/** board chat MCP tool 固定名 —— 透传到 SDK options.permissionPromptToolName
+ *  (与 packages/shared/src/board-chat.ts 的
+ *   ChatSessionMetaSchema.permissionPromptToolName 字面对齐) */
+export const CHAT_PERMISSION_PROMPT_TOOL_NAME =
+  'mcp__boardchat__user_confirm' as const
+
+/** board chat MCP server 名称 —— SDK 拼成 `mcp__<name>__<toolName>` */
+export const CHAT_MCP_SERVER_NAME = 'boardchat' as const
+
+/**
+ * Board chat 路径:per-TaskCard SDK session 直 query,不进 AISession 包装。
+ *
+ * 实现要求(issue 03 / 04 / 05 锁定):
+ * - `options.resume` 透传 `resumeSessionId`(首次 query 留空)
+ * - `options.cwd` = `board/tasks/<ulid>/` 绝对路径
+ * - `options.additionalDirectories` = 父 req dir + worktree
+ * - `options.permissionPromptToolName` = `mcp__boardchat__user_confirm`
+ *   —— SDK 触发时调我们注入的 `user_confirm` MCP tool handler
+ * - `options.mcpServers.boardchat` = createSdkMcpServer({name:'boardchat',
+ *   tools:[tool('user_confirm', ..., z.object({...}), async args => {...})]})
+ * - handler 收 SDK 入参(toolName / input / requestId / displayName / title /
+ *   description)→ 推到 SSE `chat_permission_request` → 等决议 → 返
+ *   `{behavior: 'allow'|'deny', ...}`
+ * - `mcp__boardchat__user_confirm` handler 内**独立** counter(per chat query
+ *   闭包),不共享 `runAnalysisQuery` 的 `perRunCounter`
+ *
+ * @see ChatQueryCapableProvider / ChatQueryInput 定义
+ */
+const runChatQuery: ChatQueryCapableProvider['runChatQuery'] = async (
+  _input: ChatQueryInput,
+): Promise<ChatQueryResult> => {
+  // RED 守门占位:实现由 issue 03 + 04 提交(必先走 GREEN 测试,
+  // 修改本方法必触发 ADR-0023 RED e2e 增量)。
+  return {
+    ok: false,
+    error:
+      'chat path not implemented yet (board chat issue 03+04 pending — see ADR-0029 D11 guard)',
+  }
+}
+

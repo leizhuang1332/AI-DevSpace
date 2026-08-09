@@ -166,13 +166,132 @@ export interface AnalysisQueryCapableProvider {
   runAnalysisQuery(input: AnalysisQueryInput): Promise<AnalysisQueryResult>
 }
 
-// 让 AIProvider 在任意实现中可选地包含 runAnalysisQuery
-// (TypeScript 的 declaration merging 不能直接扩展同名属性,
-// 通过函数签名兼容实现 —— 调用前用 type guard 检验)
+// ============================================================================
+// Board chat 路径扩展(issue 03 · ADR-0029 D4 + D9 + D10)
+//
+// board chat 是 web 端 Claude Code CLI 镜像(per-TaskCard SDK session);
+// 跟 Analysis Run 是两条独立的 SDK query 路径(ADR-0029 D11 + ADR-0023 守门):
+// - Run 路径走 `runAnalysisQuery` + 业务 MCP server `analysis-run-tools`
+// - Chat 路径走 `runChatQuery` + 业务 MCP server `boardchat__user_confirm`
+//
+// 严格命名空间隔离:chat 路径不进入 runAnalysisQuery 闭包,不污染
+// `mcpCallCounter`(issue 02 守门契约)。
+// ============================================================================
+
+/** board chat 单次 query 输入(ADR-0029 D4) */
+export interface ChatQueryInput {
+  /** 用户本次输入文本(模型 prompt) */
+  prompt: string
+  /** SDK options.cwd —— board/tasks/<ulid>/ 绝对路径 */
+  cwd: string
+  /** SDK options.additionalDirectories —— 父 req dir + Requirement.repos worktree */
+  additionalDirectories: ReadonlyArray<string>
+  /** SDK options.model —— claude-sonnet-5 默认,切昂贵 model 走 PUT /model */
+  model: string
+  /** SDK options.permissionMode —— 'default' | 'plan' | 'bypassPermissions' */
+  permissionMode: 'default' | 'plan' | 'bypassPermissions'
+  /** SDK sessionId(resume 协议 D9)—— 首次 query 留空,后续 query 必带 */
+  resumeSessionId?: string
+  /** MCP tool handler —— provider 内部包装为 `mcp__boardchat__user_confirm` */
+  userConfirmHandler: (
+    args: {
+      toolName: string
+      input: Record<string, unknown>
+      requestId: string
+      displayName?: string
+      title?: string
+      description?: string
+    },
+  ) => Promise<
+    | {
+        behavior: 'allow'
+        updatedPermissions?: ReadonlyArray<unknown>
+        reason?: string
+      }
+    | { behavior: 'deny'; message?: string }
+  >
+  /** SDK envelope + SSE 事件回调 —— 由 ChatSessionService 落到 SSE hub */
+  onEvent: (event: ChatStreamEvent) => void
+  /** 取消信号 —— 服务端清理 in-flight query 用 */
+  signal?: AbortSignal
+}
+
+/** chat 路径 SDK envelope → SSE 事件 统一形态 */
+export type ChatStreamEvent =
+  | { kind: 'session_init'; sessionId: string; cwd: string; model: string }
+  | { kind: 'message_user'; ts: number; text: string }
+  | {
+      kind: 'message_assistant'
+      ts: number
+      text?: string
+      thinking?: string
+      partial?: boolean
+    }
+  | {
+      kind: 'tool_call'
+      ts: number
+      id: string
+      name: string
+      args: Record<string, unknown>
+      partial: boolean
+    }
+  | {
+      kind: 'tool_result'
+      ts: number
+      id: string
+      name: string
+      output: unknown
+      isError: boolean
+    }
+  | {
+      kind: 'permission_request'
+      ts: number
+      requestId: string
+      toolName: string
+      input: Record<string, unknown>
+      displayName?: string
+      title?: string
+      description?: string
+    }
+  | { kind: 'permission_resolved'; ts: number; requestId: string }
+  | { kind: 'task_started'; ts: number; taskId: string; description: string; agentType: string }
+  | { kind: 'task_progress'; ts: number; taskId: string; summary: string }
+  | { kind: 'task_completed'; ts: number; taskId: string; result: unknown; durationMs: number }
+  | { kind: 'error'; ts: number; code: string; message: string; recoverable: boolean }
+  | {
+      kind: 'complete'
+      ts: number
+      sessionId: string
+      totalTokens: number
+      cost: number
+      reason: 'end_turn' | 'cancelled' | 'error' | 'max_tokens'
+    }
+
+/** board chat 路径结果 */
+export type ChatQueryResult =
+  | { ok: true; sessionId: string }
+  | { ok: false; error: string }
+
+/** 扩展:board chat 直接 SDK query 接口(可选 —— 普通 Provider 不必实现) */
+export interface ChatQueryCapableProvider {
+  runChatQuery(input: ChatQueryInput): Promise<ChatQueryResult>
+}
+
+// ============================================================================
+// AIProvider module augmentation —— 让可选方法挂到接口上
+// (TypeScript 的 declaration merging 不能直接扩展同名属性,通过函数签名
+// 兼容实现 —— 调用前用 type guard 检验)。
+//
+// 集中放这里,把 Analysis Run (issue 02) + Board chat (issue 03) 两个可选
+// 扩展并列;AnalysisAgentRunner / board chat 路由各自 type-guard 后调用。
+// ============================================================================
 declare module './AIProvider.js' {
   interface AIProvider {
     /** 见 AnalysisQueryCapableProvider(issue 02);非 Analysis Run 场景
      *  不必实现 —— AnalysisAgentRunner 会 type-guard 后调用 */
     runAnalysisQuery?: AnalysisQueryCapableProvider['runAnalysisQuery']
+    /** 见 ChatQueryCapableProvider(issue 03);chat 路径专用 —
+     *  board chat 路由(issue 05) type-guard 后调用 */
+    runChatQuery?: ChatQueryCapableProvider['runChatQuery']
   }
 }

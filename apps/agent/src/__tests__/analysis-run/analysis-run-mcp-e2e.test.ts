@@ -494,3 +494,616 @@ describe('真 MCP server 路径 e2e (PR-2 / ticket 10)', () => {
     },
   )
 })
+
+// ============================================================================
+// board chat 路径 RED e2e 守门(issue 02 / ADR-0029 D11 + ADR-0023 D11)
+//
+// 守门契约:ClaudeCodeProvider 新增 chat 路径后,任何修改必须先 RED 后 GREEN;
+// 当前 commit 状态 = RED(chat 路径尚未实现),所有测试预期 fail with
+// "chat path not implemented yet" 或等价的 Provider 内部行为缺失。
+//
+// 测试目标:
+// 1. 锁定 SDK 协议契约(system/init → sessionId;options.resume;permissionPromptToolName;
+//    cwd / additionalDirectories 冻结)
+// 2. 锁定 MCP tool handler 协议(allow / deny / updatedPermissions)
+// 3. 锁定 sub-agent event 透传(task_started / task_progress / task_completed)
+// 4. 锁定 runAnalysisQuery counter 物理隔离 — chat 路径不污染
+//
+// 实现由 issue 03 (ChatSessionService) + 04 (MCP permission handler) 落地,
+// 届时这些测试转 GREEN;RED 阶段失败信息保持稳定,便于定位 Provider 修改
+// 是否真走 wrapper 协议层。
+// ============================================================================
+
+/**
+ * chat 路径可控 queryFn —— 让 mock SDK 返回指定事件序列。
+ * 测试在调用前注入 `mockQueryImpl.mockImplementation(...)`。
+ */
+async function* makeChatQueryStream(
+  events: ReadonlyArray<Record<string, unknown>>,
+): AsyncIterable<unknown> {
+  for (const ev of events) {
+    yield ev
+  }
+}
+
+/**
+ * 拉取 ClaudeCodeProvider 暴露的 chat path 工具常量。
+ * 直接从 src 路径 import,避免依赖 routes (issue 05 才会接)。
+ */
+async function importProviderConstants() {
+  const mod = await import('../../providers/ClaudeCodeProvider.js')
+  return {
+    CHAT_PERMISSION_PROMPT_TOOL_NAME: mod.CHAT_PERMISSION_PROMPT_TOOL_NAME,
+    CHAT_MCP_SERVER_NAME: mod.CHAT_MCP_SERVER_NAME,
+  } as const
+}
+
+describe('board chat 路径 SDK 协议完整覆盖 — issue 02 / ADR-0029 D11 RED 守门', () => {
+  let root: string
+
+  // per-call event queue —— 控制 mock SDK 的 query 函数对每次调用返的事件
+  const eventsForCall: Array<ReadonlyArray<Record<string, unknown>>> = []
+  // observedOptions —— 记录 mock SDK query 接收到的 options(供断言)
+  const observedOptions: Array<Record<string, unknown>> = []
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'aidevsp-chat-red-'))
+    // 清空 mock SDK 状态 + analysis-run 路径的 tool 缓存
+    for (const k of Object.keys(mockToolHandlers)) delete mockToolHandlers[k]
+    for (const k of Object.keys(mockToolSchemas)) delete mockToolSchemas[k]
+    eventsForCall.length = 0
+    observedOptions.length = 0
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  /**
+   * 准备真 ClaudeCodeProvider + 通过 queryFn 注入 controlled SDK stream。
+   * 测试驱动 SDK 让 system/init 等事件真实到达 Provider wrapper;
+   * RED 阶段 Provider 内部 placeholder 不消费 queryFn → observedOptions 为空,
+   * 但 GREEN 实现后 Provider 必须调 queryFn 把 options(permissionPromptToolName /
+   * resume / cwd / additionalDirectories / mcpServers)传过来。
+   */
+  async function buildChatProvider() {
+    const { createClaudeCodeProvider } = await import(
+      '../../providers/ClaudeCodeProvider.js'
+    )
+    let callIndex = 0
+    return createClaudeCodeProvider({
+      ccSwitch: makeEmptyCcSwitch() as never,
+      queryFn: ((params: { prompt: string; options?: Record<string, unknown> }) => {
+        observedOptions.push(params.options ?? {})
+        const thisCall = callIndex++
+        return makeChatQueryStream(eventsForCall[thisCall] ?? [
+          { type: 'result', subtype: 'success' },
+        ])
+      }) as never,
+    })
+  }
+
+  /** RED 测试共享 fixture —— 默认 chat query 输入(只有差异化字段由测试传) */
+  const DEFAULT_CHAT_INPUT = {
+    prompt: 'x',
+    cwd: '/workspace/requirements/req-x/board/tasks/01J.../chat',
+    additionalDirectories: [] as ReadonlyArray<string>,
+    model: 'claude-sonnet-5',
+    permissionMode: 'default' as const,
+    userConfirmHandler: async () =>
+      ({ behavior: 'allow' as const }) as
+        | { behavior: 'allow'; updatedPermissions?: ReadonlyArray<unknown>; reason?: string }
+        | { behavior: 'deny'; message?: string },
+    onEvent: (_e: unknown) => {},
+  }
+
+  // -----------------------------------------------------------------------
+  // RED 测试 1:chat query 启动 → system/init 消息 → sessionId 提取
+  // -----------------------------------------------------------------------
+  it('chat query 启动 → mock SDK 收到 options.permissionPromptToolName + Provider 消费 system/init 提取 sessionId 通过 onEvent 传 session_init', async () => {
+    const constants = await importProviderConstants()
+    expect(constants.CHAT_PERMISSION_PROMPT_TOOL_NAME).toBe(
+      'mcp__boardchat__user_confirm',
+    )
+
+    eventsForCall.push([
+      {
+        type: 'system',
+        subtype: 'init',
+        session_id: 'sdk-sess-abc-123',
+        cwd: '/workspace/requirements/req-x/board/tasks/01J.../chat',
+        model: 'claude-sonnet-5',
+        tools: ['Read', 'Write', 'Bash'],
+      },
+      { type: 'result', subtype: 'success' },
+    ])
+
+    const observed: unknown[] = []
+    const provider = await buildChatProvider()
+    await provider.runChatQuery?.({
+      ...DEFAULT_CHAT_INPUT,
+      prompt: '你好',
+      additionalDirectories: ['/workspace/requirements/req-x'],
+      onEvent: (e: unknown) => observed.push(e),
+    })
+
+    // GREEN 实现后断言:
+    //   1) observedOptions[0].permissionPromptToolName === 'mcp__boardchat__user_confirm'
+    //   2) observedOptions[0].cwd / model 透传
+    //   3) observed 含 session_init event + sessionId 来自 SDK system/init
+    expect(observedOptions.length).toBeGreaterThan(0)
+    expect(observedOptions[0]?.['permissionPromptToolName']).toBe(
+      'mcp__boardchat__user_confirm',
+    )
+    expect(observedOptions[0]?.['cwd']).toBe(
+      '/workspace/requirements/req-x/board/tasks/01J.../chat',
+    )
+    expect(observedOptions[0]?.['model']).toBe('claude-sonnet-5')
+    const sessionInit = observed.find(
+      (e) => (e as { kind?: string }).kind === 'session_init',
+    )
+    expect(sessionInit).toBeDefined()
+    expect((sessionInit as { sessionId?: string }).sessionId).toBe(
+      'sdk-sess-abc-123',
+    )
+  })
+
+  // -----------------------------------------------------------------------
+  // RED 测试 2:第二次 query 带 options.resume: sessionId → SDK 加载历史
+  //
+  // 真实协议两步:
+  //   1. 首次 query 不带 resumeSessionId → mock SDK yield system/init(带 session_id)
+  //   2. 第二次 query 带 resumeSessionId === 首次拿到的 session_id
+  //      → mock SDK 收到的 options.resume === 'sdk-sess-resume-prev-001'
+  // -----------------------------------------------------------------------
+  it('首次 query 拿 sessionId + 第二次 query 带 resumeSessionId → mock SDK 收到的 options.resume === 首次 session_id', async () => {
+    eventsForCall.push([
+      {
+        type: 'system',
+        subtype: 'init',
+        session_id: 'sdk-sess-resume-prev-001',
+      },
+      { type: 'result', subtype: 'success' },
+    ])
+    eventsForCall.push([{ type: 'result', subtype: 'success' }])
+
+    const observed1: unknown[] = []
+    const provider = await buildChatProvider()
+    await provider.runChatQuery?.({
+      ...DEFAULT_CHAT_INPUT,
+      prompt: '首问',
+      onEvent: (e: unknown) => observed1.push(e),
+    })
+    // GREEN 后:Provider 应从 system/init 提取 sessionId 并暴露给 caller(本次 runChatQuery
+    // 不直接返 sessionId,但第二次调用者需要它)。本期契约:Provider 内部至少要把 session_id
+    // 暴露(由 ChatSessionService 落 session.json);本次 RED 测试只锁"两次 query 的 options"
+    // 形态,具体 session_id 提取在 GREEN 阶段 + ChatSessionService 一起做。
+    expect(observedOptions.length).toBeGreaterThanOrEqual(1)
+    expect(observedOptions[0]?.['resume']).toBeUndefined()
+
+    await provider.runChatQuery?.({
+      ...DEFAULT_CHAT_INPUT,
+      prompt: '续问',
+      resumeSessionId: 'sdk-sess-resume-prev-001',
+      onEvent: () => {},
+    })
+
+    // RED 阶段:observedOptions.length === 1(placeholder 不调第二次 queryFn);
+    // GREEN 后:observedOptions.length === 2 且 observedOptions[1].resume === 'sdk-sess-resume-prev-001'
+    expect(observedOptions.length).toBeGreaterThanOrEqual(2)
+    expect(observedOptions[1]?.['resume']).toBe('sdk-sess-resume-prev-001')
+  })
+
+  // -----------------------------------------------------------------------
+  // RED 测试 3:permissionPromptToolName 触发 → MCP tool handler 收 SDK 入参
+  // -----------------------------------------------------------------------
+  it('permissionPromptToolName 配置为 mcp__boardchat__user_confirm + Provider 应注册 user_confirm MCP tool 并透传 SDK 形态入参', async () => {
+    const constants = await importProviderConstants()
+    expect(constants.CHAT_PERMISSION_PROMPT_TOOL_NAME).toBe(
+      'mcp__boardchat__user_confirm',
+    )
+    expect(constants.CHAT_MCP_SERVER_NAME).toBe('boardchat')
+
+    eventsForCall.push([{ type: 'result', subtype: 'success' }])
+    const handlerCalls: Array<{
+      toolName: string
+      input: Record<string, unknown>
+      requestId: string
+      displayName?: string
+      title?: string
+      description?: string
+    }> = []
+    const provider = await buildChatProvider()
+    await provider.runChatQuery?.({
+      ...DEFAULT_CHAT_INPUT,
+      prompt: '写文件',
+      cwd: '/tmp',
+      userConfirmHandler: async (args) => {
+        handlerCalls.push(args)
+        return { behavior: 'allow' }
+      },
+    })
+
+    // GREEN 后:Provider 通过 createSdkMcpServer 注册 user_confirm tool;
+    // mockToolHandlers['user_confirm'] 应被捕获 + 调用时透传 SDK 形态入参。
+    // RED 阶段:handler 没注册,无法模拟 SDK 调用 → handlerCalls 为空。
+    expect(mockToolHandlers['user_confirm']).toBeDefined()
+    expect(typeof mockToolHandlers['user_confirm']).toBe('function')
+
+    // 模拟 SDK 内部 tool_use 协议(SDK 拦截 Write → 调我们的 user_confirm)
+    const sdkArgs = {
+      requestId: 'req-perm-1',
+      toolName: 'Write',
+      input: { file_path: '/tmp/x', content: 'hi' },
+      displayName: 'Write to /tmp/x',
+      title: 'AI 想要写入文件',
+      description: '在 /tmp/x 写入新文件',
+    }
+    await mockToolHandlers['user_confirm'](sdkArgs)
+
+    // GREEN 后:Provider 包装 handler 必须把 SDK 入参(toolName / input / requestId /
+    // displayName / title / description)透传给 ChatQueryInput.userConfirmHandler。
+    // RED:handlerCalls.length === 0(Provider 还没包装)
+    expect(handlerCalls.length).toBe(1)
+    expect(handlerCalls[0]).toMatchObject({
+      toolName: 'Write',
+      input: { file_path: '/tmp/x', content: 'hi' },
+      requestId: 'req-perm-1',
+      displayName: 'Write to /tmp/x',
+      title: 'AI 想要写入文件',
+    })
+  })
+
+  // -----------------------------------------------------------------------
+  // RED 测试 4:MCP tool handler 返 {behavior:'allow', updatedPermissions:[...]} → SDK 继续
+  // -----------------------------------------------------------------------
+  it('user_confirm handler 返 allow + addRules updatedPermissions → Provider 应在 mcpServers.boardchat 注册 user_confirm 且 SDK 调用 handler 时透传 updatedPermissions', async () => {
+    eventsForCall.push([{ type: 'result', subtype: 'success' }])
+    const provider = await buildChatProvider()
+    await provider.runChatQuery?.({
+      prompt: '跑 pytest',
+      cwd: '/tmp',
+      additionalDirectories: [],
+      model: 'claude-sonnet-5',
+      permissionMode: 'default',
+      userConfirmHandler: async () => ({
+        behavior: 'allow' as const,
+        updatedPermissions: [
+          {
+            type: 'addRules',
+            rules: [{ toolName: 'Bash', ruleContent: 'pytest:*' }],
+            destination: 'session' as const,
+          },
+        ],
+      }),
+      onEvent: () => {},
+    })
+
+    // GREEN 后:Provider 应在 options.mcpServers.boardchat 注册 user_confirm tool。
+    // RED:observedOptions[0].mcpServers === undefined
+    expect(observedOptions.length).toBeGreaterThan(0)
+    const mcpServers = observedOptions[0]?.['mcpServers'] as
+      | Record<string, unknown>
+      | undefined
+    expect(mcpServers).toBeDefined()
+    expect(mcpServers?.['boardchat']).toBeDefined()
+  })
+
+  // -----------------------------------------------------------------------
+  // RED 测试 5:MCP tool handler 返 {behavior:'deny', message:'...'} → SDK 终止当前工具
+  // -----------------------------------------------------------------------
+  it('user_confirm handler 返 deny + message → Provider 应在 Provider 行为层接受 deny 决议(本期守门:handler 被注册 + mcp server 形态可调)', async () => {
+    eventsForCall.push([{ type: 'result', subtype: 'success' }])
+    const provider = await buildChatProvider()
+    await provider.runChatQuery?.({
+      prompt: 'rm -rf /',
+      cwd: '/tmp',
+      additionalDirectories: [],
+      model: 'claude-sonnet-5',
+      permissionMode: 'default',
+      userConfirmHandler: async () => ({
+        behavior: 'deny' as const,
+        message: '不允许 rm -rf',
+      }),
+      onEvent: () => {},
+    })
+
+    // GREEN 后:Provider 应注册 user_confirm handler(同测试 4)
+    // + 实测 handler 返 deny 时 SDK 拿到的 CallToolResult 不为 null(否则 fail-closed)
+    // RED:mockToolHandlers['user_confirm'] === undefined
+    expect(mockToolHandlers['user_confirm']).toBeDefined()
+  })
+
+  // -----------------------------------------------------------------------
+  // RED 测试 6:stream_event 透传 — 我们从 SDK 收到的 stream_event 透到 web
+  // -----------------------------------------------------------------------
+  it('mock SDK yield stream_event(text delta) → Provider 应消费 queryFn 并通过 onEvent 透传 message_assistant partial:true', async () => {
+    eventsForCall.push([
+      {
+        type: 'stream_event',
+        event: {
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'text_delta', text: '你好' },
+        },
+      },
+      { type: 'result', subtype: 'success' },
+    ])
+    const provider = await buildChatProvider()
+    const observed: unknown[] = []
+    await provider.runChatQuery?.({
+      prompt: 'x',
+      cwd: '/tmp',
+      additionalDirectories: [],
+      model: 'claude-sonnet-5',
+      permissionMode: 'default',
+      userConfirmHandler: async () => ({ behavior: 'allow' }),
+      onEvent: (ev) => observed.push(ev),
+    })
+
+    // GREEN 后:observed 应含 kind:'message_assistant' + partial:true + text:'你好'
+    // RED:observed 为空
+    expect(observed.length).toBeGreaterThan(0)
+    const assistantEv = observed.find(
+      (e) => (e as { kind?: string }).kind === 'message_assistant',
+    )
+    expect(assistantEv).toBeDefined()
+    expect((assistantEv as { partial?: boolean }).partial).toBe(true)
+    expect((assistantEv as { text?: string }).text).toBe('你好')
+  })
+
+  // -----------------------------------------------------------------------
+  // RED 测试 7:task_started / task_progress / task_completed 事件格式
+  // -----------------------------------------------------------------------
+  it('mock SDK yield task_* 子 agent 事件 → Provider 通过 onEvent 透传 task_started/progress/completed', async () => {
+    eventsForCall.push([
+      {
+        type: 'stream_event',
+        event: {
+          type: 'task_started',
+          task_id: 'task-1',
+          description: '搜索代码',
+          agent_type: 'Explore',
+        },
+      },
+      {
+        type: 'stream_event',
+        event: {
+          type: 'task_progress',
+          task_id: 'task-1',
+          summary: '已找到 3 个文件',
+        },
+      },
+      {
+        type: 'stream_event',
+        event: {
+          type: 'task_completed',
+          task_id: 'task-1',
+          result: { ok: true },
+          duration_ms: 1234,
+        },
+      },
+      { type: 'result', subtype: 'success' },
+    ])
+
+    const provider = await buildChatProvider()
+    const observed: unknown[] = []
+    await provider.runChatQuery?.({
+      prompt: '搜索',
+      cwd: '/tmp',
+      additionalDirectories: [],
+      model: 'claude-sonnet-5',
+      permissionMode: 'default',
+      userConfirmHandler: async () => ({ behavior: 'allow' }),
+      onEvent: (ev) => observed.push(ev),
+    })
+
+    // GREEN 后:observed 应含 task_started / task_progress / task_completed
+    // RED:observed 为空
+    expect(observed.length).toBeGreaterThan(0)
+    const kinds = observed.map((e) => (e as { kind?: string }).kind)
+    expect(kinds).toEqual(
+      expect.arrayContaining(['task_started', 'task_progress', 'task_completed']),
+    )
+  })
+
+  // -----------------------------------------------------------------------
+  // RED 测试 8:cwd 冻结 — resume 时改 cwd 无效
+  // -----------------------------------------------------------------------
+  it('resume 时改 cwd → mock SDK 收到的 options.cwd 仍是首次 query 落盘的 cwd', async () => {
+    eventsForCall.push([{ type: 'result', subtype: 'success' }])
+    eventsForCall.push([{ type: 'result', subtype: 'success' }])
+
+    const provider = await buildChatProvider()
+    const ORIGINAL_CWD = '/workspace/requirements/req-x/board/tasks/01J.../chat'
+    const NEW_CWD = '/tmp/试图改 cwd'
+
+    // 首次 query
+    await provider.runChatQuery?.({
+      prompt: '首问',
+      cwd: ORIGINAL_CWD,
+      additionalDirectories: [],
+      model: 'claude-sonnet-5',
+      permissionMode: 'default',
+      userConfirmHandler: async () => ({ behavior: 'allow' }),
+      onEvent: () => {},
+    })
+    // 续 query 时传 NEW_CWD + resumeSessionId
+    await provider.runChatQuery?.({
+      prompt: '续问',
+      cwd: NEW_CWD,
+      additionalDirectories: [],
+      model: 'claude-sonnet-5',
+      permissionMode: 'default',
+      resumeSessionId: 'sdk-sess-frozen-001',
+      userConfirmHandler: async () => ({ behavior: 'allow' }),
+      onEvent: () => {},
+    })
+
+    // GREEN 后:observedOptions[1].cwd === ORIGINAL_CWD(resume 协议冻结 cwd,ADR-0029 D4 + D9)
+    // RED:observedOptions 长度 < 2(placeholder 不调 queryFn)
+    expect(observedOptions.length).toBeGreaterThanOrEqual(2)
+    expect(observedOptions[1]?.['cwd']).toBe(ORIGINAL_CWD)
+    expect(observedOptions[1]?.['cwd']).not.toBe(NEW_CWD)
+  })
+
+  // -----------------------------------------------------------------------
+  // RED 测试 9:additionalDirectories 限制 — cwd 之外读未被白名单包 → SDK 拒绝
+  // -----------------------------------------------------------------------
+  it('additionalDirectories 白名单外路径 → Provider 在 options.additionalDirectories 字段透传指定目录', async () => {
+    eventsForCall.push([{ type: 'result', subtype: 'success' }])
+    const provider = await buildChatProvider()
+    const allowed = [
+      '/workspace/requirements/req-x',
+      '/workspace/requirements/req-x/repos/repo-1',
+    ]
+    await provider.runChatQuery?.({
+      prompt: '读 /etc/passwd',
+      cwd: '/workspace/requirements/req-x/board/tasks/01J.../chat',
+      additionalDirectories: allowed,
+      model: 'claude-sonnet-5',
+      permissionMode: 'default',
+      userConfirmHandler: async () => ({ behavior: 'deny', message: '路径不在白名单' }),
+      onEvent: () => {},
+    })
+
+    // GREEN 后:observedOptions[0].additionalDirectories === allowed
+    // RED:observedOptions.length === 0
+    expect(observedOptions.length).toBeGreaterThan(0)
+    expect(observedOptions[0]?.['additionalDirectories']).toEqual(allowed)
+  })
+
+  // -----------------------------------------------------------------------
+  // RED 测试 10:mcpCallCounter 物理隔离 — chat 路径不增加 runAnalysisQuery 的 counter
+  //
+  // 契约:chat 路径独立 per-query counter(Provider 内部闭包变量),
+  // 不与 runAnalysisQuery 的 `perRunCounter` 共享模块级单例
+  // (ADR-0023 D11 + issue 02 真因注释:旧 module-level `mcpCallCounter`
+  // 上千次后跨 Run race)。本测试:
+  // 1. 两次 chat query 后,模拟 SDK 调 user_confirm 3 次 + 4 次
+  //    → toolUseId 序列在两次 query 内各自从 1 开始(per query counter 隔离)
+  // 2. 再触发 runAnalysisQuery → report_analysis_issue 1 次
+  //    → toolUseId 应是 mcp-report_analysis_issue-1(独立 perRun 闭包,与 chat 路径无关)
+  // -----------------------------------------------------------------------
+  it('chat 路径独立 counter — chat 与 runAnalysisQuery toolUseId 序列互不污染', async () => {
+    eventsForCall.push([{ type: 'result', subtype: 'success' }])
+    eventsForCall.push([{ type: 'result', subtype: 'success' }])
+    const provider = await buildChatProvider()
+
+    // 两次 chat query:Provider 应每次都创建独立 per-query counter 闭包
+    await provider.runChatQuery?.({
+      ...DEFAULT_CHAT_INPUT,
+      prompt: 'chat query 1',
+      cwd: '/tmp',
+    })
+    await provider.runChatQuery?.({
+      ...DEFAULT_CHAT_INPUT,
+      prompt: 'chat query 2',
+      cwd: '/tmp',
+    })
+
+    // RED 阶段:Provider 还没实现,user_confirm 未注册 → mockToolHandlers['user_confirm'] === undefined
+    // GREEN 后:模拟 SDK 在两次 chat query 中各调 3 / 4 次 user_confirm
+    //   → Provider 包装 handler 必须给每次调用生成 toolUseId
+    //   → 第一次 query 内 toolUseId = mcp-user_confirm-1/2/3
+    //   → 第二次 query 内 toolUseId = mcp-user_confirm-1/2/3/4 (从 1 重新开始)
+    expect(mockToolHandlers['user_confirm']).toBeDefined()
+
+    // chat query 1:模拟 SDK 调 3 次
+    const chatIds1: string[] = []
+    for (let i = 0; i < 3; i++) {
+      const r = await mockToolHandlers['user_confirm']({
+        requestId: `chat1-req-${i}`,
+        toolName: 'Write',
+        input: { file_path: `/tmp/chat1-${i}` },
+      })
+      const text = (r.content[0] as { text: string }).text
+      // MCP tool handler 必须在 result content 里携带 toolUseId(Provider 包装层生成)
+      const parsed = JSON.parse(text) as { toolUseId?: string }
+      if (parsed.toolUseId) chatIds1.push(parsed.toolUseId)
+    }
+    // chat query 2:模拟 SDK 调 4 次
+    const chatIds2: string[] = []
+    for (let i = 0; i < 4; i++) {
+      const r = await mockToolHandlers['user_confirm']({
+        requestId: `chat2-req-${i}`,
+        toolName: 'Write',
+        input: { file_path: `/tmp/chat2-${i}` },
+      })
+      const text = (r.content[0] as { text: string }).text
+      const parsed = JSON.parse(text) as { toolUseId?: string }
+      if (parsed.toolUseId) chatIds2.push(parsed.toolUseId)
+    }
+
+    // RED:chatIds1 / chatIds2 为空(Provider 还没包装,toolUseId 字段不存在)
+    // GREEN 后:每个 query 内 toolUseId 序列从 1 开始
+    expect(chatIds1).toEqual([
+      'mcp-user_confirm-1',
+      'mcp-user_confirm-2',
+      'mcp-user_confirm-3',
+    ])
+    expect(chatIds2).toEqual([
+      'mcp-user_confirm-1',
+      'mcp-user_confirm-2',
+      'mcp-user_confirm-3',
+      'mcp-user_confirm-4',
+    ])
+
+    // 再触发 runAnalysisQuery 路径(analysis-run-tools),counter 应从 1 开始(独立闭包)
+    const reqId = 'req-chat-counter'
+    mkdirSync(join(root, 'requirements', reqId, 'analysis'), { recursive: true })
+    writeFileSync(
+      join(root, 'requirements', reqId, 'requirement.md'),
+      '# Test PRD\n足够长文本,避免空 PRD 触发拒绝。\n',
+      'utf8',
+    )
+
+    const { AnalysisRunService } = await import('../../analysis-run/AnalysisRunService.js')
+    const runService = new AnalysisRunService(root)
+    const create = await runService.createRun({
+      requirementId: reqId,
+      skillName: 'prd-completeness',
+    })
+    expect(create.ok).toBe(true)
+    if (!create.ok) throw new Error('create failed')
+    const runId = create.run.run_id
+
+    const { createSseHub } = await import('../../sse/SseHub.js')
+    const hub = createSseHub({ heartbeatMs: 60_000 })
+
+    try {
+      const { makeReportIssueHandler } = await import(
+        '../../analysis-run/AnalysisAgentRunner.js'
+      )
+      const reportHandler = makeReportIssueHandler({
+        runService,
+        hub,
+        requirementId: reqId,
+        runId,
+      })
+      await provider.runAnalysisQuery?.({
+        prompt: 'test',
+        systemPrompt: 'test',
+        cwd: '/tmp',
+        allowedTools: ['Read'],
+        businessTools: { report_analysis_issue: reportHandler as never },
+        onEvent: () => {},
+      })
+
+      // 触发 1 次 report_analysis_issue,counter 应从 1 开始(独立 perRun 闭包)
+      const reportResult = await mockToolHandlers['report_analysis_issue']({
+        title: 'chat 路径 counter 不污染 runAnalysisQuery',
+        description: '测试 RED 守门契约',
+        source_refs: [{ kind: 'requirement', relative_path: 'requirement.md' }],
+      })
+      const parsed = JSON.parse(
+        (reportResult.content[0] as { text: string }).text,
+      ) as { accepted: boolean; issue_id?: string }
+      expect(parsed.accepted).toBe(true)
+      expect(parsed.issue_id).toMatch(/^iss-/)
+    } finally {
+      hub.close()
+    }
+  })
+})
+
