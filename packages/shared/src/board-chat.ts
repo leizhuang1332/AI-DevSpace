@@ -531,6 +531,38 @@ export type ChatSubAgentEvent = z.infer<typeof ChatSubAgentEventSchema>
 // ---------------------------------------------------------------------------
 
 /**
+ * Audit log 决议主体(ADR-0029 D16 / 决策 50 + issue 06)。
+ *
+ * 5 个决定者维度,按主体是否到用户 UI 区分:
+ * - `user` —— 用户在前端 modal 显式决议(Allow once / Deny)
+ * - `auto-allow-toggle` —— 读工具命中 auto-allow toggle,SDK 内部放行;
+ *   用户可在 board chat 上关 toggle 走 user 路径(同 sessionIn-memory permit cache)
+ * - `bypassPermissions` —— 用户开 `permissionMode: bypassPermissions`,
+ *   SDK 全部跳过拦截;此为模式级开关
+ * - `timeout` —— 用户长时间未响应默认 deny
+ * - `deny-pattern` —— 命中我们 hard-coded 敏感模式(`rm -rf /` /
+ *   `chmod 777` / `mkfs` / `dd of=/dev/sda` / `git push --force` /
+ *   `curl | sh`),handler 直接 deny
+ */
+export const ChatAuditDecidedBy = {
+  USER: 'user',
+  AUTO_ALLOW_TOGGLE: 'auto-allow-toggle',
+  BYPASS_PERMISSIONS: 'bypassPermissions',
+  TIMEOUT: 'timeout',
+  DENY_PATTERN: 'deny-pattern',
+} as const
+
+export type ChatAuditDecidedByT =
+  (typeof ChatAuditDecidedBy)[keyof typeof ChatAuditDecidedBy]
+
+export const ChatAuditDecidedBySchema = z.enum(
+  Object.values(ChatAuditDecidedBy) as [
+    ChatAuditDecidedByT,
+    ...ChatAuditDecidedByT[],
+  ],
+)
+
+/**
  * Audit log 单条记录,落 `~/.aidevspace/audit/<reqId>/<cardId>/chat.log` JSONL。
  *
  * 8 项字段(ADR-0029 决策 50):
@@ -540,7 +572,7 @@ export type ChatSubAgentEvent = z.infer<typeof ChatSubAgentEventSchema>
  * - `args` —— 工具入参(已脱敏)
  * - `result` —— 工具结果(已脱敏);error 时含 error 信息
  * - `decision` —— 'allow' / 'deny'(MCP tool 决议结果)
- * - `decidedBy` —— 决议主体:'user' / 'auto'(policy 自动放行)
+ * - `decidedBy` —— 决议主体:`ChatAuditDecidedBySchema` 5 维(见上)
  * - `durationMs` —— 工具执行耗时(毫秒)
  *
  * 物理隔离(ADR-0029 D16):audit log 与 session.json 物理独立,跟 Run
@@ -559,8 +591,8 @@ export const ChatToolAuditSchema = z.object({
   result: z.unknown(),
   /** 决议结果 */
   decision: ChatDecisionSchema,
-  /** 决议主体:user 显式决议 / auto policy 自动放行(读工具 / bypass mode) */
-  decidedBy: z.enum(['user', 'auto']),
+  /** 决议主体 —— 5 维(见 `ChatAuditDecidedBySchema`) */
+  decidedBy: ChatAuditDecidedBySchema,
   /** 工具执行耗时(毫秒) */
   durationMs: z.number().int().nonnegative(),
 })
