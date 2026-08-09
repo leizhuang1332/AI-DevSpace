@@ -19,6 +19,7 @@
 import { randomUUID } from 'node:crypto'
 import { AiSession } from '../session/AISession.js'
 import type { SdkAdapter, SdkMessageEnvelope, SdkUsage } from '../session/AISession.js'
+import type { AnyZodRawShape } from '@anthropic-ai/claude-agent-sdk'
 import type {
   AIProvider,
   AISession as IAISession,
@@ -507,8 +508,14 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
           if (Object.keys(env).length > 0) sdkOptions['env'] = env
         }
 
-        // SDK 0.3.206 会按 zod raw shape 过滤工具参数。报告工具需显式声明
-        // 可接收字段；真正的必填与内容校验仍由 handler 完成。
+        // SDK 0.3.206 会按 zod raw shape 过滤工具参数,每个 MCP tool 必须显式声明
+        // 可接收字段(true 必填校验仍由 handler 完成)。
+        //
+        // issue 13(0 卡静音成功真因):旧实现 `non-report_issue 工具全部走 z.object({})
+        // .passthrough()` —— zod→JSON Schema 时 passthrough 转 JSON Schema 丢成空
+        // properties,模型看到的 schema 没有字段定义;实际调用 SDK 把模型 args 丢掉
+        // → wrapper 永远拿到空对象/title missing。新方案:每个业务工具一份明确的 shape,
+        // 与 report_analysis_issue 一等公民。
         const sdkModule = await import('@anthropic-ai/claude-agent-sdk')
         const { z } = await import('zod')
         const reportIssueArgsShape = z
@@ -519,7 +526,27 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
             metadata: z.unknown().optional(),
           })
           .shape
-        const emptyArgsShape = z.object({}).passthrough().shape
+        // issue 13:propose_card 4 显式字段 + passthrough 兜底(允许模型加自定义字段)
+        const proposeCardArgsShape = z
+          .object({
+            title: z.string().optional(),
+            content: z.string().optional(),
+            suggested_priority: z
+              .enum(['low', 'medium', 'high', 'urgent'])
+              .nullable()
+              .optional(),
+            labels: z.array(z.string()).optional(),
+          })
+          .passthrough()
+          .shape
+        // 业务工具名 → schema 形参(其他 runner 接入时按需扩)
+        const argsShapeFor = (name: string): AnyZodRawShape => {
+          if (name === 'report_analysis_issue') return reportIssueArgsShape
+          if (name === 'propose_card') return proposeCardArgsShape
+          // 未登记工具兜底:全 passthrough 但不锁字段(新工具接入时易被
+          // 0-字段 schema 坑 → 主动 fallback,需要 runner 显式登记)
+          return z.object({}).passthrough().shape
+        }
         // PR-4 (ticket 10):per-Run 自增 counter —— 此前 module-level 单例
         // (`mcpCallCounter`)在长寿命进程跑几十次 Run 后会上千,且跨 Run
         // 状态共享容易在并发 attempt 上产生 race。改成 runAnalysisQuery
@@ -538,7 +565,7 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
             sdkModule.tool(
               name,
               input.businessToolDescriptions?.[name] ?? defaultDescription(name),
-              name === 'report_analysis_issue' ? reportIssueArgsShape : emptyArgsShape,
+              argsShapeFor(name),
               async (args: unknown) => {
                 // 这里无法拿 SDK 端 tool_use_id(SDK 不透传)——
                 // 我们用一个 Run 内自增 counter 生成 key,作为幂等键传给 handler。

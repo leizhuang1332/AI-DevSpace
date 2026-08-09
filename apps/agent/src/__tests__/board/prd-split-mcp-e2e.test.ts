@@ -229,8 +229,15 @@ describe('PRD Split Run 真 MCP server 路径 e2e (issue 13 / ADR-0023 补救)',
       // (b) 不再是 ANALYSIS RUN 字样(issue 13 真因:语义错位)
       expect(mockToolDescriptions['propose_card']).not.toContain('Analysis Run')
       expect(mockToolDescriptions['propose_card']).not.toContain('AnalysisAgentRunner')
-      // (c) schema 透传仍走 passthrough(非 report_analysis_issue 工具)
-      expect(Object.keys(mockToolSchemas['propose_card'] ?? {})).toEqual([])
+      // (c) schema 必须显式声明所有合法字段(issue 13 真因:模型看到的 JSON Schema
+      // 不能是空 properties,否则 SDK 校验会把全部字段丢掉,handler 永远
+      // 'title missing')—— 与 report_analysis_issue 一等公民待遇
+      expect(Object.keys(mockToolSchemas['propose_card'] ?? {}).sort()).toEqual([
+        'content',
+        'labels',
+        'suggested_priority',
+        'title',
+      ])
     } finally {
       hub.close()
     }
