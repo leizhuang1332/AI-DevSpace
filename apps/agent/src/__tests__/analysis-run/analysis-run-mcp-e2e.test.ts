@@ -928,10 +928,11 @@ describe('board chat 路径 SDK 协议完整覆盖 — issue 02 / ADR-0029 D11 R
       userConfirmHandler: async () => ({ behavior: 'allow' }),
       onEvent: () => {},
     })
-    // 续 query 时传 NEW_CWD + resumeSessionId
+    // 续 query 时传 NEW_CWD + resumeSessionId + frozenCwd(由 ChatSessionService 从 session.json 读取)
     await provider.runChatQuery?.({
       prompt: '续问',
       cwd: NEW_CWD,
+      frozenCwd: ORIGINAL_CWD,
       additionalDirectories: [],
       model: 'claude-sonnet-5',
       permissionMode: 'default',
@@ -990,26 +991,15 @@ describe('board chat 路径 SDK 协议完整覆盖 — issue 02 / ADR-0029 D11 R
     eventsForCall.push([{ type: 'result', subtype: 'success' }])
     const provider = await buildChatProvider()
 
-    // 两次 chat query:Provider 应每次都创建独立 per-query counter 闭包
+    // 第一次 chat query:Provider 应创建独立 per-query counter 闭包
     await provider.runChatQuery?.({
       ...DEFAULT_CHAT_INPUT,
       prompt: 'chat query 1',
       cwd: '/tmp',
     })
-    await provider.runChatQuery?.({
-      ...DEFAULT_CHAT_INPUT,
-      prompt: 'chat query 2',
-      cwd: '/tmp',
-    })
-
-    // RED 阶段:Provider 还没实现,user_confirm 未注册 → mockToolHandlers['user_confirm'] === undefined
-    // GREEN 后:模拟 SDK 在两次 chat query 中各调 3 / 4 次 user_confirm
-    //   → Provider 包装 handler 必须给每次调用生成 toolUseId
-    //   → 第一次 query 内 toolUseId = mcp-user_confirm-1/2/3
-    //   → 第二次 query 内 toolUseId = mcp-user_confirm-1/2/3/4 (从 1 重新开始)
     expect(mockToolHandlers['user_confirm']).toBeDefined()
 
-    // chat query 1:模拟 SDK 调 3 次
+    // chat query 1:模拟 SDK 调 3 次 → toolUseId 从 1 开始
     const chatIds1: string[] = []
     for (let i = 0; i < 3; i++) {
       const r = await mockToolHandlers['user_confirm']({
@@ -1022,7 +1012,15 @@ describe('board chat 路径 SDK 协议完整覆盖 — issue 02 / ADR-0029 D11 R
       const parsed = JSON.parse(text) as { toolUseId?: string }
       if (parsed.toolUseId) chatIds1.push(parsed.toolUseId)
     }
-    // chat query 2:模拟 SDK 调 4 次
+
+    // 第二次 chat query:Provider 应创建新闭包,counter 重置
+    await provider.runChatQuery?.({
+      ...DEFAULT_CHAT_INPUT,
+      prompt: 'chat query 2',
+      cwd: '/tmp',
+    })
+
+    // chat query 2:模拟 SDK 调 4 次 → toolUseId 再次从 1 开始(per-query 隔离)
     const chatIds2: string[] = []
     for (let i = 0; i < 4; i++) {
       const r = await mockToolHandlers['user_confirm']({

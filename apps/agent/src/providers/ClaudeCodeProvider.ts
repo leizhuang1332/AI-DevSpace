@@ -284,6 +284,26 @@ function toEnvelope(raw: unknown): SdkMessageEnvelope | null {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Module-level SDK query cache —— 跨 runAnalysisQuery / runChatQuery 共享,
+// 测试可注入 queryFn mock,生产懒加载 SDK。
+// ---------------------------------------------------------------------------
+
+/** Lazy import SDK —— 避免启动时拉 cli 子进程 */
+let moduleCachedQuery: QueryFn | null = null
+async function getModuleQuery(): Promise<QueryFn> {
+  if (moduleCachedQuery) return moduleCachedQuery
+  const mod = await import('@anthropic-ai/claude-agent-sdk')
+  moduleCachedQuery = ((params: { prompt: string; options?: Record<string, unknown> }) =>
+    mod.query(params)) as unknown as QueryFn
+  return moduleCachedQuery
+}
+
+/** 测试可注入 SDK query mock —— 必在 createClaudeCodeProvider 之前调用 */
+export function __setSdkQueryForTest(q: QueryFn | null): void {
+  moduleCachedQuery = q
+}
+
 export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIProvider {
   const ccSwitch = opts.ccSwitch
   const debug = opts.debug ?? false
@@ -304,14 +324,12 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
     ? null
     : (opts.providerSemaphore ?? new DefaultProviderSemaphore({ limit: 5 }))
 
-  /** Lazy import SDK —— 避免启动时拉 cli 子进程 */
-  let cachedQuery: QueryFn | null = opts.queryFn ?? null
+  // 注入测试 queryFn(若有)到 module 缓存 —— Provider 闭包与 chat 路径共享
+  if (opts.queryFn) moduleCachedQuery = opts.queryFn
+
+  /** Provider 闭包内 query —— 复用 module 缓存 */
   async function getQuery(): Promise<QueryFn> {
-    if (cachedQuery) return cachedQuery
-    const mod = await import('@anthropic-ai/claude-agent-sdk')
-    cachedQuery = ((params: { prompt: string; options?: Record<string, unknown> }) =>
-      mod.query(params)) as unknown as QueryFn
-    return cachedQuery
+    return getModuleQuery()
   }
 
   /**
@@ -689,7 +707,7 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
       // Task 7:shutdown 顺序 —— 先 close limiter(拒绝所有排队中的 waiter),
       // 再清 queryFn 缓存(已经走完的 query 自然退出,正在跑的 query 不被打断)
       providerSemaphore?.close()
-      cachedQuery = null
+      moduleCachedQuery = null
     },
 
     /**
@@ -750,14 +768,255 @@ export const CHAT_MCP_SERVER_NAME = 'boardchat' as const
  * @see ChatQueryCapableProvider / ChatQueryInput 定义
  */
 const runChatQuery: ChatQueryCapableProvider['runChatQuery'] = async (
-  _input: ChatQueryInput,
+  input: ChatQueryInput,
 ): Promise<ChatQueryResult> => {
-  // RED 守门占位:实现由 issue 03 + 04 提交(必先走 GREEN 测试,
-  // 修改本方法必触发 ADR-0023 RED e2e 增量)。
-  return {
-    ok: false,
-    error:
-      'chat path not implemented yet (board chat issue 03+04 pending — see ADR-0029 D11 guard)',
+  return chatQuery(input)
+}
+
+/**
+ * chat 路径 SDK query 入口 —— 命名空间分离(issue 03 要求 provider 内部
+ * 实现命名 `chatQuery()` / `chatQueryStream()`,不进入 Analysis Run 闭包)。
+ *
+ * 协议步骤:
+ * 1. 构造 SDK options:permissionPromptToolName / cwd / additionalDirectories /
+ *    model / permissionMode / mcpServers.boardchat(user_confirm tool 注册)
+ * 2. 若 resumeSessionId 存在 → options.resume = resumeSessionId
+ * 3. 调 queryFn → 消费 SDK event 流:
+ *    - `system/init` → onEvent({kind:'session_init', sessionId, cwd, model})
+ *    - `stream_event.content_block_delta.text_delta` → onEvent({kind:'message_assistant', partial:true, text})
+ *    - `stream_event.task_started/progress/completed` → onEvent({kind:'task_*'})
+ *    - `result(success)` → onEvent({kind:'complete', sessionId, totalTokens, cost, reason:'end_turn'})
+ *    - 其它 envelope → 透传 onEvent
+ * 4. user_confirm MCP tool handler(per-query 闭包内 counter):
+ *    - 收 SDK 入参 → 调 input.userConfirmHandler → 返 CallToolResult
+ *
+ * 不直接调用 `runAnalysisQuery` / 共享 `mcpCallCounter`(issue 02 守门)。
+ */
+async function chatQuery(input: ChatQueryInput): Promise<ChatQueryResult> {
+  const sdkModule = await import('@anthropic-ai/claude-agent-sdk')
+  const { z } = await import('zod')
+
+  // 1) 注册 user_confirm MCP tool —— 独立 per-query counter(不共享 analysis-run)
+  let perChatQueryCounter = 0
+  const userConfirmTool = sdkModule.tool(
+    'user_confirm',
+    'Board chat permission gate. Asks the user via SSE before the SDK executes ' +
+      'a tool that needs approval (Write / Edit / Bash / etc).',
+    z
+      .object({
+        requestId: z.string().optional(),
+        toolName: z.string().optional(),
+        input: z.record(z.string(), z.unknown()).optional(),
+        displayName: z.string().optional(),
+        title: z.string().optional(),
+        description: z.string().optional(),
+        cwd: z.string().optional(),
+      })
+      .passthrough()
+      .shape,
+    async (rawArgs: unknown) => {
+      // 生成 per-call toolUseId(独立 counter)
+      const toolUseId = `mcp-user_confirm-${++perChatQueryCounter}`
+      const args = (rawArgs ?? {}) as Record<string, unknown>
+      // SDK 在 PreToolUse hook 拦截写工具时,把待执行工具上下文打包给我们的 handler
+      const decision = await input.userConfirmHandler({
+        requestId: typeof args['requestId'] === 'string' ? (args['requestId'] as string) : toolUseId,
+        toolName: typeof args['toolName'] === 'string' ? (args['toolName'] as string) : '',
+        input:
+          typeof args['input'] === 'object' && args['input'] !== null && !Array.isArray(args['input'])
+            ? (args['input'] as Record<string, unknown>)
+            : {},
+        displayName:
+          typeof args['displayName'] === 'string' ? (args['displayName'] as string) : undefined,
+        title: typeof args['title'] === 'string' ? (args['title'] as string) : undefined,
+        description:
+          typeof args['description'] === 'string' ? (args['description'] as string) : undefined,
+      })
+
+      // 把决议 + toolUseId 推给 caller(便于 SSE 透传 + audit 落盘)
+      input.onEvent({
+        kind: 'permission_resolved',
+        ts: Date.now(),
+        requestId:
+          typeof args['requestId'] === 'string' ? (args['requestId'] as string) : toolUseId,
+      })
+
+      // 返 CallToolResult 形态(content: MCP 内容块数组)
+      // SDK 0.3.206 期望 {behavior: 'allow'|'deny', ...} 直接暴露在 content 中;
+      // 这里用 JSON 文本块序列化 decision + toolUseId
+      const resultPayload = { ...decision, toolUseId }
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(resultPayload),
+          },
+        ],
+      }
+    },
+  )
+
+  const mcpServer = sdkModule.createSdkMcpServer({
+    name: CHAT_MCP_SERVER_NAME,
+    version: '1.0.0',
+    tools: [userConfirmTool],
+  })
+
+  // 2) 构造 SDK options —— cwd 由 ChatSessionService 注入的 frozenCwd 优先
+  const effectiveCwd = input.frozenCwd ?? input.cwd
+  const sdkOptions: Record<string, unknown> = {
+    cwd: effectiveCwd,
+    additionalDirectories: [...input.additionalDirectories],
+    model: input.model,
+    permissionMode: input.permissionMode,
+    permissionPromptToolName: CHAT_PERMISSION_PROMPT_TOOL_NAME,
+    mcpServers: { [CHAT_MCP_SERVER_NAME]: mcpServer },
   }
+  if (input.resumeSessionId) {
+    sdkOptions['resume'] = input.resumeSessionId
+  }
+
+  // 3) 调 queryFn —— 走注入的 query(测试用 mock,生产用 SDK)
+  const q = await getModuleQuery()
+  let observedSessionId = ''
+  try {
+    const stream = q({ prompt: input.prompt, options: sdkOptions })
+    for await (const raw of stream) {
+      const m = raw as Record<string, unknown>
+      const type = m['type']
+      const ts = Date.now()
+
+      // system/init → session_init event + 记下 sessionId
+      if (type === 'system' && m['subtype'] === 'init') {
+        const sessionId =
+          typeof m['session_id'] === 'string' ? (m['session_id'] as string) : ''
+        observedSessionId = sessionId
+        input.onEvent({
+          kind: 'session_init',
+          sessionId,
+          cwd: typeof m['cwd'] === 'string' ? (m['cwd'] as string) : input.cwd,
+          model: typeof m['model'] === 'string' ? (m['model'] as string) : input.model,
+        })
+        continue
+      }
+
+      // stream_event → content_block_delta / task_* 事件透传
+      if (type === 'stream_event') {
+        const event = m['event'] as Record<string, unknown> | undefined
+        if (event) {
+          const evType = event['type']
+          if (evType === 'content_block_delta') {
+            const delta = event['delta'] as Record<string, unknown> | undefined
+            if (delta && delta['type'] === 'text_delta') {
+              input.onEvent({
+                kind: 'message_assistant',
+                ts,
+                text: typeof delta['text'] === 'string' ? (delta['text'] as string) : '',
+                partial: true,
+              })
+            }
+            continue
+          }
+          if (evType === 'task_started') {
+            input.onEvent({
+              kind: 'task_started',
+              ts,
+              taskId: typeof event['task_id'] === 'string' ? (event['task_id'] as string) : '',
+              description:
+                typeof event['description'] === 'string' ? (event['description'] as string) : '',
+              agentType:
+                typeof event['agent_type'] === 'string' ? (event['agent_type'] as string) : '',
+            })
+            continue
+          }
+          if (evType === 'task_progress') {
+            input.onEvent({
+              kind: 'task_progress',
+              ts,
+              taskId: typeof event['task_id'] === 'string' ? (event['task_id'] as string) : '',
+              summary: typeof event['summary'] === 'string' ? (event['summary'] as string) : '',
+            })
+            continue
+          }
+          if (evType === 'task_completed') {
+            input.onEvent({
+              kind: 'task_completed',
+              ts,
+              taskId: typeof event['task_id'] === 'string' ? (event['task_id'] as string) : '',
+              result: event['result'],
+              durationMs:
+                typeof event['duration_ms'] === 'number' ? (event['duration_ms'] as number) : 0,
+            })
+            continue
+          }
+        }
+        continue
+      }
+
+      // result → complete event
+      if (type === 'result') {
+        const subtype = m['subtype'] as string | undefined
+        const usage = (m['usage'] ?? {}) as Record<string, unknown>
+        const totalTokensRaw = m['total_tokens']
+        const totalTokens =
+          typeof totalTokensRaw === 'number'
+            ? totalTokensRaw
+            : (typeof usage['input_tokens'] === 'number' ? (usage['input_tokens'] as number) : 0) +
+              (typeof usage['output_tokens'] === 'number' ? (usage['output_tokens'] as number) : 0)
+        const costRaw = m['total_cost_usd']
+        const cost = typeof costRaw === 'number' ? costRaw : 0
+        const reason =
+          subtype === 'success'
+            ? 'end_turn'
+            : subtype === 'error_max_tokens'
+              ? 'max_tokens'
+              : subtype === 'cancelled'
+                ? 'cancelled'
+                : 'error'
+        input.onEvent({
+          kind: 'complete',
+          ts,
+          sessionId: observedSessionId,
+          totalTokens,
+          cost,
+          reason,
+        })
+        continue
+      }
+
+      // error → error event
+      if (type === 'error') {
+        input.onEvent({
+          kind: 'error',
+          ts,
+          code: typeof m['code'] === 'string' ? (m['code'] as string) : 'sdk_error',
+          message:
+            typeof m['message'] === 'string' ? (m['message'] as string) : 'unknown error',
+          recoverable: false,
+        })
+        continue
+      }
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    }
+  }
+
+  return { ok: true, sessionId: observedSessionId }
+}
+
+/**
+ * chat 路径流式变体(issue 03 要求命名 chatQueryStream —— 当前实现
+ * 与 chatQuery 共享 SDK queryFn,差异仅在结果语义;保留为公开 API 占位)。
+ *
+ * 当前 Provider.runChatQuery 通过 chatQuery 实现;若未来 SSE 推流需求
+ * 进一步细化为"边收 SDK 事件边推 SSE",可在此函数内独立实现。
+ */
+export async function chatQueryStream(
+  input: ChatQueryInput,
+): Promise<ChatQueryResult> {
+  return chatQuery(input)
 }
 

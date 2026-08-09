@@ -192,6 +192,16 @@ export interface ChatQueryInput {
   permissionMode: 'default' | 'plan' | 'bypassPermissions'
   /** SDK sessionId(resume 协议 D9)—— 首次 query 留空,后续 query 必带 */
   resumeSessionId?: string
+  /**
+   * resume 协议冻结的 cwd(ADR-0029 D4 + D9):ChatSessionService 从落盘
+   * session.json 读到的 cwd,Provider 优先采纳,忽略调用方传入的 cwd。
+   * 首次 query 不传(没有落盘 session.json);后续 resume 必须传。
+   *
+   * 设计动机:resume 时调用方可能传新 cwd,但 SDK resume 协议要求 cwd 与
+   * session 创建时一致 —— 由 ChatSessionService 作为唯一真相源,确保
+   * Provider 永远用落盘的 cwd,避免 SDK 拒绝 resume。
+   */
+  frozenCwd?: string
   /** MCP tool handler —— provider 内部包装为 `mcp__boardchat__user_confirm` */
   userConfirmHandler: (
     args: {
