@@ -1,0 +1,68 @@
+apps/web/src/lib/board-chat-hooks.ts
+  s_1ffbc6d7943b73::t_550326c8355fa8 15
+  s_1ffbc6d7943b73::t_a82d5de6ea27c3 41
+  s_1ffbc6d7943b73::t_ace91beb7c6ed0 544-572
+apps/web/src/components/board/detail/chat/SubAgentBlock.tsx
+  s_1ffbc6d7943b73::t_8636d7be99bc9a 4,6-10,12-17,23-29,35-64,71-72,78,105,114,116-128,130-131,134,139,141-144,149,156-185,189
+.scratch/board-chat/issues/08-web-atom-components.md
+  s_1ffbc6d7943b73::t_3ead2260193f0e 9-16,18,20-35
+apps/web/src/components/board/detail/chat/ToolCallBubble.tsx
+  s_1ffbc6d7943b73::t_988dc1f7b1adce 4,6-12,23-36,45,49,59,62,65-72,75-89,105
+apps/web/src/__tests__/board/board-card-detail-page.test.tsx
+  s_1ffbc6d7943b73::t_b0e66b288d5c04 136
+apps/web/src/components/board/detail/chat/UsageBar.tsx
+  s_1ffbc6d7943b73::t_fdf2751b0ad463 76-77
+  s_1ffbc6d7943b73::t_302669644be00d 4,7-12,15-16,25-26,29-30,37-38,64,66,70,74-75,78,85,88-97,99-100,105,111,129-185,187,191-193,197
+  s_1ffbc6d7943b73::t_7d76ed3c536861 87,98
+apps/web/src/components/board/detail/chat/MessageStream.tsx
+  s_1ffbc6d7943b73::t_4963f61de0f111 20
+  s_1ffbc6d7943b73::t_6feedbd26c7c51 65-66,69-74
+  s_1ffbc6d7943b73::t_3bf08d72253c74 81,84,88-92,141,147-148,150-161,171
+  s_1ffbc6d7943b73::t_f75bedb4f815e4 227,231-237,249-261
+packages/shared/src/board-chat.ts
+  s_1ffbc6d7943b73::t_9aaf76aafa4687 711-726
+apps/agent/src/__tests__/board/board-chat-route.test.ts
+  s_1ffbc6d7943b73::t_4d4566e08724fb 789,792-879
+packages/shared/src/__tests__/board-chat.test.ts
+  s_1ffbc6d7943b73::t_1600b089b9f0f9 974-990
+  s_1ffbc6d7943b73::t_3e66583fd9dfb9 28
+apps/agent/src/routes/board-chat.ts
+  s_1ffbc6d7943b73::t_810e7fd759c389 780-855
+  s_1ffbc6d7943b73::t_8598de4cb95cec 57,779
+  s_1ffbc6d7943b73::t_db0f92ce4de082 29-33
+apps/web/src/components/board/detail/CardTranscriptPanel.tsx
+  s_1ffbc6d7943b73::t_2981aa43289fd7 346,348,351
+  s_1ffbc6d7943b73::t_ac560b4b49d966 121-122
+  s_1ffbc6d7943b73::t_9cae797994529c 174-181
+  s_1ffbc6d7943b73::t_bd8f3d8326fae2 372-374
+  s_1ffbc6d7943b73::t_ff74d9436a312f 102-106
+  s_1ffbc6d7943b73::t_0d40f43d03437d 266-267
+  s_1ffbc6d7943b73::t_d92ddf421a36ab 43
+  s_1ffbc6d7943b73::t_b211290c70796e 398
+apps/web/src/__tests__/board/card-transcript-panel.test.tsx
+  s_1ffbc6d7943b73::t_3dcfa6f177f93f 128-131
+apps/web/src/components/board/detail/chat/PermissionPrompt.tsx
+  s_1ffbc6d7943b73::t_59a26504b8d3b9 24-31,43,48-49
+apps/web/src/__tests__/board/sub-agent-block.test.tsx
+  s_1ffbc6d7943b73::t_b6a93c3703762e 1-190
+apps/web/src/__tests__/board/board-chat-panel.test.tsx
+  s_1ffbc6d7943b73::t_d35e8536863a60 696-1171
+  s_1ffbc6d7943b73::t_3fe21d3afde56d 103
+  s_1ffbc6d7943b73::t_9d02e8ec300305 136-139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "7d815ad1b7e2402566ebb131a88c1a100c80281e",
+  "prompts": {},
+  "sessions": {
+    "s_1ffbc6d7943b73": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fee47ad4-e0ce-4036-b9ff-41f4046a8e1b",
+        "model": "xopglm52"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
