@@ -26,6 +26,11 @@
  *     body: ChatPlanModeToggleSchema;permissionMode === bypassPermissions 时 403
  *     resp: 200 { meta }
  *
+ *   PUT /api/requirement/:id/board/cards/:cardId/chat/sessions/:sessionId/permission-mode
+ *     body: ChatPermissionModeToggleSchema;auto-allow toggle(default ↔ bypassPermissions)
+ *     permissionMode === plan 时 403(与 plan mode 互斥 · issue 08)
+ *     resp: 200 { meta }
+ *
  *   POST /api/requirement/:id/board/cards/:cardId/chat/sessions/:sessionId/permission
  *     body: ChatSessionPermissionResolveRequestSchema;决议 pending permission
  *     resp: 200 { acknowledged: true, requestId }
@@ -49,6 +54,7 @@
 import { randomUUID } from 'node:crypto'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import {
+  ChatPermissionModeToggleSchema,
   ChatPlanModeToggleSchema,
   ChatSessionCostCapResolveSchema,
   ChatSessionModelSwitchRequestSchema,
@@ -760,6 +766,83 @@ export async function boardChatRoutes(
         return reply.code(200).send({ meta })
       } catch (err) {
         req.log.error({ err, reqId, cardId }, 'board chat plan-mode: patch failed')
+        return failWith(
+          reply,
+          'internal',
+          err instanceof Error ? err.message : 'patch failed',
+          req.log,
+        )
+      }
+    },
+  )
+
+  // =========================================================================
+  // PUT /chat/sessions/:sessionId/permission-mode (auto-allow toggle · issue 08)
+  // =========================================================================
+  app.put<{
+    Params: { id: string; cardId: string; sessionId: string }
+    Body: unknown
+  }>(
+    '/api/requirement/:id/board/cards/:cardId/chat/sessions/:sessionId/permission-mode',
+    async (req, reply) => {
+      const { id: reqId, cardId, sessionId } = req.params
+
+      if (!taskCardStore.exists(reqId)) {
+        return failWith(reply, 'requirement-not-found', `requirement ${reqId} not found`, req.log)
+      }
+      const card = taskCardStore.get(reqId, cardId)
+      if (!card) {
+        return failWith(reply, 'card-not-found', `card ${cardId} not found in req ${reqId}`, req.log)
+      }
+
+      const parsed = ChatPermissionModeToggleSchema.safeParse(req.body)
+      if (!parsed.success) {
+        return failWith(
+          reply,
+          'invalid-body',
+          `invalid permission-mode body: ${parsed.error.issues.map((i) => i.message).join('; ')}`,
+          req.log,
+        )
+      }
+
+      const existing = chatSessionService.get(reqId, cardId)
+      if (!existing) {
+        return failWith(
+          reply,
+          'session-not-found',
+          `no chat session for ${reqId}/${cardId}`,
+          req.log,
+        )
+      }
+      if (existing.sessionId !== sessionId) {
+        return failWith(
+          reply,
+          'session-not-found',
+          `sessionId mismatch: expected ${existing.sessionId}, got ${sessionId}`,
+          req.log,
+        )
+      }
+
+      // 守门:plan mode 时 auto-allow toggle 拒绝(ADR-0029 D8 决策 36 对称:
+      // plan-mode 路由对 bypassPermissions 守门,permission-mode 路由对 plan 守门;
+      // plan ↔ bypassPermissions 互斥)
+      if (existing.permissionMode === 'plan') {
+        return failWith(
+          reply,
+          'permission-denied',
+          'auto-allow toggle disabled when permissionMode is plan',
+          req.log,
+        )
+      }
+
+      const targetMode: ChatPermissionModeT = parsed.data.enabled
+        ? 'bypassPermissions'
+        : 'default'
+      try {
+        const meta = chatSessionService.patch(reqId, cardId, { permissionMode: targetMode })
+        return reply.code(200).send({ meta })
+      } catch (err) {
+        req.log.error({ err, reqId, cardId }, 'board chat permission-mode: patch failed')
         return failWith(
           reply,
           'internal',

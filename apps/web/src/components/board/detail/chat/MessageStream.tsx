@@ -17,7 +17,7 @@
 
 import { useMemo, type ReactNode } from 'react'
 import type { ChatSessionEvent, ChatSubAgentEvent } from '@ai-devspace/shared'
-import { SubAgentBlock } from './SubAgentBlock'
+import { SubAgentBlock, type SubAgentToolCall } from './SubAgentBlock'
 import { ToolCallBubble } from './ToolCallBubble'
 
 export interface MessageStreamProps {
@@ -62,23 +62,34 @@ interface MessageItem {
     args: Record<string, unknown>
     partial: boolean
     result?: { content: unknown; isError: boolean } | null
+    /** 工具执行耗时(result.ts - call.ts;无 result 时为 0) */
+    durationMs?: number
   }>
   /** sub-agent 块(task_* 嵌入 assistant) */
-  subAgents: Array<{ taskId: string; events: ChatSubAgentEvent[] }>
+  subAgents: Array<{
+    taskId: string
+    events: ChatSubAgentEvent[]
+    /** sub-agent 运行期间触发的工具调用摘要(按 ts 区间关联) */
+    toolCalls: SubAgentToolCall[]
+  }>
 }
 
 type StreamItem = MessageItem
 
 function buildItems(events: ChatSessionEvent[]): StreamItem[] {
   const items: StreamItem[] = []
-  // tool_use_id → 关联的 result
+  // tool_use_id → 关联的 result(content + isError + result 事件 ts)
   const toolResults = new Map<
     string,
-    { content: unknown; isError: boolean }
+    { content: unknown; isError: boolean; ts: number }
   >()
   for (const ev of events) {
     if (ev.kind === 'chat_tool_result') {
-      toolResults.set(ev.id, { content: ev.content, isError: ev.isError })
+      toolResults.set(ev.id, {
+        content: ev.content,
+        isError: ev.isError,
+        ts: ev.ts,
+      })
     }
   }
   // 确保最后一条 assistant item 存在(若 tool_call/sub-agent 出现在 assistant 之前)
@@ -127,13 +138,27 @@ function buildItems(events: ChatSessionEvent[]): StreamItem[] {
       })
     } else if (ev.kind === 'chat_tool_call') {
       const host = ensureTrailingAssistant()
+      const matched = toolResults.get(ev.id) ?? null
       host.toolCalls.push({
         id: ev.id,
         name: ev.name,
         args: ev.args,
         partial: ev.partial,
-        result: toolResults.get(ev.id) ?? null,
+        result: matched ? { content: matched.content, isError: matched.isError } : null,
+        durationMs: matched ? Math.max(0, matched.ts - ev.ts) : undefined,
       })
+      // 同步摘要到当前 host 正在跑的 sub-agent(若 task_started 未 task_completed)
+      const activeSub = host.subAgents.find(
+        (s) =>
+          !s.events.some((e) => e.kind === 'task_completed') &&
+          s.events.some((e) => e.kind === 'task_started'),
+      )
+      if (activeSub) {
+        activeSub.toolCalls.push({
+          name: ev.name,
+          argsSummary: summarizeToolArgs(ev.args),
+        })
+      }
     } else if (
       ev.kind === 'task_started' ||
       ev.kind === 'task_progress' ||
@@ -143,7 +168,7 @@ function buildItems(events: ChatSessionEvent[]): StreamItem[] {
       const host = ensureTrailingAssistant()
       let block = host.subAgents.find((s) => s.taskId === ev.taskId)
       if (!block) {
-        block = { taskId: ev.taskId, events: [] }
+        block = { taskId: ev.taskId, events: [], toolCalls: [] }
         host.subAgents.push(block)
       }
       // ev 在此分支已 narrow 为 task_* 子 union(等于 ChatSubAgentEvent)
@@ -199,10 +224,17 @@ function renderItem(it: StreamItem, idx: number): ReactNode {
           args={tc.args}
           result={tc.result}
           partial={tc.partial}
+          durationMs={tc.durationMs}
         />
       ))}
       {it.subAgents.map((sa) => (
-        <SubAgentBlock key={sa.taskId} taskId={sa.taskId} events={sa.events} />
+        <SubAgentBlock
+          key={sa.taskId}
+          taskId={sa.taskId}
+          events={sa.events}
+          toolCalls={sa.toolCalls}
+          nestedChildren={[]}
+        />
       ))}
     </div>
   )
@@ -214,4 +246,17 @@ function formatTime(ts: number): string {
   const mm = String(d.getMinutes()).padStart(2, '0')
   const ss = String(d.getSeconds()).padStart(2, '0')
   return `${hh}:${mm}:${ss}`
+}
+
+/** sub-agent 内 tool-list 的 args 摘要(复用 ToolCallBubble 同款逻辑) */
+function summarizeToolArgs(args: Record<string, unknown>): string {
+  if (args && typeof args === 'object') {
+    if (typeof args.file_path === 'string') return args.file_path
+    if (typeof args.path === 'string') return args.path
+    if (typeof args.cmd === 'string') return args.cmd
+    if (typeof args.command === 'string') return args.command
+    if (typeof args.pattern === 'string') return args.pattern
+    if (typeof args.url === 'string') return args.url
+  }
+  return JSON.stringify(args).slice(0, 60)
 }

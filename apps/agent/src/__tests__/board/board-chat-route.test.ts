@@ -786,8 +786,96 @@ describe('PUT /chat/sessions/:sessionId/plan-mode', () => {
 })
 
 // ---------------------------------------------------------------------------
-// POST /chat/sessions/:sessionId/permission
+// PUT /chat/sessions/:sessionId/permission-mode (auto-allow toggle · issue 08)
 // ---------------------------------------------------------------------------
+
+describe('PUT /chat/sessions/:sessionId/permission-mode', () => {
+  it('200 + permissionMode=bypassPermissions when enabled', async () => {
+    await chatSessionService.getOrCreateSession(REQ_ID, CARD_ID, {
+      sdkSessionId: 'sdk-sess-perm-001',
+      cwd: '/workspace/x',
+      additionalDirectories: [],
+      model: 'claude-sonnet-5',
+      permissionMode: DEFAULT_PERMISSION_MODE,
+      mcpServers: [],
+      ownerUserId: 'user-1',
+    })
+
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/sdk-sess-perm-001/permission-mode`,
+      headers: authHeaders(),
+      payload: { enabled: true },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as { meta: { permissionMode: string } }
+    expect(body.meta.permissionMode).toBe(ChatPermissionMode.BYPASS_PERMISSIONS)
+  })
+
+  it('200 + permissionMode=default when disabled (and was bypassPermissions)', async () => {
+    await chatSessionService.getOrCreateSession(REQ_ID, CARD_ID, {
+      sdkSessionId: 'sdk-sess-perm-002',
+      cwd: '/workspace/x',
+      additionalDirectories: [],
+      model: 'claude-sonnet-5',
+      permissionMode: ChatPermissionMode.BYPASS_PERMISSIONS,
+      mcpServers: [],
+      ownerUserId: 'user-1',
+    })
+
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/sdk-sess-perm-002/permission-mode`,
+      headers: authHeaders(),
+      payload: { enabled: false },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as { meta: { permissionMode: string } }
+    expect(body.meta.permissionMode).toBe(ChatPermissionMode.DEFAULT)
+  })
+
+  it('403 permission-denied when session is plan (mutual exclusion)', async () => {
+    await chatSessionService.getOrCreateSession(REQ_ID, CARD_ID, {
+      sdkSessionId: 'sdk-sess-perm-003',
+      cwd: '/workspace/x',
+      additionalDirectories: [],
+      model: 'claude-sonnet-5',
+      permissionMode: ChatPermissionMode.PLAN,
+      mcpServers: [],
+      ownerUserId: 'user-1',
+    })
+
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/sdk-sess-perm-003/permission-mode`,
+      headers: authHeaders(),
+      payload: { enabled: true },
+    })
+    expect(res.statusCode).toBe(403)
+    const body = res.json() as { reason: string }
+    expect(body.reason).toBe('permission-denied')
+  })
+
+  it('400 invalid-body when enabled is missing', async () => {
+    await chatSessionService.getOrCreateSession(REQ_ID, CARD_ID, {
+      sdkSessionId: 'sdk-sess-perm-004',
+      cwd: '/workspace/x',
+      additionalDirectories: [],
+      model: 'claude-sonnet-5',
+      permissionMode: DEFAULT_PERMISSION_MODE,
+      mcpServers: [],
+      ownerUserId: 'user-1',
+    })
+
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/sdk-sess-perm-004/permission-mode`,
+      headers: authHeaders(),
+      payload: {},
+    })
+    expect(res.statusCode).toBe(400)
+  })
+})
 
 describe('POST /chat/sessions/:sessionId/permission', () => {
   it('200 + acknowledge when decision is allow', async () => {

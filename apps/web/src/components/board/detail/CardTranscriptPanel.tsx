@@ -40,6 +40,7 @@ import {
   useChatPermission,
   useChatModelSwitch,
   useChatPlanMode,
+  useChatPermissionMode,
   useChatCostCap,
 } from '@/lib/board-chat-hooks'
 import { UsageBar } from './chat/UsageBar'
@@ -98,6 +99,11 @@ export function CardTranscriptPanel({
     card.id,
     meta?.sessionId ?? null,
   )
+  const permissionModeMutation = useChatPermissionMode(
+    requirementId,
+    card.id,
+    meta?.sessionId ?? null,
+  )
   const costCapMutation = useChatCostCap(
     requirementId,
     card.id,
@@ -112,6 +118,8 @@ export function CardTranscriptPanel({
 
   // ---- 派生 sub-agent tokens(本期简化:0;后续可解析 task_* 累计) ----
   const subAgentTokens = 0
+  // ---- 派生 sub-agent cost(本期简化:0;后续从 task_completed 累计) ----
+  const subAgentCost = 0
 
   // ---- session 累计 duration(自 createdAt 到 lastQueryAt 的毫秒数) ----
   const durationMs = useMemo(() => {
@@ -161,6 +169,14 @@ export function CardTranscriptPanel({
       void planModeMutation.mutateAsync({ enabled })
     },
     [planModeMutation],
+  )
+
+  // ---- Auto-allow toggle(default ↔ bypassPermissions;与 plan 互斥) ----
+  const handleAutoAllowChange = useCallback(
+    (enabled: boolean) => {
+      void permissionModeMutation.mutateAsync({ enabled })
+    },
+    [permissionModeMutation],
   )
 
   // ---- Permission resolve ----
@@ -247,6 +263,8 @@ export function CardTranscriptPanel({
 
   const planToggleDisabled =
     meta?.permissionMode === 'bypassPermissions' || lock.lockedByOtherTab
+  const autoAllowDisabled =
+    meta?.permissionMode === 'plan' || lock.lockedByOtherTab
 
   return (
     <div
@@ -325,9 +343,12 @@ export function CardTranscriptPanel({
         <UsageBar
           meta={meta}
           planToggleDisabled={planToggleDisabled}
+          autoAllowDisabled={autoAllowDisabled}
           subAgentTokens={subAgentTokens}
+          subAgentCost={subAgentCost}
           durationMs={durationMs}
           onPlanToggle={handlePlanToggle}
+          onAutoAllowChange={handleAutoAllowChange}
           onModelChange={handleModelChange}
         />
       ) : (
@@ -348,7 +369,9 @@ export function CardTranscriptPanel({
         isPending={
           stream.status === 'streaming' ||
           startMutation.isPending ||
-          modelMutation.isPending
+          modelMutation.isPending ||
+          planModeMutation.isPending ||
+          permissionModeMutation.isPending
         }
         error={
           stream.error
@@ -372,6 +395,7 @@ export function CardTranscriptPanel({
       {stream.pendingPermission && (
         <PermissionPrompt
           request={stream.pendingPermission}
+          forced={stream.pendingPermission.forced}
           onResolve={handlePermissionResolve}
         />
       )}

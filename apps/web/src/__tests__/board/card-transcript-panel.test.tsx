@@ -125,6 +125,10 @@ vi.mock('@/lib/board-chat-hooks', () => ({
     mutateAsync: mockTogglePlanMode,
     isPending: false,
   }),
+  useChatPermissionMode: () => ({
+    mutateAsync: vi.fn().mockResolvedValue(undefined),
+    isPending: false,
+  }),
   useChatCostCap: () => ({
     mutateAsync: mockResolveCostCap,
     isPending: false,

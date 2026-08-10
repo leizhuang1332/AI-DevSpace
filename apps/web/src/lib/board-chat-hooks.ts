@@ -12,6 +12,7 @@
  * - `useChatPermission(reqId, cardId, sessionId)` —— POST /permission 决议
  * - `useChatModelSwitch(...)` —— PUT /model
  * - `useChatPlanMode(...)` —— PUT /plan-mode
+ * - `useChatPermissionMode(...)` —— PUT /permission-mode(auto-allow toggle · issue 08)
  * - `useChatCostCap(...)` —— POST /cost-cap
  *
  * SSE 实现要点:
@@ -37,6 +38,7 @@ import {
   type ChatSessionPermissionResolveRequest,
   type ChatSessionSnapshotResponse,
   type ChatPlanModeToggle,
+  type ChatPermissionModeToggle,
   type ChatSessionCostCapResolve,
 } from '@ai-devspace/shared'
 import { AgentError, agentFetch } from './agent-client'
@@ -528,6 +530,35 @@ export function useChatPlanMode(
       if (!sessionId) throw new AgentError(0, { reason: 'no-session' })
       return agentFetch<{ meta: ChatSessionMeta }>(
         `/api/requirement/${encodeURIComponent(requirementId)}/board/cards/${encodeURIComponent(cardId)}/chat/sessions/${encodeURIComponent(sessionId)}/plan-mode`,
+        { method: 'PUT', body: JSON.stringify(args) },
+      )
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({
+        queryKey: ['board-chat-snapshot', requirementId, cardId],
+      })
+    },
+  })
+}
+
+/**
+ * `useChatPermissionMode` —— PUT /permission-mode 切 auto-allow 开关
+ * (default ↔ bypassPermissions;issue 08 · ADR-0029 D4/D8)。
+ *
+ * 与 plan mode 互斥:session 当前 `permissionMode === 'plan'` 时后端返 403。
+ * 镜像 `useChatPlanMode`,仅 endpoint / body 类型不同。
+ */
+export function useChatPermissionMode(
+  requirementId: string,
+  cardId: string,
+  sessionId: string | null,
+) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (args: ChatPermissionModeToggle) => {
+      if (!sessionId) throw new AgentError(0, { reason: 'no-session' })
+      return agentFetch<{ meta: ChatSessionMeta }>(
+        `/api/requirement/${encodeURIComponent(requirementId)}/board/cards/${encodeURIComponent(cardId)}/chat/sessions/${encodeURIComponent(sessionId)}/permission-mode`,
         { method: 'PUT', body: JSON.stringify(args) },
       )
     },

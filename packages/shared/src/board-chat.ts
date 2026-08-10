@@ -708,6 +708,22 @@ export const ChatPlanModeToggleSchema = z.object({
 })
 export type ChatPlanModeToggle = z.infer<typeof ChatPlanModeToggleSchema>
 
+/**
+ * PUT `/chat/sessions/<reqId>/<cardId>/permission-mode` body 契约
+ * (ADR-0029 D4 / D8 · issue 08 auto-allow toggle)。
+ *
+ * - `enabled` —— true 切 `bypassPermissions`(auto-allow on,SDK 全部跳过拦截);
+ *   false 切回 `default`(恢复写工具弹 modal)
+ * - 与 plan mode 互斥:session 当前 `permissionMode === 'plan'` 时拒绝
+ *   (后端二次校验 + web 端 disabled,对称于 plan-mode 路由对 bypassPermissions 的守门)
+ */
+export const ChatPermissionModeToggleSchema = z.object({
+  enabled: z.boolean(),
+})
+export type ChatPermissionModeToggle = z.infer<
+  typeof ChatPermissionModeToggleSchema
+>
+
 // ---------------------------------------------------------------------------
 // 错误码(reason → { code, status } 单一来源,与 board-card.ts 风格一致)
 // ---------------------------------------------------------------------------

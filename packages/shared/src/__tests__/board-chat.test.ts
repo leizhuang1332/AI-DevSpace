@@ -25,6 +25,7 @@ import {
   ChatMcpServerConfigSchema,
   ChatMessageAssistantContentSchema,
   ChatMessageUserContentSchema,
+  ChatPermissionModeToggleSchema,
   ChatPermissionMode,
   ChatPermissionModeSchema,
   ChatPermissionRequestSchema,
@@ -966,6 +967,23 @@ describe('ChatPlanModeToggleSchema', () => {
 
   it('rejects missing enabled', () => {
     const r = ChatPlanModeToggleSchema.safeParse({})
+    expect(r.success).toBe(false)
+  })
+})
+
+describe('ChatPermissionModeToggleSchema', () => {
+  it('accepts enabled=true', () => {
+    const r = ChatPermissionModeToggleSchema.safeParse({ enabled: true })
+    expect(r.success).toBe(true)
+  })
+
+  it('accepts enabled=false', () => {
+    const r = ChatPermissionModeToggleSchema.safeParse({ enabled: false })
+    expect(r.success).toBe(true)
+  })
+
+  it('rejects missing enabled', () => {
+    const r = ChatPermissionModeToggleSchema.safeParse({})
     expect(r.success).toBe(false)
   })
 })

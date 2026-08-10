@@ -100,6 +100,7 @@ const mockQueryMutate = vi.fn().mockResolvedValue(undefined)
 const mockResolvePermission = vi.fn().mockResolvedValue(undefined)
 const mockSwitchModel = vi.fn().mockResolvedValue({ meta: metaForMock })
 const mockTogglePlanMode = vi.fn().mockResolvedValue({ meta: metaForMock })
+const mockTogglePermissionMode = vi.fn().mockResolvedValue({ meta: metaForMock })
 const mockResolveCostCap = vi.fn().mockResolvedValue(undefined)
 
 const mockUseChatSessionSnapshot = vi.fn()
@@ -130,6 +131,10 @@ vi.mock('@/lib/board-chat-hooks', () => ({
   }),
   useChatPlanMode: () => ({
     mutateAsync: mockTogglePlanMode,
+    isPending: false,
+  }),
+  useChatPermissionMode: () => ({
+    mutateAsync: mockTogglePermissionMode,
     isPending: false,
   }),
   useChatCostCap: () => ({
@@ -686,6 +691,482 @@ describe('CardTranscriptPanel · 发送消息', () => {
     })
     expect(sendFn).toHaveBeenCalledWith(
       expect.objectContaining({ content: '快捷键' }),
+    )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// UsageBar · auto-allow toggle + pill + sub-agent cost(issue 08)
+// ---------------------------------------------------------------------------
+
+describe('CardTranscriptPanel · UsageBar issue 08 扩展', () => {
+  function setupMetaSnapshot(meta: ChatSessionMeta): void {
+    mockUseChatSessionSnapshot.mockReturnValue({
+      snapshot: makeSnapshot(meta),
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    mockUseChatSessionStream.mockReturnValue({
+      events: [],
+      status: 'idle',
+      send: vi.fn(),
+      abort: vi.fn(),
+    })
+  }
+
+  it('model pill 渲染 + brand 圆点(Sonnet 非 expensive)', () => {
+    setupMetaSnapshot(makeMeta({ model: 'claude-sonnet-5' }))
+    wrap(
+      <CardTranscriptPanel
+        card={makeCard()}
+        requirementId={REQ_ID}
+        onClose={vi.fn()}
+      />,
+    )
+    const pill = screen.getByTestId('board-chat-model-pill')
+    expect(pill).toHaveTextContent('Sonnet 5')
+    expect(pill).toHaveTextContent('claude-sonnet-5')
+    const dot = pill.querySelector('span > span')
+    expect(dot?.className).toContain('bg-brand')
+  })
+
+  it('切到 opus → pill 圆点 warning 色(昂贵)', () => {
+    setupMetaSnapshot(makeMeta({ model: 'claude-opus-5' }))
+    wrap(
+      <CardTranscriptPanel
+        card={makeCard()}
+        requirementId={REQ_ID}
+        onClose={vi.fn()}
+      />,
+    )
+    const pill = screen.getByTestId('board-chat-model-pill')
+    const dot = pill.querySelector('span > span')
+    expect(dot?.className).toContain('bg-warning')
+  })
+
+  it('auto-allow toggle 默认 off(aria-checked=false)', () => {
+    setupMetaSnapshot(makeMeta())
+    wrap(
+      <CardTranscriptPanel
+        card={makeCard()}
+        requirementId={REQ_ID}
+        onClose={vi.fn()}
+      />,
+    )
+    const toggle = screen.getByTestId('board-chat-auto-allow-toggle')
+    expect(toggle).toHaveAttribute('aria-checked', 'false')
+  })
+
+  it('auto-allow on(permissionMode=bypassPermissions)→ aria-checked=true', () => {
+    setupMetaSnapshot(
+      makeMeta({ permissionMode: 'bypassPermissions' as never }),
+    )
+    wrap(
+      <CardTranscriptPanel
+        card={makeCard()}
+        requirementId={REQ_ID}
+        onClose={vi.fn()}
+      />,
+    )
+    const toggle = screen.getByTestId('board-chat-auto-allow-toggle')
+    expect(toggle).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('点击 auto-allow → useChatPermissionMode 调 {enabled:true}', async () => {
+    setupMetaSnapshot(makeMeta())
+    wrap(
+      <CardTranscriptPanel
+        card={makeCard()}
+        requirementId={REQ_ID}
+        onClose={vi.fn()}
+      />,
+    )
+    const toggle = screen.getByTestId('board-chat-auto-allow-toggle')
+    await act(async () => {
+      fireEvent.click(toggle)
+    })
+    expect(mockTogglePermissionMode).toHaveBeenCalledWith({ enabled: true })
+  })
+
+  it('plan mode on → auto-allow toggle disabled', () => {
+    setupMetaSnapshot(makeMeta({ permissionMode: 'plan' as never }))
+    wrap(
+      <CardTranscriptPanel
+        card={makeCard()}
+        requirementId={REQ_ID}
+        onClose={vi.fn()}
+      />,
+    )
+    const toggle = screen.getByTestId('board-chat-auto-allow-toggle')
+    expect(toggle).toBeDisabled()
+    // plan toggle 此时 enabled(bypassPermissions 才禁 plan)
+    expect(screen.getByTestId('board-chat-plan-toggle')).not.toBeDisabled()
+  })
+
+  it('sub-line 含 sub-agent cost', () => {
+    setupMetaSnapshot(makeMeta())
+    wrap(
+      <CardTranscriptPanel
+        card={makeCard()}
+        requirementId={REQ_ID}
+        onClose={vi.fn()}
+      />,
+    )
+    expect(screen.getByTestId('board-chat-usage-sub-agent')).toHaveTextContent(
+      '含 sub-agent',
+    )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// PermissionPrompt · forced(敏感模式 · issue 08)
+// ---------------------------------------------------------------------------
+
+describe('CardTranscriptPanel · PermissionPrompt forced', () => {
+  it('forced=true → forced banner 渲染', () => {
+    mockUseChatSessionSnapshot.mockReturnValue({
+      snapshot: makeSnapshot(makeMeta()),
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    mockUseChatSessionStream.mockReturnValue({
+      events: [],
+      status: 'idle',
+      send: vi.fn(),
+      abort: vi.fn(),
+      pendingPermission: {
+        kind: 'chat_permission_request',
+        ts: Date.now(),
+        requestId: 'req-forced-1',
+        toolName: 'Bash',
+        input: { command: 'rm -rf /' },
+        forced: true,
+      },
+    })
+    wrap(
+      <CardTranscriptPanel
+        card={makeCard()}
+        requirementId={REQ_ID}
+        onClose={vi.fn()}
+      />,
+    )
+    expect(
+      screen.getByTestId('board-chat-permission-modal'),
+    ).toHaveAttribute('data-forced', 'true')
+    expect(
+      screen.getByTestId('board-chat-permission-forced-banner'),
+    ).toBeInTheDocument()
+  })
+
+  it('forced 缺省 → data-forced=false,无 banner', () => {
+    mockUseChatSessionSnapshot.mockReturnValue({
+      snapshot: makeSnapshot(makeMeta()),
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    mockUseChatSessionStream.mockReturnValue({
+      events: [],
+      status: 'idle',
+      send: vi.fn(),
+      abort: vi.fn(),
+      pendingPermission: {
+        kind: 'chat_permission_request',
+        ts: Date.now(),
+        requestId: 'req-nf-1',
+        toolName: 'Bash',
+        input: { cmd: 'echo hi' },
+      },
+    })
+    wrap(
+      <CardTranscriptPanel
+        card={makeCard()}
+        requirementId={REQ_ID}
+        onClose={vi.fn()}
+      />,
+    )
+    expect(
+      screen.getByTestId('board-chat-permission-modal'),
+    ).toHaveAttribute('data-forced', 'false')
+    expect(
+      screen.queryByTestId('board-chat-permission-forced-banner'),
+    ).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// SubAgentBlock · running 枚举 + toolCalls + nestedChildren(issue 08)
+// ---------------------------------------------------------------------------
+
+describe('CardTranscriptPanel · SubAgentBlock issue 08 扩展', () => {
+  it('task_progress → data-status=running(非 progress)', () => {
+    mockUseChatSessionSnapshot.mockReturnValue({
+      snapshot: makeSnapshot(makeMeta(), [
+        {
+          kind: 'task_started',
+          ts: 1700000000000,
+          taskId: 'task-run-1',
+          description: '分析性能',
+          agentType: 'general-purpose',
+        },
+        {
+          kind: 'task_progress',
+          ts: 1700000000500,
+          taskId: 'task-run-1',
+          summary: '一半了',
+        },
+      ]),
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    mockUseChatSessionStream.mockReturnValue({
+      events: [],
+      status: 'idle',
+      send: vi.fn(),
+      abort: vi.fn(),
+    })
+    wrap(
+      <CardTranscriptPanel
+        card={makeCard()}
+        requirementId={REQ_ID}
+        onClose={vi.fn()}
+      />,
+    )
+    const block = screen.getByTestId('board-chat-sub-agent')
+    expect(block).toHaveAttribute('data-status', 'running')
+  })
+
+  it('task_completed → data-status=completed', () => {
+    mockUseChatSessionSnapshot.mockReturnValue({
+      snapshot: makeSnapshot(makeMeta(), [
+        {
+          kind: 'task_started',
+          ts: 1700000000000,
+          taskId: 'task-done-1',
+          description: '完成的分析',
+          agentType: 'general-purpose',
+        },
+        {
+          kind: 'task_completed',
+          ts: 1700000002000,
+          taskId: 'task-done-1',
+          result: 'ok',
+          durationMs: 2000,
+        },
+      ]),
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    mockUseChatSessionStream.mockReturnValue({
+      events: [],
+      status: 'idle',
+      send: vi.fn(),
+      abort: vi.fn(),
+    })
+    wrap(
+      <CardTranscriptPanel
+        card={makeCard()}
+        requirementId={REQ_ID}
+        onClose={vi.fn()}
+      />,
+    )
+    expect(screen.getByTestId('board-chat-sub-agent')).toHaveAttribute(
+      'data-status',
+      'completed',
+    )
+  })
+
+  it('running 状态 icon 有 animate-spin class', () => {
+    mockUseChatSessionSnapshot.mockReturnValue({
+      snapshot: makeSnapshot(makeMeta(), [
+        {
+          kind: 'task_started',
+          ts: 1700000000000,
+          taskId: 'task-spin-1',
+          description: 'spin test',
+          agentType: 'general-purpose',
+        },
+        {
+          kind: 'task_progress',
+          ts: 1700000000500,
+          taskId: 'task-spin-1',
+          summary: '跑',
+        },
+      ]),
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    mockUseChatSessionStream.mockReturnValue({
+      events: [],
+      status: 'idle',
+      send: vi.fn(),
+      abort: vi.fn(),
+    })
+    wrap(
+      <CardTranscriptPanel
+        card={makeCard()}
+        requirementId={REQ_ID}
+        onClose={vi.fn()}
+      />,
+    )
+    const block = screen.getByTestId('board-chat-sub-agent')
+    // summary 行(running → brand-50 bg)存在
+    const summary = block.querySelector('summary')
+    expect(summary?.className).toContain('bg-brand-50')
+  })
+
+  it('sub-agent 运行期间的 tool_call → toolCalls 摘要列表渲染', () => {
+    mockUseChatSessionSnapshot.mockReturnValue({
+      snapshot: makeSnapshot(makeMeta(), [
+        {
+          kind: 'task_started',
+          ts: 1700000000000,
+          taskId: 'task-tool-1',
+          description: 'sub-agent 用工具',
+          agentType: 'general-purpose',
+        },
+        {
+          kind: 'chat_tool_call',
+          ts: 1700000000100,
+          id: 'tool-sa-1',
+          name: 'Bash',
+          args: { cmd: 'ls -la' },
+          partial: false,
+        },
+        {
+          kind: 'task_progress',
+          ts: 1700000000500,
+          taskId: 'task-tool-1',
+          summary: '跑了',
+        },
+      ]),
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    mockUseChatSessionStream.mockReturnValue({
+      events: [],
+      status: 'idle',
+      send: vi.fn(),
+      abort: vi.fn(),
+    })
+    wrap(
+      <CardTranscriptPanel
+        card={makeCard()}
+        requirementId={REQ_ID}
+        onClose={vi.fn()}
+      />,
+    )
+    const toolList = screen.getByTestId('board-chat-sub-agent-tools')
+    expect(toolList).toHaveTextContent('Bash')
+    expect(toolList).toHaveTextContent('ls -la')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// ToolCallBubble · durationMs + result 折叠(issue 08)
+// ---------------------------------------------------------------------------
+
+describe('CardTranscriptPanel · ToolCallBubble issue 08 扩展', () => {
+  it('tool_call + tool_result → duration 显示', () => {
+    mockUseChatSessionSnapshot.mockReturnValue({
+      snapshot: makeSnapshot(makeMeta(), [
+        {
+          kind: 'chat_tool_call',
+          ts: 1700000000000,
+          id: 'tool-dur-1',
+          name: 'Bash',
+          args: { cmd: 'sleep 1' },
+          partial: false,
+        },
+        {
+          kind: 'chat_tool_result',
+          ts: 1700000001200,
+          id: 'tool-dur-1',
+          name: 'Bash',
+          content: 'done',
+          isError: false,
+        },
+      ]),
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    mockUseChatSessionStream.mockReturnValue({
+      events: [],
+      status: 'idle',
+      send: vi.fn(),
+      abort: vi.fn(),
+    })
+    wrap(
+      <CardTranscriptPanel
+        card={makeCard()}
+        requirementId={REQ_ID}
+        onClose={vi.fn()}
+      />,
+    )
+    expect(screen.getByTestId('board-chat-tool-duration')).toHaveTextContent(
+      '1s',
+    )
+  })
+
+  it('result 渲染为可折叠 <details>', () => {
+    mockUseChatSessionSnapshot.mockReturnValue({
+      snapshot: makeSnapshot(makeMeta(), [
+        {
+          kind: 'chat_tool_call',
+          ts: 1700000000000,
+          id: 'tool-fold-1',
+          name: 'Read',
+          args: { file_path: '/a.txt' },
+          partial: false,
+        },
+        {
+          kind: 'chat_tool_result',
+          ts: 1700000000100,
+          id: 'tool-fold-1',
+          name: 'Read',
+          content: 'line1\nline2',
+          isError: false,
+        },
+      ]),
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    mockUseChatSessionStream.mockReturnValue({
+      events: [],
+      status: 'idle',
+      send: vi.fn(),
+      abort: vi.fn(),
+    })
+    wrap(
+      <CardTranscriptPanel
+        card={makeCard()}
+        requirementId={REQ_ID}
+        onClose={vi.fn()}
+      />,
+    )
+    const bubble = screen.getByTestId('board-chat-tool-bubble')
+    const details = bubble.querySelector('details')
+    expect(details).not.toBeNull()
+    // result 仍可查(非 unmount)
+    expect(screen.getByTestId('board-chat-tool-result')).toHaveTextContent(
+      'line1',
     )
   })
 })

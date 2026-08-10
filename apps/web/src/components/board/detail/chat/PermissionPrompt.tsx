@@ -21,6 +21,14 @@ export type PermissionDecisionKind = 'allow-once' | 'allow-session' | 'deny'
 
 export interface PermissionPromptProps {
   request: ChatPermissionRequest
+  /**
+   * 是否命中敏感模式(rm -rf /、chmod 777、mkfs、dd、git push --force、
+   * curl | sh)—— 强制弹 modal,即使 auto-allow 开启也不跳过。
+   *
+   * 来自 SSE `chat_permission_request` 事件的 `forced` 字段
+   * (packages/shared/src/board-chat.ts);父组件从 stream.pendingPermission.forced 透传。
+   */
+  forced?: boolean
   onResolve: (
     kind: PermissionDecisionKind,
     payload: {
@@ -32,14 +40,13 @@ export interface PermissionPromptProps {
 
 export function PermissionPrompt({
   request,
+  forced = false,
   onResolve,
 }: PermissionPromptProps): ReactNode {
   const [denyReason, setDenyReason] = useState('')
   // forced=true 的"敏感模式永弹"信号由 SSE 事件 chat_permission_request 携带
-  // (见 board-chat.ts ChatSessionEventSchema);PermissionPrompt 接的是 SDK 内部
-  // ChatPermissionRequest(无 forced 字段)。这里保守显示 forced banner 仅当
-  // 父组件通过 props 显式标了;本期默认 false。
-  const isForced = false
+  // (见 board-chat.ts ChatSessionEventSchema);此处接父组件透传的 forced prop。
+  const isForced = forced
 
   const handleAllowOnce = (): void => {
     onResolve('allow-once', {
