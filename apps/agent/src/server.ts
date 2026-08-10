@@ -31,6 +31,7 @@ import { createCcSwitchClient, createNullCcSwitchClient } from './providers/CcSw
 import type { CcSwitchClient } from './providers/CcSwitchClient.js'
 import { createClaudeCodeProvider } from './providers/ClaudeCodeProvider.js'
 import type { RetryableSession } from './providers/ClaudeCodeProvider.js'
+import { FakeChatProvider } from './providers/FakeChatProvider.js'
 import {
   readCache as readDefaultSystemPromptCache,
   ensureCached,
@@ -412,7 +413,19 @@ if (isMain) {
   const host = process.env.HOST ?? '0.0.0.0'
   const workspaceRoot = process.env.AIDEVSPACE_HOME ?? defaultWorkspaceRoot()
   const logFilePath = process.env.AGENT_LOG_FILE ?? defaultLogPath()
-  const app = await buildServer({ workspaceRoot, logFilePath })
+  // issue 09 e2e 守门 —— `AIDEVSPACE_FAKE_CHAT_PROVIDER=1` 时用脚本化
+  // FakeChatProvider(确定性 emit PermissionPrompt / PlanModePrompt 等 11 步
+  // e2e 流程),不走真 ClaudeCodeProvider,无需 ANTHROPIC_API_KEY。
+  // 生产 / 本机 dev 不设该 env → 走真 createClaudeCodeProvider,行为不变。
+  const providerOverride =
+    process.env.AIDEVSPACE_FAKE_CHAT_PROVIDER === '1'
+      ? new FakeChatProvider()
+      : undefined
+  const app = await buildServer({
+    workspaceRoot,
+    logFilePath,
+    ...(providerOverride ? { provider: providerOverride } : {}),
+  })
 
   // ── 可选:启动时自动 capture SDK default system prompt ──
   // AIDEVSPACE_CAPTURE_DEFAULT_SYSTEM_PROMPT=1 时触发,缺则跳过。

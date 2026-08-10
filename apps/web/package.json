@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "e2e": "playwright test",
+    "e2e:board-chat": "playwright test e2e/board-chat.spec.ts",
     "e2e:install": "playwright install --with-deps chromium"
   },
   "dependencies": {

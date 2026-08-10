@@ -52,8 +52,13 @@ async function isAgentHealthy(request: APIRequestContext): Promise<boolean> {
 }
 
 async function isWebReachable(): Promise<boolean> {
+  // 探测轻量端点 /api/agent/bootstrap(无需 cookie)。root path 在 SSR 时
+  // 会 fetch requirements list,无 cookie → 500。改用 bootstrap 端点探测
+  // Next dev 是否 listen + 能 serve 路由,更准(issue 09 同款修复)。
   try {
-    const res = await fetch(WEB_URL, { redirect: 'manual' })
+    const res = await fetch(`${WEB_URL}/api/agent/bootstrap`, {
+      redirect: 'manual',
+    })
     return res.status >= 200 && res.status < 500
   } catch {
     return false
@@ -257,10 +262,10 @@ test.describe('board section e2e', () => {
       'data-right-panel',
       'transcript',
     )
-    await expect(page.getByTestId('board-detail-transcript-panel')).toBeVisible()
+    await expect(page.getByTestId('board-chat-panel')).toBeVisible()
 
     // 4. 点 ✕ → 切回 property
-    await page.getByTestId('board-detail-transcript-close').click()
+    await page.getByTestId('board-chat-close').click()
     await expect(page.getByTestId('board-card-detail-page')).toHaveAttribute(
       'data-right-panel',
       'property',

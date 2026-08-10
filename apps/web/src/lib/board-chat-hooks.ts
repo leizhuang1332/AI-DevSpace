@@ -243,7 +243,11 @@ async function runChatQueryStream(opts: RunStreamOpts): Promise<void> {
       },
     )
   } catch (err) {
-    if ((err as Error).name === 'AbortError') {
+    // abort 错误识别:AbortController.abort() 触发时,不同浏览器抛不同 message
+    // (Chrome: 'Failed to fetch' / Firefox: 'NetworkError when attempting to
+    //  fetch resource' / Safari: 'The operation was aborted')。统一通过
+    // signal.aborted 判断;只有 signal.aborted=true 才认为是 abort。
+    if (signal.aborted) {
       opts.onDone()
       return
     }
@@ -330,7 +334,11 @@ async function runChatQueryStream(opts: RunStreamOpts): Promise<void> {
       }
     }
   } catch (err) {
-    if ((err as Error).name === 'AbortError') {
+    // abort 错误识别:AbortController.abort() 触发时,不同浏览器抛不同 message
+    // (Chrome: 'Failed to fetch' / Firefox: 'NetworkError when attempting to
+    //  fetch resource' / Safari: 'The operation was aborted')。统一通过
+    // signal.aborted 判断;只有 signal.aborted=true 才认为是 abort。
+    if (signal.aborted) {
       opts.onDone()
       return
     }

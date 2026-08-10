@@ -39,6 +39,14 @@ const webServers = [
     url: `${AGENT_URL}/api/health`,
     reuseExistingServer: true,
     timeout: 120_000,
+    /**
+     * issue 09 e2e 守门 —— `AIDEVSPACE_FAKE_CHAT_PROVIDER=1` 让 agent 用
+     * 脚本化 FakeChatProvider 跑 board-chat.spec.ts(确定性 emit
+     * PermissionPrompt / PlanModePrompt / CostCapModal 等 11 步),不走真
+     * ClaudeCodeProvider。生产 / 其他 e2e 不设该 env → 行为不变。
+     * reuseExistingServer: true 时,若 agent 已手动起(带该 env)就直接复用。
+     */
+    env: { AIDEVSPACE_FAKE_CHAT_PROVIDER: '1' },
     stdout: 'pipe' as const,
     stderr: 'pipe' as const,
   },

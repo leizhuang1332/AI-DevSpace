@@ -488,7 +488,15 @@ export async function boardChatRoutes(
         })
       }
 
-      // 6. 设置 SSE 响应头
+      // 6. 设置 SSE 响应头(issue 09 e2e 守门 —— hijack 后 fastify-cors hook
+      // 不再应用到 raw stream 上的 headers,必须显式 setHeader CORS 头,
+      // 否则浏览器从 3333 fetch 7777 会报 'No Access-Control-Allow-Origin')。
+      const origin = req.headers.origin
+      if (origin === 'http://localhost:3333' || origin === 'http://127.0.0.1:3333') {
+        reply.raw.setHeader('Access-Control-Allow-Origin', origin)
+        reply.raw.setHeader('Access-Control-Allow-Credentials', 'true')
+        reply.raw.setHeader('Vary', 'Origin')
+      }
       reply.raw.setHeader('Content-Type', 'text/event-stream')
       reply.raw.setHeader('Cache-Control', 'no-cache, no-transform')
       reply.raw.setHeader('Connection', 'keep-alive')
@@ -614,6 +622,20 @@ export async function boardChatRoutes(
         await queryPromise
       } finally {
         cleanup()
+        // 显式 end SSE response —— reply.hijack() 后 Fastify 不自动结束 raw stream,
+        // 否则客户端 fetch reader 永远等不到 end → onDone 不触发 → web stream
+        // status 一直 'streaming' → 下一次 send() abort 旧流时报 'Failed to fetch'。
+        // 真 SDK provider 在 result 后 SDK 内部会 close stream;FakeChatProvider 同步
+        // 返 ok 后没有 SDK 关流,所以这里兜底 end。延迟 1 tick 确保 in-flight
+        // sseWrite(例如 userConfirmHandler fire-and-forget 推 permission_request)
+        // 都 drain 完再 close,避免 ERR_STREAM_WRITE_AFTER_END。
+        setImmediate(() => {
+          try {
+            if (!reply.raw.writableEnded) reply.raw.end()
+          } catch {
+            /* socket already closed */
+          }
+        })
       }
     },
   )

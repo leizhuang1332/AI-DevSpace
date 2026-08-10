@@ -380,7 +380,7 @@ export function CardTranscriptPanel({
               ? '加载 session 失败,请刷新页面'
               : null
         }
-        disabled={lock.lockedByOtherTab || !meta}
+        disabled={lock.lockedByOtherTab}
         placeholder={
           lock.lockedByOtherTab
             ? '已在另一 tab 打开,当前 tab 锁定'

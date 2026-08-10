@@ -61,6 +61,8 @@ export function CardTranscriptInput({
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={handleKeyDown}
+        // lock 时禁用(父传 disabled=true);首次发送(!meta)允许填内容触发
+        // startMutation 启动 SDK session。button 仍受 canSend 控制表达"可发"语义。
         disabled={disabled || isPending}
         placeholder={placeholder}
         className="w-full border-none outline-none resize-none font-inherit text-sm text-text-1 bg-transparent min-h-[60px]"
@@ -86,7 +88,10 @@ export function CardTranscriptInput({
         </button>
       </div>
       {error && (
-        <div className="text-sm text-error bg-error/10 px-2 py-1 rounded-sm mt-1.5">
+        <div
+          data-testid="board-chat-input-error"
+          className="text-sm text-error bg-error/10 px-2 py-1 rounded-sm mt-1.5"
+        >
           {error}
         </div>
       )}
