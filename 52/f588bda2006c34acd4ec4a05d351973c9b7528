@@ -1,0 +1,23 @@
+.scratch/board-chat/issues/10-agent-start-does-not-consume-user-prompt.md
+  s_1394b3d11fa398::t_3a68f2b7c986bb 1-70
+.scratch/board-chat/issues/11-agent-start-single-tab-lock.md
+  s_1394b3d11fa398::t_ea79918b7a1629 1-39
+.scratch/board-chat/issues/12-agent-start-schema-decoupling.md
+  s_1394b3d11fa398::t_529a83b711c8d7 1-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "52f588bda2006c34acd4ec4a05d351973c9b7528",
+  "prompts": {},
+  "sessions": {
+    "s_1394b3d11fa398": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "865a6419-9b50-4c11-84a9-2cbe5c039b95",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
