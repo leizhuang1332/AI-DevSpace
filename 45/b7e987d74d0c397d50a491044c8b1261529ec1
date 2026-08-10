@@ -1,0 +1,71 @@
+apps/web/src/components/board/detail/CardTranscriptPanel.tsx
+  s_02cd5a154e2500::t_6eef71af767153 383
+apps/web/src/lib/board-chat-hooks.ts
+  s_02cd5a154e2500::t_fd95e868495117 246-250,337-341
+apps/web/src/components/board/detail/CardTranscriptInput.tsx
+  s_02cd5a154e2500::t_9e63d6a47913c6 91-94
+  s_02cd5a154e2500::t_62b2998d99b881 64-65
+apps/agent/src/routes/board-chat.ts
+  s_02cd5a154e2500::t_eaa5227ffc34c4 625-628
+  s_02cd5a154e2500::t_ad12156e7752a3 491-499
+  s_02cd5a154e2500::t_9531a6ff297c6b 629-638
+apps/agent/src/providers/FakeChatProvider.ts
+  s_02cd5a154e2500::t_1e82f37c5eee31 1-114,121-386
+  s_02cd5a154e2500::t_32b3c71c4e4dfb 115-120
+apps/web/playwright.config.ts
+  s_02cd5a154e2500::t_d0df734142a27b 42-49
+apps/web/e2e/board-chat.spec.ts
+  s_02cd5a154e2500::t_07461b2bcf9b14 217-221
+  s_02cd5a154e2500::t_de07b388f952bb 423-427
+  s_02cd5a154e2500::t_cb856c5b343101 168-170
+  s_02cd5a154e2500::t_e399919b0b6b85 316-320,322-323
+  s_02cd5a154e2500::t_615c073f7faf02 399-402
+  s_02cd5a154e2500::t_f187ef3b994d31 408,411
+  s_02cd5a154e2500::t_fe64ba3f5ee09a 361,363-364
+  s_02cd5a154e2500::t_d0a327a51d0d8a 566-588
+  s_02cd5a154e2500::t_25b20467325b0a 531-533
+  s_02cd5a154e2500::t_7c2acbf99c062f 436-438,440-447
+  s_02cd5a154e2500::t_322cacd96c1e56 478-480
+  s_02cd5a154e2500::t_80b207ba8f2133 537-546,558,563-565,592,594
+  s_02cd5a154e2500::t_1f783e60b798e3 484-487
+  s_02cd5a154e2500::t_710140ca1bbe1e 293-300
+  s_02cd5a154e2500::t_5262bfa6f0b92b 495
+  s_02cd5a154e2500::t_ab8496703cd8be 498,500-503
+  s_02cd5a154e2500::t_8c7b9e018d02b2 1-72,76,80-167,171-216,222-292,301-315,321,332-334,339-349,356-360,362,365-398,403-407,409-410,412-422,428-435,439,448-471,475-477,481-483,491,493-494,497,499,504-522,527-530,534-536,547-556,589-591,593,595-597
+  s_02cd5a154e2500::t_f5583a58a3c0b2 73-75,77-79
+  s_02cd5a154e2500::t_9fdb4b28ce50f0 350-355
+  s_02cd5a154e2500::t_185c33a816e4ba 324
+  s_02cd5a154e2500::t_1f826caedfbc0b 472-474
+  s_02cd5a154e2500::t_3b7300f99ef559 325-331
+  s_02cd5a154e2500::t_b098567b2be04a 488-490,492,496
+  s_02cd5a154e2500::t_57bdd93a71acf3 523-526
+  s_02cd5a154e2500::t_665dd32be12ab2 557,559-562
+  s_02cd5a154e2500::t_aa2ec376de7bac 335-338
+apps/agent/src/server.ts
+  s_02cd5a154e2500::t_9bb3420abca4e0 34
+  s_02cd5a154e2500::t_9e97bda23efac1 416-428
+apps/web/package.json
+  s_02cd5a154e2500::t_fd76b9fadf0d05 12
+apps/web/e2e/board.spec.ts
+  s_02cd5a154e2500::t_1f035c640b5e85 55-57,59-61
+  s_02cd5a154e2500::t_fcf46286436d0c 265
+  s_02cd5a154e2500::t_ea13ffe4ac09ef 268
+apps/web/e2e/__screenshots__/.gitkeep
+  s_02cd5a154e2500::t_187db24b0b6953 1-4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "45b7e987d74d0c397d50a491044c8b1261529ec1",
+  "prompts": {},
+  "sessions": {
+    "s_02cd5a154e2500": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d216132b-89fa-4cc4-944c-32ec0f8be956",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
