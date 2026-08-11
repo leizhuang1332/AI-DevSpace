@@ -1,0 +1,21 @@
+apps/agent/src/__tests__/board/board-chat-route.test.ts
+  s_4472897ffc894e::t_ede0e11b9ba3c2 331-332,334-335
+apps/agent/src/routes/board-chat.ts
+  s_4472897ffc894e::t_4356f4b700d0f1 366-372,379,384-385,393-394
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "a4dcf8e7209200ebbb349600dd2a5bd9e3a12eff",
+  "prompts": {},
+  "sessions": {
+    "s_4472897ffc894e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aa370eb5-e365-4746-a080-f9836ef0524e",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
