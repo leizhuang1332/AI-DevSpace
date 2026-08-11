@@ -328,8 +328,11 @@ describe('POST /chat/sessions/start', () => {
     expect(body.meta.sessionId).toBe('sdk-sess-first-001')
     expect(body.meta.cardId).toBe(CARD_ID)
     expect(body.meta.model).toBe('claude-sonnet-5')
-    // Provider 被调(且 prompt 含用户输入)
+    // Provider 被调 1 次(bootstrap sessionId);但 prompt 必须 === '',
+    // 不消耗用户首条消息 —— 首条消息由 /query 唯一处理(issue 10)
     expect(provider.runChatQuery).toHaveBeenCalledTimes(1)
+    const startCall = provider.runChatQuery.mock.calls[0]?.[0] as { prompt: string }
+    expect(startCall.prompt).toBe('')
   })
 
   it('200 + existing meta when session.json already on disk (no second SDK init)', async () => {

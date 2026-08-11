@@ -363,18 +363,26 @@ export async function boardChatRoutes(
       }
 
       // 5. 首次启动 —— 调 Provider.runChatQuery(无 resume),等 session_init 落盘
+      // 注:prompt 必须 === ''(issue 10 不变量)—— /start 只 bootstrap sessionId,
+      // 不消耗用户首条消息;用户首条消息由后续 /query 唯一处理。否则会触发:
+      //   - 首条消息延迟 ×2(/start 黑盒跑完整 turn + /query 再跑一次)
+      //   - credits 双倍烧
+      //   - /start 期间 AI 若调 Write/Bash,userConfirmHandler 写死 allow,
+      //     用户无从 deny(危险命令静默执行)
+      //   - SDK session 历史出现两次相同 user turn → 后续 AI 上下文污染
       const cwd = cardChatDir(reqId, cardId)
       let observedSessionId: string | null = null
       let observedCwd = cwd
       let observedModel = 'claude-sonnet-5'
 
       const result = await chatProvider.runChatQuery({
-        prompt: promptFromContent(parsed.data.content),
+        prompt: '',
         cwd,
         additionalDirectories: [joinReqDir(reqId)],
         model: observedModel,
         permissionMode: DEFAULT_PERMISSION_MODE,
-        // /start 阶段无 SSE,userConfirmHandler 自动 allow(不阻塞)
+        // /start 阶段无 SSE,userConfirmHandler 自动 allow(不阻塞);
+        // 空 prompt 下 SDK 不会发起 tool call(decision 边界由 prompt='' 保证)。
         userConfirmHandler: async () => ({ behavior: 'allow' as const }),
         onEvent: (event) => {
           if (event.kind === 'session_init') {
@@ -382,6 +390,8 @@ export async function boardChatRoutes(
             if (typeof event.cwd === 'string') observedCwd = event.cwd
             if (typeof event.model === 'string') observedModel = event.model
           }
+          // 其它事件(message_assistant / tool_call / complete 等)静默丢弃——
+          // /start 不暴露给 client,只拿 sessionId 用于落盘
         },
       })
 
