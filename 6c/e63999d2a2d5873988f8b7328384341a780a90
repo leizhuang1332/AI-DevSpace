@@ -1,0 +1,33 @@
+apps/web/src/components/board/detail/CardTranscriptPanel.tsx
+  s_4472897ffc894e::t_898ebaa2a10c3e 218-219,221
+packages/shared/src/__tests__/board-chat.test.ts
+  s_4472897ffc894e::t_1144e71ef0d517 40
+  s_4472897ffc894e::t_54f79bfb3b6528 876-902
+apps/agent/src/__tests__/board/board-chat-route.test.ts
+  s_4472897ffc894e::t_447d34a7c65d5a 363-397,402-415,418
+apps/agent/src/routes/board-chat.ts
+  s_4472897ffc894e::t_59fe50f14923d0 63
+  s_4472897ffc894e::t_f6cb3bfe6e8007 332-334
+apps/web/src/lib/board-chat-hooks.ts
+  s_4472897ffc894e::t_1243d174187519 422-424,426,437,442
+packages/shared/src/board-chat.ts
+  s_4472897ffc894e::t_ca4be46cee93d1 637-660
+apps/web/src/__tests__/board/board-chat-panel.test.tsx
+  s_4472897ffc894e::t_e0f099960a032a 696-725
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "6ce63999d2a2d5873988f8b7328384341a780a90",
+  "prompts": {},
+  "sessions": {
+    "s_4472897ffc894e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aa370eb5-e365-4746-a080-f9836ef0524e",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
