@@ -1150,6 +1150,41 @@ async function chatQuery(input: ChatQueryInput): Promise<ChatQueryResult> {
         continue
       }
 
+      // issue 15 —— assistant 完整消息(SDK 0.3.206 默认 emit 模式)
+      // SDK 在每个 turn 末尾 emit `assistant` event 携带完整 assistant 消息,
+      // m.message.content 是 block 数组(可能含 text / tool_use / etc)。
+      // 之前 for-await 循环没 case 处理 type=assistant,导致 assistant 文本
+      // 静默丢弃 → SSE 流只有 chat_session_init + chat_complete,无
+      // chat_message_assistant → web 端"AI 没回复"。
+      if (type === 'assistant') {
+        const message = m['message'] as { content?: unknown } | undefined
+        const content = message?.content
+        if (Array.isArray(content)) {
+          const textParts: string[] = []
+          for (const block of content) {
+            if (
+              block !== null &&
+              typeof block === 'object' &&
+              (block as Record<string, unknown>)['type'] === 'text'
+            ) {
+              const text = (block as Record<string, unknown>)['text']
+              if (typeof text === 'string' && text.length > 0) {
+                textParts.push(text)
+              }
+            }
+          }
+          if (textParts.length > 0) {
+            input.onEvent({
+              kind: 'message_assistant',
+              ts,
+              text: textParts.join(''),
+              partial: false, // SDK 0.3.x assistant event 是完整消息
+            })
+          }
+        }
+        continue
+      }
+
       // result → complete event
       if (type === 'result') {
         const subtype = m['subtype'] as string | undefined
