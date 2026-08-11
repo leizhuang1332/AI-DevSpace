@@ -1,0 +1,23 @@
+.scratch/board-chat/issues/15-agent-query-assistant-event-handler.md
+  s_4472897ffc894e::t_1a258c50f2a905 1-117
+apps/agent/src/providers/ClaudeCodeProvider.ts
+  s_4472897ffc894e::t_9f70101961b6b8 1153-1187
+apps/agent/src/__tests__/ClaudeCodeProvider.runChatQuery.test.ts
+  s_4472897ffc894e::t_e2b26538cf20b7 197-413
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "7b6084599de12fdee79d4a264d8a08d4bb4f1b42",
+  "prompts": {},
+  "sessions": {
+    "s_4472897ffc894e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aa370eb5-e365-4746-a080-f9836ef0524e",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
