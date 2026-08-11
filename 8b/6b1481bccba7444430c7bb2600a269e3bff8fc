@@ -1,0 +1,64 @@
+apps/agent/src/services/board/ChatSessionService.ts
+  s_4472897ffc894e::t_ee79c1d1d1e5ca 33,469
+  s_4472897ffc894e::t_55b8f4f032ad2d 470-545
+.scratch/board-chat/issues/13-agent-query-session-expired-recovery.md
+  s_4472897ffc894e::t_820a83f50c57cc 1-7,9-128
+  s_4472897ffc894e::t_2ce256dd26e622 8
+apps/agent/src/providers/AIProvider.ts
+  s_4472897ffc894e::t_8c2a0284c89b58 288-300
+apps/agent/src/__tests__/board/board-chat-route.test.ts
+  s_4472897ffc894e::t_1c0ddddfaaf3fe 1114-1175,1177-1216,1218-1233,1235-1243,1245-1273,1275-1355
+  s_4472897ffc894e::t_7db375956fb0be 1176,1217,1234,1244
+  s_4472897ffc894e::t_542da2317b3eaf 1274
+  s_4472897ffc894e::t_ae237d56842e92 28
+apps/agent/src/routes/board-chat.ts
+  s_4472897ffc894e::t_cb626bc8f0e3ad 599
+  s_4472897ffc894e::t_aa54e64b2a8276 42-48
+  s_4472897ffc894e::t_2cb9a86552fec3 89
+  s_4472897ffc894e::t_6f0612ef29847d 215-221,225,229
+  s_4472897ffc894e::t_5bcbbfcf6ed353 597,601,670-698
+  s_4472897ffc894e::t_94f69f982110cc 1073-1128
+apps/web/src/__tests__/board/board-chat-panel.test.tsx
+  s_4472897ffc894e::t_6fb91e45c7ea99 1218-1292
+  s_4472897ffc894e::t_6836a1e0bf0b38 652,685,753,974,1015,1057,1107,1157,1201
+  s_4472897ffc894e::t_437c7f546282cc 162
+  s_4472897ffc894e::t_03c4a7437ed5b6 478,520,879,917
+  s_4472897ffc894e::t_34c9a0bec0830a 561,597
+apps/agent/src/__tests__/board/chat-session-service.test.ts
+  s_4472897ffc894e::t_fcc60af2e36455 614-703
+apps/web/src/lib/board-chat-hooks.ts
+  s_4472897ffc894e::t_283d59b5b57b2b 244-253
+  s_4472897ffc894e::t_8727ce24cc6436 134-138,169-171,184-194,201-202,221
+  s_4472897ffc894e::t_23d102614da1a0 195-200
+  s_4472897ffc894e::t_ca1c1d22ddbc41 499-513,515-524,551-552
+  s_4472897ffc894e::t_1e50b623c6e70e 103-108
+  s_4472897ffc894e::t_4e92b31beeb96a 514,525-550
+  s_4472897ffc894e::t_dc7f284342119f 11,498
+apps/agent/src/providers/ClaudeCodeProvider.ts
+  s_4472897ffc894e::t_6ef40fc95cf385 1173
+  s_4472897ffc894e::t_71eccf09f0c1ae 1077-1078
+  s_4472897ffc894e::t_88b76167fd99f9 1205-1218
+apps/web/src/components/board/detail/CardTranscriptPanel.tsx
+  s_4472897ffc894e::t_98dad51b10351f 327-348
+  s_4472897ffc894e::t_5ff0d092543534 216-225,237
+packages/shared/src/__tests__/board-chat.test.ts
+  s_4472897ffc894e::t_b684836c0dfe27 518,522,530-551
+packages/shared/src/board-chat.ts
+  s_4472897ffc894e::t_ba44a418d8b543 487,491-499
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "8b6b1481bccba7444430c7bb2600a269e3bff8fc",
+  "prompts": {},
+  "sessions": {
+    "s_4472897ffc894e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aa370eb5-e365-4746-a080-f9836ef0524e",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
