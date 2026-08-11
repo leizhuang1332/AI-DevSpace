@@ -213,6 +213,16 @@ export function CardTranscriptPanel({
   const handleSend = useCallback(
     async (content: string): Promise<void> => {
       if (lock.lockedByOtherTab) return
+      // issue 13 端到端自愈:stream hook 在收到 chat_error E_SESSION_EXPIRED
+      // 时已自动调 reset(无需 UI 介入),此时 sessionExpired=true;
+      // handleSend 不调 stream.send(因为 stream.status='closed' 也会短路
+      // 旧 send),等待下一次 send 时由用户重新触发 → 新一轮 start → 新 sessionId
+      if (stream.sessionExpired) {
+        // 已自愈完毕;meta 已被 reset 清成 null,新一轮 send 走无 meta 路径
+        pendingStartRef.current = content
+        await startMutation.mutateAsync({})
+        return
+      }
       if (!meta) {
         // 启动 session 后 snapshot 会刷新;把内容记到 ref,等 meta 出现再 send
         // issue 12 —— /start schema 解耦:/start 不再处理 user content,
@@ -224,7 +234,7 @@ export function CardTranscriptPanel({
       }
       await stream.send({ content, cardId: card.id })
     },
-    [lock.lockedByOtherTab, meta, startMutation, stream, card.id],
+    [lock.lockedByOtherTab, stream.sessionExpired, meta, startMutation, stream, card.id],
   )
 
   // 监听 snapshot 拿到新 meta 后自动触发 send(start 模式)
@@ -314,16 +324,28 @@ export function CardTranscriptPanel({
       </div>
 
       {/* 顶部 banner:首次进入提示 + 旧 transcript 折叠 */}
-      <div
-        data-testid="board-chat-banner"
-        className="text-xs text-text-3 bg-bg-subtle px-2 py-1.5 rounded flex items-start gap-2"
-      >
-        <span>📦</span>
-        <span>
-          这是 Claude Code SDK session,跟下方旧 transcript.yaml 是两套形态 —— chat 走 SDK
-          sessionId 续接,旧 transcript 保持只读折叠。
-        </span>
-      </div>
+      {stream.sessionExpired ? (
+        <div
+          data-testid="board-chat-banner"
+          className="text-xs text-warning bg-warning/10 px-2 py-1.5 rounded flex items-start gap-2"
+        >
+          <span>⚠️</span>
+          <span>
+            SDK session 失效已自动清理 —— 请重新输入并发送,系统会自动开启新 session。
+          </span>
+        </div>
+      ) : (
+        <div
+          data-testid="board-chat-banner"
+          className="text-xs text-text-3 bg-bg-subtle px-2 py-1.5 rounded flex items-start gap-2"
+        >
+          <span>📦</span>
+          <span>
+            这是 Claude Code SDK session,跟下方旧 transcript.yaml 是两套形态 —— chat 走 SDK
+            sessionId 续接,旧 transcript 保持只读折叠。
+          </span>
+        </div>
+      )}
       {hasLegacyTranscript && (
         <details
           data-testid="board-chat-legacy-fold"

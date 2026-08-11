@@ -8,6 +8,7 @@
  * - `useChatSessionLock(reqId, cardId)` —— 探测 in-flight query lock(同
  *   (reqId, cardId) 只能 1 个 in-flight;第二个 tab 拿不到则显示 banner)
  * - `useChatSessionStart(reqId, cardId)` —— POST /start(无 session 时)
+ * - `useChatSessionReset(reqId, cardId)` —— POST /reset(issue 13 端到端自愈)
  * - `useChatQuery(...)` —— 包含 SSE 连接的 mutation(由 stream hook 内部调)
  * - `useChatPermission(reqId, cardId, sessionId)` —— POST /permission 决议
  * - `useChatModelSwitch(...)` —— PUT /model
@@ -99,6 +100,12 @@ export interface UseChatSessionStreamResult {
   > | null
   /** 是否到达 cost cap(供 UI 弹 CostCapModal)。 */
   pendingCostCap: boolean
+  /**
+   * issue 13 —— SSE 末条为 `chat_error { code: 'E_SESSION_EXPIRED' }` 时
+   * 置 true。stream hook 内部已触发 useChatSessionReset(自动端到端自愈),
+   * UI 据此知道"自动 /start + 让用户重新输入",无需显示错误或拦截 send。
+   */
+  sessionExpired: boolean
   /** 触发新 query(POST .../query SSE)。 */
   send: (input: UseChatSessionStreamInput) => Promise<void>
   /** 中断 in-flight SSE 连接。 */
@@ -124,6 +131,11 @@ export function useChatSessionStream(
   const [events, setEvents] = useState<ChatSessionEvent[]>([])
   const [status, setStatus] = useState<ChatStreamStatus>('idle')
   const [error, setError] = useState<string | null>(null)
+  // issue 13 —— SSE 末条 chat_error E_SESSION_EXPIRED 时置 true;
+  // 同一个 session 内只触发一次 reset(避免重复重置)
+  const [sessionExpired, setSessionExpired] = useState(false)
+  const resetTriggeredRef = useRef(false)
+  const qc = useQueryClient()
   const abortRef = useRef<AbortController | null>(null)
   const pendingResolveRef = useRef<((v: void) => void) | null>(null)
 
@@ -154,6 +166,9 @@ export function useChatSessionStream(
       const ctrl = new AbortController()
       abortRef.current = ctrl
       setError(null)
+      // 重置 sessionExpired 标志(新一轮 send 不应被上一轮自愈状态污染)
+      setSessionExpired(false)
+      resetTriggeredRef.current = false
       setStatus('streaming')
 
       return new Promise<void>((resolve) => {
@@ -166,6 +181,25 @@ export function useChatSessionStream(
           signal: ctrl.signal,
           onEvent: (event) => {
             setEvents((prev) => [...prev, event])
+            // issue 13 端到端自愈:收到 chat_error { code: 'E_SESSION_EXPIRED' }
+            // → 自动调 reset 端点 + 清 snapshot cache + 关 stream status,
+            // 不算 stream error(用户视角:自动重启 session,无需介入)
+            if (
+              event.kind === 'chat_error' &&
+              event.code === 'E_SESSION_EXPIRED' &&
+              !resetTriggeredRef.current
+            ) {
+              resetTriggeredRef.current = true
+              setSessionExpired(true)
+              setStatus('closed')
+              // 共享 reset 触发函数 + invalidate snapshot —— 与 useChatSessionReset
+              // mutation 走同一路径(issue 13 review #2)
+              void triggerChatSessionReset(requirementId, cardId).then(() =>
+                qc.invalidateQueries({
+                  queryKey: ['board-chat-snapshot', requirementId, cardId],
+                }),
+              )
+            }
           },
           onError: (msg) => {
             setError(msg)
@@ -184,7 +218,7 @@ export function useChatSessionStream(
         })
       })
     },
-    [requirementId, cardId, meta],
+    [requirementId, cardId, meta, qc],
   )
 
   // 派生:last permission_request 且无对应 permission_resolved → pending
@@ -207,7 +241,16 @@ export function useChatSessionStream(
     return meta.cumulativeUsage.cumulativeCostUsd >= 5
   }, [meta])
 
-  return { events, status, error, pendingPermission, pendingCostCap, send, abort }
+  return {
+    events,
+    status,
+    error,
+    pendingPermission,
+    pendingCostCap,
+    sessionExpired,
+    send,
+    abort,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -450,6 +493,61 @@ export function useChatSessionStart(requirementId: string, cardId: string) {
       })
     },
   })
+}
+
+/**
+ * POST `/chat/sessions/reset`(issue 13 端到端自愈)——
+ * 删 stale session.json + audit/ + SDK jsonl,返 cleared summary。
+ *
+ * 调用时机:
+ * - 手动:用户主动放弃当前 session 时
+ * - 自动:stream hook 在 `chat_error { code: 'E_SESSION_EXPIRED' }` 后内部触发
+ *   (无需 UI 介入),成功后 invalidate snapshot 让 UI 重渲染
+ *
+ * 成功后 snapshot.meta 变 null(因 service.delete 把 session.json rename .bak),
+ * CardTranscriptPanel 据此走空态 + 提示用户重新输入。
+ */
+export function useChatSessionReset(requirementId: string, cardId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async () => {
+      return triggerChatSessionReset(requirementId, cardId)
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({
+        queryKey: ['board-chat-snapshot', requirementId, cardId],
+      })
+      void qc.removeQueries({
+        queryKey: ['board-chat-snapshot', requirementId, cardId],
+      })
+    },
+  })
+}
+
+/**
+ * 共享 reset 触发函数 —— `useChatSessionReset` mutation 与 stream hook 在
+ * `chat_error E_SESSION_EXPIRED` 自动路径都走它,集中 fire-and-forget + 错误吞掉
+ * (issue 13 review 中 #2:避免 mutation 与 fetch 两条路径各写一份 cache 失效逻辑)。
+ *
+ * 返回的 Promise 仅用于 hook 内部 await,UI 层不感知 —— 失败也不阻断自愈流。
+ */
+export async function triggerChatSessionReset(
+  requirementId: string,
+  cardId: string,
+): Promise<void> {
+  try {
+    await fetch(
+      `${getAgentBase()}/api/requirement/${encodeURIComponent(requirementId)}/board/cards/${encodeURIComponent(cardId)}/chat/sessions/reset`,
+      {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      },
+    )
+  } catch {
+    /* 吞掉错误 —— UI 自动重试,reset 失败不阻断 /start */
+  }
 }
 
 /**

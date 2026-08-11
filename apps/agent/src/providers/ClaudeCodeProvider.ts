@@ -1074,6 +1074,8 @@ async function chatQuery(input: ChatQueryInput): Promise<ChatQueryResult> {
   // 3) 调 queryFn —— 走注入的 query(测试用 mock,生产用 SDK)
   const q = await getModuleQuery()
   let observedSessionId = ''
+  let lastReason: 'end_turn' | 'cancelled' | 'error' | 'max_tokens' | null =
+    null
   try {
     const stream = q({ prompt: input.prompt, options: sdkOptions })
     for await (const raw of stream) {
@@ -1168,6 +1170,7 @@ async function chatQuery(input: ChatQueryInput): Promise<ChatQueryResult> {
               : subtype === 'cancelled'
                 ? 'cancelled'
                 : 'error'
+        lastReason = reason
         input.onEvent({
           kind: 'complete',
           ts,
@@ -1199,7 +1202,20 @@ async function chatQuery(input: ChatQueryInput): Promise<ChatQueryResult> {
     }
   }
 
-  return { ok: true, sessionId: observedSessionId }
+  // issue 13 —— 端到端自愈触发:SDK resume 一个已失效 sessionId 时,
+  // 走 result { subtype ∉ success/error_max_tokens/cancelled } 路径,且
+  // 始终没 emit system/init(observedSessionId 保持 '')。这是无声失败的
+  // 标志,Provider 显式标 isSessionExpired = true,由路由层自动清理
+  // stale session.json + 推 SSE `chat_error E_SESSION_EXPIRED`。
+  const isSessionExpired =
+    !!input.resumeSessionId &&
+    observedSessionId === '' &&
+    lastReason === 'error'
+  return {
+    ok: true,
+    sessionId: observedSessionId,
+    isSessionExpired,
+  }
 }
 
 /**

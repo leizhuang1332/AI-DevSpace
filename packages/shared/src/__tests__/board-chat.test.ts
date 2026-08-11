@@ -515,16 +515,38 @@ describe('ChatSessionEventSchema — 9 类主事件 + 4 类 sub-agent 事件', (
     expect(r.success).toBe(true)
   })
 
-  it('accepts chat_error with category', () => {
+  it('accepts chat_error with category (issue 13 code enum)', () => {
     const r = ChatSessionEventSchema.safeParse({
       kind: 'chat_error',
       ts: 1000,
-      code: 'E_API_RATE_LIMIT',
+      code: 'E_QUERY_FAILED',
       message: 'rate limited',
       recoverable: true,
       category: 'A',
     })
     expect(r.success).toBe(true)
+  })
+
+  it('accepts chat_error with code=E_SESSION_EXPIRED', () => {
+    const r = ChatSessionEventSchema.safeParse({
+      kind: 'chat_error',
+      ts: 1000,
+      code: 'E_SESSION_EXPIRED',
+      message: 'SDK session 失效,前端将自动 reset',
+      recoverable: true,
+    })
+    expect(r.success).toBe(true)
+  })
+
+  it('rejects chat_error with unknown code (issue 13 enum tighten)', () => {
+    const r = ChatSessionEventSchema.safeParse({
+      kind: 'chat_error',
+      ts: 1000,
+      code: 'E_API_RATE_LIMIT', // enum 外字符串
+      message: 'rate limited',
+      recoverable: true,
+    })
+    expect(r.success).toBe(false)
   })
 
   it('accepts chat_complete with reason=end_turn', () => {

@@ -30,6 +30,7 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs'
 import { createHash } from 'node:crypto'
@@ -463,6 +464,83 @@ export class ChatSessionService {
     }
     this.writeMeta(requirementId, cardId, validated.data)
     return validated.data
+  }
+
+  // -------------------------------------------------------------------------
+  // Reset / Delete —— issue 13 自愈路径
+  // -------------------------------------------------------------------------
+
+  /**
+   * 删 stale session.json + audit/ 子目录 + SDK jsonl(issue 13 端到端自愈)。
+   *
+   * 触发场景:`/query` 调到已失效 sessionId 时(典型:`/start` 时
+   * FakeChatProvider 落 `sdk-fake-001` 假 id,后续切真 Provider 再 `/query`
+   * 真 SDK 找不到该 session,issue 13 根因),由 `/query` handler 自动调用,
+   * 或 web 端收到 `chat_error { code: 'E_SESSION_EXPIRED' }` 后调
+   * `POST /chat/sessions/reset` 触发。
+   *
+   * 物理清理:
+   * - session.json → 先 rename 到 session.json.bak(兜底可回滚)
+   * - chat/audit/ 目录 → 整目录删
+   * - SDK jsonl(`~/.claude/projects/<hash>/<sid>.jsonl`)→ 删
+   * - card 物理 dir 不动(card.json 等其他文件保留)
+   *
+   * 锁行为:不参与 queryLocks(lock 由 route 层管)。本方法本身是幂等的:
+   * 多次调对不存在的 session.json / SDK jsonl 安全。
+   *
+   * @returns 清理摘要(给 caller 调试 / 日志用)
+   */
+  delete(
+    requirementId: string,
+    cardId: string,
+  ): {
+    sessionJson: 'renamed' | 'absent'
+    auditDir: 'removed' | 'absent'
+    sdkJsonl: 'removed' | 'absent'
+  } {
+    const sessionPath = this.sessionJsonPath(requirementId, cardId)
+    let sessionJson: 'renamed' | 'absent' = 'absent'
+    if (existsSync(sessionPath)) {
+      // rename 到 .bak 兜底(误删可回滚)
+      renameSync(sessionPath, `${sessionPath}.bak`)
+      sessionJson = 'renamed'
+    }
+
+    // 删 chat/audit/ 子目录(若存在);issue 06 D16 物理独立,本方法一并清
+    const chatDir = this.chatDir(requirementId, cardId)
+    const auditDir = join(chatDir, 'audit')
+    let auditDirResult: 'removed' | 'absent' = 'absent'
+    if (existsSync(auditDir)) {
+      rmSync(auditDir, { recursive: true, force: true })
+      auditDirResult = 'removed'
+    }
+
+    // 删 SDK jsonl —— 必须先读 cwd + sessionId 才能派生路径,所以仅在
+    // session.json 仍可读(.bak 之前)时尝试;若 .bak 不存在则跳过
+    let sdkJsonl: 'removed' | 'absent' = 'absent'
+    const bakPath = `${sessionPath}.bak`
+    if (existsSync(bakPath)) {
+      try {
+        const raw = readFileSync(bakPath, 'utf8')
+        const parsed = JSON.parse(raw) as {
+          cwd?: string
+          sessionId?: string
+        }
+        if (parsed.cwd && parsed.sessionId) {
+          const sdkPath = sdkSessionLogPathFor(parsed.cwd, parsed.sessionId)
+          if (existsSync(sdkPath)) {
+            rmSync(sdkPath, { force: true })
+            sdkJsonl = 'removed'
+          }
+        }
+      } catch {
+        /* 损坏 .bak 忽略 —— 不阻断 reset */
+      }
+    }
+
+    // 进程级 cache 清掉(避免 chatSessionService.get 仍返 stale meta)
+    // chat dir 物理仍存在,只要 session.json 不在 get() 就会返 null
+    return { sessionJson, auditDir: auditDirResult, sdkJsonl }
   }
 
   // -------------------------------------------------------------------------

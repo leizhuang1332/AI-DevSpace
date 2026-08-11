@@ -25,7 +25,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import http from 'node:http'
@@ -1108,6 +1108,248 @@ describe('POST /chat/sessions/:sessionId/cost-cap', () => {
       payload: { resolve: 'fly-to-the-moon' },
     })
     expect(res.statusCode).toBe(400)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// POST /chat/sessions/reset(issue 13 端到端自愈)
+// ---------------------------------------------------------------------------
+
+describe('POST /chat/sessions/reset · issue 13 自愈端点', () => {
+  /** 工具:在 chat dir 落 session.json + audit/foo.log 模拟"有 stale session" */
+  async function seedStaleSession(opts: { sdkSessionId: string; cwd: string }): Promise<void> {
+    await chatSessionService.getOrCreateSession(REQ_ID, CARD_ID, {
+      sdkSessionId: opts.sdkSessionId,
+      cwd: opts.cwd,
+      additionalDirectories: [],
+      model: 'claude-sonnet-5',
+      permissionMode: DEFAULT_PERMISSION_MODE,
+      mcpServers: [],
+      ownerUserId: 'user-1',
+    })
+    mkdirSync(join(tmpRoot, 'requirements', REQ_ID, 'board', 'tasks', CARD_ID, 'chat', 'audit'), {
+      recursive: true,
+    })
+    writeFileSync(
+      join(
+        tmpRoot,
+        'requirements',
+        REQ_ID,
+        'board',
+        'tasks',
+        CARD_ID,
+        'chat',
+        'audit',
+        'fake-audit.jsonl',
+      ),
+      '{}\n',
+    )
+  }
+
+  it('200 + acknowledged + 清掉 session.json + audit/ 子目录', async () => {
+    await seedStaleSession({
+      sdkSessionId: 'sdk-stale-001',
+      cwd: '/workspace/req-001-refund/board/tasks/01J.../chat',
+    })
+    // 确认 seed 落盘
+    expect(chatSessionService.get(REQ_ID, CARD_ID)).not.toBeNull()
+    expect(
+      existsSync(
+        join(
+          tmpRoot,
+          'requirements',
+          REQ_ID,
+          'board',
+          'tasks',
+          CARD_ID,
+          'chat',
+          'audit',
+          'fake-audit.jsonl',
+        ),
+      ),
+    ).toBe(true)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/reset`,
+      headers: authHeaders(),
+      payload: {},
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as {
+      acknowledged: boolean
+      cleared: { sessionJson: string; auditDir: string; sdkJsonl: string }
+    }
+    expect(body.acknowledged).toBe(true)
+    expect(body.cleared.sessionJson).toBe('renamed')
+    expect(body.cleared.auditDir).toBe('removed')
+    // 后续 get() 应返 null
+    expect(chatSessionService.get(REQ_ID, CARD_ID)).toBeNull()
+    // audit 物理清空
+    expect(
+      existsSync(
+        join(tmpRoot, 'requirements', REQ_ID, 'board', 'tasks', CARD_ID, 'chat', 'audit'),
+      ),
+    ).toBe(false)
+    // session.json.bak 应被保留(兜底)
+    expect(
+      existsSync(
+        join(
+          tmpRoot,
+          'requirements',
+          REQ_ID,
+          'board',
+          'tasks',
+          CARD_ID,
+          'chat',
+          'session.json.bak',
+        ),
+      ),
+    ).toBe(true)
+  })
+
+  it('200 + acknowledged (idempotent) when no session.json exists', async () => {
+    // 没 seed —— 直接 reset,service.delete 应兜底 absent + 仍返 200
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/reset`,
+      headers: authHeaders(),
+      payload: {},
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as {
+      acknowledged: boolean
+      cleared: { sessionJson: string; auditDir: string; sdkJsonl: string }
+    }
+    expect(body.acknowledged).toBe(true)
+    expect(body.cleared.sessionJson).toBe('absent')
+    expect(body.cleared.auditDir).toBe('absent')
+  })
+
+  it('404 requirement-not-found when req missing', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/requirement/req-999-missing/board/cards/${CARD_ID}/chat/sessions/reset`,
+      headers: authHeaders(),
+      payload: {},
+    })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('404 card-not-found when card missing', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/requirement/${REQ_ID}/board/cards/01J7X3K2P5EVR0Z3YQJD8HFKXX/chat/sessions/reset`,
+      headers: authHeaders(),
+      payload: {},
+    })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('409 session-locked when concurrent in-flight query holds the lock', async () => {
+    // 让 fake provider 第一次 /query 慢 200ms(进入 in-flight lock)
+    provider.runChatQuery = vi.fn(async (input: ChatQueryInput) => {
+      input.onEvent({
+        kind: 'session_init',
+        sessionId: 'sdk-sess-locked',
+        cwd: '/x',
+        model: 'claude-sonnet-5',
+      })
+      await new Promise((r) => setTimeout(r, 200))
+      return { ok: true, sessionId: 'sdk-sess-locked' }
+    })
+    const queryPromise = postSse(
+      port,
+      `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/sdk-sess-locked/query`,
+      { content: [{ kind: 'text', text: 'first' }] },
+      { 'x-aidevspace-token': token },
+      500,
+    )
+    await new Promise((r) => setTimeout(r, 30))
+    // reset 应被 409 session-locked 拒绝(in-flight /query 持锁)
+    const resetRes = await app.inject({
+      method: 'POST',
+      url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/reset`,
+      headers: authHeaders(),
+      payload: {},
+    })
+    expect(resetRes.statusCode).toBe(409)
+    expect(resetRes.json()).toMatchObject({ reason: 'session-locked' })
+    // 让 in-flight /query 跑完清理
+    await queryPromise
+  })
+})
+
+// ---------------------------------------------------------------------------
+// POST /chat/sessions/:sessionId/query · issue 13 自愈触发
+// ---------------------------------------------------------------------------
+
+describe('POST /query · issue 13 session 失效 SSE 自愈', () => {
+  it('SDK 返 ok=true + isSessionExpired=true → SSE 末条 chat_error E_SESSION_EXPIRED + session.json 被改名 .bak', async () => {
+    // seed 一个 stale session.json(模拟:之前 /start 用 fake id 'sdk-stale-resume')
+    await chatSessionService.getOrCreateSession(REQ_ID, CARD_ID, {
+      sdkSessionId: 'sdk-stale-resume',
+      cwd: '/workspace/req-001-refund/board/tasks/01J.../chat',
+      additionalDirectories: [],
+      model: 'claude-sonnet-5',
+      permissionMode: DEFAULT_PERMISSION_MODE,
+      mcpServers: [],
+      ownerUserId: 'user-1',
+    })
+    expect(chatSessionService.get(REQ_ID, CARD_ID)?.sessionId).toBe('sdk-stale-resume')
+
+    // 替换 fake provider:不 emit session_init,只 emit error 形式 complete
+    // 让 runChatQuery 返 { ok: true, sessionId: '', isSessionExpired: true }
+    provider.runChatQuery = vi.fn(async (input: ChatQueryInput) => {
+      input.onEvent({
+        kind: 'complete',
+        ts: 1,
+        sessionId: '', // 真 SDK 找不到 resume 时 observedSessionId 保持 ''
+        totalTokens: 0,
+        cost: 0,
+        reason: 'error',
+      })
+      return { ok: true, sessionId: '', isSessionExpired: true }
+    })
+
+    const res = await postSse(
+      port,
+      `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/sdk-stale-resume/query`,
+      { content: [{ kind: 'text', text: 'continuing' }] },
+      { 'x-aidevspace-token': token },
+      400,
+    )
+    expect(res.statusCode).toBe(200)
+    const events = parseSseEvents(res.body)
+    const kinds = events.map((e) => e.event)
+
+    // 末条应是 chat_error E_SESSION_EXPIRED
+    const lastError = [...events].reverse().find((e) => e.event === 'chat_error')
+    expect(lastError).toBeDefined()
+    const errorData = lastError!.data as { code: string; recoverable: boolean }
+    expect(errorData.code).toBe('E_SESSION_EXPIRED')
+    expect(errorData.recoverable).toBe(true)
+
+    // 整个 SSE 流末条事件应是 chat_error(isSessionExpired 触发)
+    expect(kinds[kinds.length - 1]).toBe('chat_error')
+
+    // session.json 应被改名 .bak(issue 13 端到端自愈关键证据)
+    expect(
+      existsSync(
+        join(
+          tmpRoot,
+          'requirements',
+          REQ_ID,
+          'board',
+          'tasks',
+          CARD_ID,
+          'chat',
+          'session.json.bak',
+        ),
+      ),
+    ).toBe(true)
+    // service.get 后续返 null
+    expect(chatSessionService.get(REQ_ID, CARD_ID)).toBeNull()
   })
 })
 

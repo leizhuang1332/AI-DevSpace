@@ -159,6 +159,7 @@ function setupDefaultMocks(): void {
     status: 'idle',
     send: vi.fn(),
     abort: vi.fn(),
+    sessionExpired: false,
   })
   mockUseChatSessionLock.mockReturnValue({ lockedByOtherTab: false })
 }
@@ -474,6 +475,7 @@ describe('CardTranscriptPanel · PermissionPrompt', () => {
       status: 'idle',
       send: sendFn,
       abort: vi.fn(),
+      sessionExpired: false,
       pendingPermission: {
         kind: 'chat_permission_request',
         ts: Date.now(),
@@ -515,6 +517,7 @@ describe('CardTranscriptPanel · PermissionPrompt', () => {
       status: 'idle',
       send: vi.fn(),
       abort: vi.fn(),
+      sessionExpired: false,
       pendingPermission: {
         kind: 'chat_permission_request',
         ts: Date.now(),
@@ -555,6 +558,7 @@ describe('CardTranscriptPanel · CostCapModal', () => {
       status: 'idle',
       send: vi.fn(),
       abort: vi.fn(),
+      sessionExpired: false,
       pendingCostCap: true,
     })
     wrap(
@@ -590,6 +594,7 @@ describe('CardTranscriptPanel · CostCapModal', () => {
       status: 'idle',
       send: vi.fn(),
       abort: vi.fn(),
+      sessionExpired: false,
       pendingCostCap: true,
     })
     wrap(
@@ -644,6 +649,7 @@ describe('CardTranscriptPanel · 发送消息', () => {
       status: 'idle',
       send: sendFn,
       abort: vi.fn(),
+      sessionExpired: false,
     })
     wrap(
       <CardTranscriptPanel
@@ -676,6 +682,7 @@ describe('CardTranscriptPanel · 发送消息', () => {
       status: 'idle',
       send: sendFn,
       abort: vi.fn(),
+      sessionExpired: false,
     })
     wrap(
       <CardTranscriptPanel
@@ -743,6 +750,7 @@ describe('CardTranscriptPanel · UsageBar issue 08 扩展', () => {
       status: 'idle',
       send: vi.fn(),
       abort: vi.fn(),
+      sessionExpired: false,
     })
   }
 
@@ -868,6 +876,7 @@ describe('CardTranscriptPanel · PermissionPrompt forced', () => {
       status: 'idle',
       send: vi.fn(),
       abort: vi.fn(),
+      sessionExpired: false,
       pendingPermission: {
         kind: 'chat_permission_request',
         ts: Date.now(),
@@ -905,6 +914,7 @@ describe('CardTranscriptPanel · PermissionPrompt forced', () => {
       status: 'idle',
       send: vi.fn(),
       abort: vi.fn(),
+      sessionExpired: false,
       pendingPermission: {
         kind: 'chat_permission_request',
         ts: Date.now(),
@@ -961,6 +971,7 @@ describe('CardTranscriptPanel · SubAgentBlock issue 08 扩展', () => {
       status: 'idle',
       send: vi.fn(),
       abort: vi.fn(),
+      sessionExpired: false,
     })
     wrap(
       <CardTranscriptPanel
@@ -1001,6 +1012,7 @@ describe('CardTranscriptPanel · SubAgentBlock issue 08 扩展', () => {
       status: 'idle',
       send: vi.fn(),
       abort: vi.fn(),
+      sessionExpired: false,
     })
     wrap(
       <CardTranscriptPanel
@@ -1042,6 +1054,7 @@ describe('CardTranscriptPanel · SubAgentBlock issue 08 扩展', () => {
       status: 'idle',
       send: vi.fn(),
       abort: vi.fn(),
+      sessionExpired: false,
     })
     wrap(
       <CardTranscriptPanel
@@ -1091,6 +1104,7 @@ describe('CardTranscriptPanel · SubAgentBlock issue 08 扩展', () => {
       status: 'idle',
       send: vi.fn(),
       abort: vi.fn(),
+      sessionExpired: false,
     })
     wrap(
       <CardTranscriptPanel
@@ -1140,6 +1154,7 @@ describe('CardTranscriptPanel · ToolCallBubble issue 08 扩展', () => {
       status: 'idle',
       send: vi.fn(),
       abort: vi.fn(),
+      sessionExpired: false,
     })
     wrap(
       <CardTranscriptPanel
@@ -1183,6 +1198,7 @@ describe('CardTranscriptPanel · ToolCallBubble issue 08 扩展', () => {
       status: 'idle',
       send: vi.fn(),
       abort: vi.fn(),
+      sessionExpired: false,
     })
     wrap(
       <CardTranscriptPanel
@@ -1198,5 +1214,80 @@ describe('CardTranscriptPanel · ToolCallBubble issue 08 扩展', () => {
     expect(screen.getByTestId('board-chat-tool-result')).toHaveTextContent(
       'line1',
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Session expired · issue 13 端到端自愈
+// ---------------------------------------------------------------------------
+
+describe('CardTranscriptPanel · session expired 自愈', () => {
+  it('stream.sessionExpired=true 时 send → 调 startMutation({}) 触发新一轮 /start', async () => {
+    mockUseChatSessionSnapshot.mockReturnValue({
+      snapshot: makeSnapshot(null), // reset 后 meta 已被清成 null
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    mockUseChatSessionStream.mockReturnValue({
+      events: [],
+      status: 'closed',
+      send: vi.fn(),
+      abort: vi.fn(),
+      sessionExpired: true, // 端到端自愈已被 stream hook 触发
+    })
+    mockStartMutate.mockClear()
+    wrap(
+      <CardTranscriptPanel
+        card={makeCard()}
+        requirementId={REQ_ID}
+        onClose={vi.fn()}
+      />,
+    )
+    const ta = screen.getByTestId('board-chat-textarea')
+    fireEvent.change(ta, { target: { value: '继续' } })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('board-chat-send'))
+    })
+    // stream.send 不应被调(sessionExpired=true → 走 startMutation 重启)
+    // startMutation 应被调 1 次({} —— 不带 content,issue 12 同款)
+    expect(mockStartMutate).toHaveBeenCalledTimes(1)
+    const callArgs = mockStartMutate.mock.calls[0]?.[0] as Record<string, unknown>
+    expect(callArgs).not.toHaveProperty('content')
+  })
+
+  it('末条 SSE 事件 chat_error E_SESSION_EXPIRED → 顶部 banner 提示重新输入', () => {
+    mockUseChatSessionSnapshot.mockReturnValue({
+      snapshot: makeSnapshot(null),
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    mockUseChatSessionStream.mockReturnValue({
+      events: [
+        {
+          kind: 'chat_error',
+          ts: Date.now(),
+          code: 'E_SESSION_EXPIRED',
+          message: 'SDK session 失效,已自动清理',
+          recoverable: true,
+        },
+      ],
+      status: 'closed',
+      send: vi.fn(),
+      abort: vi.fn(),
+      sessionExpired: true,
+    })
+    wrap(
+      <CardTranscriptPanel
+        card={makeCard()}
+        requirementId={REQ_ID}
+        onClose={vi.fn()}
+      />,
+    )
+    // 流事件里有 chat_error E_SESSION_EXPIRED —— 顶部 banner 应显示"重新输入"
+    expect(screen.getByTestId('board-chat-banner')).toHaveTextContent(/重新|自愈|reset|重新输入|继续/i)
   })
 })

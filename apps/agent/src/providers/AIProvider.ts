@@ -285,8 +285,19 @@ export type ChatStreamEvent =
 
 /** board chat 路径结果 */
 export type ChatQueryResult =
-  | { ok: true; sessionId: string }
-  | { ok: false; error: string }
+  | {
+      ok: true
+      sessionId: string
+      /**
+       * session 失效信号(issue 13)—— Provider 在 SDK resume 一个不存在的
+       * sessionId 时(典型:`/start` 时 FakeChatProvider 落 `sdk-fake-001` 假
+       * id,后续切真 Provider 再 /query 真 SDK 找不到该 session)置 true,
+       * 路由层据此自动清理 stale session.json + 推 SSE `chat_error
+       * { code: 'E_SESSION_EXPIRED' }` 走端到端自愈。SDK 正常返回 false。
+       */
+      isSessionExpired?: boolean
+    }
+  | { ok: false; error: string; isSessionExpired?: boolean }
 
 /** 扩展:board chat 直接 SDK query 接口(可选 —— 普通 Provider 不必实现) */
 export interface ChatQueryCapableProvider {

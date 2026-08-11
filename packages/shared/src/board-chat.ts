@@ -484,12 +484,19 @@ export const ChatSessionEventSchema = z.discriminatedUnion('kind', [
     requestId: z.string().min(1),
     decision: ChatDecisionWithReasonSchema,
   }),
-  // 8) chat_error —— SDK error 消息
+  // 8) chat_error —— SDK error 消息或路由层兜底
   z.object({
     kind: z.literal('chat_error'),
     ts: SseTsSchema,
-    /** 错误码(分类 A-E;同 SSE 已有约定) */
-    code: z.string().min(1),
+    /**
+     * 错误码 —— issue 13 收紧为 enum:
+     * - `E_QUERY_FAILED` —— 路由层 catch(SDK 抛 / SSE 写失败等通用兜底)
+     * - `E_SESSION_EXPIRED` —— SDK resume 不存在的 session(典型:`/start` 时
+     *   FakeChatProvider 落 'sdk-fake-001' 假 id,后续切真 Provider 再 /query
+     *   真 SDK 找不到该 session)。前端收到此 code 须自动调 reset 端点
+     *   走端到端自愈,无需用户介入。
+     */
+    code: z.enum(['E_QUERY_FAILED', 'E_SESSION_EXPIRED']),
     message: z.string().min(1),
     /** 可恢复标志 —— Web 端据此决定 retry 入口 */
     recoverable: z.boolean(),

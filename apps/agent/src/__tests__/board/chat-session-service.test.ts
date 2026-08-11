@@ -612,3 +612,93 @@ describe('ChatSessionService.loadSnapshot', () => {
     rmSync(sdkPath, { force: true })
   })
 })
+
+// ---------------------------------------------------------------------------
+// delete · issue 13 端到端自愈
+// ---------------------------------------------------------------------------
+
+describe('ChatSessionService.delete · issue 13', () => {
+  it('删 session.json(先 rename .bak)+ 清 audit/ 子目录 + 删 SDK jsonl', async () => {
+    seedRequirement()
+    await service.getOrCreateSession(REQ, CARD_A, DEFAULT_SEED)
+    // seed audit/ 子目录
+    const chatDir = service.chatDir(REQ, CARD_A)
+    const auditDir = join(chatDir, 'audit')
+    mkdirSync(auditDir, { recursive: true })
+    writeFileSync(join(auditDir, 'log.jsonl'), '{}\n', 'utf8')
+    // seed SDK jsonl
+    const sdkPath = sdkSessionLogPathFor(DEFAULT_SEED.cwd, DEFAULT_SEED.sdkSessionId)
+    mkdirSync(join(sdkPath, '..'), { recursive: true })
+    writeFileSync(sdkPath, '{}\n', 'utf8')
+
+    const sessionJsonPath = service.sessionJsonPath(REQ, CARD_A)
+    expect(existsSync(sessionJsonPath)).toBe(true)
+
+    const cleared = service.delete(REQ, CARD_A)
+    expect(cleared).toEqual({
+      sessionJson: 'renamed',
+      auditDir: 'removed',
+      sdkJsonl: 'removed',
+    })
+    // session.json 已改名 .bak
+    expect(existsSync(sessionJsonPath)).toBe(false)
+    expect(existsSync(`${sessionJsonPath}.bak`)).toBe(true)
+    // audit 物理删
+    expect(existsSync(auditDir)).toBe(false)
+    // SDK jsonl 删
+    expect(existsSync(sdkPath)).toBe(false)
+    // service.get 返 null
+    expect(service.get(REQ, CARD_A)).toBeNull()
+
+    // cleanup
+    rmSync(`${sessionJsonPath}.bak`, { force: true })
+  })
+
+  it('session 不存在 → 幂等返 {absent, absent, absent} 不抛错', () => {
+    seedRequirement()
+    const cleared = service.delete(REQ, CARD_A)
+    expect(cleared).toEqual({
+      sessionJson: 'absent',
+      auditDir: 'absent',
+      sdkJsonl: 'absent',
+    })
+  })
+
+  it('不删 card 物理 dir 本身(card.json 等其他文件保留)', async () => {
+    seedRequirement()
+    await service.getOrCreateSession(REQ, CARD_A, DEFAULT_SEED)
+    // 在 card dir 下放一个 card.json(模拟其他文件的边界场景)
+    const cardDir = join(tmpRoot, 'requirements', REQ, 'board', 'tasks', CARD_A)
+    writeFileSync(join(cardDir, 'card.json'), '{"id":"x"}\n', 'utf8')
+
+    service.delete(REQ, CARD_A)
+    // card.json 应保留
+    expect(existsSync(join(cardDir, 'card.json'))).toBe(true)
+    // 但 chat 子目录里的 session.json 已 rename .bak
+    const sessionJsonPath = service.sessionJsonPath(REQ, CARD_A)
+    expect(existsSync(sessionJsonPath)).toBe(false)
+    expect(existsSync(`${sessionJsonPath}.bak`)).toBe(true)
+  })
+
+  it('audit 不存在时 auditDir: absent + 不抛错', async () => {
+    seedRequirement()
+    await service.getOrCreateSession(REQ, CARD_A, DEFAULT_SEED)
+    // 不 seed audit
+    const cleared = service.delete(REQ, CARD_A)
+    expect(cleared.sessionJson).toBe('renamed')
+    expect(cleared.auditDir).toBe('absent')
+    expect(cleared.sdkJsonl).toBe('absent')
+  })
+
+  it('损坏的 .bak 内容(JSON 解析失败) → 不阻断,仍返 sessionJson=renamed', async () => {
+    seedRequirement()
+    await service.getOrCreateSession(REQ, CARD_A, DEFAULT_SEED)
+    // 手动把 session.json 内容搞坏,再触发 delete —— rename 会先成功,后续
+    // 读 .bak 解析失败应被 catch 吞掉,sdkJsonl 返 absent
+    const sessionJsonPath = service.sessionJsonPath(REQ, CARD_A)
+    writeFileSync(sessionJsonPath, '{not valid json', 'utf8')
+    const cleared = service.delete(REQ, CARD_A)
+    expect(cleared.sessionJson).toBe('renamed')
+    expect(cleared.sdkJsonl).toBe('absent')
+  })
+})

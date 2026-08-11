@@ -39,6 +39,13 @@
  *     body: ChatSessionCostCapResolveSchema;4 选项决议
  *     resp: 200 { acknowledged: true, resolve }
  *
+ *   POST /api/requirement/:id/board/cards/:cardId/chat/sessions/reset  (issue 13)
+ *     端到端自愈端点:删 stale session.json + audit/ + SDK jsonl,供 web 端
+ *     收到 chat_error E_SESSION_EXPIRED 后调用。复用 queryLocks 锁模式:
+ *     同 lockKey in-flight 时 409 session-locked,避免 reset 把 in-flight
+ *     query 的 session 删掉。
+ *     resp: 200 { acknowledged: true, cleared: { sessionJson, auditDir, sdkJsonl } }
+ *
  * 错误响应:复用 `REASON_TO_HTTP_STATUS_BOARD_CHAT`(requirement-not-found /
  * card-not-found / session-not-found / session-locked / invalid-body /
  * permission-denied / internal),镜像 `board-transcript.ts` 的 failWith 模式。
@@ -79,6 +86,7 @@ import type {
   AIProvider,
   ChatQueryCapableProvider,
   ChatQueryInput,
+  ChatQueryResult,
   ChatStreamEvent,
 } from '../providers/AIProvider.js'
 
@@ -204,14 +212,21 @@ export function convertChatStreamEvent(
         result: event.result,
         durationMs: event.durationMs,
       }
-    case 'error':
+    case 'error': {
+      // Provider stream 'error' 事件的 code 是自由字符串;shared schema 收紧为
+      // enum['E_QUERY_FAILED'|'E_SESSION_EXPIRED'](issue 13)。E_SESSION_EXPIRED
+      // 由 Provider 通过 isSessionExpired flag 标记,不通过此 error event
+      // 传——这里把所有 Provider 错误收敛到 E_QUERY_FAILED(路由层 catch 一致)。
+      const safeCode: 'E_QUERY_FAILED' | 'E_SESSION_EXPIRED' =
+        event.code === 'E_SESSION_EXPIRED' ? 'E_SESSION_EXPIRED' : 'E_QUERY_FAILED'
       return {
         kind: 'chat_error',
         ts,
-        code: event.code,
+        code: safeCode,
         message: event.message,
         recoverable: event.recoverable,
       }
+    }
     case 'complete':
       return {
         kind: 'chat_complete',
@@ -579,9 +594,11 @@ export async function boardChatRoutes(
 
       // 实际 runChatQuery promise 启动(同步构造,异步 await)
       const runChatQuery = chatProvider.runChatQuery.bind(chatProvider)
+      // issue 13 —— 端到端自愈:捕获 Provider 返回的 isSessionExpired 信号
       const queryPromise = (async () => {
+        let result: ChatQueryResult | undefined
         try {
-          await runChatQuery({
+          result = await runChatQuery({
             prompt: promptFromContent(parsed.data.content),
             cwd: effectiveCwd,
             additionalDirectories: effectiveAdditionalDirectories,
@@ -649,6 +666,35 @@ export async function boardChatRoutes(
             recoverable: false,
           })
           req.log.error({ err, reqId, cardId, sessionId }, 'board chat query: provider threw')
+        }
+
+        // issue 13 —— session 失效自愈路径:
+        // Provider.runChatQuery 返 ok=true 但 isSessionExpired=true 时,
+        // 表示 SDK resume 一个已失效的 sessionId(典型:`/start` 时
+        // FakeChatProvider 落 'sdk-fake-001' 假 id,后续切真 Provider 再 /query
+        // 真 SDK 找不到)。先删 stale session.json(before SSE close),
+        // 再推 chat_error E_SESSION_EXPIRED,前端收到后自动调 reset 端点。
+        if (result && result.ok && result.isSessionExpired) {
+          try {
+            chatSessionService.delete(reqId, cardId)
+            req.log.warn(
+              { reqId, cardId, sessionId },
+              'board chat query: session expired, auto-deleted session.json',
+            )
+          } catch (err) {
+            req.log.error(
+              { err, reqId, cardId, sessionId },
+              'board chat query: session-expired delete failed',
+            )
+          }
+          sseWrite({
+            kind: 'chat_error',
+            ts: Date.now(),
+            code: 'E_SESSION_EXPIRED',
+            message:
+              'SDK session 失效,已自动清理,前端将自动 reset 并重新 /start',
+            recoverable: true,
+          })
         }
       })()
       // 把真实 promise 写回 lock,让外部 queryLocks.get(lockKey)?.promise 拿到
@@ -1022,6 +1068,62 @@ export async function boardChatRoutes(
         resolve: parsed.data.resolve,
         sessionId,
       })
+    },
+  )
+
+  // =========================================================================
+  // POST /chat/sessions/reset —— issue 13 端到端自愈端点
+  // =========================================================================
+  app.post<{ Params: { id: string; cardId: string } }>(
+    '/api/requirement/:id/board/cards/:cardId/chat/sessions/reset',
+    async (req, reply) => {
+      const { id: reqId, cardId } = req.params
+
+      if (!taskCardStore.exists(reqId)) {
+        return failWith(reply, 'requirement-not-found', `requirement ${reqId} not found`, req.log)
+      }
+      const card = taskCardStore.get(reqId, cardId)
+      if (!card) {
+        return failWith(reply, 'card-not-found', `card ${cardId} not found in req ${reqId}`, req.log)
+      }
+
+      // 锁语义 —— 复用 /start / /query 的 queryLocks;in-flight query 期间
+      // 不应被 reset 把 stale session 删掉(会导致 in-flight query 后续
+      // recordUsage 时找不到 session.json)。同 lockKey 已有 in-flight → 409。
+      const lockKey = `${reqId}::${cardId}`
+      if (queryLocks.has(lockKey)) {
+        return failWith(
+          reply,
+          'session-locked',
+          `another /start or /query is in-flight for ${reqId}/${cardId}; please wait`,
+          req.log,
+        )
+      }
+
+      // 占位锁 → 调 service.delete → finally 释放(虽然 delete 本身很快,
+      // 但锁语义保持一致:reset 是写操作,跟 /start / /query 同性质)
+      queryLocks.set(lockKey, {
+        promise: Promise.resolve(),
+        permissionRequestIds: new Set<string>(),
+      })
+      try {
+        const result = chatSessionService.delete(reqId, cardId)
+        req.log.info({ reqId, cardId, result }, 'board chat reset: cleared session')
+        return reply.code(200).send({
+          acknowledged: true,
+          cleared: result,
+        })
+      } catch (err) {
+        req.log.error({ err, reqId, cardId }, 'board chat reset: delete failed')
+        return failWith(
+          reply,
+          'internal',
+          err instanceof Error ? err.message : 'reset failed',
+          req.log,
+        )
+      } finally {
+        queryLocks.delete(lockKey)
+      }
     },
   )
 }
