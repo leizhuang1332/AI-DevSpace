@@ -1196,9 +1196,25 @@ async function chatQuery(input: ChatQueryInput): Promise<ChatQueryResult> {
       }
     }
   } catch (err) {
+    // issue 14 —— SDK CLI throw 路径下的 session-expired 自愈:
+    // 真实调用链:SDK 调 `claude -p --resume <id>`,CLI 找不到该 sessionId
+    // 时(典型:`/start` 用 FakeChatProvider 落 `sdk-fake-001` 非 UUID 假 id,
+    // 后续切真 Provider 再 /query 真 CLI 找不到)—— CLI 退出码非 0,SDK 先
+    // emit `result { subtype: 'error_during_execution' }`,再把 stderr 包成
+    // Error throw 出来。issue 13 的 ok=true 分支 isSessionExpired 检测不
+    // 覆盖这条路径;这里 catch 时按 error message 特征识别 resume-fail,
+    // 标 isSessionExpired=true,路由层据此走端到端自愈(issue 13 的 SSE
+    // `chat_error E_SESSION_EXPIRED` + 自动 reset)。
+    const message = err instanceof Error ? err.message : String(err)
+    const isSessionExpired =
+      !!input.resumeSessionId &&
+      /--resume requires a valid session ID|is not a UUID|does not match any session/i.test(
+        message,
+      )
     return {
       ok: false,
-      error: err instanceof Error ? err.message : String(err),
+      error: message,
+      isSessionExpired,
     }
   }
 

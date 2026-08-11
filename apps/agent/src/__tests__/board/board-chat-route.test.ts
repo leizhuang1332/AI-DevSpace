@@ -1351,6 +1351,136 @@ describe('POST /query · issue 13 session 失效 SSE 自愈', () => {
     // service.get 后续返 null
     expect(chatSessionService.get(REQ_ID, CARD_ID)).toBeNull()
   })
+
+  it('issue 14: SDK CLI throw 路径(ok=false + isSessionExpired=true) → SSE 末条 chat_error E_SESSION_EXPIRED + session.json 被改名 .bak', async () => {
+    // 真实调用栈(2026-08-11 抓):
+    // SDK 调 `claude -p --resume sdk-fake-001 ...`,CLI 找不到 session,先 emit
+    //   result { subtype: 'error_during_execution', session_id: '<new uuid>' }
+    // 然后 throw `Claude Code returned an error result: Error: --resume requires a
+    //   valid session ID... Provided value "sdk-fake-001" is not a UUID`
+    // Provider catch → { ok: false, error: '...', isSessionExpired: true }
+    // 路由层原本只判 `result.ok && result.isSessionExpired`,ok=false 时跳过
+    // 自愈 —— 必须扩展为 `result.isSessionExpired`(不依赖 ok)
+    await chatSessionService.getOrCreateSession(REQ_ID, CARD_ID, {
+      sdkSessionId: 'sdk-fake-001', // FakeChatProvider 留下的假 id
+      cwd: '/workspace/req-001-refund/board/tasks/01J.../chat',
+      additionalDirectories: [],
+      model: 'claude-sonnet-5',
+      permissionMode: DEFAULT_PERMISSION_MODE,
+      mcpServers: [],
+      ownerUserId: 'user-1',
+    })
+
+    // 模拟 Provider catch 走 resume-session-not-found 模式
+    provider.runChatQuery = vi.fn(async (input: ChatQueryInput) => {
+      // SDK 在 throw 前先 emit 一个 complete event(reason='error',
+      // sessionId='')—— 路由层会推 chat_complete(reason=error) 到 SSE
+      input.onEvent({
+        kind: 'complete',
+        ts: 1,
+        sessionId: '',
+        totalTokens: 0,
+        cost: 0,
+        reason: 'error',
+      })
+      // 然后 throw → Provider catch → 返 ok=false + isSessionExpired=true
+      return {
+        ok: false,
+        error:
+          'Claude Code returned an error result: Error: --resume requires a valid ' +
+          'session ID or session title when used with --print. Usage: claude -p ' +
+          '--resume <session-id|title>. Provided value "sdk-fake-001" is not a ' +
+          'UUID and does not match any session title.',
+        isSessionExpired: true,
+      }
+    })
+
+    const res = await postSse(
+      port,
+      `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/sdk-fake-001/query`,
+      { content: [{ kind: 'text', text: 'hi' }] },
+      { 'x-aidevspace-token': token },
+      400,
+    )
+    expect(res.statusCode).toBe(200)
+    const events = parseSseEvents(res.body)
+    const kinds = events.map((e) => e.event)
+
+    // 末条应是 chat_error E_SESSION_EXPIRED(issue 14 关键断言)
+    const lastError = [...events].reverse().find((e) => e.event === 'chat_error')
+    expect(lastError).toBeDefined()
+    const errorData = lastError!.data as { code: string; recoverable: boolean }
+    expect(errorData.code).toBe('E_SESSION_EXPIRED')
+    expect(errorData.recoverable).toBe(true)
+
+    expect(kinds[kinds.length - 1]).toBe('chat_error')
+
+    // session.json 应被改名 .bak(跟 ok=true 路径一致的自愈证据)
+    expect(
+      existsSync(
+        join(
+          tmpRoot,
+          'requirements',
+          REQ_ID,
+          'board',
+          'tasks',
+          CARD_ID,
+          'chat',
+          'session.json.bak',
+        ),
+      ),
+    ).toBe(true)
+    expect(chatSessionService.get(REQ_ID, CARD_ID)).toBeNull()
+  })
+
+  it('issue 14: SDK throw 非 session-expired 错误(ok=false + isSessionExpired=false) → SSE 末条 chat_error E_QUERY_FAILED,session.json 保留', async () => {
+    await chatSessionService.getOrCreateSession(REQ_ID, CARD_ID, {
+      sdkSessionId: 'sdk-fake-001',
+      cwd: '/workspace/req-001-refund/board/tasks/01J.../chat',
+      additionalDirectories: [],
+      model: 'claude-sonnet-5',
+      permissionMode: DEFAULT_PERMISSION_MODE,
+      mcpServers: [],
+      ownerUserId: 'user-1',
+    })
+
+    // 模拟一个非 session-expired 的 throw(error message 不含 --resume / UUID 特征)
+    provider.runChatQuery = vi.fn(async (input: ChatQueryInput) => {
+      input.onEvent({
+        kind: 'complete',
+        ts: 1,
+        sessionId: '',
+        totalTokens: 0,
+        cost: 0,
+        reason: 'error',
+      })
+      return {
+        ok: false,
+        error: 'rate limit exceeded',
+        isSessionExpired: false, // 不是 session 失效
+      }
+    })
+
+    const res = await postSse(
+      port,
+      `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/sdk-fake-001/query`,
+      { content: [{ kind: 'text', text: 'hi' }] },
+      { 'x-aidevspace-token': token },
+      400,
+    )
+    expect(res.statusCode).toBe(200)
+    const events = parseSseEvents(res.body)
+
+    // 末条应是 chat_error E_QUERY_FAILED(不是 E_SESSION_EXPIRED)
+    const lastError = [...events].reverse().find((e) => e.event === 'chat_error')
+    expect(lastError).toBeDefined()
+    const errorData = lastError!.data as { code: string; recoverable: boolean }
+    expect(errorData.code).toBe('E_QUERY_FAILED')
+    expect(errorData.recoverable).toBe(false)
+
+    // session.json 不应被清(因为不是 session-expired)
+    expect(chatSessionService.get(REQ_ID, CARD_ID)).not.toBeNull()
+  })
 })
 
 // ---------------------------------------------------------------------------

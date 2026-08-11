@@ -668,13 +668,16 @@ export async function boardChatRoutes(
           req.log.error({ err, reqId, cardId, sessionId }, 'board chat query: provider threw')
         }
 
-        // issue 13 —— session 失效自愈路径:
-        // Provider.runChatQuery 返 ok=true 但 isSessionExpired=true 时,
-        // 表示 SDK resume 一个已失效的 sessionId(典型:`/start` 时
-        // FakeChatProvider 落 'sdk-fake-001' 假 id,后续切真 Provider 再 /query
-        // 真 SDK 找不到)。先删 stale session.json(before SSE close),
-        // 再推 chat_error E_SESSION_EXPIRED,前端收到后自动调 reset 端点。
-        if (result && result.ok && result.isSessionExpired) {
+        // issue 13 + 14 —— session 失效自愈路径:
+        // Provider.runChatQuery 返回的 result.isSessionExpired=true 时(不论
+        // ok=true 还是 ok=false),表示 SDK resume 一个已失效的 sessionId:
+        // - ok=true(issue 13):SDK 走完 stream 但 observedSessionId='' + reason='error'
+        // - ok=false(issue 14):SDK CLI throw '--resume requires a valid session ID...'
+        //   (典型:`/start` 用 FakeChatProvider 落 'sdk-fake-001' 假 id,后续切真
+        //   Provider 再 /query 真 SDK 找不到)
+        // 先删 stale session.json(before SSE close),再推 chat_error
+        // E_SESSION_EXPIRED,前端收到后自动调 reset 端点。
+        if (result?.isSessionExpired) {
           try {
             chatSessionService.delete(reqId, cardId)
             req.log.warn(
@@ -694,6 +697,17 @@ export async function boardChatRoutes(
             message:
               'SDK session 失效,已自动清理,前端将自动 reset 并重新 /start',
             recoverable: true,
+          })
+        } else if (result && !result.ok) {
+          // issue 14 —— Provider 返 ok=false 但不是 session-expired(rate limit、
+          // 网络错误等):SSE 已打开但前端没收到任何 chat_error 会以为流成功。
+          // 补推一条 chat_error E_QUERY_FAILED 让前端能区分"出错"vs"完成"。
+          sseWrite({
+            kind: 'chat_error',
+            ts: Date.now(),
+            code: 'E_QUERY_FAILED',
+            message: result.error,
+            recoverable: false,
           })
         }
       })()
