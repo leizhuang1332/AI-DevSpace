@@ -635,6 +635,30 @@ export type ChatSessionQueryRequest = z.infer<
 >
 
 /**
+ * POST `/chat/sessions/<reqId>/<cardId>/start` body 契约(issue 12)。
+ *
+ * **与 `/query` 共用 schema 已弃用**:`/start` 只 bootstrap sessionId,
+ * 不处理用户输入(用户首条消息由 `/query` 唯一处理,见 issue 10)。
+ * 共用 schema 会暴露"它们语义一致"的错误信号,且要求 client 传
+ * `content` 既冗余又误导。
+ *
+ * 字段:
+ * - `model` —— 可选覆盖 session.json.model(本期固定走 session.json;
+ *   保留字段便于未来临时切换)
+ *
+ * Back-compat 策略(issue 12 How to apply):老客户端可能仍带 `content` 字段;
+ * zod 默认 strip 未知字段,**服务端静默忽略**(不报错),不破老调用。
+ * 后续若新增字段必须为 optional,且不得删除现有 optional 字段(老客户端
+ * 可能在跑)。
+ */
+export const ChatSessionStartRequestSchema = z.object({
+  model: z.string().min(1).optional(),
+})
+export type ChatSessionStartRequest = z.infer<
+  typeof ChatSessionStartRequestSchema
+>
+
+/**
  * PUT `/chat/sessions/<reqId>/<cardId>/model` body 契约(ADR-0029 D7)。
  *
  * - `model` —— 目标 model 名

@@ -360,15 +360,62 @@ describe('POST /chat/sessions/start', () => {
     expect(provider.runChatQuery).not.toHaveBeenCalled()
   })
 
-  it('400 invalid-body when content is empty array', async () => {
+  it('200 + meta when body is empty (issue 12 schema decoupling)', async () => {
+    provider.defaultScript = [
+      {
+        event: {
+          kind: 'session_init',
+          sessionId: 'sdk-sess-empty-body-001',
+          cwd: '/workspace/requirements/req-001-refund/board/tasks/01J.../chat',
+          model: 'claude-sonnet-5',
+        },
+      },
+    ]
     const res = await app.inject({
       method: 'POST',
       url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/start`,
       headers: authHeaders(),
-      payload: { content: [] },
+      payload: {},
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as { meta: { sessionId: string } }
+    expect(body.meta.sessionId).toBe('sdk-sess-empty-body-001')
+  })
+
+  it('200 + meta when body has legacy content field (back-compat stripped)', async () => {
+    // issue 12 back-compat:老客户端可能仍带 content;zod 默认 strip,
+    // 服务端静默忽略,不传给 SDK(prompt 仍 === '')
+    provider.defaultScript = [
+      {
+        event: {
+          kind: 'session_init',
+          sessionId: 'sdk-sess-legacy-001',
+          cwd: '/workspace/requirements/req-001-refund/board/tasks/01J.../chat',
+          model: 'claude-sonnet-5',
+        },
+      },
+    ]
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/start`,
+      headers: authHeaders(),
+      payload: { content: [{ kind: 'text', text: '老客户端发的' }] },
+    })
+    expect(res.statusCode).toBe(200)
+    // prompt 必须仍是空,不消耗 user content
+    const startCall = provider.runChatQuery.mock.calls[0]?.[0] as { prompt: string }
+    expect(startCall.prompt).toBe('')
+  })
+
+  it('400 invalid-body when body has wrong-typed model', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/start`,
+      headers: authHeaders(),
+      payload: { model: 123 }, // 应是 string,不是 number
     })
     expect(res.statusCode).toBe(400)
-    const body = res.json() as { error: string; reason: string }
+    const body = res.json() as { reason: string }
     expect(body.reason).toBe('invalid-body')
   })
 

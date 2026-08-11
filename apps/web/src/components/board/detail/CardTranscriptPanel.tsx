@@ -215,8 +215,10 @@ export function CardTranscriptPanel({
       if (lock.lockedByOtherTab) return
       if (!meta) {
         // 启动 session 后 snapshot 会刷新;把内容记到 ref,等 meta 出现再 send
+        // issue 12 —— /start schema 解耦:/start 不再处理 user content,
+        // 只 bootstrap sessionId;真实 send 走下方 stream.send(/query)
         pendingStartRef.current = content
-        await startMutation.mutateAsync({ content })
+        await startMutation.mutateAsync({})
         // 注意:不要在 await 之后立即 stream.send(meta 仍是旧闭包值)
         return
       }

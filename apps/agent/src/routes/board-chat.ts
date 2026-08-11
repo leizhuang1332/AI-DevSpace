@@ -60,6 +60,7 @@ import {
   ChatSessionModelSwitchRequestSchema,
   ChatSessionPermissionResolveRequestSchema,
   ChatSessionQueryRequestSchema,
+  ChatSessionStartRequestSchema,
   ChatSessionSnapshotResponseSchema,
   REASON_TO_HTTP_STATUS_BOARD_CHAT,
   type BoardChatFailReason,
@@ -328,8 +329,9 @@ export async function boardChatRoutes(
     async (req, reply) => {
       const { id: reqId, cardId } = req.params
 
-      // 1. body 校验
-      const parsed = ChatSessionQueryRequestSchema.safeParse(req.body)
+      // 1. body 校验 —— 用 ChatSessionStartRequestSchema(issue 12),不要求 content;
+      // 老客户端发的 content 字段被 zod 默认 strip(服务端静默忽略,back-compat)
+      const parsed = ChatSessionStartRequestSchema.safeParse(req.body)
       if (!parsed.success) {
         return failWith(
           reply,

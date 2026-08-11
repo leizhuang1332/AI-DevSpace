@@ -37,6 +37,7 @@ import {
   ChatSessionModelSwitchRequestSchema,
   ChatSessionPermissionResolveRequestSchema,
   ChatSessionQueryRequestSchema,
+  ChatSessionStartRequestSchema,
   ChatSessionSnapshotResponseSchema,
   ChatSubAgentEventSchema,
   ChatToolAuditSchema,
@@ -869,6 +870,33 @@ describe('ChatSessionQueryRequestSchema', () => {
   it('rejects missing content', () => {
     const r = ChatSessionQueryRequestSchema.safeParse({})
     expect(r.success).toBe(false)
+  })
+})
+
+// issue 12 —— /start schema 跟 /query 解耦:/start 不要求 content,
+// 仅 bootstrap sessionId(用户首条消息由 /query 唯一处理)
+describe('ChatSessionStartRequestSchema', () => {
+  it('accepts empty body (no content required)', () => {
+    const r = ChatSessionStartRequestSchema.safeParse({})
+    expect(r.success).toBe(true)
+  })
+
+  it('accepts optional model override', () => {
+    const r = ChatSessionStartRequestSchema.safeParse({
+      model: 'claude-opus-4-8',
+    })
+    expect(r.success).toBe(true)
+  })
+
+  it('strips legacy content field silently (back-compat)', () => {
+    // 老客户端可能仍带 content;zod 默认 strip 未知字段,服务端不报错
+    const r = ChatSessionStartRequestSchema.safeParse({
+      content: [{ kind: 'text', text: '老客户端' }],
+    })
+    expect(r.success).toBe(true)
+    if (r.success) {
+      expect(r.data).not.toHaveProperty('content')
+    }
   })
 })
 

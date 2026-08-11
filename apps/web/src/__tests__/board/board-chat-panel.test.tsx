@@ -693,6 +693,36 @@ describe('CardTranscriptPanel · 发送消息', () => {
       expect.objectContaining({ content: '快捷键' }),
     )
   })
+
+  // issue 12 —— /start schema 解耦:无 meta 时发送,startMutation 调用 args 不带 content
+  it('无 meta 发送 → startMutation.mutateAsync({}) 不带 content', async () => {
+    mockUseChatSessionSnapshot.mockReturnValue({
+      snapshot: makeSnapshot(null),
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    mockStartMutate.mockClear()
+    wrap(
+      <CardTranscriptPanel
+        card={makeCard()}
+        requirementId={REQ_ID}
+        onClose={vi.fn()}
+      />,
+    )
+    const ta = screen.getByTestId('board-chat-textarea')
+    fireEvent.change(ta, { target: { value: '你好 AI' } })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('board-chat-send'))
+    })
+    // startMutation 必须被调用 1 次,且 args 是 {} —— 不带 content
+    expect(mockStartMutate).toHaveBeenCalledTimes(1)
+    expect(mockStartMutate).toHaveBeenCalledWith(expect.not.objectContaining({ content: undefined }))
+    // 进一步断言:args 实际值不包含 content 字段
+    const callArgs = mockStartMutate.mock.calls[0]?.[0] as Record<string, unknown>
+    expect(callArgs).not.toHaveProperty('content')
+  })
 })
 
 // ---------------------------------------------------------------------------

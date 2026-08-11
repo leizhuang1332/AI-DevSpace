@@ -419,8 +419,11 @@ export function useChatSessionLock(
 // Mutations
 // ---------------------------------------------------------------------------
 
+// issue 12 —— /start schema 解耦:不再要求 client 传 content。
+// 服务端 `/start` 只 bootstrap sessionId(用户首条消息由 `/query` 唯一处理)。
+// 当前 args 只在 hook 内部使用,留空 interface 便于后续扩展(如 `model` 切换)。
 export interface UseChatSessionStartArgs {
-  content: string
+  model?: string
 }
 
 /**
@@ -431,14 +434,12 @@ export interface UseChatSessionStartArgs {
 export function useChatSessionStart(requirementId: string, cardId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (args: UseChatSessionStartArgs) => {
+    mutationFn: async (args: UseChatSessionStartArgs = {}) => {
       const res = await agentFetch<{ meta: ChatSessionMeta }>(
         `/api/requirement/${encodeURIComponent(requirementId)}/board/cards/${encodeURIComponent(cardId)}/chat/sessions/start`,
         {
           method: 'POST',
-          body: JSON.stringify({
-            content: [{ kind: 'text', text: args.content }],
-          }),
+          body: JSON.stringify(args),
         },
       )
       return res
