@@ -362,72 +362,96 @@ export async function boardChatRoutes(
         })
       }
 
-      // 5. 首次启动 —— 调 Provider.runChatQuery(无 resume),等 session_init 落盘
-      // 注:prompt 必须 === ''(issue 10 不变量)—— /start 只 bootstrap sessionId,
-      // 不消耗用户首条消息;用户首条消息由后续 /query 唯一处理。否则会触发:
-      //   - 首条消息延迟 ×2(/start 黑盒跑完整 turn + /query 再跑一次)
-      //   - credits 双倍烧
-      //   - /start 期间 AI 若调 Write/Bash,userConfirmHandler 写死 allow,
-      //     用户无从 deny(危险命令静默执行)
-      //   - SDK session 历史出现两次相同 user turn → 后续 AI 上下文污染
-      const cwd = cardChatDir(reqId, cardId)
-      let observedSessionId: string | null = null
-      let observedCwd = cwd
-      let observedModel = 'claude-sonnet-5'
-
-      const result = await chatProvider.runChatQuery({
-        prompt: '',
-        cwd,
-        additionalDirectories: [joinReqDir(reqId)],
-        model: observedModel,
-        permissionMode: DEFAULT_PERMISSION_MODE,
-        // /start 阶段无 SSE,userConfirmHandler 自动 allow(不阻塞);
-        // 空 prompt 下 SDK 不会发起 tool call(decision 边界由 prompt='' 保证)。
-        userConfirmHandler: async () => ({ behavior: 'allow' as const }),
-        onEvent: (event) => {
-          if (event.kind === 'session_init') {
-            observedSessionId = event.sessionId
-            if (typeof event.cwd === 'string') observedCwd = event.cwd
-            if (typeof event.model === 'string') observedModel = event.model
-          }
-          // 其它事件(message_assistant / tool_call / complete 等)静默丢弃——
-          // /start 不暴露给 client,只拿 sessionId 用于落盘
-        },
-      })
-
-      if (!result.ok || !observedSessionId) {
-        req.log.error(
-          { reqId, cardId, err: 'no_session_id' },
-          'board chat start: SDK did not yield session_id',
-        )
+      // 5. 单 tab lock —— 复用 /query 的 queryLocks(issue 11);/start 是写
+      // session.json 的入口,无锁会让并发 /start 拿到两个 sessionId,后到的
+      // tmp+rename 覆盖前者 + lastQueryAt 错位 + client 拿错 sessionId resume
+      // 找不到对应 SDK session。同 lockKey(issue 09 /query 同款语义)
+      // 第二个 /start 立即 409 session-locked,不排队(避免活锁)。
+      const lockKey = `${reqId}::${cardId}`
+      if (queryLocks.has(lockKey)) {
         return failWith(
           reply,
-          'internal',
-          'SDK did not yield session_id during start; cannot persist session.json',
+          'session-locked',
+          `another /start or /query is in-flight for ${reqId}/${cardId}; please wait`,
           req.log,
         )
       }
-
-      // 6. 落盘 session.json(atomic)
+      // 占位:用同步 resolved promise;锁释放走 finally,SDK 失败 / session.json
+      // 写盘失败都兜底 delete。/start 期间不开 SSE,无需 raw.on('close') cleanup。
+      queryLocks.set(lockKey, {
+        promise: Promise.resolve(),
+        permissionRequestIds: new Set<string>(),
+      })
       try {
-        const meta = await chatSessionService.getOrCreateSession(reqId, cardId, {
-          sdkSessionId: observedSessionId,
-          cwd: observedCwd,
+        // 6. 首次启动 —— 调 Provider.runChatQuery(无 resume),等 session_init 落盘
+        // 注:prompt 必须 === ''(issue 10 不变量)—— /start 只 bootstrap sessionId,
+        // 不消耗用户首条消息;用户首条消息由后续 /query 唯一处理。否则会触发:
+        //   - 首条消息延迟 ×2(/start 黑盒跑完整 turn + /query 再跑一次)
+        //   - credits 双倍烧
+        //   - /start 期间 AI 若调 Write/Bash,userConfirmHandler 写死 allow,
+        //     用户无从 deny(危险命令静默执行)
+        //   - SDK session 历史出现两次相同 user turn → 后续 AI 上下文污染
+        const cwd = cardChatDir(reqId, cardId)
+        let observedSessionId: string | null = null
+        let observedCwd = cwd
+        let observedModel = 'claude-sonnet-5'
+
+        const result = await chatProvider.runChatQuery({
+          prompt: '',
+          cwd,
           additionalDirectories: [joinReqDir(reqId)],
           model: observedModel,
           permissionMode: DEFAULT_PERMISSION_MODE,
-          mcpServers: [{ name: 'boardchat', config: { type: 'sdk' } }],
-          ownerUserId: 'user-1',
+          // /start 阶段无 SSE,userConfirmHandler 自动 allow(不阻塞);
+          // 空 prompt 下 SDK 不会发起 tool call(decision 边界由 prompt='' 保证)。
+          userConfirmHandler: async () => ({ behavior: 'allow' as const }),
+          onEvent: (event) => {
+            if (event.kind === 'session_init') {
+              observedSessionId = event.sessionId
+              if (typeof event.cwd === 'string') observedCwd = event.cwd
+              if (typeof event.model === 'string') observedModel = event.model
+            }
+            // 其它事件(message_assistant / tool_call / complete 等)静默丢弃——
+            // /start 不暴露给 client,只拿 sessionId 用于落盘
+          },
         })
-        return reply.code(200).send({ meta })
-      } catch (err) {
-        req.log.error({ err, reqId, cardId }, 'board chat start: getOrCreateSession failed')
-        return failWith(
-          reply,
-          'internal',
-          err instanceof Error ? err.message : 'session persist failed',
-          req.log,
-        )
+
+        if (!result.ok || !observedSessionId) {
+          req.log.error(
+            { reqId, cardId, err: 'no_session_id' },
+            'board chat start: SDK did not yield session_id',
+          )
+          return failWith(
+            reply,
+            'internal',
+            'SDK did not yield session_id during start; cannot persist session.json',
+            req.log,
+          )
+        }
+
+        // 7. 落盘 session.json(atomic)
+        try {
+          const meta = await chatSessionService.getOrCreateSession(reqId, cardId, {
+            sdkSessionId: observedSessionId,
+            cwd: observedCwd,
+            additionalDirectories: [joinReqDir(reqId)],
+            model: observedModel,
+            permissionMode: DEFAULT_PERMISSION_MODE,
+            mcpServers: [{ name: 'boardchat', config: { type: 'sdk' } }],
+            ownerUserId: 'user-1',
+          })
+          return reply.code(200).send({ meta })
+        } catch (err) {
+          req.log.error({ err, reqId, cardId }, 'board chat start: getOrCreateSession failed')
+          return failWith(
+            reply,
+            'internal',
+            err instanceof Error ? err.message : 'session persist failed',
+            req.log,
+          )
+        }
+      } finally {
+        queryLocks.delete(lockKey)
       }
     },
   )

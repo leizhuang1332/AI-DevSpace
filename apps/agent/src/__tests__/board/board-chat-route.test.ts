@@ -405,6 +405,118 @@ describe('POST /chat/sessions/start', () => {
     })
     expect(res.statusCode).toBe(401)
   })
+
+  // issue 11 —— /start 接入单 tab lock,防并发 session.json 撕裂写
+  it('409 session-locked when second /start fires while first is in-flight', async () => {
+    // 让 fake provider 第一次调用挂起 200ms,模拟 SDK 慢启动;
+    // 期间发起第二次 /start,应被锁拒绝
+    let inFlight = 0
+    let firstStarted = false
+    provider.runChatQuery = vi.fn(async (input: ChatQueryInput): Promise<ChatQueryResult> => {
+      inFlight++
+      input.onEvent({
+        kind: 'session_init',
+        sessionId: inFlight === 1 ? 'sdk-sess-start-001' : 'sdk-sess-start-002',
+        cwd: '/x',
+        model: 'claude-sonnet-5',
+      })
+      if (!firstStarted) {
+        firstStarted = true
+        await new Promise((r) => setTimeout(r, 200))
+      }
+      return { ok: true, sessionId: 'sdk-sess-start-001' }
+    })
+
+    // 第一次 /start —— 发起后不等
+    const firstPromise = app.inject({
+      method: 'POST',
+      url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/start`,
+      headers: authHeaders(),
+      payload: { content: [{ kind: 'text', text: 'hi' }] },
+    })
+
+    // 等 30ms 让第一次 /start 进入 in-flight lock
+    await new Promise((r) => setTimeout(r, 30))
+
+    // 第二次 /start —— 应被 409 session-locked 拒绝
+    const res2 = await app.inject({
+      method: 'POST',
+      url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/start`,
+      headers: authHeaders(),
+      payload: { content: [{ kind: 'text', text: 'hi' }] },
+    })
+    expect(res2.statusCode).toBe(409)
+    expect(res2.json()).toMatchObject({ reason: 'session-locked' })
+
+    // 第一次 /start 应继续走完并落 session.json
+    const firstRes = await firstPromise
+    expect(firstRes.statusCode).toBe(200)
+    const firstBody = firstRes.json() as { meta: { sessionId: string } }
+    expect(firstBody.meta.sessionId).toBe('sdk-sess-start-001')
+  })
+
+  it('two /start with different (reqId, cardId) are NOT locked against each other', async () => {
+    // seed 第二张 card(card1.id 由 ulidFactory 决定,此处用另一个 ulid)
+    taskCardStore.create(REQ_ID, { title: 'card2', id: '01J7X3K2P5EVR0Z3YQJD8HFKBB' })
+    provider.defaultScript = [
+      { event: { kind: 'session_init', sessionId: 'sdk-sess-a', cwd: '/x', model: 'claude-sonnet-5' } },
+      { event: { kind: 'session_init', sessionId: 'sdk-sess-b', cwd: '/x', model: 'claude-sonnet-5' } },
+    ]
+
+    // 同时发起两个 /start —— 不同 lockKey,互不干扰
+    const [resA, resB] = await Promise.all([
+      app.inject({
+        method: 'POST',
+        url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/start`,
+        headers: authHeaders(),
+        payload: { content: [{ kind: 'text', text: 'A' }] },
+      }),
+      app.inject({
+        method: 'POST',
+        url: `/api/requirement/${REQ_ID}/board/cards/01J7X3K2P5EVR0Z3YQJD8HFKBB/chat/sessions/start`,
+        headers: authHeaders(),
+        payload: { content: [{ kind: 'text', text: 'B' }] },
+      }),
+    ])
+    expect(resA.statusCode).toBe(200)
+    expect(resB.statusCode).toBe(200)
+  })
+
+  it('lock is released even when SDK fails (finally cleanup)', async () => {
+    provider.runChatQuery = vi.fn(async () => {
+      // 模拟 SDK 失败 —— 直接 throw
+      throw new Error('SDK boom')
+    })
+
+    const res1 = await app.inject({
+      method: 'POST',
+      url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/start`,
+      headers: authHeaders(),
+      payload: { content: [{ kind: 'text', text: 'first' }] },
+    })
+    // /start 失败 → 走 500 internal 路径
+    expect(res1.statusCode).toBe(500)
+
+    // 第二次 /start —— 锁应已释放,SDK 这次返 ok 让落盘成功
+    provider.runChatQuery = vi.fn(async (input: ChatQueryInput) => {
+      input.onEvent({
+        kind: 'session_init',
+        sessionId: 'sdk-sess-retry-001',
+        cwd: '/x',
+        model: 'claude-sonnet-5',
+      })
+      return { ok: true, sessionId: 'sdk-sess-retry-001' }
+    })
+    const res2 = await app.inject({
+      method: 'POST',
+      url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/start`,
+      headers: authHeaders(),
+      payload: { content: [{ kind: 'text', text: 'retry' }] },
+    })
+    expect(res2.statusCode).toBe(200)
+    const body = res2.json() as { meta: { sessionId: string } }
+    expect(body.meta.sessionId).toBe('sdk-sess-retry-001')
+  })
 })
 
 // ---------------------------------------------------------------------------
