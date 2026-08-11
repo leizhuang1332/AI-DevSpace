@@ -1,0 +1,28 @@
+apps/agent/src/routes/board-chat.ts
+  s_4472897ffc894e::t_fe311888dc5ca9 671-680
+  s_4472897ffc894e::t_acf7042a464b6d 701-711
+apps/agent/src/__tests__/ClaudeCodeProvider.runChatQuery.test.ts
+  s_4472897ffc894e::t_ce0e91962887e2 1-196
+apps/agent/src/__tests__/board/board-chat-route.test.ts
+  s_4472897ffc894e::t_95978ea8e3ee80 1354-1483
+.scratch/board-chat/issues/14-agent-query-sdk-cli-throw-session-expired.md
+  s_4472897ffc894e::t_0f0d7c946a12c5 1-135
+apps/agent/src/providers/ClaudeCodeProvider.ts
+  s_4472897ffc894e::t_0a2a0d2d872620 1199-1213,1216-1217
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "fd3639df821f30d98d6bb060fafe04a81dd25288",
+  "prompts": {},
+  "sessions": {
+    "s_4472897ffc894e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aa370eb5-e365-4746-a080-f9836ef0524e",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
