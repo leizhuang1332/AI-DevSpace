@@ -642,6 +642,14 @@ export type ChatToolAudit = z.infer<typeof ChatToolAuditSchema>
 export const ChatSessionSnapshotResponseSchema = z.object({
   meta: ChatSessionMetaSchema.nullable(),
   events: z.array(ChatSessionEventSchema).default([]),
+  /**
+   * SDK 会话日志 jsonl 缺失标记 —— 服务端检测到 session.json 存在但
+   * `~/.claude/projects/<hash>/<sid>.jsonl` 不在(30 天 sweep / 手动删 /
+   * workspace 移动 hash 变化)。UI 据此渲染 banner "⚠️ SDK 会话日志丢失,
+   * 需重新开始";不阻断历史渲染路径(Events 数组就是空,跟"从未聊过"
+   * 同形 —— 此标记用于区分两种情况)。
+   */
+  sdkJsonlMissing: z.boolean().optional(),
 })
 export type ChatSessionSnapshotResponse = z.infer<
   typeof ChatSessionSnapshotResponseSchema

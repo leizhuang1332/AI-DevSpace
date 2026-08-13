@@ -824,6 +824,7 @@ export async function boardChatRoutes(
       const validated = ChatSessionSnapshotResponseSchema.parse({
         meta: snap.meta,
         events: snap.events,
+        sdkJsonlMissing: snap.sdkJsonlMissing,
       })
       return reply.code(200).send(validated)
     },

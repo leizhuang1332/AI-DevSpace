@@ -82,8 +82,9 @@ function makeMeta(overrides: Partial<ChatSessionMeta> = {}): ChatSessionMeta {
 function makeSnapshot(
   meta: ChatSessionMeta | null,
   events: ChatSessionEvent[] = [],
+  sdkJsonlMissing = false,
 ): ChatSessionSnapshotResponse {
-  return { meta, events }
+  return { meta, events, sdkJsonlMissing }
 }
 
 // ---- mock board-chat-hooks ----
@@ -218,6 +219,28 @@ describe('CardTranscriptPanel · 渲染', () => {
     )
     fireEvent.click(screen.getByTestId('board-chat-close'))
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('snapshot.sdkJsonlMissing === true → banner 显式提示 SDK 日志丢失(Q5-1b)', () => {
+    // Q5-1b —— 区分"从未聊过"与"SDK 会话日志丢失"两种空态;
+    // 前者走 happy path 灰底 banner,后者走 warning banner
+    mockUseChatSessionSnapshot.mockReturnValue({
+      snapshot: makeSnapshot(makeMeta(), [], true),
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    wrap(
+      <CardTranscriptPanel
+        card={makeCard()}
+        requirementId={REQ_ID}
+        onClose={vi.fn()}
+      />,
+    )
+    const banner = screen.getByTestId('board-chat-banner')
+    expect(banner).toHaveTextContent('SDK 会话日志丢失')
+    expect(banner.className).toContain('text-warning')
   })
 })
 

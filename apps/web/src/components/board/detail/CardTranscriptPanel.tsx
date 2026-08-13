@@ -340,6 +340,20 @@ export function CardTranscriptPanel({
             SDK session 失效已自动清理 —— 请重新输入并发送,系统会自动开启新 session。
           </span>
         </div>
+      ) : snapshotQ.snapshot?.sdkJsonlMissing ? (
+        // Q5-1b 兑现:session.json 存在但 SDK jsonl 缺失(30 天 sweep /
+        // workspace 移动 hash 变化 / 手动清理)—— 显式区分"从未聊过"
+        // 与"SDK 会话日志丢失",避免用户误以为有历史但 UI 空白
+        <div
+          data-testid="board-chat-banner"
+          className="text-xs text-warning bg-warning/10 px-2 py-1.5 rounded flex items-start gap-2"
+        >
+          <span>⚠️</span>
+          <span>
+            SDK 会话日志丢失(可能原因:30 天过期清理 / workspace 路径变化 / 手动删除),
+            无法渲染历史对话 —— 请在下方输入框发送消息,系统会开启新 session。
+          </span>
+        </div>
       ) : (
         <div
           data-testid="board-chat-banner"
