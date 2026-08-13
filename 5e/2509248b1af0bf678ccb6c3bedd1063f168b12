@@ -1,0 +1,26 @@
+apps/web/src/components/board/detail/CardTranscriptInput.tsx
+  s_e5c49adf9b3fd0::t_a57ce6abf5c518 6-10
+  s_e5c49adf9b3fd0::t_f5f26943949bf5 91
+  s_e5c49adf9b3fd0::t_b441f216024a1f 50-51
+apps/web/src/__tests__/board/board-chat-panel.test.tsx
+  s_e5c49adf9b3fd0::t_9ba0458805cfcd 689,715,722-752
+apps/web/src/__tests__/board/card-transcript-panel.test.tsx
+  s_e5c49adf9b3fd0::t_76d65f4082a4d2 294,319,326,349,351
+  s_e5c49adf9b3fd0::t_c97cd931ec32fc 8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "5e2509248b1af0bf678ccb6c3bedd1063f168b12",
+  "prompts": {},
+  "sessions": {
+    "s_e5c49adf9b3fd0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a8baceba-804e-4435-9975-2bf2c1de5867",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
