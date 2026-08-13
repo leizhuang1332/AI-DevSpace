@@ -1,0 +1,53 @@
+apps/web/src/app/api/agent/events/requirements/__tests__/route.test.ts
+  s_71938510b9b09e::t_02466dbdd50c28 3-6,9,12,15-16,23,31,41,61,73,83,95,106
+apps/web/src/lib/requirement-list.server.ts
+  s_c7748018e2f139::t_555d6e7449999d 6
+  s_71938510b9b09e::t_db612bd616dad2 5,7-10,23,36,38,42
+apps/web/src/app/api/requirement/[id]/assets/[filename]/route.ts
+  s_71938510b9b09e::t_d04e42608f0a31 11-12,23,36,49
+apps/web/src/lib/board.server.ts
+  s_71938510b9b09e::t_88f0a9155312d0 10-14,21,34,39-51,56,69,104,125,147
+apps/web/src/lib/__tests__/server-agent-token.test.ts
+  s_71938510b9b09e::t_af6cf02862741c 97
+  s_71938510b9b09e::t_113fa06f50912b 59,67
+  s_71938510b9b09e::t_59fc0a7ebabb88 1-12,14-35,37,39-42,46-49,56-58,60-66,68-93,95-96,99-100,102,118,122-134
+  s_71938510b9b09e::t_69401902246e96 13,36,38,43-45,50-55,94,98,101,103-117,119
+  s_71938510b9b09e::t_eb7a0f96d72636 120-121
+apps/web/src/lib/__tests__/requirement-list-server.test.ts
+  s_71938510b9b09e::t_af5088bcc5537b 3-5,8,11,28,35-36,40,45-46,57,64,79,95-96,113,116-134
+apps/web/src/app/api/requirement/[id]/events/route.ts
+  s_71938510b9b09e::t_192add5d2a189e 13-14,19,23,33,46
+apps/web/src/app/api/requirement/[id]/assets/[filename]/__tests__/route.test.ts
+  s_71938510b9b09e::t_43d7f0bdcc88f6 3-5,8,11,14-15,46,54,64,88,99,110,126,136
+apps/web/src/app/api/requirement/[id]/events/__tests__/route.test.ts
+  s_71938510b9b09e::t_9ba2f18d8088c7 3-5,8,11,14-15,29,37,47,67,79,93,103,115,126
+apps/web/src/app/api/agent/events/requirements/route.ts
+  s_71938510b9b09e::t_9ed85f95c8f676 8-9,17,24,35
+apps/web/src/lib/server-agent-token.ts
+  s_71938510b9b09e::t_367d20b66c73f6 70-73,75-80
+  s_71938510b9b09e::t_b6927091e3466c 1-69,74,81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "0119bf02516d956cf9d6a96c316beba393ce13e5",
+  "prompts": {},
+  "sessions": {
+    "s_71938510b9b09e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "58459b95-9378-46a2-9f44-f127a35bd73b",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    },
+    "s_c7748018e2f139": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7ddbb4df-4126-460d-a14b-76703ed3df88",
+        "model": "MiniMax-M3"
+      },
+      "human_author": null
+    }
+  }
+}
