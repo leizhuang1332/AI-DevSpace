@@ -25,7 +25,6 @@
  * - chat 路径走独立命名空间(FakeChatProvider.runChatQuery),与 Analysis Run 物理隔离
  */
 
-import { createHash } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -38,6 +37,7 @@ import type {
   ChatStreamEvent,
   CreateSessionOptions,
 } from './AIProvider.js'
+import { sdkSessionLogPathFor } from '../services/board/ChatSessionService.js'
 
 // ---------------------------------------------------------------------------
 // Scripted event shape
@@ -317,8 +317,9 @@ export class FakeChatProvider implements AIProvider, ChatQueryCapableProvider {
   // -------------------------------------------------------------------------
 
   /**
-   * 路径公式必须与 ChatSessionService.ts:109-119 sdkSessionLogPathFor 严格对齐:
-   * `~/.claude/projects/<sha256(cwd).slice(0,16)>/<sessionId>.jsonl`
+   * 路径公式走 ChatSessionService.sdkSessionLogPathFor(2026-08-13 探底:SDK 用
+   * sanitized cwd 作 dir,不是 sha256);FakeChatProvider 必须用同一 helper,
+   * 否则 issue 13 测试 fixture 与 loadSnapshot 路径会错位。
    *
    * SDK jsonl 行形态(参 ChatSessionService.ts:683-770 parseSdkSessionLog):
    * - `{type:'user', message:{role:'user', content:[{type:'text', text}]}}`
@@ -330,8 +331,13 @@ export class FakeChatProvider implements AIProvider, ChatQueryCapableProvider {
    * 把 system/init 放最后。
    */
   private writeSdkJsonl(input: ChatQueryInput, script: ScriptedEvent[]): void {
-    const hash = createHash('sha256').update(input.cwd).digest('hex').slice(0, 16)
-    const dir = join(homedir(), '.claude', 'projects', hash)
+    // 与 ChatSessionService.sdkSessionLogPathFor 走同一 helper(sanitize cwd,
+    // 不是 sha256)——issue 13 测试 fixture 必须能 loadSnapshot 读回
+    //
+    // sessionId 用 `this.nextSessionId`(fake 内部默认 'sdk-fake-001'),
+    // 跟 runChatQuery 返回值 + jsonl 内容里的 session_id 保持一致
+    const filePath = sdkSessionLogPathFor(input.cwd, this.nextSessionId)
+    const dir = dirname(filePath)
     mkdirSync(dir, { recursive: true, mode: 0o700 })
     const lines: string[] = []
     lines.push(
@@ -377,7 +383,6 @@ export class FakeChatProvider implements AIProvider, ChatQueryCapableProvider {
         },
       }),
     )
-    const filePath = join(dir, `${this.nextSessionId}.jsonl`)
     // 确保父目录(mode 0o700 mkdirSync 在循环内已调用);此处直接写
     writeFileSync(filePath, lines.join('\n') + '\n', { encoding: 'utf8', mode: 0o600 })
     // dirname 已在 mkdirSync 时 mode 0o700,这里冗余一次保险

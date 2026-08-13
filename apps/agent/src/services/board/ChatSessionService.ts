@@ -4,6 +4,12 @@
  * 物理路径:`~/.aidevspace/requirements/<reqId>/board/tasks/<ulid>/chat/session.json`
  * 物理独立 SDK 会话日志:`~/.claude/projects/<hash-of-cwd>/<sessionId>.jsonl`
  *
+ * **重要事实(ADR-0029 D9a 修订后)**:
+ * - **session.json 只存元数据**(model / sessionId / cwd / cumulativeUsage ...)
+ * - **真正的消息内容在 SDK jsonl** —— 由 Claude Code SDK 0.3.206 写;
+ *   我们不持久化 transcript 事件(避免双写漂移)
+ * - Snapshot 渲染历史 = 解析 SDK jsonl → 映射为 `ChatSessionEvent[]`
+ *
  * 设计要点(对应 ADR-0029 D4 / D8 / D9 / D16):
  * - **17 项字段 round-trip** —— 与 `ChatSessionMetaSchema` 严格对齐,
  *   服务端不重命名字段(SDK camelCase ↔ 服务端契约一致)
@@ -13,8 +19,11 @@
  *   existsSync 缺失 → 触发重建路径(下次 query 落 system/init 时新 sessionId)
  * - **严格单 tab lock** —— `Map<sessionKey, Promise<void>>` 锁;
  *   同 `(reqId, cardId)` 第二次 query 等待 / 拒绝
- * - **Snapshot → messages 数组** —— 从 SDK jsonl 解析 `system/init` 之前的
- *   user / assistant 消息(本期实现:从 `system/init` 之前的 SDK jsonl 行)
+ * - **Snapshot → events 数组** —— `parseSdkSessionLog` 解析 SDK jsonl:
+ *   init 之后全部 user / assistant(纯 tool_use 拆 chat_tool_call;
+ *   含 text/thinking 走 chat_message_assistant);user 消息的 tool_result
+ *   拆 chat_tool_result;permission_request 配对 + 注入 synthetic resolved=deny
+ *   (session-interrupted)
  * - **Cost 累计** —— 每次 `result` 消息带 `usage`,累加到 session.json.cumulativeUsage
  *   + 同时累加 sub-agent 计费(本期:同样累计到主 session)
  *
@@ -33,7 +42,6 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs'
-import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import {
@@ -99,24 +107,37 @@ export function sessionJsonPathFor(
 
 /**
  * SDK 会话日志 jsonl 路径(由 cwd 派生)——
- * Claude Code SDK 0.3.206 真实形态:`~/.claude/projects/<hash-of-cwd>/<sessionId>.jsonl`。
+ * Claude Code SDK 0.3.206 真实形态:`~/.claude/projects/<sanitized-cwd>/<sessionId>.jsonl`。
  *
- * hash-of-cwd 与 SDK 内部实现保持一致(基于 macOS SDK 0.3.206 推导;
- * 若 SDK 内部使用 cwd 字符串而非 hash,我们仍走 cwd 字符串容错路径)。
+ * **SDK sanitize 规则**(2026-08-13 探底确证):
+ * 1. 路径分隔符 `:` / `\` / `/` → `-`
+ * 2. 任何非 `[A-Za-z0-9-]` 字符(含 CJK / `.` / 空格 ...)→ `-`
  *
- * 本期实现:返回绝对路径 cwd 拼接;SDK 实际 hash 化由 SDK 内部完成,
- * 我们只用于 existsSync 健康检查。
+ * 实例(用户实测,2026-08-13):
+ *   cwd: `C:\Users\Lorcan\.aidevspace\requirements\req-003-这下可以了吧\board\tasks\<ulid>\chat`
+ *   实际 dir: `C--Users-Lorcan--aidevspace-requirements-req-003--------board-tasks-<ulid>-chat`
+ *
+ * **早期误判**:本函数原用 `sha256(cwd).slice(0, 16)`,导致 `existsSync` 永远返 false
+ * → `loadSnapshot` 永远走 `sdkJsonlMissing: true` 分支 → 跨刷新不渲染历史。
+ * 修正后 existsSync 能命中真实 jsonl,snapshot events 数组会被填充。
  */
 export function sdkSessionLogPathFor(
   cwd: string,
   sessionId: string,
 ): string {
-  // SDK 0.3.206 真形态:`~/.claude/projects/<sha256-of-cwd-prefix>/<sessionId>.jsonl`。
-  // 我们用 sha256(cwd).slice(0,16) 模拟 SDK 内部的 cwd-prefix hash(16 hex chars);
-  // 若 SDK hash 算法不同,existsSync 会返 false → healthCheck 走 rebuild 路径。
-  // 测试同样依赖 existsSync(false) 触发 sweep fallback 验证。
-  const hash = createHash('sha256').update(cwd).digest('hex').slice(0, 16)
-  return join(homedir(), '.claude', 'projects', hash, `${sessionId}.jsonl`)
+  const projectDir = sanitizeCwdForSdkProjectDir(cwd)
+  return join(homedir(), '.claude', 'projects', projectDir, `${sessionId}.jsonl`)
+}
+
+/**
+ * SDK 0.3.206 内部 project dir 命名规则:
+ * 1. `[:\\/]` → `-`
+ * 2. `[^A-Za-z0-9-]` → `-`
+ *
+ * 纯字符串操作,跟 cwd 长度一致(99 chars → 99 chars);无 hash。
+ */
+export function sanitizeCwdForSdkProjectDir(cwd: string): string {
+  return cwd.replace(/[:\\/]/g, '-').replace(/[^A-Za-z0-9-]/g, '-')
 }
 
 // ---------------------------------------------------------------------------
@@ -177,6 +198,12 @@ export interface ChatSessionServiceDeps {
   sessionIdGenerator?: () => string
   /** session.json 不可解析时的回调(便于上层日志);默认 console.warn */
   onCorruptSession?: (path: string, err: unknown) => void
+  /**
+   * SDK jsonl 单行损坏时的回调(便于上层日志);默认 console.warn。
+   * 与 onCorruptSession 对称 —— 测试可注入收集器断言损坏行被记录。
+   * 解析继续进行,损坏行被 silent skip(Q5 决议:不阻断 history 渲染)。
+   */
+  onCorruptJsonlLine?: (path: string, line: string, err: unknown) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -199,6 +226,11 @@ export class ChatSessionService {
   private readonly workspaceRoot: string
   private readonly nowIso: () => string
   private readonly onCorruptSession: (path: string, err: unknown) => void
+  private readonly onCorruptJsonlLine: (
+    path: string,
+    line: string,
+    err: unknown,
+  ) => void
   /** 严格单 tab lock:`${reqId}::${cardId}` → in-flight Promise<ChatSessionMeta> */
   private readonly locks = new Map<string, Promise<ChatSessionMeta>>()
 
@@ -209,6 +241,14 @@ export class ChatSessionService {
       deps.onCorruptSession ??
       ((path, err) => {
         console.warn(`[ChatSessionService] corrupt session.json at ${path}:`, err)
+      })
+    this.onCorruptJsonlLine =
+      deps.onCorruptJsonlLine ??
+      ((path, line, err) => {
+        console.warn(
+          `[ChatSessionService] corrupt jsonl line at ${path}: ${line.slice(0, 80)}`,
+          err,
+        )
       })
   }
 
@@ -715,12 +755,13 @@ export class ChatSessionService {
   // -------------------------------------------------------------------------
 
   /**
-   * 构造 ChatSessionSnapshotResponse —— meta + events 数组。
+   * 构造 ChatSessionSnapshotResponse —— meta + events + sdkJsonlMissing 标志。
    *
    * - `meta` —— session.json 元数据(session 不存在时为 null,UI 走空态)
-   * - `events` —— 从 SDK jsonl 解析的历史事件(本期实现:基于 SDK jsonl
-   *   路径 `~/.claude/projects/<hash>/<sessionId>.jsonl` 解析 system/init
-   *   之前的 user / assistant 消息)。
+   * - `events` —— 从 SDK jsonl 解析的历史事件;详见 `parseSdkSessionLog` 注释
+   * - `sdkJsonlMissing` —— session.json 存在但 SDK jsonl(`~/.claude/projects/<hash>/<sid>.jsonl`)
+   *   缺失(30 天 sweep / 手动删 / workspace 移动后 hash 变化);UI 据此渲染
+   *   "⚠️ SDK 会话日志丢失" banner,与"从未聊过"(events:[] + meta:null)区分开。
    *
    * 注:Snapshot 解析不进入 chat 单 tab lock —— 这是只读操作,可以并行。
    * 当前实现为同步 IO;若 SDK jsonl 体积变大,后续可包成 async + worker 线程。
@@ -728,13 +769,19 @@ export class ChatSessionService {
   loadSnapshot(
     requirementId: string,
     cardId: string,
-  ): { meta: ChatSessionMeta | null; events: ChatSessionEvent[] } {
+  ): {
+    meta: ChatSessionMeta | null
+    events: ChatSessionEvent[]
+    sdkJsonlMissing: boolean
+  } {
     const meta = this.get(requirementId, cardId)
-    if (!meta) return { meta: null, events: [] }
-    const events = parseSdkSessionLog(
-      sdkSessionLogPathFor(meta.cwd, meta.sessionId),
-    )
-    return { meta, events }
+    if (!meta) return { meta: null, events: [], sdkJsonlMissing: false }
+    const sdkPath = sdkSessionLogPathFor(meta.cwd, meta.sessionId)
+    if (!existsSync(sdkPath)) {
+      return { meta, events: [], sdkJsonlMissing: true }
+    }
+    const events = parseSdkSessionLog(sdkPath, this.onCorruptJsonlLine)
+    return { meta, events, sdkJsonlMissing: false }
   }
 }
 
@@ -752,22 +799,46 @@ function writeAtomic(target: string, content: string): void {
 }
 
 /**
- * 从 SDK 会话日志 jsonl 解析历史事件(本期实现:简化版 —— 解析
- * system/init 之前的 user / assistant 消息)。
+ * 从 SDK 会话日志 jsonl 解析历史事件(本期实现 —— ADR-0029 D9a 修订后)。
  *
- * SDK jsonl 行形态:
- * - `{type: 'system', subtype: 'init', session_id, cwd, model, tools}` —— 系统初始化
- * - `{type: 'user', message: {role:'user', content:[...]}}` —— 用户消息
- * - `{type: 'assistant', message: {role:'assistant', content:[...]}}` —— 助手消息
- * - `{type: 'result', subtype, total_cost_usd, usage, ...}` —— 结果
+ * SDK 2.1.206 jsonl 真形态(用户实测,2026-08-13):
+ * - `{type: 'system', subtype: 'init', session_id, cwd, model}` —— **不保证存在**
+ *   (D9a 探底确证 SDK 0.3.206 不在 user-facing stream emit init;SDK 2.1.206
+ *   持久化到 jsonl 时也可能不写 init 行 —— `/start` 走纯本地 + 首次 `/query`
+ *   触发建会话的场景下,真实 jsonl 第 1 行就是 `type: 'user'`)
+ * - `{type: 'user', timestamp, message: {role:'user', content:[{type:'text', text}]}}`
+ *   —— SDK 2.1.206 **总是带** timestamp 字段(ISO 字符串;与 SDK 0.3.206 注释
+ *   "Older emitters omit it" 不一致,以实测为准)
+ * - `{type: 'assistant', timestamp?, message: {role:'assistant', content:[...]}}`
+ *   —— SDK 2.1.206 实际带 timestamp
+ * - `{type: 'last-prompt', lastPrompt, leafUuid, sessionId}` —— 本期不解析
+ * - `{type: 'result', ...}` —— 本期不解析(Q3 范围外)
  *
- * 本期只解析 system/init 之前的 user / assistant 消息,后期扩展补
- * result / tool_use / tool_result / permission_request 等。
+ * 解析策略(Q1-Q5 决议 + 2026-08-13 全局复盘):
+ * 1. JSON.parse 失败 → 调 `onCorruptJsonlLine` + silent skip(Q5-5a)
+ * 2. **不预设 init 行** —— `system/init` 存在则 skip(仅供调试),不存在不阻断;
+ *    所有 `type: 'user' | 'assistant' | 'last-prompt' | 'result' | 'error' ...`
+ *    按 type 无条件 dispatch(sawInit gate 已于 2026-08-13 拆掉)
+ * 3. user 消息 `ts`:读 `parsed.timestamp`(ISO)→ `Date.parse`;缺省 → `Date.now()`(Q4-A)
+ * 4. assistant 消息 `ts`:SDK 2.1.206 实际带 `timestamp`,用同样策略;0.3.206 不带则 fallback(Q4-A)
+ * 5. assistant 单条消息含 text/thinking/tool_use 混合 → 1 条 `chat_message_assistant`,
+ *    content 数组按 jsonl 顺序;**纯 tool_use**(无 text/thinking)→ 每块拆 1 条
+ *    `chat_tool_call`(Q3-B + UI 跟 Live 形态对齐)
+ * 6. user 消息含 tool_result → 1 条 `chat_tool_result`(Q3-B;
+ *    `ChatMessageUserContentSchema` 不接受 tool_result block,所以必须单算)
+ * 7. 我们自己的 SSE event(`kind: 'chat_permission_*'`)也接受:维护 pendingRequestIds,
+ *    循环结束后对未配对的 request 各注入 1 条 synthetic `chat_permission_resolved`
+ *    `{ decision: { decision: 'deny', reason: 'session-interrupted' } }`(Q5-3a)
+ * 8. 未知 `kind` / 未知 `type` → 调 `onCorruptJsonlLine` + skip
  *
  * @param sdkLogPath SDK 会话日志 jsonl 绝对路径
- * @returns ChatSessionEvent[] —— 顺序与 jsonl 一致
+ * @param onCorruptJsonlLine 单行损坏回调(Q5-5a + 测试可注入收集器)
+ * @returns ChatSessionEvent[] —— 顺序与 jsonl 一致(尾部追加 synthetic resolved)
  */
-export function parseSdkSessionLog(sdkLogPath: string): ChatSessionEvent[] {
+export function parseSdkSessionLog(
+  sdkLogPath: string,
+  onCorruptJsonlLine?: (path: string, line: string, err: unknown) => void,
+): ChatSessionEvent[] {
   if (!existsSync(sdkLogPath)) return []
   let raw: string
   try {
@@ -777,83 +848,267 @@ export function parseSdkSessionLog(sdkLogPath: string): ChatSessionEvent[] {
   }
   const lines = raw.split('\n').filter((l) => l.trim().length > 0)
   const out: ChatSessionEvent[] = []
-  const now = Date.now()
-  let sawInit = false
+  const pendingRequestIds = new Set<string>()
+
   for (const line of lines) {
     let parsed: Record<string, unknown>
     try {
       parsed = JSON.parse(line) as Record<string, unknown>
-    } catch {
+    } catch (err) {
+      onCorruptJsonlLine?.(sdkLogPath, line, err)
       continue
     }
+
+    // -- Branch A:我们自己的 SSE event(以 `kind: 'chat_*'` 形态出现) --
+    const kind = parsed['kind']
+    if (typeof kind === 'string') {
+      if (kind === 'chat_permission_request') {
+        const requestId =
+          typeof parsed['requestId'] === 'string' ? parsed['requestId'] : ''
+        if (requestId) pendingRequestIds.add(requestId)
+        // schema 要求 `input: Record<string, unknown>`;parsed['input'] 是 unknown,窄化为 record
+        const rawInput = parsed['input']
+        const input: Record<string, unknown> =
+          rawInput !== null && typeof rawInput === 'object'
+            ? (rawInput as Record<string, unknown>)
+            : {}
+        out.push({
+          kind: 'chat_permission_request',
+          ts: Date.now(),
+          requestId,
+          toolName:
+            typeof parsed['toolName'] === 'string' ? parsed['toolName'] : '',
+          input,
+          displayName:
+            typeof parsed['displayName'] === 'string'
+              ? parsed['displayName']
+              : undefined,
+          title: typeof parsed['title'] === 'string' ? parsed['title'] : undefined,
+          description:
+            typeof parsed['description'] === 'string'
+              ? parsed['description']
+              : undefined,
+        })
+        continue
+      }
+      if (kind === 'chat_permission_resolved') {
+        const requestId =
+          typeof parsed['requestId'] === 'string' ? parsed['requestId'] : ''
+        if (requestId) pendingRequestIds.delete(requestId)
+        const decisionObj =
+          parsed['decision'] &&
+          typeof parsed['decision'] === 'object' &&
+          parsed['decision'] !== null
+            ? (parsed['decision'] as Record<string, unknown>)
+            : {}
+        const decisionLiteral =
+          decisionObj['decision'] === 'deny' ? 'deny' : 'allow'
+        const reason =
+          typeof decisionObj['reason'] === 'string'
+            ? decisionObj['reason']
+            : undefined
+        out.push({
+          kind: 'chat_permission_resolved',
+          ts: Date.now(),
+          requestId,
+          decision: { decision: decisionLiteral, reason },
+        })
+        continue
+      }
+      // 未知 chat_* kind:记 warn + skip(不影响 history 渲染)
+      onCorruptJsonlLine?.(
+        sdkLogPath,
+        line,
+        new Error(`unknown event kind: ${kind}`),
+      )
+      continue
+    }
+
+    // -- Branch B:SDK 事件(以 `type: ...` 形态出现) --
     const type = parsed['type']
     if (type === 'system' && parsed['subtype'] === 'init') {
-      sawInit = true
-      // system/init 之前的消息不算(本期先解析之前的 user/assistant;
-      // 后期扩展也解析 system/init 之后的 user/assistant/result 等)
+      // init 自身不解析为 event(init 不是稳定契约 —— SDK 2.1.206 真实 jsonl
+      // 不一定写 system/init;此行仅供调试,不构成后续事件的 gate)。
+      // 历史上曾用 sawInit gate 跳过 init 之前的事件(commit before 2026-08-13),
+      // 但用户实测 jsonl 根本没有 init 行,导致全部 user/assistant 被 skip →
+      // events=[];现已拆掉 gate,所有 SDK 事件按 type 无条件 dispatch。
       continue
     }
-    // 只解析 system/init 之前的消息
-    if (sawInit) continue
+
+    // --- user 消息 ---
     if (type === 'user') {
-      const message = parsed['message'] as
-        | { content?: unknown }
-        | undefined
+      const message = parsed['message'] as { content?: unknown } | undefined
       const content = message?.content
       if (!Array.isArray(content)) continue
-      const userContent = content
-        .map((block) => {
-          if (!block || typeof block !== 'object') return null
-          const b = block as Record<string, unknown>
-          if (b['type'] === 'text' && typeof b['text'] === 'string') {
-            return { kind: 'text' as const, text: b['text'] as string }
-          }
-          return null
-        })
-        .filter((c): c is { kind: 'text'; text: string } => c !== null)
-      if (userContent.length === 0) continue
-      out.push({
-        kind: 'chat_message_user',
-        ts: now,
-        content: userContent,
-      })
-    } else if (type === 'assistant') {
-      const message = parsed['message'] as
-        | { content?: unknown }
-        | undefined
-      const content = message?.content
-      if (!Array.isArray(content)) continue
-      const assistantContent: Array<
-        | { kind: 'text'; text: string; partial?: boolean }
-        | { kind: 'thinking'; text: string; partial?: boolean }
+      const userBlocks: Array<
+        | { kind: 'text'; text: string }
+        | { kind: 'attachment'; url: string; name?: string }
       > = []
+      const toolResultEvents: Array<{
+        id: string
+        name: string
+        content: unknown
+        isError: boolean
+        ts: number
+      }> = []
       for (const block of content) {
         if (!block || typeof block !== 'object') continue
         const b = block as Record<string, unknown>
         if (b['type'] === 'text' && typeof b['text'] === 'string') {
-          assistantContent.push({
-            kind: 'text',
-            text: b['text'] as string,
-          })
+          userBlocks.push({ kind: 'text', text: b['text'] })
         } else if (
-          b['type'] === 'thinking' &&
-          typeof b['thinking'] === 'string'
+          b['type'] === 'tool_result' &&
+          typeof b['tool_use_id'] === 'string'
         ) {
-          assistantContent.push({
-            kind: 'thinking',
-            text: b['thinking'] as string,
+          // tool_result 不进 chat_message_user.content(Schema 不接受);单算 chat_tool_result
+          const toolUseId = b['tool_use_id']
+          const toolName =
+            typeof b['name'] === 'string' ? b['name'] : '(unknown)'
+          toolResultEvents.push({
+            id: toolUseId,
+            name: toolName,
+            content: b['content'],
+            isError: b['is_error'] === true,
+            ts: parseSdkTimestamp(parsed, sdkLogPath, line, onCorruptJsonlLine),
           })
         }
       }
-      if (assistantContent.length === 0) continue
-      out.push({
-        kind: 'chat_message_assistant',
-        ts: now,
-        content: assistantContent,
-      })
+      // 决定 ts:user 消息的 ts 对所有派生 events 共用(SDK jsonl 只有 1 个 timestamp)
+      const userTs = parseSdkTimestamp(parsed, sdkLogPath, line, onCorruptJsonlLine)
+      // tool_result 单独 emit
+      for (const tr of toolResultEvents) {
+        out.push({
+          kind: 'chat_tool_result',
+          ts: userTs,
+          id: tr.id,
+          name: tr.name,
+          content: tr.content,
+          isError: tr.isError,
+        })
+      }
+      // user text/attachment → 1 条 chat_message_user
+      if (userBlocks.length > 0) {
+        out.push({
+          kind: 'chat_message_user',
+          ts: userTs,
+          content: userBlocks,
+        })
+      }
+      continue
     }
+
+    // --- assistant 消息 ---
+    if (type === 'assistant') {
+      const message = parsed['message'] as { content?: unknown } | undefined
+      const content = message?.content
+      if (!Array.isArray(content)) continue
+      const assistantBlocks: Array<
+        | { kind: 'text'; text: string }
+        | { kind: 'thinking'; text: string }
+        | { kind: 'tool_use'; toolUseId: string; name: string; input: Record<string, unknown> }
+      > = []
+      const toolCallEvents: Array<{
+        id: string
+        name: string
+        input: unknown
+      }> = []
+      let hasNonToolUse = false
+      for (const block of content) {
+        if (!block || typeof block !== 'object') continue
+        const b = block as Record<string, unknown>
+        if (b['type'] === 'text' && typeof b['text'] === 'string') {
+          assistantBlocks.push({ kind: 'text', text: b['text'] })
+          hasNonToolUse = true
+        } else if (b['type'] === 'thinking' && typeof b['thinking'] === 'string') {
+          assistantBlocks.push({ kind: 'thinking', text: b['thinking'] })
+          hasNonToolUse = true
+        } else if (
+          b['type'] === 'tool_use' &&
+          typeof b['id'] === 'string' &&
+          typeof b['name'] === 'string'
+        ) {
+          const rawToolInput = b['input']
+          const toolInput: Record<string, unknown> =
+            rawToolInput !== null && typeof rawToolInput === 'object'
+              ? (rawToolInput as Record<string, unknown>)
+              : {}
+          assistantBlocks.push({
+            kind: 'tool_use',
+            toolUseId: b['id'],
+            name: b['name'],
+            input: toolInput,
+          })
+          toolCallEvents.push({
+            id: b['id'],
+            name: b['name'],
+            input: toolInput,
+          })
+        }
+      }
+      const asstTs = parseSdkTimestamp(parsed, sdkLogPath, line, onCorruptJsonlLine) // SDK 2.1.206 实测带 timestamp;0.3.206 不带 → fallback Date.now()
+      if (!hasNonToolUse && toolCallEvents.length > 0) {
+        // 纯 tool_use:每块拆 1 条 chat_tool_call
+        for (const tc of toolCallEvents) {
+          out.push({
+            kind: 'chat_tool_call',
+            ts: asstTs,
+            id: tc.id,
+            name: tc.name,
+            args: tc.input as Record<string, unknown>,
+            partial: false,
+          })
+        }
+      } else if (assistantBlocks.length > 0) {
+        // 含 text/thinking(可能 +tool_use)→ 1 条 chat_message_assistant
+        out.push({
+          kind: 'chat_message_assistant',
+          ts: asstTs,
+          content: assistantBlocks,
+        })
+      }
+      continue
+    }
+
+    // result / error / 其它 SDK type:本期不解析(Q3 范围外)—— skip
+    continue
   }
+
+  // 注入 synthetic chat_permission_resolved(Q5-3a):
+  // 对未配对的 permission_request,加一条 decision=deny reason=session-interrupted
+  for (const requestId of pendingRequestIds) {
+    out.push({
+      kind: 'chat_permission_resolved',
+      ts: Date.now(),
+      requestId,
+      decision: { decision: 'deny', reason: 'session-interrupted' },
+    })
+  }
+
   return out
+}
+
+/**
+ * 从 SDK 消息行顶层 `timestamp` 字段读 ISO 字符串并解析为 epoch ms。
+ * 缺省 / 解析失败 → fallback `Date.now()`(Q4-A);失败时同时调 onCorruptJsonlLine
+ * 记录 warn(但不让其阻断 history 渲染 —— Q5-5a silent skip 原则)。
+ */
+function parseSdkTimestamp(
+  parsed: Record<string, unknown>,
+  sdkLogPath: string,
+  line: string,
+  onCorruptJsonlLine?: (path: string, line: string, err: unknown) => void,
+): number {
+  const tsField = parsed['timestamp']
+  if (typeof tsField === 'string') {
+    const ms = Date.parse(tsField)
+    if (Number.isFinite(ms)) return ms
+    onCorruptJsonlLine?.(
+      sdkLogPath,
+      line,
+      new Error(`unparseable timestamp: ${tsField}`),
+    )
+  }
+  return Date.now()
 }
 
 /** 默认 permission mode(用于 seed 缺省值) */
