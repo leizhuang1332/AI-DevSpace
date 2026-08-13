@@ -954,7 +954,15 @@ export function parseSdkSessionLog(
       for (const block of content) {
         if (!block || typeof block !== 'object') continue
         const b = block as Record<string, unknown>
-        if (b['type'] === 'text' && typeof b['text'] === 'string') {
+        // text 块要求 length>0 —— `ChatMessageUserContentSchema.text` 是
+        // `z.string().min(1)`,若 SDK 写出空 text(实测 SDK 2.1.206 在
+        // tool_result-only user 消息 / 内部 marker 场景会写 `text: ''`),
+        // 此处不 push,否则后续 snapshot 端 zod parse 会 500。
+        if (
+          b['type'] === 'text' &&
+          typeof b['text'] === 'string' &&
+          b['text'].length > 0
+        ) {
           userBlocks.push({ kind: 'text', text: b['text'] })
         } else if (
           b['type'] === 'tool_result' &&
@@ -1016,10 +1024,20 @@ export function parseSdkSessionLog(
       for (const block of content) {
         if (!block || typeof block !== 'object') continue
         const b = block as Record<string, unknown>
-        if (b['type'] === 'text' && typeof b['text'] === 'string') {
+        // 同 user 解析:空 text/thinking 块跳过(无 UI 价值;assistant schema
+        // 允许空,但保持 user/assistant 行为一致,避免空块被 snapshot 推给 web 端)。
+        if (
+          b['type'] === 'text' &&
+          typeof b['text'] === 'string' &&
+          b['text'].length > 0
+        ) {
           assistantBlocks.push({ kind: 'text', text: b['text'] })
           hasNonToolUse = true
-        } else if (b['type'] === 'thinking' && typeof b['thinking'] === 'string') {
+        } else if (
+          b['type'] === 'thinking' &&
+          typeof b['thinking'] === 'string' &&
+          b['thinking'].length > 0
+        ) {
           assistantBlocks.push({ kind: 'thinking', text: b['thinking'] })
           hasNonToolUse = true
         } else if (

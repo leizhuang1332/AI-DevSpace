@@ -694,6 +694,149 @@ describe('parseSdkSessionLog', () => {
     }
   })
 
+  it('user 消息带空 text 块(text: "")→ 跳过,不 emit chat_message_user', () => {
+    // SDK 2.1.206 实测在 tool_result-only user 消息 / 内部 marker 场景会写
+    // `{type:'text', text:''}`(user 角色但 content 实质是空的占位);若不
+    // 过滤,parse 阶段会产出 `chat_message_user.content=[{kind:'text',text:''}]`,
+    // 而 `ChatMessageUserContentSchema.text` 是 `z.string().min(1)` → snapshot
+    // 端 zod parse 失败 500。修复后:空 text 块不 push,user 消息整条不 emit。
+    const tmpFile = join(tmpRoot, 'sdk-empty-user.jsonl')
+    const lines = [
+      JSON.stringify({
+        type: 'user',
+        message: { role: 'user', content: [{ type: 'text', text: '' }] },
+      }),
+    ]
+    writeFileSync(tmpFile, lines.join('\n') + '\n', 'utf8')
+
+    const events = parseSdkSessionLog(tmpFile)
+    expect(events).toEqual([])
+  })
+
+  it('user 消息空 text 块 + tool_result → 只 emit chat_tool_result,跳过空 user', () => {
+    // SDK 在 tool_use → tool_result 循环里偶尔会为 user 角色写一条纯
+    // tool_result 消息,可能附一个空 text 占位块;若空 text 不过滤,会产生
+    // 坏 chat_message_user。
+    const tmpFile = join(tmpRoot, 'sdk-empty-user-with-toolresult.jsonl')
+    const lines = [
+      JSON.stringify({
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'text', text: '' },
+            {
+              type: 'tool_result',
+              tool_use_id: 'toolu_abc',
+              name: 'Read',
+              content: 'file contents',
+              is_error: false,
+            },
+          ],
+        },
+      }),
+    ]
+    writeFileSync(tmpFile, lines.join('\n') + '\n', 'utf8')
+
+    const events = parseSdkSessionLog(tmpFile)
+    expect(events).toHaveLength(1)
+    expect(events[0]?.kind).toBe('chat_tool_result')
+  })
+
+  it('assistant 消息纯空 text 块 → 不 emit chat_message_assistant', () => {
+    // assistant schema 允许空 text(无 min(1)),但空块无 UI 价值且会让
+    // snapshot 推送空 content;保持 user/assistant 行为一致,parse 阶段
+    // 一并过滤。
+    const tmpFile = join(tmpRoot, 'sdk-empty-assistant.jsonl')
+    const lines = [
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: '' }],
+        },
+      }),
+    ]
+    writeFileSync(tmpFile, lines.join('\n') + '\n', 'utf8')
+
+    const events = parseSdkSessionLog(tmpFile)
+    expect(events).toEqual([])
+  })
+
+  it('assistant 消息空 text + tool_use → 走 tool_call 路径(空 text 不阻断)', () => {
+    // 边界:空 text 不算 hasNonToolUse,整条按纯 tool_use 处理 → chat_tool_call。
+    const tmpFile = join(tmpRoot, 'sdk-empty-assistant-with-tooluse.jsonl')
+    const lines = [
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: '' },
+            {
+              type: 'tool_use',
+              id: 'toolu_xyz',
+              name: 'Bash',
+              input: { cmd: 'ls' },
+            },
+          ],
+        },
+      }),
+    ]
+    writeFileSync(tmpFile, lines.join('\n') + '\n', 'utf8')
+
+    const events = parseSdkSessionLog(tmpFile)
+    expect(events).toHaveLength(1)
+    expect(events[0]?.kind).toBe('chat_tool_call')
+  })
+
+  it('assistant 消息含空 thinking 块 → 同样跳过', () => {
+    const tmpFile = join(tmpRoot, 'sdk-empty-thinking.jsonl')
+    const lines = [
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'thinking', thinking: '' }],
+        },
+      }),
+    ]
+    writeFileSync(tmpFile, lines.join('\n') + '\n', 'utf8')
+
+    const events = parseSdkSessionLog(tmpFile)
+    expect(events).toEqual([])
+  })
+
+  it('assistant 消息含有效 text + 空 thinking → chat_message_assistant 只含 text 块', () => {
+    // 防御:混合块中空 thinking 不污染 content 数组
+    const tmpFile = join(tmpRoot, 'sdk-mixed-empty-thinking.jsonl')
+    const lines = [
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: '有效回答' },
+            { type: 'thinking', thinking: '' },
+          ],
+        },
+      }),
+    ]
+    writeFileSync(tmpFile, lines.join('\n') + '\n', 'utf8')
+
+    const events = parseSdkSessionLog(tmpFile)
+    expect(events).toHaveLength(1)
+    expect(events[0]?.kind).toBe('chat_message_assistant')
+    if (events[0]?.kind === 'chat_message_assistant') {
+      expect(events[0].content).toHaveLength(1)
+      expect(events[0].content[0]).toEqual({
+        kind: 'text',
+        text: '有效回答',
+        partial: undefined,
+      })
+    }
+  })
+
   it('assistant 消息含 tool_use block → chat_tool_call event', () => {
     const tmpFile = join(tmpRoot, 'sdk.jsonl')
     const lines = [
