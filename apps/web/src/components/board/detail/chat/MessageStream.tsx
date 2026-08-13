@@ -15,7 +15,7 @@
  * 视觉一致。
  */
 
-import { useMemo, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { ChatSessionEvent, ChatSubAgentEvent } from '@ai-devspace/shared'
 import { SubAgentBlock, type SubAgentToolCall } from './SubAgentBlock'
 import { ToolCallBubble } from './ToolCallBubble'
@@ -24,9 +24,95 @@ export interface MessageStreamProps {
   events: ChatSessionEvent[]
 }
 
+/** 贴底判定阈值(px)—— ≤ 1px 视为贴底;流式 token 累积时 scrollHeight 增量内 */
+const STICK_TO_BOTTOM_THRESHOLD_PX = 1
+
 export function MessageStream({ events }: MessageStreamProps): ReactNode {
   // 把事件按时间序排好(已由后端保证);本组件只 group:同一 ts 的 tool_call + tool_result 合并
   const items = useMemo(() => buildItems(events), [events])
+
+  // ---- stick-to-bottom 滚动契约 ----
+  // - scrollContainerRef:滚动容器 div
+  // - roRef:ResizeObserver 实例(callback ref 挂/卸时维护)
+  // - isStuckToBottom:当前是否贴底(true 时新 events → 自动跟底;false → 让位)
+  // - stuckRef:镜像 isStuckToBottom,供 RO 回调读最新值(避免 stale closure)
+  // - initialMountedRef:标记首次 mount 的"初始跳底"是否已执行
+  // - skipNextAutoScrollRef:用户点 ↓ 后,跳过下一次 useEffect 自动 scrollTo
+  //   (避免 setIsStuckToBottom(true) 触发 useEffect 重跑 → 再调一次 scrollTo)
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null)
+  const roRef = useRef<ResizeObserver | null>(null)
+  const initialMountedRef = useRef(false)
+  const skipNextAutoScrollRef = useRef(false)
+  const stuckRef = useRef(true)
+  const [isStuckToBottom, setIsStuckToBottom] = useState(true)
+
+  useEffect(() => {
+    stuckRef.current = isStuckToBottom
+  }, [isStuckToBottom])
+
+  const scrollToBottom = useCallback((smooth: boolean): void => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
+  }, [])
+
+  // 滚动容器挂/卸 → 同步挂/卸 ResizeObserver
+  // useCallback([]) 稳定引用 → React 不会在 rerender 时反复调 ref(null)+ref(el)
+  // 重挂(否则每次父组件 rerender 都会 disconnect+reconnect RO,且会破坏 RO callback
+  // 闭包里的 scrollContainerRef 当前引用)
+  const setScrollRef = useCallback((el: HTMLDivElement | null): void => {
+    if (roRef.current) {
+      roRef.current.disconnect()
+      roRef.current = null
+    }
+    scrollContainerRef.current = el
+    if (el) {
+      const ro = new ResizeObserver(() => {
+        // 容器高度变化(图片加载 / 窗口 resize)→ 若仍贴底,同步滚到底
+        const cur = scrollContainerRef.current
+        if (!cur) return
+        if (!stuckRef.current) return
+        cur.scrollTo({ top: cur.scrollHeight, behavior: 'auto' })
+      })
+      ro.observe(el)
+      roRef.current = ro
+    }
+  }, [])
+
+  // 初始 mount(smooth) + events.length 增长(stick 时 · instant)
+  // - 区分场景:mount / 用户主动回底 → smooth;流式高频 → instant
+  // - events.length 作为依赖去重(React Query refetch 即使内容不变 reference 变也不触发)
+  useEffect(() => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    if (items.length === 0) return
+    if (!initialMountedRef.current) {
+      initialMountedRef.current = true
+      scrollToBottom(true)
+      return
+    }
+    if (skipNextAutoScrollRef.current) {
+      skipNextAutoScrollRef.current = false
+      return
+    }
+    if (!isStuckToBottom) return
+    scrollToBottom(false)
+  }, [items.length, isStuckToBottom, scrollToBottom])
+
+  const handleScroll = (): void => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    const stuck =
+      el.scrollHeight - el.scrollTop - el.clientHeight <=
+      STICK_TO_BOTTOM_THRESHOLD_PX
+    setIsStuckToBottom(stuck)
+  }
+
+  const handleJumpToBottom = (): void => {
+    skipNextAutoScrollRef.current = true
+    scrollToBottom(true)
+    setIsStuckToBottom(true)
+  }
 
   if (items.length === 0) {
     return (
@@ -41,6 +127,8 @@ export function MessageStream({ events }: MessageStreamProps): ReactNode {
 
   return (
     <div
+      ref={setScrollRef}
+      onScroll={handleScroll}
       data-testid="board-chat-message-stream"
       // min-h-0:让 flex 子项能收缩到容器内,否则 flex 默认 min-height: auto
       // 会让消息流拒绝收缩,长消息时整个面板高度被撑爆,overflow 失效
@@ -48,9 +136,28 @@ export function MessageStream({ events }: MessageStreamProps): ReactNode {
       // overflow-y-scroll + scrollbar-thin:始终显示细滚动条(给用户"这里有更多内容"
       // 的视觉提示,避免 macOS overlay 滚动条不易发现;track/thumb 颜色在 globals.css
       // 用 ::-webkit-scrollbar 配项目 CSS 变量)
+      //
+      // 不加 relative:↓ 按钮 absolute 定位找最近的 positioned 祖先 → 锚到
+      // CardTranscriptPanel(已加 relative),这样按钮钉在 panel 右下角 · input
+      // 顶部上方,而不是 MessageStream 内右下角
       className="flex flex-col gap-3 flex-1 min-h-0 py-3 overflow-y-scroll scrollbar-thin"
     >
       {items.map((it, idx) => renderItem(it, idx))}
+      {!isStuckToBottom && (
+        <button
+          type="button"
+          data-testid="board-chat-scroll-to-bottom"
+          onClick={handleJumpToBottom}
+          aria-label="跳到最新消息"
+          title="跳到最新消息"
+          // 定位参照系:CardTranscriptPanel(relative,见 CardTranscriptPanel.tsx)
+          // bottom-[110px]:给 CardTranscriptInput(高度 ~110px)留出空间,按钮浮在
+          // panel 右下角 · input 顶部上方;z-10 防被 input 边框/背景覆盖
+          className="absolute right-3 bottom-[110px] z-10 w-8 h-8 rounded-full border border-border bg-bg-elevated text-text-1 hover:border-text-3 hover:text-brand-700 shadow-sm inline-flex items-center justify-center"
+        >
+          ↓
+        </button>
+      )}
     </div>
   )
 }

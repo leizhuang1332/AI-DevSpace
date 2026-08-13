@@ -76,6 +76,9 @@ function makeMeta(overrides: Partial<ChatSessionMeta> = {}): ChatSessionMeta {
     lastQueryAt: '2026-08-07T00:00:00Z',
     queryCount: 3,
     ownerUserId: 'user-1',
+    // ChatSessionMeta 上 sdkSessionEstablished 是必填 boolean,默认 true 表示
+    // 「SDK sessionId 已落 session.json」(issue 16 / ADR-0029 D9a)。
+    sdkSessionEstablished: true,
     cumulativeUsage: {
       cumulativeCostUsd: 0.42,
       cumulativeInputTokens: 1234,
@@ -176,6 +179,21 @@ function wrap(node: ReactNode): ReturnType<typeof render> {
 beforeEach(() => {
   vi.clearAllMocks()
   setupDefaultMocks()
+  // 全局桩:jsdom 不实现 scrollTo / ResizeObserver。
+  // 所有渲染 MessageStream 的 describe 都需要这两个 —— 必须顶层桩。
+  // MessageStream 内部 `new ResizeObserver(...)` 找全局标识符;设 globalThis
+  // 而不是 window,因为 vitest jsdom 下两者通常等价,但 globalThis 更稳。
+  if (typeof (globalThis as { ResizeObserver?: unknown }).ResizeObserver !== 'function') {
+    ;(globalThis as { ResizeObserver?: unknown }).ResizeObserver = vi
+      .fn()
+      .mockImplementation(() => ({
+        observe: vi.fn(),
+        unobserve: vi.fn(),
+        disconnect: vi.fn(),
+      }))
+  }
+  ;(window.HTMLElement.prototype as unknown as { scrollTo?: unknown }).scrollTo ??=
+    vi.fn()
 })
 
 afterEach(() => {
@@ -1349,5 +1367,310 @@ describe('CardTranscriptPanel · 滚动布局契约', () => {
     expect(stream.className).toContain('min-h-0')
     expect(stream.className).toContain('overflow-y-scroll')
     expect(stream.className).toContain('scrollbar-thin')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 自动滚动契约 + ↓ 浮动回底按钮(stick-to-bottom · 本期新增)
+// 锁定以下行为(grilling Q1-Q7 + 边界 ①②③ 共识):
+// - mount → smooth 跳底 1 次
+// - events.length 增长 → instant 跟底(stick 状态时)
+// - 用户上滚脱离底部 → 新 events 不再触发跟随
+// - 点 ↓ 按钮 → smooth 跳底 + 重置为跟随态(stick=true 时按钮消失)
+// - 占位态(无 events)→ 不渲染滚动容器也不渲染 ↓ 按钮
+// - ResizeObserver 监听容器尺寸变化(stick 时跟随)
+// jsdom 缺 scrollTo / ResizeObserver,本块顶部 beforeEach 桩。
+// 改动前 RED,改动后 GREEN。
+// ---------------------------------------------------------------------------
+
+describe('CardTranscriptPanel · 自动滚动与 ↓ 按钮', () => {
+  let scrollToSpy: ReturnType<typeof vi.fn>
+  let resizeObserveSpy: ReturnType<typeof vi.fn>
+  let resizeDisconnectSpy: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    // jsdom 不实现 scrollTo / ResizeObserver
+    scrollToSpy = vi.fn()
+    ;(window.HTMLElement.prototype as unknown as { scrollTo: unknown }).scrollTo =
+      scrollToSpy
+    resizeObserveSpy = vi.fn()
+    resizeDisconnectSpy = vi.fn()
+    ;(window as unknown as { ResizeObserver: unknown }).ResizeObserver = vi
+      .fn()
+      .mockImplementation(() => ({
+        observe: resizeObserveSpy,
+        unobserve: vi.fn(),
+        disconnect: resizeDisconnectSpy,
+      }))
+  })
+
+  /** 给 MessageStream div 装上 jsdom 缺的 layout 属性,便于 onScroll 触发判定 */
+  function fakeLayout(
+    el: HTMLElement,
+    opts: { scrollHeight: number; clientHeight: number; scrollTop: number },
+  ): void {
+    Object.defineProperty(el, 'scrollHeight', {
+      configurable: true,
+      get: () => opts.scrollHeight,
+    })
+    Object.defineProperty(el, 'clientHeight', {
+      configurable: true,
+      get: () => opts.clientHeight,
+    })
+    Object.defineProperty(el, 'scrollTop', {
+      configurable: true,
+      get: () => opts.scrollTop,
+      set: (v: number) => {
+        opts.scrollTop = v
+      },
+    })
+  }
+
+  function setupSnapshotWithEvents(events: ChatSessionEvent[]): void {
+    mockUseChatSessionSnapshot.mockReturnValue({
+      snapshot: makeSnapshot(makeMeta(), events),
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    mockUseChatSessionStream.mockReturnValue({
+      events: [],
+      status: 'idle',
+      send: vi.fn(),
+      abort: vi.fn(),
+      sessionExpired: false,
+    })
+  }
+
+  it('mount → scrollTo 触发 1 次(初始跳底 · smooth)', async () => {
+    setupSnapshotWithEvents([
+      {
+        kind: 'chat_message_user',
+        ts: 1700000000000,
+        content: [{ kind: 'text', text: 'hi' }],
+      },
+    ])
+    await act(async () => {
+      wrap(
+        <CardTranscriptPanel
+          card={makeCard()}
+          requirementId={REQ_ID}
+          onClose={vi.fn()}
+        />,
+      )
+    })
+    expect(scrollToSpy).toHaveBeenCalledTimes(1)
+    expect(scrollToSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ top: 0, behavior: 'smooth' }),
+    )
+  })
+
+  it('events.length 增加 → scrollTo 再触发 1 次(instant · 跟底)', async () => {
+    setupSnapshotWithEvents([
+      {
+        kind: 'chat_message_user',
+        ts: 1700000000000,
+        content: [{ kind: 'text', text: 'hi' }],
+      },
+    ])
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const buildUi = (): ReactNode => (
+      <QueryClientProvider client={qc}>
+        <CardTranscriptPanel
+          card={makeCard()}
+          requirementId={REQ_ID}
+          onClose={vi.fn()}
+        />
+      </QueryClientProvider>
+    )
+    let renderResult: ReturnType<typeof render>
+    await act(async () => {
+      renderResult = render(buildUi())
+    })
+    scrollToSpy.mockClear()
+    // 模拟 stream 端来新 event → 父组件合并后 events.length +1
+    mockUseChatSessionStream.mockReturnValue({
+      events: [
+        {
+          kind: 'chat_message_assistant',
+          ts: 1700000001000,
+          content: [{ kind: 'text', text: 'hello' }],
+        },
+      ],
+      status: 'idle',
+      send: vi.fn(),
+      abort: vi.fn(),
+      sessionExpired: false,
+    })
+    // rerender 必须传**新**ReactElement(同一引用 React 18 可能 bail out
+    // 不重跑函数组件,见调试 log 验证)
+    await act(async () => {
+      renderResult!.rerender(buildUi())
+    })
+    expect(scrollToSpy).toHaveBeenCalledTimes(1)
+    // 流式高频触发 → instant(非 smooth)
+    expect(scrollToSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ behavior: 'auto' }),
+    )
+  })
+
+  it('用户上滚脱离底部 → 新增 events 不再触发 scrollTo(stick-to-bottom 让位)', async () => {
+    setupSnapshotWithEvents([
+      {
+        kind: 'chat_message_user',
+        ts: 1700000000000,
+        content: [{ kind: 'text', text: 'hi' }],
+      },
+    ])
+    // 共享 QC + 共享 panel 实例,rerender 不重建缓存
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const ui = (
+      <QueryClientProvider client={qc}>
+        <CardTranscriptPanel
+          card={makeCard()}
+          requirementId={REQ_ID}
+          onClose={vi.fn()}
+        />
+      </QueryClientProvider>
+    )
+    let renderResult: ReturnType<typeof render>
+    await act(async () => {
+      renderResult = render(ui)
+    })
+    // 模拟用户上滚:scrollTop=100,scrollHeight=1000,clientHeight=500
+    // → 距底 1000-100-500 = 400px(>1px,脱离底部)
+    const stream = screen.getByTestId('board-chat-message-stream')
+    fakeLayout(stream, { scrollHeight: 1000, clientHeight: 500, scrollTop: 100 })
+    await act(async () => {
+      fireEvent.scroll(stream)
+    })
+    scrollToSpy.mockClear()
+    // 模拟 stream 端来新 event → 父组件合并后 events.length +1
+    mockUseChatSessionStream.mockReturnValue({
+      events: [
+        {
+          kind: 'chat_message_assistant',
+          ts: 1700000001000,
+          content: [{ kind: 'text', text: 'hello' }],
+        },
+      ],
+      status: 'idle',
+      send: vi.fn(),
+      abort: vi.fn(),
+      sessionExpired: false,
+    })
+    await act(async () => {
+      renderResult!.rerender(ui)
+    })
+    // 已离开底部 → 不应触发跟随
+    expect(scrollToSpy).not.toHaveBeenCalled()
+  })
+
+  it('↓ 按钮在已贴底时不存在', async () => {
+    setupSnapshotWithEvents([
+      {
+        kind: 'chat_message_user',
+        ts: 1700000000000,
+        content: [{ kind: 'text', text: 'hi' }],
+      },
+    ])
+    await act(async () => {
+      wrap(
+        <CardTranscriptPanel
+          card={makeCard()}
+          requirementId={REQ_ID}
+          onClose={vi.fn()}
+        />,
+      )
+    })
+    expect(screen.queryByTestId('board-chat-scroll-to-bottom')).toBeNull()
+  })
+
+  it('上滚后 ↓ 按钮出现 → 点按钮 → scrollTo(smooth)+ 重置跟随态', async () => {
+    setupSnapshotWithEvents([
+      {
+        kind: 'chat_message_user',
+        ts: 1700000000000,
+        content: [{ kind: 'text', text: 'hi' }],
+      },
+    ])
+    await act(async () => {
+      wrap(
+        <CardTranscriptPanel
+          card={makeCard()}
+          requirementId={REQ_ID}
+          onClose={vi.fn()}
+        />,
+      )
+    })
+    const stream = screen.getByTestId('board-chat-message-stream')
+    fakeLayout(stream, { scrollHeight: 1000, clientHeight: 500, scrollTop: 100 })
+    await act(async () => {
+      fireEvent.scroll(stream)
+    })
+    const btn = screen.getByTestId('board-chat-scroll-to-bottom')
+    expect(btn).toBeInTheDocument()
+    scrollToSpy.mockClear()
+    await act(async () => {
+      fireEvent.click(btn)
+    })
+    expect(scrollToSpy).toHaveBeenCalledTimes(1)
+    expect(scrollToSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ behavior: 'smooth' }),
+    )
+    // 模拟滚到底(click 后 scrollTop 跳到 500 = scrollHeight - clientHeight)
+    fakeLayout(stream, { scrollHeight: 1000, clientHeight: 500, scrollTop: 500 })
+    await act(async () => {
+      fireEvent.scroll(stream)
+    })
+    // 重新进入跟随态 → ↓ 按钮消失
+    expect(screen.queryByTestId('board-chat-scroll-to-bottom')).toBeNull()
+  })
+
+  it('无 events(占位态)→ 不渲染滚动容器也无 ↓ 按钮', async () => {
+    setupSnapshotWithEvents([])
+    await act(async () => {
+      wrap(
+        <CardTranscriptPanel
+          card={makeCard()}
+          requirementId={REQ_ID}
+          onClose={vi.fn()}
+        />,
+      )
+    })
+    // 占位态不调 scrollTo
+    expect(scrollToSpy).not.toHaveBeenCalled()
+    // 占位态也无 ↓ 按钮
+    expect(screen.queryByTestId('board-chat-scroll-to-bottom')).toBeNull()
+  })
+
+  it('MessageStream mount 时挂上 ResizeObserver;unmount 时 disconnect', async () => {
+    setupSnapshotWithEvents([
+      {
+        kind: 'chat_message_user',
+        ts: 1700000000000,
+        content: [{ kind: 'text', text: 'hi' }],
+      },
+    ])
+    let renderResult: ReturnType<typeof render>
+    await act(async () => {
+      renderResult = wrap(
+        <CardTranscriptPanel
+          card={makeCard()}
+          requirementId={REQ_ID}
+          onClose={vi.fn()}
+        />,
+      )
+    })
+    expect(resizeObserveSpy).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      renderResult!.unmount()
+    })
+    expect(resizeDisconnectSpy).toHaveBeenCalledTimes(1)
   })
 })

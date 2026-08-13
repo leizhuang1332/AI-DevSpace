@@ -286,7 +286,11 @@ export function CardTranscriptPanel({
       data-locked-by-other={lock.lockedByOtherTab ? 'true' : 'false'}
       // h-full:撑满右栏 grid cell(wrapper 已是 flex 容器,提供高度约束)
       // 配合 MessageStream 的 flex-1 + min-h-0,长消息时仅消息流滚,头+输入框钉死
-      className="p-4 bg-bg-elevated flex flex-col gap-2 h-full min-w-0"
+      //
+      // relative:↓ 浮动按钮 absolute 定位的参照系(MessageStream 自己不加 relative,
+      // 这样按钮 absolute 找最近的 positioned 祖先 → 钉到 panel 右下角 · input 顶部上方,
+      // 而不是钉在 MessageStream 内右下角)
+      className="p-4 bg-bg-elevated flex flex-col gap-2 h-full min-w-0 relative"
       style={{ animation: 'expand .25s ease-out' }}
     >
       {/* 单 tab lock banner */}
