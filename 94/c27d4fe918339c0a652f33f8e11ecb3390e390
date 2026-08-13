@@ -1,0 +1,27 @@
+apps/agent/src/routes/board-chat.ts
+  s_028fe1ea0f5444::t_a6516c0eb773c7 827
+apps/web/src/__tests__/board/card-transcript-panel.test.tsx
+  s_028fe1ea0f5444::t_444854e2b5340d 223-243
+  s_028fe1ea0f5444::t_987e12c07d89eb 85,87
+  s_028fe1ea0f5444::t_0888eb2b2a183c 244
+packages/shared/src/board-chat.ts
+  s_028fe1ea0f5444::t_0776e92ac332f3 645-652
+apps/web/src/components/board/detail/CardTranscriptPanel.tsx
+  s_028fe1ea0f5444::t_beb6e4125efbcf 343-356
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "94c27d4fe918339c0a652f33f8e11ecb3390e390",
+  "prompts": {},
+  "sessions": {
+    "s_028fe1ea0f5444": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "138d61be-4603-4f1c-a50a-98ac683062b4",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
