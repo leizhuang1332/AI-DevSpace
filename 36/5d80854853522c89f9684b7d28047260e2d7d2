@@ -1,0 +1,40 @@
+apps/web/src/app/(workspace)/layout.tsx
+  s_05c6ef4a2e0a33::t_58bebcc922eacb 40-45
+  s_05c6ef4a2e0a33::t_71a26678ffbbd1 27-31
+apps/web/src/components/board/detail/BoardCardDetailPage.tsx
+  s_05c6ef4a2e0a33::t_a4e673c5c342e3 219-224
+apps/web/src/lib/zone-shell.tsx
+  s_05c6ef4a2e0a33::t_0f0d2a31c24fff 86
+apps/web/src/__tests__/board/board-card-detail-page.test.tsx
+  s_05c6ef4a2e0a33::t_9b4a36ee93544a 359-396
+apps/web/src/components/board/detail/CardTranscriptPanel.tsx
+  s_05c6ef4a2e0a33::t_6215b045303ac6 287-289
+apps/web/src/styles/globals.css
+  s_05c6ef4a2e0a33::t_f896fd791a225d 52-76
+apps/web/src/components/board/detail/chat/MessageStream.tsx
+  s_05c6ef4a2e0a33::t_61ac4cbfe13018 46-51
+  s_05c6ef4a2e0a33::t_4e0b2fe599e642 45
+apps/web/src/__tests__/board/board-chat-panel.test.tsx
+  s_05c6ef4a2e0a33::t_7dc7886aa5c32d 1346-1347,1350-1351
+  s_05c6ef4a2e0a33::t_4aba6c18683240 1293-1345,1348-1349,1352
+apps/web/src/components/board/detail/CardSideProperty.tsx
+  s_05c6ef4a2e0a33::t_0acac9dd2cd439 55-57
+apps/web/src/__tests__/zone-shell.test.tsx
+  s_05c6ef4a2e0a33::t_1a7144fcc4e0d9 155-169
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "365d80854853522c89f9684b7d28047260e2d7d2",
+  "prompts": {},
+  "sessions": {
+    "s_05c6ef4a2e0a33": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5f3090e6-96fd-44a5-afbd-0fa5a905eb5c",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
