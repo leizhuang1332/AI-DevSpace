@@ -1,0 +1,22 @@
+apps/agent/src/services/board/ChatSessionService.ts
+  s_ddb649c8e52c75::t_cc6c98884b0b78 1027-1033,1036-1040
+  s_ddb649c8e52c75::t_15f59b2530e789 957-965
+apps/agent/src/__tests__/board/chat-session-service.test.ts
+  s_ddb649c8e52c75::t_83e43dabb00cb0 697-839
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "e472e87488800e684989f225eeb36f055dc18dde",
+  "prompts": {},
+  "sessions": {
+    "s_ddb649c8e52c75": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3510fe0f-6842-44c9-8a78-5be4fed62de8",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
