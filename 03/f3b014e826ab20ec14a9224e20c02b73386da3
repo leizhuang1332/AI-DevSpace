@@ -1,0 +1,25 @@
+apps/web/src/app/(workspace)/requirements/[id]/page.tsx
+  s_f9283f6057acc0::t_acf7ac9b5fadce 2,10-13
+  s_f9283f6057acc0::t_3b4025b2161eed 24-29,31-43
+apps/web/src/lib/requirement-overview.server.ts
+  s_f9283f6057acc0::t_c336c48ad2d075 1-493
+apps/web/src/lib/__tests__/requirement-overview.server.test.ts
+  s_f9283f6057acc0::t_7f099295e3fb90 205-206,208,210-211
+  s_f9283f6057acc0::t_bcc09338826b38 1-204,207,209,212-419
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "03f3b014e826ab20ec14a9224e20c02b73386da3",
+  "prompts": {},
+  "sessions": {
+    "s_f9283f6057acc0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bfdef3b7-82d9-4e8c-8c22-aba885018eae",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
