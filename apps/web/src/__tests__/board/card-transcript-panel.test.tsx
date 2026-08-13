@@ -5,7 +5,7 @@
  * - head 渲染(标题 + SDK session badge + ✕)
  * - snapshot 加载 + meta 渲染
  * - ✕ → onClose
- * - 输入框 textarea + 发送按钮 + ⌘+↵ 发送
+ * - 输入框 textarea + 发送按钮 + ↵ 发送(Shift+↵ 换行)
  * - 空内容 → 发送 disabled
  *
  * mock 策略:mock `board-chat-hooks` 全部 hooks
@@ -291,7 +291,7 @@ describe('CardTranscriptPanel · 输入框', () => {
     )
   })
 
-  it('⌘+Enter → 发送', async () => {
+  it('Enter → 发送', async () => {
     mockUseChatSessionSnapshot.mockReturnValue({
       snapshot: makeSnapshot(makeMeta()),
       isLoading: false,
@@ -316,14 +316,14 @@ describe('CardTranscriptPanel · 输入框', () => {
     const ta = screen.getByTestId('board-chat-textarea') as HTMLTextAreaElement
     fireEvent.change(ta, { target: { value: '快捷键消息' } })
     await act(async () => {
-      fireEvent.keyDown(ta, { key: 'Enter', metaKey: true })
+      fireEvent.keyDown(ta, { key: 'Enter' })
     })
     expect(sendFn).toHaveBeenCalledWith(
       expect.objectContaining({ content: '快捷键消息' }),
     )
   })
 
-  it('普通 Enter 不发送', async () => {
+  it('Shift+Enter 不发送(走默认换行行为)', async () => {
     mockUseChatSessionSnapshot.mockReturnValue({
       snapshot: makeSnapshot(makeMeta()),
       isLoading: false,
@@ -346,9 +346,9 @@ describe('CardTranscriptPanel · 输入框', () => {
       />,
     )
     const ta = screen.getByTestId('board-chat-textarea') as HTMLTextAreaElement
-    fireEvent.change(ta, { target: { value: '普通回车' } })
+    fireEvent.change(ta, { target: { value: '换行回车' } })
     await act(async () => {
-      fireEvent.keyDown(ta, { key: 'Enter' })
+      fireEvent.keyDown(ta, { key: 'Enter', shiftKey: true })
     })
     expect(sendFn).not.toHaveBeenCalled()
   })

@@ -686,7 +686,7 @@ describe('CardTranscriptPanel · 发送消息', () => {
     )
   })
 
-  it('⌘+Enter → 发送', async () => {
+  it('Enter → 发送', async () => {
     mockUseChatSessionSnapshot.mockReturnValue({
       snapshot: makeSnapshot(makeMeta()),
       isLoading: false,
@@ -712,11 +712,42 @@ describe('CardTranscriptPanel · 发送消息', () => {
     const ta = screen.getByTestId('board-chat-textarea')
     fireEvent.change(ta, { target: { value: '快捷键' } })
     await act(async () => {
-      fireEvent.keyDown(ta, { key: 'Enter', metaKey: true })
+      fireEvent.keyDown(ta, { key: 'Enter' })
     })
     expect(sendFn).toHaveBeenCalledWith(
       expect.objectContaining({ content: '快捷键' }),
     )
+  })
+
+  it('Shift+Enter 不发送(走默认换行行为)', async () => {
+    mockUseChatSessionSnapshot.mockReturnValue({
+      snapshot: makeSnapshot(makeMeta()),
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    const sendFn = vi.fn().mockResolvedValue(undefined)
+    mockUseChatSessionStream.mockReturnValue({
+      events: [],
+      status: 'idle',
+      send: sendFn,
+      abort: vi.fn(),
+      sessionExpired: false,
+    })
+    wrap(
+      <CardTranscriptPanel
+        card={makeCard()}
+        requirementId={REQ_ID}
+        onClose={vi.fn()}
+      />,
+    )
+    const ta = screen.getByTestId('board-chat-textarea')
+    fireEvent.change(ta, { target: { value: '换行' } })
+    await act(async () => {
+      fireEvent.keyDown(ta, { key: 'Enter', shiftKey: true })
+    })
+    expect(sendFn).not.toHaveBeenCalled()
   })
 
   // issue 12 —— /start schema 解耦:无 meta 时发送,startMutation 调用 args 不带 content

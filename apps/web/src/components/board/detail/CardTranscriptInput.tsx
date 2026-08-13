@@ -3,7 +3,11 @@
 /**
  * board chat 输入框(issue 07 / ADR-0029)
  *
- * 形态沿用旧 CardTranscriptInput:textarea + 发送按钮 + ⌘+↵ 快捷键。
+ * 形态沿用旧 CardTranscriptInput:textarea + 发送按钮 + 快捷键。
+ * 快捷键约定:
+ * - Enter → 发送(主流 chat UX)
+ * - Shift+Enter → 换行(保留多行输入能力)
+ *
  * 新增:
  * - `disabled` prop(单 tab lock 时禁用)
  * - `placeholder` 由父组件传入(chat 模式 vs transcript 模式区别)
@@ -43,7 +47,8 @@ export function CardTranscriptInput({
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      // Enter 直接发送;Shift+Enter 走默认行为(插入换行,保留多行输入)。
+      if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault()
         void handleSend()
       }
@@ -83,7 +88,7 @@ export function CardTranscriptInput({
         >
           {isPending ? '发送中…' : '发送'}
           {!isPending && (
-            <span className="opacity-60 text-[11px] ml-1">⌘+↵</span>
+            <span className="opacity-60 text-[11px] ml-1">↵</span>
           )}
         </button>
       </div>
