@@ -1,21 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-// mock next/headers — 不引入真实 Next.js 运行时
-vi.mock('next/headers', () => ({
-  cookies: vi.fn(),
+// mock server-agent-token —— 不再依赖 next/headers cookies(),走 x-aidevspace-token header
+vi.mock('@/lib/server-agent-token', () => ({
+  getServerAgentToken: vi.fn(),
 }))
 
-import { cookies } from 'next/headers'
+import { getServerAgentToken } from '@/lib/server-agent-token'
 import { GET } from '../route'
 
-const mockCookies = vi.mocked(cookies)
+const mockGetToken = vi.mocked(getServerAgentToken)
 const mockFetch = vi.fn()
 
-function mockCookiePresent(token: string | undefined) {
-  mockCookies.mockReturnValue({
-    get: (name: string) =>
-      name === 'aidevspace_token' ? (token ? { name, value: token } : undefined) : undefined,
-  } as unknown as ReturnType<typeof cookies>)
+function mockToken(value: string | null) {
+  mockGetToken.mockReturnValue(value)
 }
 
 function callGET(id: string, filename: string, signal?: AbortSignal) {
@@ -46,7 +43,7 @@ describe('GET /api/requirement/[id]/assets/[filename]', () => {
   beforeEach(() => {
     mockFetch.mockReset()
     vi.stubGlobal('fetch', mockFetch)
-    mockCookies.mockReset()
+    mockGetToken.mockReset()
   })
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -54,7 +51,7 @@ describe('GET /api/requirement/[id]/assets/[filename]', () => {
   })
 
   it('无 token → 401 unauthorized', async () => {
-    mockCookiePresent(undefined)
+    mockToken(null)
 
     const res = await callGET('req-001', 'refund-flow.png')
     expect(res.status).toBe(401)
@@ -64,7 +61,7 @@ describe('GET /api/requirement/[id]/assets/[filename]', () => {
   })
 
   it('200 透传:content-type / content-length / cache-control 跟随 upstream', async () => {
-    mockCookiePresent('test-token')
+    mockToken('test-token')
     mockFetch.mockResolvedValue(
       upstreamResponse({
         status: 200,
@@ -88,7 +85,7 @@ describe('GET /api/requirement/[id]/assets/[filename]', () => {
     expect(mockFetch).toHaveBeenCalledWith(
       'http://localhost:7777/api/requirement/req-001/assets/refund-flow.png',
       expect.objectContaining({
-        headers: { Cookie: 'aidevspace_token=test-token' },
+        headers: { 'x-aidevspace-token': 'test-token' },
         cache: 'no-store',
       }),
     )
@@ -99,7 +96,7 @@ describe('GET /api/requirement/[id]/assets/[filename]', () => {
   })
 
   it('id / filename 做 URL encode(防路径注入)', async () => {
-    mockCookiePresent('test-token')
+    mockToken('test-token')
     mockFetch.mockResolvedValue(upstreamResponse({ status: 200 }))
 
     await callGET('req/x', 'a b.png')
@@ -110,7 +107,7 @@ describe('GET /api/requirement/[id]/assets/[filename]', () => {
   })
 
   it('upstream 404 → 原样透传 status(不折叠成 502)', async () => {
-    mockCookiePresent('test-token')
+    mockToken('test-token')
     mockFetch.mockResolvedValue(
       upstreamResponse({
         status: 404,
@@ -126,7 +123,7 @@ describe('GET /api/requirement/[id]/assets/[filename]', () => {
   })
 
   it('upstream fetch 抛错 → 502 upstream_failed', async () => {
-    mockCookiePresent('test-token')
+    mockToken('test-token')
     mockFetch.mockRejectedValue(new Error('connect ECONNREFUSED'))
 
     const res = await callGET('req-001', 'refund-flow.png')
@@ -136,7 +133,7 @@ describe('GET /api/requirement/[id]/assets/[filename]', () => {
   })
 
   it('转发 req.signal 到 upstream fetch', async () => {
-    mockCookiePresent('test-token')
+    mockToken('test-token')
     const ctrl = new AbortController()
     mockFetch.mockResolvedValue(upstreamResponse({ status: 200 }))
 

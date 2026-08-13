@@ -7,19 +7,21 @@
  * - 客户端 component 不应 import 本文件(避免 server IO 漏入 client bundle)
  *
  * RSC 内不走 `agentFetch`(无 document,无法 bootstrap cookie),而是直接 fetch
- * agent server + 手动传 Cookie header(从 `cookies()` helper 读),与
- * `requirement-list.server.ts` 同款范式(ticket 07b 决策 D1)。
+ * agent server + 手动传 `x-aidevspace-token` header(从 `server-agent-token` helper 读),
+ * 与 `requirement-list.server.ts` 同款范式(ticket 07b 决策 D1)。
+ *
+ * helper 优先读 cookie(外部 caller / e2e set cookie),fallback 到
+ * $AIDEVSPACE_HOME/.agent-token 文件(server-to-server 共享,首次 RSC 渲染也走这条)。
  *
  * 与 analyzing/drafting 的 .server.ts 差异:
  * - analyzing / drafting 走 fs 直读 `requirement.md`(web 端可达的物理路径)
  * - board 卡片数据全在 agent 端 TaskCardStore(`~/.aidevspace/requirements/<id>/
  *   board/tasks/<ulid>.json`),web SSR 走 HTTP `GET /api/requirement/:id/board/cards`
  *
- * 容错(决策 30):agent 不可达 / 401(无 token cookie)/ 404 / 5xx →
+ * 容错(决策 30):agent 不可达 / 401(无 token)/ 404 / 5xx →
  * `{ requirementId, cards: [], total: 0 }`,UI 走空态,不抛错阻塞 SSR。
  */
 
-import { cookies } from 'next/headers'
 import type {
   BoardCardListResponse,
   RequirementListResponse,
@@ -29,15 +31,29 @@ import type {
   TaskCardTranscriptResponse,
 } from '@ai-devspace/shared'
 import type { BoardCardListData } from './board'
+import { getServerAgentToken } from './server-agent-token'
 
 /** server 端 agent base(env 不带 NEXT_PUBLIC_ 前缀,沿用 requirement-list.server.ts) */
 const AGENT_BASE = process.env.AGENT_URL ?? 'http://localhost:7777'
 
 /**
+ * 构造带鉴权头的 fetch options —— 统一封装避免每处重写。
+ * token 缺失 → 返不带鉴权头的 options,下游走 agent 端 401 容错。
+ */
+function authedFetchOptions(): { headers: Record<string, string> } {
+  const token = getServerAgentToken()
+  const headers: Record<string, string> = {}
+  if (token) {
+    headers['x-aidevspace-token'] = token
+  }
+  return { headers }
+}
+
+/**
  * SSR 拉 board 卡片列表(活跃卡全集)。
  *
  * - 走 `GET /api/requirement/:id/board/cards`(默认 include_archived=false)
- * - 从 `cookies()` 读 `aidevspace_token` → 手动传 Cookie header(鉴权)
+ * - `x-aidevspace-token` header 鉴权(由 server-agent-token 解析)
  * - `cache: 'no-store'` 防 RSC 永久缓存
  * - 成功 → `{ requirementId, cards, total }`
  * - 失败(agent 不可达 / 401 无 token / 404 / 5xx / 解析错)→
@@ -50,14 +66,7 @@ export async function getBoardData(
   requirementId: string,
 ): Promise<BoardCardListData> {
   try {
-    const token = cookies().get('aidevspace_token')?.value
-    const headers: Record<string, string> = {}
-    if (token) {
-      headers.Cookie = `aidevspace_token=${token}`
-    }
-    // 无 token 仍发请求 —— agent 端会返 401,本函数 catch 后降级空态;
-    // 不在 SSR 抛错(用户未 bootstrap 时 board 走空态,客户端 bootstrap 后
-    // React Query 会自动重拉)
+    const { headers } = authedFetchOptions()
 
     const res = await fetch(
       `${AGENT_BASE}/api/requirement/${encodeURIComponent(requirementId)}/board/cards`,
@@ -92,11 +101,7 @@ export async function getCardDetail(
   cardId: string,
 ): Promise<TaskCard | null> {
   try {
-    const token = cookies().get('aidevspace_token')?.value
-    const headers: Record<string, string> = {}
-    if (token) {
-      headers.Cookie = `aidevspace_token=${token}`
-    }
+    const { headers } = authedFetchOptions()
     const res = await fetch(
       `${AGENT_BASE}/api/requirement/${encodeURIComponent(requirementId)}/board/cards/${encodeURIComponent(cardId)}`,
       { headers, cache: 'no-store' },
@@ -117,11 +122,7 @@ export async function getCardTranscriptInitial(
   cardId: string,
 ): Promise<TaskCardTranscript | null> {
   try {
-    const token = cookies().get('aidevspace_token')?.value
-    const headers: Record<string, string> = {}
-    if (token) {
-      headers.Cookie = `aidevspace_token=${token}`
-    }
+    const { headers } = authedFetchOptions()
     const res = await fetch(
       `${AGENT_BASE}/api/requirement/${encodeURIComponent(requirementId)}/board/cards/${encodeURIComponent(cardId)}/transcript`,
       { headers, cache: 'no-store' },
@@ -143,11 +144,7 @@ export async function getRequirementSummaryForBoard(
   requirementId: string,
 ): Promise<RequirementSummary | null> {
   try {
-    const token = cookies().get('aidevspace_token')?.value
-    const headers: Record<string, string> = {}
-    if (token) {
-      headers.Cookie = `aidevspace_token=${token}`
-    }
+    const { headers } = authedFetchOptions()
     const res = await fetch(`${AGENT_BASE}/api/requirements`, {
       headers,
       cache: 'no-store',

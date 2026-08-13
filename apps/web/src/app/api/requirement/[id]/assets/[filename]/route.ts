@@ -8,7 +8,8 @@
  * 背景:analyzing.server.ts 生成的 asset url 是同源相对路径(直接用作 <img src>),
  * 而真正的路由注册在 agent(apps/agent/src/routes/requirement.ts)。
  *
- * 鉴权:从 web origin cookie 读 aidevspace_token,塞 Cookie header 给 agent。
+ * 鉴权:从 server-agent-token helper 拿 token,塞 `x-aidevspace-token` header 给 agent
+ *   (cookie 优先,fallback ~/.aidevspace/.agent-token —— 详见 server-agent-token.ts)
  *
  * 实现要点:
  * - 二进制流式透传(不 buffer);content-type / content-length / cache-control
@@ -18,8 +19,8 @@
  * - 仅网络层失败(agent 不可达)才 502 upstream_failed
  */
 
-import { cookies } from 'next/headers'
 import type { NextRequest } from 'next/server'
+import { getServerAgentToken } from '@/lib/server-agent-token'
 
 const AGENT_BASE = process.env.AGENT_URL ?? 'http://localhost:7777'
 
@@ -32,7 +33,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { id: string; filename: string } },
 ): Promise<Response> {
-  const token = cookies().get('aidevspace_token')?.value
+  const token = getServerAgentToken()
   if (!token) {
     return new Response(JSON.stringify({ error: 'unauthorized' }), {
       status: 401,
@@ -45,7 +46,7 @@ export async function GET(
     upstream = await fetch(
       `${AGENT_BASE}/api/requirement/${encodeURIComponent(params.id)}/assets/${encodeURIComponent(params.filename)}`,
       {
-        headers: { Cookie: `aidevspace_token=${token}` },
+        headers: { 'x-aidevspace-token': token },
         cache: 'no-store',
         signal: req.signal,
       },

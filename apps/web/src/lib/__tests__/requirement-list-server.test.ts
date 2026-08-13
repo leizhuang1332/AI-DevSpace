@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-// mock next/headers — 不引入真实 Next.js 运行时
-vi.mock('next/headers', () => ({
-  cookies: vi.fn(),
+// mock server-agent-token —— 测试隔离,防止真实文件 / cookie 干扰
+vi.mock('../server-agent-token', () => ({
+  getServerAgentToken: vi.fn(),
 }))
 
-import { cookies } from 'next/headers'
+import { getServerAgentToken } from '../server-agent-token'
 import { fetchRequirementsServer, ServerListRequirementsError } from '../requirement-list.server'
 
-const mockCookies = vi.mocked(cookies)
+const mockGetToken = vi.mocked(getServerAgentToken)
 const mockFetch = vi.fn()
 
 const VALID_REQ = {
@@ -21,36 +21,29 @@ const VALID_REQ = {
   updatedAt: '2026-07-15T10:00:00Z',
 }
 
-function mockCookiePresent(token: string | undefined) {
-  mockCookies.mockReturnValue({
-    get: (name: string) =>
-      name === 'aidevspace_token' ? (token ? { name, value: token } : undefined) : undefined,
-  } as unknown as ReturnType<typeof cookies>)
-}
-
 describe('fetchRequirementsServer', () => {
   beforeEach(() => {
     mockFetch.mockReset()
     vi.stubGlobal('fetch', mockFetch)
-    mockCookies.mockReset()
+    mockGetToken.mockReset()
   })
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
   })
 
-  it('无 token → 抛 ServerListRequirementsError(401, no_auth_cookie)', async () => {
-    mockCookiePresent(undefined)
+  it('无 token → 抛 ServerListRequirementsError(401, no_auth)', async () => {
+    mockGetToken.mockReturnValue(null)
 
     await expect(fetchRequirementsServer()).rejects.toMatchObject({
       status: 401,
-      body: { error: 'no_auth_cookie' },
+      body: { error: 'no_auth' },
     })
     expect(mockFetch).not.toHaveBeenCalled()
   })
 
-  it('200 成功 → 返回数组', async () => {
-    mockCookiePresent('test-token')
+  it('200 成功 → 返回数组(用 x-aidevspace-token header,不再用 Cookie)', async () => {
+    mockGetToken.mockReturnValue('test-token')
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({ requirements: [VALID_REQ] }),
@@ -61,14 +54,14 @@ describe('fetchRequirementsServer', () => {
     expect(mockFetch).toHaveBeenCalledWith(
       'http://localhost:7777/api/requirements',
       expect.objectContaining({
-        headers: { Cookie: 'aidevspace_token=test-token' },
+        headers: { 'x-aidevspace-token': 'test-token' },
         cache: 'no-store',
       }),
     )
   })
 
   it('500 → 抛 ServerListRequirementsError(500, body)', async () => {
-    mockCookiePresent('test-token')
+    mockGetToken.mockReturnValue('test-token')
     mockFetch.mockResolvedValue({
       ok: false,
       status: 500,
@@ -83,7 +76,7 @@ describe('fetchRequirementsServer', () => {
   })
 
   it('响应 body 非法 → 抛 ZodError', async () => {
-    mockCookiePresent('test-token')
+    mockGetToken.mockReturnValue('test-token')
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({ requirements: [{ id: 'oops' }] }),
@@ -99,11 +92,8 @@ describe('fetchRequirementsServer', () => {
     process.env.AGENT_URL = 'http://agent-internal:9999'
     vi.resetModules()
 
-    vi.doMock('next/headers', () => ({
-      cookies: vi.fn(() => ({
-        get: (name: string) =>
-          name === 'aidevspace_token' ? { name, value: 'test-token' } : undefined,
-      })),
+    vi.doMock('../server-agent-token', () => ({
+      getServerAgentToken: vi.fn(() => 'test-token'),
     }))
 
     const mod = await import('../requirement-list.server')
@@ -120,7 +110,25 @@ describe('fetchRequirementsServer', () => {
 
     if (prev === undefined) delete process.env.AGENT_URL
     else process.env.AGENT_URL = prev
-    vi.doUnmock('next/headers')
+    vi.doUnmock('../server-agent-token')
     vi.resetModules()
+  })
+
+  it('token 来自文件 fallback(cookie 为空但 helper 返 token)→ 仍能正确调 agent', async () => {
+    // 模拟首次 RSC 渲染:cookie 没有,但 server-agent-token 读到了 ~/.aidevspace/.agent-token
+    mockGetToken.mockReturnValue('file-fallback-token')
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ requirements: [] }),
+    })
+
+    const result = await fetchRequirementsServer()
+    expect(result).toEqual([])
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://localhost:7777/api/requirements',
+      expect.objectContaining({
+        headers: { 'x-aidevspace-token': 'file-fallback-token' },
+      }),
+    )
   })
 })

@@ -5,24 +5,23 @@
  *   → Next.js API Route 透传到 agent:GET http://localhost:7777/api/events/requirements
  *   → 把 agent SSE 流用 ReadableStream 透传给 web 客户端
  *
- * 鉴权:从 web origin cookie 读 aidevspace_token,塞 Cookie header 给 agent
- *   (agent authPlugin 校验通过后允许 SseHub.subscribe)
+ * 鉴权:从 server-agent-token helper 拿 token,塞 `x-aidevspace-token` header 给 agent
+ *   (cookie 优先,fallback ~/.aidevspace/.agent-token —— 详见 server-agent-token.ts)
  *
  * 实现要点:
  * - 用 ReadableStream + fetch streaming response 透传(不是 buffer)
  * - 转发 req.signal 到 upstream fetch,客户端断开 → 关 upstream(spec L457 abort 要求)
- * - agent cookie 名 = 'aidevspace_token'(见 apps/agent/src/auth/authPlugin.ts:26)
  */
 
-import { cookies } from 'next/headers'
 import type { NextRequest } from 'next/server'
+import { getServerAgentToken } from '@/lib/server-agent-token'
 
 const AGENT_BASE = process.env.AGENT_URL ?? 'http://localhost:7777'
 
 export const dynamic = 'force-dynamic' // 必须 streaming response
 
 export async function GET(req: NextRequest): Promise<Response> {
-  const token = cookies().get('aidevspace_token')?.value
+  const token = getServerAgentToken()
   if (!token) {
     return new Response(JSON.stringify({ error: 'unauthorized' }), {
       status: 401,
@@ -33,7 +32,7 @@ export async function GET(req: NextRequest): Promise<Response> {
   let upstream: Response
   try {
     upstream = await fetch(`${AGENT_BASE}/api/events/requirements`, {
-      headers: { Cookie: `aidevspace_token=${token}` },
+      headers: { 'x-aidevspace-token': token },
       cache: 'no-store',
       // 客户端断开 → 关 upstream fetch
       signal: req.signal,
