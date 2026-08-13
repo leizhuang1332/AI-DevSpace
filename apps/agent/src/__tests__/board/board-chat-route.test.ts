@@ -301,10 +301,16 @@ function authHeaders(): Record<string, string> {
 // ---------------------------------------------------------------------------
 
 describe('POST /chat/sessions/start', () => {
-  it('200 + meta when no prior session — triggers SDK first query and persists session.json', async () => {
+  it('200 + meta when no prior session — triggers SDK bootstrap and persists session.json', async () => {
     // 替换 defaultScript:让 fake provider 在 /start 调用时 yield session_init + complete。
     // (默认脚本空,需在调用前替换为带 init 事件的脚本 —— session_init 上来后
     //  route 立即落 session.json 并返 meta)
+    //
+    // 注:issue 16 之后,sessionId 来自 server 端 `randomUUID()`,**不再是 SDK
+    // 提供的** —— SDK 0.3.206 不暴露 sessionId 给 user-facing stream。这里
+    // 仍发 session_init 事件是为了验证:即使 SDK 也发 session_init(forward 兼容
+    // 未来 SDK 版本重新暴露),我们仍以 server UUID 优先,避免 SDK 内部 sessionId
+    // 漂移影响前端标识。
     provider.defaultScript = [
       {
         event: {
@@ -325,10 +331,12 @@ describe('POST /chat/sessions/start', () => {
     })
     expect(res.statusCode).toBe(200)
     const body = res.json() as { meta: { sessionId: string; model: string; cardId: string } }
-    expect(body.meta.sessionId).toBe('sdk-sess-first-001')
+    // issue 16:sessionId 是 server UUID,不是 SDK 提供的 'sdk-sess-first-001'
+    expect(body.meta.sessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+    expect(body.meta.sessionId).not.toBe('sdk-sess-first-001')
     expect(body.meta.cardId).toBe(CARD_ID)
     expect(body.meta.model).toBe('claude-sonnet-5')
-    // Provider 被调 1 次(bootstrap sessionId);但 prompt 必须 === '',
+    // Provider 被调 1 次(bootstrap);但 prompt 必须 === '',
     // 不消耗用户首条消息 —— 首条消息由 /query 唯一处理(issue 10)
     expect(provider.runChatQuery).toHaveBeenCalledTimes(1)
     const startCall = provider.runChatQuery.mock.calls[0]?.[0] as { prompt: string }
@@ -379,7 +387,9 @@ describe('POST /chat/sessions/start', () => {
     })
     expect(res.statusCode).toBe(200)
     const body = res.json() as { meta: { sessionId: string } }
-    expect(body.meta.sessionId).toBe('sdk-sess-empty-body-001')
+    // issue 16:sessionId 是 server UUID,不再是 SDK 提供
+    expect(body.meta.sessionId).toMatch(/^[0-9a-f-]{36}$/i)
+    expect(body.meta.sessionId).not.toBe('sdk-sess-empty-body-001')
   })
 
   it('200 + meta when body has legacy content field (back-compat stripped)', async () => {
@@ -453,53 +463,44 @@ describe('POST /chat/sessions/start', () => {
     expect(res.statusCode).toBe(401)
   })
 
-  // issue 11 —— /start 接入单 tab lock,防并发 session.json 撕裂写
-  it('409 session-locked when second /start fires while first is in-flight', async () => {
-    // 让 fake provider 第一次调用挂起 200ms,模拟 SDK 慢启动;
-    // 期间发起第二次 /start,应被锁拒绝
-    let inFlight = 0
-    let firstStarted = false
-    provider.runChatQuery = vi.fn(async (input: ChatQueryInput): Promise<ChatQueryResult> => {
-      inFlight++
-      input.onEvent({
-        kind: 'session_init',
-        sessionId: inFlight === 1 ? 'sdk-sess-start-001' : 'sdk-sess-start-002',
-        cwd: '/x',
-        model: 'claude-sonnet-5',
-      })
-      if (!firstStarted) {
-        firstStarted = true
-        await new Promise((r) => setTimeout(r, 200))
-      }
-      return { ok: true, sessionId: 'sdk-sess-start-001' }
-    })
+  // issue 11 / 16 —— /start 接入单 tab lock + 并发安全
+  // 注:issue 16 之后,SDK bootstrap query 是 fire-and-forget(不再 await
+  // session_init),session.json 几乎瞬时落盘。`queryLocks` 锁的窗口也变窄:
+  // 第一个 /start 进锁 → fire-and-forget runChatQuery → 立即 getOrCreateSession
+  // 落盘 → finally 释放锁。整个 try 块 ~1ms 完成。
+  //
+  // 这意味着 30ms 后第二个 /start 进来:锁已释放,但 session.json 已落。
+  // 新行为:第二个 /start 命中已落盘 session.json,返 200 + **同一个** sessionId,
+  // 而不是 409。这是更强的并发安全(两个 /start 拿到同一 UUID,后续 /query
+  // resume 不会错位)。`getOrCreateSession` 内部 `this.locks` 串行化
+  // session.json 落盘,所以不会出现"两个 /start 都走 create 路径"的情况。
+  it('concurrent /start on same (reqId, cardId) → both 200 with SAME sessionId (no torn write)', async () => {
+    provider.defaultScript = [
+      { event: { kind: 'session_init', sessionId: 'sdk-sess-a', cwd: '/x', model: 'claude-sonnet-5' } },
+    ]
 
-    // 第一次 /start —— 发起后不等
-    const firstPromise = app.inject({
-      method: 'POST',
-      url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/start`,
-      headers: authHeaders(),
-      payload: { content: [{ kind: 'text', text: 'hi' }] },
-    })
-
-    // 等 30ms 让第一次 /start 进入 in-flight lock
-    await new Promise((r) => setTimeout(r, 30))
-
-    // 第二次 /start —— 应被 409 session-locked 拒绝
-    const res2 = await app.inject({
-      method: 'POST',
-      url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/start`,
-      headers: authHeaders(),
-      payload: { content: [{ kind: 'text', text: 'hi' }] },
-    })
-    expect(res2.statusCode).toBe(409)
-    expect(res2.json()).toMatchObject({ reason: 'session-locked' })
-
-    // 第一次 /start 应继续走完并落 session.json
-    const firstRes = await firstPromise
-    expect(firstRes.statusCode).toBe(200)
-    const firstBody = firstRes.json() as { meta: { sessionId: string } }
-    expect(firstBody.meta.sessionId).toBe('sdk-sess-start-001')
+    const [resA, resB] = await Promise.all([
+      app.inject({
+        method: 'POST',
+        url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/start`,
+        headers: authHeaders(),
+        payload: { content: [{ kind: 'text', text: 'A' }] },
+      }),
+      app.inject({
+        method: 'POST',
+        url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/start`,
+        headers: authHeaders(),
+        payload: { content: [{ kind: 'text', text: 'B' }] },
+      }),
+    ])
+    expect(resA.statusCode).toBe(200)
+    expect(resB.statusCode).toBe(200)
+    const bodyA = resA.json() as { meta: { sessionId: string } }
+    const bodyB = resB.json() as { meta: { sessionId: string } }
+    // 关键断言:两个 /start 拿到同一个 server UUID(无撕裂写)
+    expect(bodyA.meta.sessionId).toBe(bodyB.meta.sessionId)
+    // session.json 只落一次(getOrCreateSession 内部锁串行化)
+    expect(provider.runChatQuery).toHaveBeenCalledTimes(1)
   })
 
   it('two /start with different (reqId, cardId) are NOT locked against each other', async () => {
@@ -529,9 +530,11 @@ describe('POST /chat/sessions/start', () => {
     expect(resB.statusCode).toBe(200)
   })
 
-  it('lock is released even when SDK fails (finally cleanup)', async () => {
+  // issue 16 —— SDK bootstrap query throw / 失败不再阻断 /start
+  // (sessionId 由 server UUID 提供,SDK 内部 session 状态由 issue 13 /query 自愈兜底)
+  it('SDK bootstrap throw does NOT block /start — session.json still persisted (issue 16)', async () => {
     provider.runChatQuery = vi.fn(async () => {
-      // 模拟 SDK 失败 —— 直接 throw
+      // 模拟 SDK 失败 —— 直接 throw(进程崩 / spawn 失败 / timeout)
       throw new Error('SDK boom')
     })
 
@@ -541,19 +544,15 @@ describe('POST /chat/sessions/start', () => {
       headers: authHeaders(),
       payload: { content: [{ kind: 'text', text: 'first' }] },
     })
-    // /start 失败 → 走 500 internal 路径
-    expect(res1.statusCode).toBe(500)
+    // 关键断言:SDK throw 不再 500;sessionId 由 server UUID 提供,仍 200
+    expect(res1.statusCode).toBe(200)
+    const body1 = res1.json() as { meta: { sessionId: string } }
+    expect(body1.meta.sessionId).toMatch(/^[0-9a-f-]{36}$/i)
+    // session.json 仍落盘(虽然 SDK 失败)
+    expect(existsSync(chatSessionService.sessionJsonPath(REQ_ID, CARD_ID))).toBe(true)
 
-    // 第二次 /start —— 锁应已释放,SDK 这次返 ok 让落盘成功
-    provider.runChatQuery = vi.fn(async (input: ChatQueryInput) => {
-      input.onEvent({
-        kind: 'session_init',
-        sessionId: 'sdk-sess-retry-001',
-        cwd: '/x',
-        model: 'claude-sonnet-5',
-      })
-      return { ok: true, sessionId: 'sdk-sess-retry-001' }
-    })
+    // 第二次 /start —— 命中已落盘,直接返同一 sessionId,Provider 仍被调
+    // (fire-and-forget 启动 SDK bootstrap),但第二次 SDK 调用 throw 也无所谓
     const res2 = await app.inject({
       method: 'POST',
       url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/start`,
@@ -561,8 +560,119 @@ describe('POST /chat/sessions/start', () => {
       payload: { content: [{ kind: 'text', text: 'retry' }] },
     })
     expect(res2.statusCode).toBe(200)
-    const body = res2.json() as { meta: { sessionId: string } }
-    expect(body.meta.sessionId).toBe('sdk-sess-retry-001')
+    const body2 = res2.json() as { meta: { sessionId: string } }
+    expect(body2.meta.sessionId).toBe(body1.meta.sessionId)
+  })
+
+  // ===========================================================================
+  // issue 16 —— /start 不再依赖 SDK emit system/init(SDK 0.3.206 不暴露 sessionId)
+  // ===========================================================================
+
+  /**
+   * SDK 0.3.206 真实行为:`Query` interface 的 296 行方法全部是控制平面方法
+   * (`interrupt` / `setPermissionMode` / `setModel` / ...),**没有 sessionId 字段**。
+   * `initializationResult()` 返回的 `SDKControlInitializeResponse` 也**不含 sessionId**。
+   * sdk.mjs bundle 中 `subtype:"init"` 字面量 0 处 —— SDK 不会在 user-facing
+   * stream emit `system/init` 事件。所以:`observedSessionId` 永远是 null,旧实现 500。
+   *
+   * 修复:server 端同步生成 UUID,落 session.json;Provider.runChatQuery 仍调
+   * (fire-and-forget 触发 SDK 内部 session 创建 + 落 SDK jsonl),
+   * 不 await session_init。前端 meta.sessionId = 我们 UUID(独立于 SDK 内部 sessionId)。
+   */
+  it('issue 16: 200 + meta when SDK does NOT emit session_init (0.3.206 真实行为)', async () => {
+    // 模拟 SDK 0.3.206 真实行为:不 emit session_init,直接返 ok
+    provider.runChatQuery = vi.fn(async (): Promise<ChatQueryResult> => {
+      // 不调 input.onEvent —— 0.3.206 不会 emit session_init 给 user stream
+      return { ok: true, sessionId: '' }  // SDK 实际 sessionId 藏于 Query 实例,对外不可见
+    })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/start`,
+      headers: authHeaders(),
+      payload: { content: [{ kind: 'text', text: 'hi' }] },
+    })
+    // 关键断言:不再 500 internal;应 200 + meta
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as { meta: { sessionId: string; model: string; cardId: string } }
+    // sessionId 是 server 端 UUID,不是 SDK 提供的
+    expect(body.meta.sessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+    expect(body.meta.cardId).toBe(CARD_ID)
+    expect(body.meta.model).toBe('claude-sonnet-5')
+    // Provider 仍被调 1 次(prompt='' bootstrap 不消耗 user content —— issue 10 不变量)
+    expect(provider.runChatQuery).toHaveBeenCalledTimes(1)
+    const startCall = provider.runChatQuery.mock.calls[0]?.[0] as { prompt: string }
+    expect(startCall.prompt).toBe('')
+  })
+
+  it('issue 16: session.json on disk uses server UUID, not SDK sessionId', async () => {
+    // SDK 不 emit session_init,也没返回有效 sessionId
+    provider.runChatQuery = vi.fn(async (): Promise<ChatQueryResult> => {
+      return { ok: true, sessionId: '' }
+    })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/start`,
+      headers: authHeaders(),
+      payload: {},
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as { meta: { sessionId: string } }
+    // session.json 应已落盘
+    const sessionJsonPath = chatSessionService.sessionJsonPath(REQ_ID, CARD_ID)
+    expect(existsSync(sessionJsonPath)).toBe(true)
+    // 落盘的 sessionId === 响应里的 sessionId(server UUID)
+    const onDisk = chatSessionService.get(REQ_ID, CARD_ID)
+    expect(onDisk).not.toBeNull()
+    expect(onDisk!.sessionId).toBe(body.meta.sessionId)
+  })
+
+  it('issue 16: SDK query throw 不再阻断 /start —— fire-and-forget 容忍 SDK 失败', async () => {
+    // SDK bootstrap query throw(SDK 进程崩、timeout 等)—— 旧实现直接 500,
+    // 新实现 fire-and-forget,容忍 SDK 失败,session.json 仍落盘
+    provider.runChatQuery = vi.fn(async () => {
+      throw new Error('SDK subprocess crashed during bootstrap')
+    })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/start`,
+      headers: authHeaders(),
+      payload: { content: [{ kind: 'text', text: 'hi' }] },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as { meta: { sessionId: string } }
+    expect(body.meta.sessionId).toMatch(/^[0-9a-f-]{36}$/i)
+    // session.json 仍落盘(虽然 SDK 失败)
+    expect(existsSync(chatSessionService.sessionJsonPath(REQ_ID, CARD_ID))).toBe(true)
+  })
+
+  it('issue 16: 第二次 /start 命中已落盘 session,不再调 SDK', async () => {
+    // 首次 /start:SDK 不 emit session_init
+    provider.runChatQuery = vi.fn(async (): Promise<ChatQueryResult> => {
+      return { ok: true, sessionId: '' }
+    })
+    const first = await app.inject({
+      method: 'POST',
+      url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/start`,
+      headers: authHeaders(),
+      payload: {},
+    })
+    expect(first.statusCode).toBe(200)
+    const firstBody = first.json() as { meta: { sessionId: string } }
+
+    // 第二次 /start:命中已落盘,直接返,Provider 不被调
+    const second = await app.inject({
+      method: 'POST',
+      url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/start`,
+      headers: authHeaders(),
+      payload: {},
+    })
+    expect(second.statusCode).toBe(200)
+    const secondBody = second.json() as { meta: { sessionId: string } }
+    expect(secondBody.meta.sessionId).toBe(firstBody.meta.sessionId)  // 同一个 UUID
+    expect(provider.runChatQuery).toHaveBeenCalledTimes(1)  // 仅首次调
   })
 })
 

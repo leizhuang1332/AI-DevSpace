@@ -3,9 +3,12 @@
  *
  * 7 条端点:
  *   POST /api/requirement/:id/board/cards/:cardId/chat/sessions/start
- *     首次启动 chat;无 session.json → 走 SDK 首次 query 拿 sessionId 落盘;
+ *     首次启动 chat;无 session.json → server 端同步生成 UUID 作 sessionId
+ *     落盘(issue 16 —— SDK 0.3.206 不暴露 sessionId 给 user-facing stream);
+ *     SDK bootstrap query 仍调(prompt='',fire-and-forget 触发 SDK 内部 session
+ *     创建 + 落 SDK jsonl),不 await session_init 事件;
  *     已有 session.json → 直接返现有 meta(不调 SDK)
- *     body: ChatSessionQueryRequestSchema(content 数组)
+ *     body: ChatSessionStartRequestSchema(issue 12:不要求 content,back-compat strip)
  *     resp: 200 { meta: ChatSessionMeta }
  *
  *   POST /api/requirement/:id/board/cards/:cardId/chat/sessions/:sessionId/query
@@ -400,63 +403,83 @@ export async function boardChatRoutes(
         permissionRequestIds: new Set<string>(),
       })
       try {
-        // 6. 首次启动 —— 调 Provider.runChatQuery(无 resume),等 session_init 落盘
-        // 注:prompt 必须 === ''(issue 10 不变量)—— /start 只 bootstrap sessionId,
-        // 不消耗用户首条消息;用户首条消息由后续 /query 唯一处理。否则会触发:
-        //   - 首条消息延迟 ×2(/start 黑盒跑完整 turn + /query 再跑一次)
-        //   - credits 双倍烧
-        //   - /start 期间 AI 若调 Write/Bash,userConfirmHandler 写死 allow,
-        //     用户无从 deny(危险命令静默执行)
-        //   - SDK session 历史出现两次相同 user turn → 后续 AI 上下文污染
+        // 6. issue 16 —— sessionId 由 server 端同步生成 UUID(SDK 0.3.206 不暴露)
+        //
+        // 旧实现:调 Provider.runChatQuery({prompt:''}) → 等待 SDK emit
+        // `session_init` event → 拿 event.sessionId 落 session.json。
+        // 这条路径在 SDK 0.3.206 **永远走不通**:
+        // - SDK mjs bundle 中 `subtype:"init"` 字面量 0 处 —— SDK 不在
+        //   user-facing stream emit `system/init`
+        // - SDK `Query` interface 的 296 行方法全部是控制平面方法
+        //   (interrupt/setPermissionMode/...),**没有 sessionId 字段**
+        // - `Query.initializationResult()` 返回的 `SDKControlInitializeResponse`
+        //   字段是 commands/agents/models/account,**没有 sessionId**
+        // 结果:旧 `/start` 在 SDK 0.3.206 下 `observedSessionId` 永远是 null,
+        // 500 internal 错误"SDK did not yield session_id"。
+        //
+        // 新实现(方案 B):
+        // - server 端 `randomUUID()` 生成 sessionId(给前端用作会话标识 + URL path)
+        // - `Provider.runChatQuery({prompt:''})` 仍调 —— fire-and-forget 触发
+        //   SDK 内部 session 创建 + 落 `~/.claude/projects/<hash>/<sid>.jsonl`
+        //   (SDK 内部 sessionId 由它自己管理,前端不可见,也不依赖)
+        // - session.json 立即落盘,不再 await SDK
+        // - SDK bootstrap query throw / 失败 → 不阻断 /start(只 log warn),
+        //   因为 SDK 内部 session 状态不影响前端 sessionId 标识
+        //
+        // /query 路径:URL `sessionId` = 我们 UUID,作 `resumeSessionId` 传 SDK。
+        // SDK 找不到 UUID 对应 jsonl → issue 13 自愈兜底(chat_error
+        // E_SESSION_EXPIRED → web 端 reset → 自动重 /start)。
+        // 跨刷新恢复靠 transcript events + 我们的 session.json(不靠 SDK jsonl)。
         const cwd = cardChatDir(reqId, cardId)
-        let observedSessionId: string | null = null
-        let observedCwd = cwd
-        let observedModel = 'claude-sonnet-5'
+        const serverSessionId = randomUUID()
 
-        const result = await chatProvider.runChatQuery({
+        // fire-and-forget SDK bootstrap query:prompt='' 不消耗 user content
+        // (issue 10 不变量),onEvent swallow all events(SDK 0.3.206 不 emit
+        // session_init;后续 message_assistant/tool_call/complete 等也不暴露给
+        // /start,只 /query 才把 user content 喂给 AI)。
+        const runChatQuery = chatProvider.runChatQuery.bind(chatProvider)
+        const sdkPromise = runChatQuery({
           prompt: '',
           cwd,
           additionalDirectories: [joinReqDir(reqId)],
-          model: observedModel,
+          model: 'claude-sonnet-5',
           permissionMode: DEFAULT_PERMISSION_MODE,
           // /start 阶段无 SSE,userConfirmHandler 自动 allow(不阻塞);
           // 空 prompt 下 SDK 不会发起 tool call(decision 边界由 prompt='' 保证)。
           userConfirmHandler: async () => ({ behavior: 'allow' as const }),
-          onEvent: (event) => {
-            if (event.kind === 'session_init') {
-              observedSessionId = event.sessionId
-              if (typeof event.cwd === 'string') observedCwd = event.cwd
-              if (typeof event.model === 'string') observedModel = event.model
-            }
-            // 其它事件(message_assistant / tool_call / complete 等)静默丢弃——
-            // /start 不暴露给 client,只拿 sessionId 用于落盘
+          onEvent: () => {
+            /* swallow —— SDK 0.3.206 不 emit session_init,其它事件 /start 不暴露 */
           },
+        }).catch((err: unknown) => {
+          // SDK bootstrap 失败(进程崩 / spawn 失败 / timeout)不阻断 /start:
+          // sessionId 由 server UUID 提供,前端可用;SDK 内部 session 状态由
+          // 下次 /query 自愈(issue 13)兜底。
+          const errMsg = err instanceof Error ? err.message : String(err)
+          req.log.warn(
+            { err: errMsg, reqId, cardId },
+            'board chat start: SDK bootstrap query failed (non-fatal, sessionId already generated server-side)',
+          )
         })
 
-        if (!result.ok || !observedSessionId) {
-          req.log.error(
-            { reqId, cardId, err: 'no_session_id' },
-            'board chat start: SDK did not yield session_id',
-          )
-          return failWith(
-            reply,
-            'internal',
-            'SDK did not yield session_id during start; cannot persist session.json',
-            req.log,
-          )
-        }
-
-        // 7. 落盘 session.json(atomic)
+        // 7. 落盘 session.json(atomic)—— 用 server UUID 作 sdkSessionId seed
+        // 注:此 seed 字段名是历史命名(原本意为"SDK 提供的 sessionId"),实际语义
+        // 已变为"前端用的 session 标识 UUID"。SDK 内部 sessionId 由 SDK 自行
+        // 管理,不通过此 seed 字段表达(issue 16 决策 —— 详见 issue 16 PRD)。
         try {
           const meta = await chatSessionService.getOrCreateSession(reqId, cardId, {
-            sdkSessionId: observedSessionId,
-            cwd: observedCwd,
+            sdkSessionId: serverSessionId,
+            cwd,
             additionalDirectories: [joinReqDir(reqId)],
-            model: observedModel,
+            model: 'claude-sonnet-5',
             permissionMode: DEFAULT_PERMISSION_MODE,
             mcpServers: [{ name: 'boardchat', config: { type: 'sdk' } }],
             ownerUserId: 'user-1',
           })
+          // 同步响应先返;SDK bootstrap promise 保留引用避免被 GC,但不 await
+          // (fire-and-forget)。SDK 进程清理由 OS / 下次 /query reset 兜底。
+          // 注:这里 `void sdkPromise` 仅保留引用;promise 自身 reject 已在
+          // 上方 .catch() 吞掉。
+          void sdkPromise
           return reply.code(200).send({ meta })
         } catch (err) {
           req.log.error({ err, reqId, cardId }, 'board chat start: getOrCreateSession failed')

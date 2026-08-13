@@ -177,7 +177,7 @@ SDK 继续执行 Write(或终止)
 
 **Tab 行为**:严格单 tab(同 `(reqId, cardId)` in-flight query lock)。
 
-**断连恢复**:
+**断连恢复**(issue 16 修订 — 适配 SDK 0.3.206 协议变更):
 ```
 web 刷新页面
   ↓
@@ -185,15 +185,76 @@ GET /chat/sessions/.../snapshot → 拿完整 transcript
   ↓
 渲染历史
   ↓
-POST /chat/sessions/.../query {content} → 触发新 query with resume
+POST /chat/sessions/.../query {content} → 触发新 query
   ↓
-SSE 流式推送 chat_message_assistant 等
+  优先:resumeSessionId = URL sessionId(我们 server UUID)
+       → SDK 找不到对应 jsonl(sessionId 解耦,见 D9a)
+       → issue 13 自愈:chat_error E_SESSION_EXPIRED
+       → web 调 reset → 自动重 /start → 创新 server UUID → 创新 SDK session
+  fallback:SDK 接受 resume(罕见,SDK 内部 sessionId 漂移对齐时)
+  SSE 流式推送 chat_message_assistant 等
 ```
 
 **单 tab lock**:
 - Server 端: `chatSessionLock: Map<sessionKey, Promise<void>>`
 - 同 key 第二个 query = 等待第一个完成 / 拒绝
 - Web 端: lock 时 input box disabled + 顶部 "⚠️ 此 chat 已在另一 tab 打开"
+
+### D9a. sessionId 语义重定义(issue 16)
+
+**原语义**(D9 草案,被 issue 16 修订):
+
+- `session.json` 的 `sessionId` = SDK 提供的 sessionId
+- SDK 内部 sessionId = 我们 sessionId(一对一)
+- 跨刷新恢复靠 SDK `options.resume: sessionId` 协议
+
+**新语义**(issue 16,适配 SDK 0.3.206):
+
+- `session.json` 的 `sessionId` = **server 端 `randomUUID()`**,用作前端会话标识 + URL path
+- SDK 内部 sessionId = SDK 自行生成(藏于 `Query` 实例 / CLI subprocess),**不对外暴露**
+- 两者**解耦**;不假设相等;不通过 `session.json` 表达 SDK sessionId
+
+**SDK 0.3.206 协议根因**(issue 16 探底确证):
+
+1. SDK 0.3.206 `Query` interface 全部方法都是控制平面方法,**没有 `sessionId` 字段**(类型层不暴露)
+2. `Query.initializationResult()` 返回的 `SDKControlInitializeResponse` 字段是 commands/agents/models/account,**没有 sessionId**
+3. sdk.mjs bundle 中 `subtype:"init"` 字面量 0 处 —— SDK **不在 user-facing stream emit `system/init`** 给 `for await` 调用方
+4. 唯一带 sessionId 的类 `DirectConnectTransport.getSessionId()` 是远程 managed session 专用,本地 spawn CLI 路径不可用
+
+**新流程**(`/start`):
+```
+1. server 端 randomUUID() = serverSessionId
+2. Provider.runChatQuery({ prompt: '' })  fire-and-forget
+   → SDK 内部创 session + 落 ~/.claude/projects/<hash>/<sid>.jsonl
+   → SDK throw / 失败 → log warn 不阻断
+3. ChatSessionService.getOrCreateSession(serverSessionId) → 立即落 session.json
+4. 返 200 { meta: { sessionId: serverSessionId, ... } }
+```
+
+**新流程**(`/query`):
+```
+1. URL sessionId = server UUID
+2. resumeSessionId = server UUID 传 SDK
+3. SDK 找不到对应 jsonl → 失败
+4. Provider 报 isSessionExpired=true(issue 13 信号)
+5. /query handler 推 SSE chat_error { code: 'E_SESSION_EXPIRED' }
+6. web 端 useChatSessionStream 收到 → 自动 useChatSessionReset
+7. reset 端点删 stale session.json + audit/ + SDK jsonl
+8. web 重发 /start → 拿新 server UUID → AI 正常回复
+```
+
+**跨刷新恢复**(D9 修订):
+
+- **primary 路径**: transcript events + 我们 session.json(不依赖 SDK resume)
+- **secondary 路径**(SDK resume 偶尔生效时,可优化): web 端 `useChatSessionStream` 仍走 `/query` 触发新 turn,SDK 内部 session 偶尔能 match 时跳过自愈直接回复
+
+**新约束**(issue 16 How to apply):
+
+1. 不再假设 SDK emit session_init
+2. 不再假设 SDK 内部 sessionId === session.json.sessionId
+3. SDK bootstrap / fire-and-forget 失败 → log warn 不阻断
+4. 跨刷新恢复靠 transcript events + 我们 session.json(SDK resume 降为 secondary)
+5. 改 `ClaudeCodeProvider` chat 路径 → RED → GREEN(ADR-0023 D11 守门)
 
 ### D10. SSE 事件类型
 
