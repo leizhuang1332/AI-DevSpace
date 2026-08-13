@@ -1,0 +1,45 @@
+apps/agent/src/providers/ClaudeCodeProvider.ts
+  s_99bd3c3dcd5856::t_d3446d39c289ae 1072-1078
+apps/agent/src/services/board/ChatSessionService.ts
+  s_99bd3c3dcd5856::t_1e74c2745e387a 401-403
+  s_99bd3c3dcd5856::t_74efefcef36c48 423,437-438
+  s_99bd3c3dcd5856::t_5e166bd02d4fce 462-464
+apps/agent/src/routes/board-chat.ts
+  s_99bd3c3dcd5856::t_88f0e99bb43f64 406,408-412,414-417,419-425,429
+  s_99bd3c3dcd5856::t_2d24af90b802d1 577-687,691-718,731-748,771-772,783
+apps/agent/src/__tests__/board/chat-session-service.test.ts
+  s_99bd3c3dcd5856::t_e1da2908e01659 5
+  s_99bd3c3dcd5856::t_d43dc5cae0261b 119-122,144,155,173
+  s_99bd3c3dcd5856::t_b65aa7ab52cef1 207
+  s_99bd3c3dcd5856::t_f4468f0edd1294 226-227
+packages/shared/src/board-chat.ts
+  s_99bd3c3dcd5856::t_00772e75494517 183-193
+  s_99bd3c3dcd5856::t_c27a2853eece32 143-153
+apps/agent/src/providers/AIProvider.ts
+  s_99bd3c3dcd5856::t_6de2db8a5cf5a7 193-197,199-210
+apps/agent/src/__tests__/board/board-chat-route.test.ts
+  s_99bd3c3dcd5856::t_c73597d86b3e9b 369-370,379,381-382
+  s_99bd3c3dcd5856::t_5a2f0f589a187e 507-512
+  s_99bd3c3dcd5856::t_6fde2246b30e91 387-392,400-403
+  s_99bd3c3dcd5856::t_45b6f0e3751425 304-306,308-312,333,338-340
+  s_99bd3c3dcd5856::t_53e3094a1c5217 515-521,523,532,536,538-539,541,551
+  s_99bd3c3dcd5856::t_229d71c8af59f3 555-556,560-561,563-569,571-572,574,586,590-591,594,610-611,614-616,630,634,654
+  s_99bd3c3dcd5856::t_2150bd571e6375 452,454-460,482-483
+  s_99bd3c3dcd5856::t_1317c893d25b9e 1376-1558
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "4bb55c45122fc9f96779e0e489e01cc62ba7cdf1",
+  "prompts": {},
+  "sessions": {
+    "s_99bd3c3dcd5856": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cf4f2de3-47a9-4487-918f-c46465b18590",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
