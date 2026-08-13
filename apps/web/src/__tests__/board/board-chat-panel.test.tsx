@@ -1291,3 +1291,63 @@ describe('CardTranscriptPanel · session expired 自愈', () => {
     expect(screen.getByTestId('board-chat-banner')).toHaveTextContent(/重新|自愈|reset|重新输入|继续/i)
   })
 })
+
+// ---------------------------------------------------------------------------
+// 滚动布局契约(锁住 transcript 面板的 flex+overflow 结构,防止未来 refactor
+// 把 min-h-0 删掉导致长消息把输入框推出视口。改动前 RED,改动后 GREEN。)
+// ---------------------------------------------------------------------------
+
+describe('CardTranscriptPanel · 滚动布局契约', () => {
+  it('CardTranscriptPanel 是 h-full flex 容器(非 min-h-[600px])', () => {
+    wrap(
+      <CardTranscriptPanel
+        card={makeCard()}
+        requirementId={REQ_ID}
+        onClose={vi.fn()}
+      />,
+    )
+    const panel = screen.getByTestId('board-chat-panel')
+    // 必须撑满父容器,不能只设下限(否则 flex 收缩受 min-h 钳制)
+    expect(panel.className).toContain('h-full')
+    expect(panel.className).toContain('flex')
+    expect(panel.className).toContain('flex-col')
+    expect(panel.className).not.toContain('min-h-[600px]')
+  })
+
+  it('MessageStream 是 flex-1 + min-h-0 + overflow-auto(flex 子项可独立滚)', () => {
+    // 给点消息让 MessageStream 不显示"还没有对话"占位
+    mockUseChatSessionSnapshot.mockReturnValue({
+      snapshot: makeSnapshot(makeMeta(), [
+        {
+          kind: 'chat_message_user',
+          ts: 1700000000000,
+          content: [{ kind: 'text', text: 'hi' }],
+        },
+        {
+          kind: 'chat_message_assistant',
+          ts: 1700000001000,
+          content: [{ kind: 'text', text: 'hello' }],
+        },
+      ]),
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    })
+    wrap(
+      <CardTranscriptPanel
+        card={makeCard()}
+        requirementId={REQ_ID}
+        onClose={vi.fn()}
+      />,
+    )
+    const stream = screen.getByTestId('board-chat-message-stream')
+    // flex-1:占据中间剩余空间;min-h-0:允许 flex 子项收缩到容器内;
+    // overflow-y-scroll + scrollbar-thin:始终显示细滚动条(macOS overlay 默认
+    // 隐藏 → 这里强制常驻,给用户「这里有更多内容」视觉提示)
+    expect(stream.className).toContain('flex-1')
+    expect(stream.className).toContain('min-h-0')
+    expect(stream.className).toContain('overflow-y-scroll')
+    expect(stream.className).toContain('scrollbar-thin')
+  })
+})

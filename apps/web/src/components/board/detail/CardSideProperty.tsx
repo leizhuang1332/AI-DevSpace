@@ -52,7 +52,9 @@ export function CardSideProperty({
   return (
     <div
       data-testid="board-detail-side-property"
-      className="p-4 bg-bg-elevated flex flex-col gap-3 min-w-0"
+      // h-full:撑满右栏 grid cell
+      // overflow-auto:长依赖列表 / 多标签时内部独立滚(不再依赖 wrapper 滚动)
+      className="p-4 bg-bg-elevated flex flex-col gap-3 h-full overflow-auto min-w-0"
     >
       {/* [💬 在对话中打开] toggle 按钮 */}
       <button

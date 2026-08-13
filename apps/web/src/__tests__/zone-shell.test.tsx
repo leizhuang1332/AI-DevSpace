@@ -152,4 +152,19 @@ describe('ZoneShell', () => {
       (c2.querySelector('[data-testid="zone-shell"]') as HTMLElement).className,
     ).toContain('grid-cols-1')
   })
+
+  // 滚动布局契约:ZoneShell 必须是 h-[100vh-84px](definite)而非 min-h-[100vh-84px]
+  // 锁住整条高度链:workspace root h-screen → grid flex-1 → outer main overflow-auto
+  //   → ZoneShell h-full → 各 zone 内部 h-full
+  // min-h 是 indefinite,会让子组件 h-full 退化为 fit-content,长 chat 把 body 撑滚
+  it('高度契约:ZoneShell 用 h-[calc(100vh-84px)](definite),不是 min-h-', () => {
+    const { getByTestId } = render(
+      <ZoneShell id="REF-001" zone={board}>
+        <span>main</span>
+      </ZoneShell>,
+    )
+    const shell = getByTestId('zone-shell')
+    expect(shell.className).toContain('h-[calc(100vh-84px)]')
+    expect(shell.className).not.toContain('min-h-[calc(100vh-84px)]')
+  })
 })

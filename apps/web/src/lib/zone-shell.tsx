@@ -83,7 +83,7 @@ export function ZoneShell({
       data-zone-id={zone.id}
       data-has-resource-tree={String(zone.hasResourceTree)}
       data-has-inline-rail={String(zone.hasInlineRail)}
-      className={`grid min-h-[calc(100vh-${WORKSPACE_SHELL_OFFSET_PX}px)] bg-bg ${zoneShellGridClass(zone)}`}
+      className={`grid h-[calc(100vh-${WORKSPACE_SHELL_OFFSET_PX}px)] bg-bg ${zoneShellGridClass(zone)}`}
     >
       {zone.hasResourceTree && (
         <ResourceTree

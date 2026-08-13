@@ -357,3 +357,41 @@ describe('BoardCardDetailPage · chat 发送', () => {
     })
   })
 })
+
+// ---------------------------------------------------------------------------
+// 滚动布局契约(锁住 flex+overflow 结构,防止未来 refactor 把 min-h-0 删掉
+// 导致长消息把输入框推出视口。改动前 RED,改动后 GREEN。)
+// ---------------------------------------------------------------------------
+
+describe('BoardCardDetailPage · 滚动布局契约', () => {
+  it('右栏 wrapper 是 flex 容器(非 overflow-auto),让子组件各自管滚动', () => {
+    mockCard = makeCard()
+    renderPage()
+    const right = screen.getByTestId('board-card-detail-right')
+    expect(right.className).toContain('flex')
+    expect(right.className).toContain('flex-col')
+    expect(right.className).toContain('h-full')
+    expect(right.className).toContain('overflow-hidden')
+    // 不能让 wrapper 自己滚 —— 会导致整个面板一起滚,输入框被推出
+    expect(right.className).not.toContain('overflow-auto')
+  })
+
+  it('property 态下 CardSideProperty 自己滚动(h-full + overflow-auto)', () => {
+    mockCard = makeCard()
+    renderPage()
+    const prop = screen.getByTestId('board-detail-side-property')
+    expect(prop.className).toContain('h-full')
+    expect(prop.className).toContain('overflow-auto')
+  })
+
+  it('transcript 态下右栏 wrapper 仍是 flex 容器(toggle 不破坏结构)', () => {
+    mockCard = makeCard()
+    renderPage()
+    fireEvent.click(screen.getByTestId('board-detail-toggle-transcript'))
+    const right = screen.getByTestId('board-card-detail-right')
+    expect(right.className).toContain('flex')
+    expect(right.className).toContain('flex-col')
+    expect(right.className).toContain('h-full')
+    expect(right.className).not.toContain('overflow-auto')
+  })
+})

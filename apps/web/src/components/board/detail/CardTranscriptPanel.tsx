@@ -284,7 +284,9 @@ export function CardTranscriptPanel({
       data-card-id={card.id}
       data-requirement-id={requirementId}
       data-locked-by-other={lock.lockedByOtherTab ? 'true' : 'false'}
-      className="p-4 bg-bg-elevated flex flex-col gap-2 min-h-[600px] min-w-0"
+      // h-full:撑满右栏 grid cell(wrapper 已是 flex 容器,提供高度约束)
+      // 配合 MessageStream 的 flex-1 + min-h-0,长消息时仅消息流滚,头+输入框钉死
+      className="p-4 bg-bg-elevated flex flex-col gap-2 h-full min-w-0"
       style={{ animation: 'expand .25s ease-out' }}
     >
       {/* 单 tab lock banner */}

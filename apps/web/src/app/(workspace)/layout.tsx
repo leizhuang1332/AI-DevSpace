@@ -24,7 +24,11 @@ export default async function WorkspaceLayout({ children }: { children: ReactNod
             层)共享 controller context,Cmd+K 「🗂️ 历史分析」命令可调起浮动
             面板。AnalyzingZone 通过 setController 注册/清空。 */}
         <AnalyzingHistoryFabControllerProvider>
-          <div className="min-h-screen flex flex-col">
+          {/* h-screen(definite 100vh)而非 min-h-screen:
+              flex 容器主轴尺寸必须 definite,flex-1 子项才能按 available space 分配。
+              min-h-screen 是 indefinite → flex 子项按 content size 撑大,长 chat 等
+              场景会让 body 跟着滚(违反 workspace「body 不滚、outer main 接管滚动」契约)。 */}
+          <div className="h-screen flex flex-col">
             {/* StatusBar + ZoneBar 共享一个 sticky 容器(issue: sticky zone-bar):
                 两者在主区滚动时始终钉在 viewport 顶部。容器只挂 sticky 骨架,
                 内部 StatusBar/ZoneBar 各自的 bg / border 保留,视觉与改动前一致。
@@ -33,7 +37,12 @@ export default async function WorkspaceLayout({ children }: { children: ReactNod
               <StatusBar tabs={tabs} currentId={null} />
               <ZoneBar />
             </div>
-            <div className="flex-1 grid grid-cols-[56px_1fr]">
+            {/* flex-1 min-h-0:跟下方各 zone 的 h-full + flex + overflow 契约配套
+                —— 缺 min-h-0 时 flex item 默认 min-height: auto,grid 拒绝收缩
+                到比 content 更小,board-chat 长消息等场景会把 body 撑出 viewport,
+                出现"最外层滚动条"。加 min-h-0 后 grid 锁在 (100vh - 84px),
+                grid 内的 overflow-auto 子项接管滚动。 */}
+            <div className="flex-1 min-h-0 grid grid-cols-[56px_1fr]">
               <Sidebar />
               <main className="overflow-auto">{children}</main>
             </div>

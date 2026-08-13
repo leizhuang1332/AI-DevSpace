@@ -42,7 +42,13 @@ export function MessageStream({ events }: MessageStreamProps): ReactNode {
   return (
     <div
       data-testid="board-chat-message-stream"
-      className="flex flex-col gap-3 flex-1 py-3 overflow-auto"
+      // min-h-0:让 flex 子项能收缩到容器内,否则 flex 默认 min-height: auto
+      // 会让消息流拒绝收缩,长消息时整个面板高度被撑爆,overflow 失效
+      //
+      // overflow-y-scroll + scrollbar-thin:始终显示细滚动条(给用户"这里有更多内容"
+      // 的视觉提示,避免 macOS overlay 滚动条不易发现;track/thumb 颜色在 globals.css
+      // 用 ::-webkit-scrollbar 配项目 CSS 变量)
+      className="flex flex-col gap-3 flex-1 min-h-0 py-3 overflow-y-scroll scrollbar-thin"
     >
       {items.map((it, idx) => renderItem(it, idx))}
     </div>

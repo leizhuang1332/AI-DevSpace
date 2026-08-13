@@ -216,8 +216,12 @@ export function BoardCardDetailPage({
           />
         </div>
 
-        {/* 右栏 toggle */}
-        <div className="overflow-auto bg-bg-elevated border border-border rounded-lg">
+        {/* 右栏 toggle —— flex 容器让 CardSideProperty / CardTranscriptPanel 各自管自己滚动
+            (避免 transcript 长消息时整个面板一起滚,导致输入框被推出视口) */}
+        <div
+          data-testid="board-card-detail-right"
+          className="flex flex-col h-full overflow-hidden bg-bg-elevated border border-border rounded-lg"
+        >
           {rightPanel === 'property' ? (
             <CardSideProperty
               card={card}
