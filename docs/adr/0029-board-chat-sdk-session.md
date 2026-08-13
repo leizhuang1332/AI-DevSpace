@@ -68,7 +68,7 @@ Board chat **完整暴露** Claude Code CLI 核心能力:
 
 Board chat session 绑定实体 = **TaskCard**(per-TaskCard)。
 
-持久化路径:`board/tasks/<ulid>/chat/session.json`(我们元数据) + `~/.claude/projects/<hash-of-cwd>/<sessionId>.jsonl`(SDK session log)。
+持久化路径:`board/tasks/<ulid>/chat/session.json`(我们元数据) + `~/.claude/projects/<sanitized-cwd>/<sessionId>.jsonl`(SDK session log)。
 
 **业务产物 vs 临时物**:
 - 业务产物:TaskCard 自身的 transcript.yaml(保留 `<chat>` 段作为范围独立的协作说明)
@@ -195,7 +195,41 @@ POST /chat/sessions/.../query {content} → 触发新 query
   SSE 流式推送 chat_message_assistant 等
 ```
 
+**Snapshot 渲染历史实现**(`ChatSessionService.parseSdkSessionLog`):
+
+- 真正消息内容存于 SDK 自写 jsonl(`~/.claude/projects/<sanitized-cwd>/<sid>.jsonl`);
+  `session.json` 只存元数据(model / sessionId / cwd / cumulativeUsage ... 不含消息)
+- **`<sanitized-cwd>` 派生规则**(SDK 0.3.206 实测,2026-08-13 探底):cwd 字符串
+  两步 sanitize —— ① `[:\\/]` 全部替换为 `-`;② `[^A-Za-z0-9-]` 全部替换为 `-`。
+  纯字符串操作,无 hash。实例:
+  - cwd: `C:\Users\Lorcan\.aidevspace\requirements\req-003-这下可以了吧\board\tasks\<ulid>\chat`
+  - dir: `C--Users-Lorcan--aidevspace-requirements-req-003--------board-tasks-<ulid>-chat`
+  - **早期误判**:D9 草案写 `<sha256-of-cwd>`,导致 `existsSync` 永远 false →
+    跨刷新不渲染历史(2026-08-13 用户实测复现);修正后 `sanitizeCwdForSdkProjectDir` 与
+    SDK 内部规则一致
+- `loadSnapshot` 派生 jsonl 路径 → `existsSync` 缺失则返 `sdkJsonlMissing: true`(UI 渲染 banner
+  "⚠️ SDK 会话日志丢失") + 空 events
+- 解析策略(7 轮 grilling 沉淀 + 2026-08-13 真实 jsonl 复盘):
+  - **不预设 `system/init` 行存在** —— 旧 sawInit gate 已于 2026-08-13 拆掉。
+    SDK 2.1.206 真实 jsonl 不一定含 init 行(`/start` 走纯本地 + 首次 `/query`
+    触发建会话的场景下,首行就是 `type:'user'`);所有 SDK 事件按 type 无条件
+    dispatch,init 存在时仅 skip(不构成 event,也不构成后续事件的 gate)
+  - SDK 2.1.206 user 消息**总是带** timestamp 字段(ISO,顶层 `timestamp`,
+    不在 content 内);旧"Older emitters omit it"假设以实测为准
+  - SDK 2.1.206 assistant 消息**也带** timestamp;旧"SDKAssistantMessage
+    无 timestamp 字段"假设作废
+  - assistant 单条消息含 text+thinking+tool_use 混合 block → 1 条 `chat_message_assistant`;
+    纯 tool_use → 每块 1 条 `chat_tool_call`(跟 Live SSE 形态对齐)
+  - user 消息的 tool_result block → 1 条 `chat_tool_result`
+  - `chat_permission_request` 无对应 `chat_permission_resolved` → 循环结束后注入 synthetic
+    `chat_permission_resolved { decision: { decision: 'deny', reason: 'session-interrupted' } }`
+    (避免 UI 跨刷新后弹陈旧 modal)
+  - 损坏行(JSON.parse 失败 / 字段缺失)→ silent skip + `onCorruptJsonlLine` warn
+  - ts 策略:user 消息读顶层 `timestamp`(ISO 字符串)→ `Date.parse`,缺省 fallback `Date.now()`;
+    assistant 消息 SDK 不给 timestamp 字段,统一 `Date.now()`
+
 **单 tab lock**:
+
 - Server 端: `chatSessionLock: Map<sessionKey, Promise<void>>`
 - 同 key 第二个 query = 等待第一个完成 / 拒绝
 - Web 端: lock 时 input box disabled + 顶部 "⚠️ 此 chat 已在另一 tab 打开"
@@ -225,7 +259,7 @@ POST /chat/sessions/.../query {content} → 触发新 query
 ```
 1. server 端 randomUUID() = serverSessionId
 2. Provider.runChatQuery({ prompt: '' })  fire-and-forget
-   → SDK 内部创 session + 落 ~/.claude/projects/<hash>/<sid>.jsonl
+   → SDK 内部创 session + 落 ~/.claude/projects/<sanitized-cwd>/<sid>.jsonl
    → SDK throw / 失败 → log warn 不阻断
 3. ChatSessionService.getOrCreateSession(serverSessionId) → 立即落 session.json
 4. 返 200 { meta: { sessionId: serverSessionId, ... } }
@@ -245,7 +279,10 @@ POST /chat/sessions/.../query {content} → 触发新 query
 
 **跨刷新恢复**(D9 修订):
 
-- **primary 路径**: transcript events + 我们 session.json(不依赖 SDK resume)
+- **primary 路径**: transcript events 来自 **SDK jsonl**(`~/.claude/projects/<hash>/<sid>.jsonl`);
+  我们 `session.json` 只存元数据(model / sessionId / cwd / cumulativeUsage ...)—— 不持久化
+  transcript(避免双写漂移)。Snapshot 渲染 = 解析 SDK jsonl → `ChatSessionEvent[]`,
+  详见上文"Snapshot 渲染历史实现"。
 - **secondary 路径**(SDK resume 偶尔生效时,可优化): web 端 `useChatSessionStream` 仍走 `/query` 触发新 turn,SDK 内部 session 偶尔能 match 时跳过自愈直接回复
 
 **新约束**(issue 16 How to apply):
