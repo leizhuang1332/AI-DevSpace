@@ -1,0 +1,30 @@
+apps/web/src/components/board/detail/CardTranscriptPanel.tsx
+  s_b2a7d3fea104df::t_100a8cacd98f1a 289-293
+apps/web/src/__tests__/board/board-chat-panel.test.tsx
+  s_b2a7d3fea104df::t_8c460910940f43 79-81
+  s_b2a7d3fea104df::t_1437625010faa8 1480,1491,1496-1502,1508-1509,1511
+  s_b2a7d3fea104df::t_762ce99f988f2a 1371-1479,1481-1490,1492-1495,1503-1507,1510,1512-1527,1534-1537,1544-1552,1554-1567,1569,1571-1675
+  s_b2a7d3fea104df::t_d30b5f2864b012 182-196
+  s_b2a7d3fea104df::t_7556727402ddde 1528-1533,1538-1543,1553,1568,1570
+apps/web/src/components/board/detail/chat/MessageStream.tsx
+  s_b2a7d3fea104df::t_6f491b45263439 27-29,34-52,54-56,58-59,64-71,74,76-79,81-99,101-116,130-131,139,146-152,157-160
+  s_b2a7d3fea104df::t_acac9d66452d8e 140-142
+  s_b2a7d3fea104df::t_cbfea408741ee8 153-156
+  s_b2a7d3fea104df::t_0be17ac75a0cfa 18,53,57,60-63,72-73,75,80,100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "1ee3d5b3eb1fa340288050aa9ea35a77f76c7906",
+  "prompts": {},
+  "sessions": {
+    "s_b2a7d3fea104df": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "830e495e-0371-41cf-b6a3-d0f95c38837b",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
