@@ -1,0 +1,33 @@
+apps/agent/src/routes/board-chat.ts
+  s_71938510b9b09e::t_cc2a0a52a9e045 406-432,434,436-441,445,450-451,453-460,462,464-467,470-471,473,478-482
+  s_71938510b9b09e::t_8a50c659a61074 6-9,11
+.scratch/board-chat/issues/16-agent-start-server-uuid-session-id.md
+  s_71938510b9b09e::t_1d88a7a83ca1ef 1-164
+docs/adr/0029-board-chat-sdk-session.md
+  s_71938510b9b09e::t_3419f27cffa5a6 206,212,218
+  s_71938510b9b09e::t_f23ba71ed96766 180,188,190-195,203-205,207-211,213-217,219-246,248-251,253-257
+  s_71938510b9b09e::t_bf587a9d29b706 247,252
+  s_71938510b9b09e::t_8edcc2e9581132 258
+apps/agent/src/__tests__/board/board-chat-route.test.ts
+  s_71938510b9b09e::t_3eb82d73c87a2c 553,565-675
+  s_71938510b9b09e::t_ddded19c721593 533-535,537,547-552,554-555,563-564
+  s_71938510b9b09e::t_fc98c1c2b4c774 390-392
+  s_71938510b9b09e::t_4a6962aae769bf 304,308-313,334-336,339
+  s_71938510b9b09e::t_0c1cc43824529b 466-480,482-503
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "2168b08f128f87c2abed0f637e8cb94734122105",
+  "prompts": {},
+  "sessions": {
+    "s_71938510b9b09e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "58459b95-9378-46a2-9f44-f127a35bd73b",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
