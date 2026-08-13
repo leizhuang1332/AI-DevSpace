@@ -1,0 +1,27 @@
+docs/adr/0029-board-chat-sdk-session.md
+  s_028fe1ea0f5444::t_084201b6556d9a 202-209
+  s_028fe1ea0f5444::t_15cb4e07fca481 199
+  s_028fe1ea0f5444::t_713bc5fa91715b 282-285
+  s_028fe1ea0f5444::t_fe8a6c793cc6c9 200
+  s_028fe1ea0f5444::t_0d2b0ecd97cf6e 262
+  s_028fe1ea0f5444::t_747c65805a479f 71
+  s_028fe1ea0f5444::t_e5f03d0217eb05 232
+  s_028fe1ea0f5444::t_964b4a2b25acbf 212-220
+  s_028fe1ea0f5444::t_00fb5890175fca 198,201,210-211,221-230
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "af922b39fd9ccbcec43461c3ded053f996213b23",
+  "prompts": {},
+  "sessions": {
+    "s_028fe1ea0f5444": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "138d61be-4603-4f1c-a50a-98ac683062b4",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
