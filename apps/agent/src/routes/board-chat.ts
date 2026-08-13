@@ -403,68 +403,30 @@ export async function boardChatRoutes(
         permissionRequestIds: new Set<string>(),
       })
       try {
-        // 6. issue 16 —— sessionId 由 server 端同步生成 UUID(SDK 0.3.206 不暴露)
+        // 6. issue 16 + 17 —— sessionId 由 server 端同步生成 UUID
         //
-        // 旧实现:调 Provider.runChatQuery({prompt:''}) → 等待 SDK emit
-        // `session_init` event → 拿 event.sessionId 落 session.json。
-        // 这条路径在 SDK 0.3.206 **永远走不通**:
-        // - SDK mjs bundle 中 `subtype:"init"` 字面量 0 处 —— SDK 不在
-        //   user-facing stream emit `system/init`
-        // - SDK `Query` interface 的 296 行方法全部是控制平面方法
-        //   (interrupt/setPermissionMode/...),**没有 sessionId 字段**
-        // - `Query.initializationResult()` 返回的 `SDKControlInitializeResponse`
-        //   字段是 commands/agents/models/account,**没有 sessionId**
-        // 结果:旧 `/start` 在 SDK 0.3.206 下 `observedSessionId` 永远是 null,
-        // 500 internal 错误"SDK did not yield session_id"。
+        // issue 16 发现 SDK 0.3.206 不在 user-facing stream emit `system/init`,
+        // 于是改为 server 端 randomUUID();但当时**误以为**"SDK 内部 sessionId
+        // 无法指定,只能与我们的 UUID 解耦",导致 /query resume 我们的 UUID 时
+        // SDK 必然找不到(SDK 自己生成了另一个 id 落 jsonl)—— 每次 query 都
+        // 静默失败。
         //
-        // 新实现(方案 B):
-        // - server 端 `randomUUID()` 生成 sessionId(给前端用作会话标识 + URL path)
-        // - `Provider.runChatQuery({prompt:''})` 仍调 —— fire-and-forget 触发
-        //   SDK 内部 session 创建 + 落 `~/.claude/projects/<hash>/<sid>.jsonl`
-        //   (SDK 内部 sessionId 由它自己管理,前端不可见,也不依赖)
-        // - session.json 立即落盘,不再 await SDK
-        // - SDK bootstrap query throw / 失败 → 不阻断 /start(只 log warn),
-        //   因为 SDK 内部 session 状态不影响前端 sessionId 标识
+        // issue 17 修正:SDK 支持 `options.sessionId` 预指定会话 id
+        // (sdk.d.ts:1769 "Use a specific session ID for the conversation
+        // instead of an auto-generated one. Must be a valid UUID.")。
+        // 于是 server UUID **就是** SDK session id,两者不再解耦。
         //
-        // /query 路径:URL `sessionId` = 我们 UUID,作 `resumeSessionId` 传 SDK。
-        // SDK 找不到 UUID 对应 jsonl → issue 13 自愈兜底(chat_error
-        // E_SESSION_EXPIRED → web 端 reset → 自动重 /start)。
-        // 跨刷新恢复靠 transcript events + 我们的 session.json(不靠 SDK jsonl)。
+        // 因此 `/start` 不再需要跑 SDK bootstrap query:
+        // - 它唯一的作用是"触发 SDK 建 session",而现在首轮 `/query` 会用
+        //   `options.sessionId` 自己建
+        // - 省一次进程 spawn + 一次无意义的空 prompt API 调用
+        // - 消除 fire-and-forget bootstrap 与随后 `/query` 之间的落盘竞态
+        //
+        // `/start` 现在是纯本地操作:生成 UUID → 落 session.json → 返回。
         const cwd = cardChatDir(reqId, cardId)
         const serverSessionId = randomUUID()
 
-        // fire-and-forget SDK bootstrap query:prompt='' 不消耗 user content
-        // (issue 10 不变量),onEvent swallow all events(SDK 0.3.206 不 emit
-        // session_init;后续 message_assistant/tool_call/complete 等也不暴露给
-        // /start,只 /query 才把 user content 喂给 AI)。
-        const runChatQuery = chatProvider.runChatQuery.bind(chatProvider)
-        const sdkPromise = runChatQuery({
-          prompt: '',
-          cwd,
-          additionalDirectories: [joinReqDir(reqId)],
-          model: 'claude-sonnet-5',
-          permissionMode: DEFAULT_PERMISSION_MODE,
-          // /start 阶段无 SSE,userConfirmHandler 自动 allow(不阻塞);
-          // 空 prompt 下 SDK 不会发起 tool call(decision 边界由 prompt='' 保证)。
-          userConfirmHandler: async () => ({ behavior: 'allow' as const }),
-          onEvent: () => {
-            /* swallow —— SDK 0.3.206 不 emit session_init,其它事件 /start 不暴露 */
-          },
-        }).catch((err: unknown) => {
-          // SDK bootstrap 失败(进程崩 / spawn 失败 / timeout)不阻断 /start:
-          // sessionId 由 server UUID 提供,前端可用;SDK 内部 session 状态由
-          // 下次 /query 自愈(issue 13)兜底。
-          const errMsg = err instanceof Error ? err.message : String(err)
-          req.log.warn(
-            { err: errMsg, reqId, cardId },
-            'board chat start: SDK bootstrap query failed (non-fatal, sessionId already generated server-side)',
-          )
-        })
-
-        // 7. 落盘 session.json(atomic)—— 用 server UUID 作 sdkSessionId seed
-        // 注:此 seed 字段名是历史命名(原本意为"SDK 提供的 sessionId"),实际语义
-        // 已变为"前端用的 session 标识 UUID"。SDK 内部 sessionId 由 SDK 自行
-        // 管理,不通过此 seed 字段表达(issue 16 决策 —— 详见 issue 16 PRD)。
+        // 7. 落盘 session.json(atomic)
         try {
           const meta = await chatSessionService.getOrCreateSession(reqId, cardId, {
             sdkSessionId: serverSessionId,
@@ -475,11 +437,6 @@ export async function boardChatRoutes(
             mcpServers: [{ name: 'boardchat', config: { type: 'sdk' } }],
             ownerUserId: 'user-1',
           })
-          // 同步响应先返;SDK bootstrap promise 保留引用避免被 GC,但不 await
-          // (fire-and-forget)。SDK 进程清理由 OS / 下次 /query reset 兜底。
-          // 注:这里 `void sdkPromise` 仅保留引用;promise 自身 reject 已在
-          // 上方 .catch() 吞掉。
-          void sdkPromise
           return reply.code(200).send({ meta })
         } catch (err) {
           req.log.error({ err, reqId, cardId }, 'board chat start: getOrCreateSession failed')
@@ -617,68 +574,148 @@ export async function boardChatRoutes(
 
       // 实际 runChatQuery promise 启动(同步构造,异步 await)
       const runChatQuery = chatProvider.runChatQuery.bind(chatProvider)
-      // issue 13 —— 端到端自愈:捕获 Provider 返回的 isSessionExpired 信号
+
+      // ---- issue 17 —— sessionId 契约:URL 里的 UUID 就是 SDK 的 session id --
+      // 首轮把它作为 SDK `options.sessionId` 传下去建会话(Provider 层
+      // `newSessionId`),SDK 落盘的 `<uuid>.jsonl` 就是它;之后作
+      // `options.resume` 续会话,必然命中。
+      //
+      // `sdkSessionEstablished` 缺失(issue 16 时代落盘的老 session.json)
+      // → schema default false → 走新建路径 → 坏 session 下次 query 自动
+      // 修好,不需要迁移脚本 / 用户删文件。
+      const useResume = meta?.sdkSessionEstablished === true
+
+      /** SDK 真跑起来了的证据 —— 用来区分"会话不存在"与"跑了但失败" */
+      const OUTPUT_EVENT_KINDS: ReadonlySet<ChatStreamEvent['kind']> = new Set([
+        'session_init',
+        'message_assistant',
+        'tool_call',
+        'tool_result',
+        'permission_request',
+        'task_started',
+        'task_progress',
+        'task_completed',
+      ])
+      let producedOutput = false
+      // resume 尝试期间的 complete 事件先扣住:若要回退重试,这条
+      // reason='error' 的 complete 不能推给前端 —— 否则前端会收到两个
+      // chat_complete,第一个就让 UI 认为本轮已结束。
+      let bufferedComplete: ChatSessionEvent | null = null
+
+      const makeOnEvent =
+        (buffering: boolean) =>
+        (event: ChatStreamEvent): void => {
+          if (OUTPUT_EVENT_KINDS.has(event.kind)) producedOutput = true
+          const converted = convertChatStreamEvent(event, {
+            permissionMode: effectivePermissionMode,
+          })
+          if (!converted) return
+          if (buffering && converted.kind === 'chat_complete') {
+            bufferedComplete = converted
+            return
+          }
+          sseWrite(converted)
+        }
+
+      const userConfirmHandler = async (args: {
+        toolName: string
+        input: Record<string, unknown>
+        requestId: string
+        displayName?: string
+        title?: string
+        description?: string
+      }): Promise<
+        | { behavior: 'allow'; updatedPermissions?: ReadonlyArray<unknown>; reason?: string }
+        | { behavior: 'deny'; message?: string }
+      > => {
+        const requestId = args.requestId || `req-${randomUUID()}`
+        lockValue.permissionRequestIds.add(requestId)
+        // 推 SSE permission_request —— ADR-0029 D5 敏感模式永弹信号也带 forced
+        sseWrite({
+          kind: 'chat_permission_request',
+          ts: Date.now(),
+          requestId,
+          toolName: args.toolName,
+          input: args.input,
+          displayName: args.displayName,
+          title: args.title,
+          description: args.description,
+        })
+        // 等 POST /permission 决议
+        const decision = await new Promise<
+          | { behavior: 'allow'; updatedPermissions?: ReadonlyArray<unknown>; reason?: string }
+          | { behavior: 'deny'; message?: string }
+        >((resolve) => {
+          permissionResolvers.set(requestId, { resolve, lockKey })
+        })
+        permissionResolvers.delete(requestId)
+        lockValue.permissionRequestIds.delete(requestId)
+        // 推 SSE permission_resolved(含决议)
+        sseWrite({
+          kind: 'chat_permission_resolved',
+          ts: Date.now(),
+          requestId,
+          decision: {
+            decision: decision.behavior,
+            ...(decision.behavior === 'deny' && decision.message !== undefined
+              ? { reason: decision.message }
+              : decision.behavior === 'allow' && decision.reason !== undefined
+                ? { reason: decision.reason }
+                : {}),
+          },
+        })
+        return decision
+      }
+
+      /** 单次 SDK 调用 —— resume 续会话 或 用指定 UUID 建新会话(二选一,SDK 契约互斥) */
+      const attempt = (
+        mode: { resume: string } | { newSession: string },
+      ): Promise<ChatQueryResult> =>
+        runChatQuery({
+          prompt: promptFromContent(parsed.data.content),
+          cwd: effectiveCwd,
+          additionalDirectories: effectiveAdditionalDirectories,
+          model: effectiveModel,
+          permissionMode: effectivePermissionMode,
+          ...('resume' in mode
+            ? { resumeSessionId: mode.resume }
+            : { newSessionId: mode.newSession }),
+          frozenCwd: effectiveCwd,
+          userConfirmHandler,
+          onEvent: makeOnEvent('resume' in mode),
+        })
+
       const queryPromise = (async () => {
         let result: ChatQueryResult | undefined
         try {
-          result = await runChatQuery({
-            prompt: promptFromContent(parsed.data.content),
-            cwd: effectiveCwd,
-            additionalDirectories: effectiveAdditionalDirectories,
-            model: effectiveModel,
-            permissionMode: effectivePermissionMode,
-            resumeSessionId: sessionId,
-            frozenCwd: effectiveCwd,
-            userConfirmHandler: async (args) => {
-              const requestId = args.requestId || `req-${randomUUID()}`
-              lockValue.permissionRequestIds.add(requestId)
-              // 推 SSE permission_request —— ADR-0029 D5 敏感模式永弹信号也带 forced
-              sseWrite({
-                kind: 'chat_permission_request',
-                ts: Date.now(),
-                requestId,
-                toolName: args.toolName,
-                input: args.input,
-                displayName: args.displayName,
-                title: args.title,
-                description: args.description,
-                ...(typeof args.input === 'object' && args.input !== null
-                  ? {} // forced 由 Provider 包装层 emit 的 chat_permission_request
-                    // 提供;此处直接推 SSE 的形态与 Provider stream 一致
-                  : {}),
-              })
-              // 等 POST /permission 决议
-              const decision = await new Promise<
-                | { behavior: 'allow'; updatedPermissions?: ReadonlyArray<unknown>; reason?: string }
-                | { behavior: 'deny'; message?: string }
-              >((resolve) => {
-                permissionResolvers.set(requestId, { resolve, lockKey })
-              })
-              permissionResolvers.delete(requestId)
-              lockValue.permissionRequestIds.delete(requestId)
-              // 推 SSE permission_resolved(含决议)
-              sseWrite({
-                kind: 'chat_permission_resolved',
-                ts: Date.now(),
-                requestId,
-                decision: {
-                  decision: decision.behavior,
-                  ...(decision.behavior === 'deny' && decision.message !== undefined
-                    ? { reason: decision.message }
-                    : decision.behavior === 'allow' && decision.reason !== undefined
-                      ? { reason: decision.reason }
-                      : {}),
-                },
-              })
-              return decision
-            },
-            onEvent: (event) => {
-              const converted = convertChatStreamEvent(event, {
-                permissionMode: effectivePermissionMode,
-              })
-              if (converted) sseWrite(converted)
-            },
-          })
+          result = await attempt(
+            useResume ? { resume: sessionId } : { newSession: sessionId },
+          )
+
+          // ---- 回退重试(issue 17)------------------------------------------
+          // 判据刻意**不看错误措辞**:用 resume 起会话,结果一个事件都没吐出来
+          // 就失败了 → SDK 侧极可能根本没这个会话 → 用同一个 UUID 重新建。
+          //
+          // 这替代了 issue 14 的错误串白名单。CLI 措辞已经变过一次
+          // ('is not a UUID' → 'No conversation found with session ID'),
+          // 白名单每变一次就漏一次;"零输出即失败"这个信号不依赖任何文案。
+          //
+          // UUID 保持不变 → 前端标识稳定,不需要 reset + 重 /start 那条
+          // 会无限循环的路径。
+          const failed = !result.ok || result.isSessionExpired === true
+          if (useResume && failed && !producedOutput) {
+            req.log.warn(
+              { reqId, cardId, sessionId, error: result.ok ? undefined : result.error },
+              'board chat query: resume produced no output, rebuilding session with same UUID',
+            )
+            bufferedComplete = null // 丢弃 resume 那条 reason=error 的 complete
+            producedOutput = false
+            result = await attempt({ newSession: sessionId })
+          } else if (bufferedComplete) {
+            // 不重试 → 把扣住的 complete 补推给前端
+            sseWrite(bufferedComplete)
+            bufferedComplete = null
+          }
         } catch (err) {
           // SSE 已打开,不能再发 JSON;通过 SSE chat_error 事件传达错误
           sseWrite({
@@ -691,15 +728,24 @@ export async function boardChatRoutes(
           req.log.error({ err, reqId, cardId, sessionId }, 'board chat query: provider threw')
         }
 
-        // issue 13 + 14 —— session 失效自愈路径:
-        // Provider.runChatQuery 返回的 result.isSessionExpired=true 时(不论
-        // ok=true 还是 ok=false),表示 SDK resume 一个已失效的 sessionId:
-        // - ok=true(issue 13):SDK 走完 stream 但 observedSessionId='' + reason='error'
-        // - ok=false(issue 14):SDK CLI throw '--resume requires a valid session ID...'
-        //   (典型:`/start` 用 FakeChatProvider 落 'sdk-fake-001' 假 id,后续切真
-        //   Provider 再 /query 真 SDK 找不到)
-        // 先删 stale session.json(before SSE close),再推 chat_error
-        // E_SESSION_EXPIRED,前端收到后自动调 reset 端点。
+        // ---- 会话建立成功 → 落盘标记,下次走 resume ------------------------
+        if (result?.ok && !result.isSessionExpired && !useResume) {
+          try {
+            chatSessionService.patch(reqId, cardId, { sdkSessionEstablished: true })
+          } catch (err) {
+            // session.json 缺失的宽容路径(meta === null)下 patch 会抛;
+            // 不致命 —— 下次 query 再走一遍新建即可
+            req.log.warn(
+              { err, reqId, cardId, sessionId },
+              'board chat query: mark sdkSessionEstablished failed (non-fatal)',
+            )
+          }
+        }
+
+        // issue 13 + 14 —— session 失效自愈(第二道防线):
+        // issue 17 的回退重试已能兜住绝大多数 resume 失效场景;走到这里
+        // 说明**重试也失败了**(或首轮新建就失败),此时清 session.json 让
+        // 下次 /start 从头来过。
         if (result?.isSessionExpired) {
           try {
             chatSessionService.delete(reqId, cardId)
@@ -722,8 +768,8 @@ export async function boardChatRoutes(
             recoverable: true,
           })
         } else if (result && !result.ok) {
-          // issue 14 —— Provider 返 ok=false 但不是 session-expired(rate limit、
-          // 网络错误等):SSE 已打开但前端没收到任何 chat_error 会以为流成功。
+          // Provider 返 ok=false 但不是 session-expired(rate limit、网络错误
+          // 等):SSE 已打开但前端没收到任何 chat_error 会以为流成功。
           // 补推一条 chat_error E_QUERY_FAILED 让前端能区分"出错"vs"完成"。
           sseWrite({
             kind: 'chat_error',
@@ -734,6 +780,7 @@ export async function boardChatRoutes(
           })
         }
       })()
+
       // 把真实 promise 写回 lock,让外部 queryLocks.get(lockKey)?.promise 拿到
       lockValue.promise = queryPromise
 

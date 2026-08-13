@@ -2,7 +2,7 @@
  * ChatSessionService 单测 —— issue 03 / ADR-0029
  *
  * 覆盖:
- * - 17 项 session.json 字段 round-trip(get / write / patch)
+ * - 18 项 session.json 字段 round-trip(get / write / patch)
  * - getOrCreateSession + 单 tab lock 串行语义
  * - 30 天 SDK 健康检查(sdk-jsonl-missing / session-older-than-30-days)
  * - 30 天 sweep —— 超期 session 重置 cumulativeUsage + sessionId
@@ -116,7 +116,10 @@ describe('ChatSessionService.get / writeMeta', () => {
     expect(corruptEvents[0]?.path).toContain('session.json')
   })
 
-  it('writeMeta:17 项字段 round-trip —— session.json 落盘 + get 读回一致', () => {
+  it('writeMeta:18 项字段 round-trip —— session.json 落盘 + get 读回一致', () => {
+    // issue 17 新增第 18 项 sdkSessionEstablished:false —— 默认值是迁移策略:
+    // 老 session.json 没这个字段 → zod default(false) → 读出来是 false → 下次
+    // /query 自动走"用 server UUID 新建"路径 → 坏的旧 session 自动修好。
     seedRequirement()
     const meta: ChatSessionMeta = {
       sessionId: 'sdk-sess-abc-123',
@@ -138,6 +141,7 @@ describe('ChatSessionService.get / writeMeta', () => {
         cumulativeOutputTokens: 0,
         cumulativeCacheReadTokens: 0,
       },
+      sdkSessionEstablished: false,
     }
 
     service.writeMeta(REQ, CARD_A, meta)
@@ -148,7 +152,7 @@ describe('ChatSessionService.get / writeMeta', () => {
     const read = service.get(REQ, CARD_A)
     expect(read).toEqual(meta)
 
-    // 17 项字段断言(逐项)
+    // 18 项字段断言(逐项)
     expect(read?.sessionId).toBe('sdk-sess-abc-123')
     expect(read?.requirementId).toBe(REQ)
     expect(read?.cardId).toBe(CARD_A)
@@ -166,6 +170,7 @@ describe('ChatSessionService.get / writeMeta', () => {
     expect(read?.cumulativeUsage.cumulativeInputTokens).toBe(0)
     expect(read?.cumulativeUsage.cumulativeOutputTokens).toBe(0)
     expect(read?.cumulativeUsage.cumulativeCacheReadTokens).toBe(0)
+    expect(read?.sdkSessionEstablished).toBe(false)
   })
 
   it('writeMeta:tmp+rename atomic —— 写期间崩溃不撕裂文件', () => {
@@ -199,7 +204,7 @@ describe('ChatSessionService.get / writeMeta', () => {
 // ---------------------------------------------------------------------------
 
 describe('ChatSessionService.getOrCreateSession + 单 tab lock', () => {
-  it('首次调用:写入 session.json + 17 项字段 + zeroCumulativeUsage', async () => {
+  it('首次调用:写入 session.json + 18 项字段 + zeroCumulativeUsage + sdkSessionEstablished=false', async () => {
     seedRequirement()
 
     const meta = await service.getOrCreateSession(REQ, CARD_A, DEFAULT_SEED)
@@ -218,6 +223,8 @@ describe('ChatSessionService.getOrCreateSession + 单 tab lock', () => {
     expect(meta.queryCount).toBe(1)
     expect(meta.ownerUserId).toBe('user-1')
     expect(meta.cumulativeUsage).toEqual(zeroCumulativeUsage())
+    // issue 17:首次落盘默认 sdkSessionEstablished=false(/query 首轮传 newSessionId)
+    expect(meta.sdkSessionEstablished).toBe(false)
   })
 
   it('第二次调用:session.json 已存在 → 直接 get 返回,cwd 不一致时仍返原 session', async () => {

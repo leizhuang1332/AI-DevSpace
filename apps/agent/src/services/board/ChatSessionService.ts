@@ -398,6 +398,9 @@ export class ChatSessionService {
       queryCount: 1,
       ownerUserId: seed.ownerUserId,
       cumulativeUsage: zeroCumulativeUsage(),
+      // issue 17 —— 新 session 的 SDK 侧会话尚未建立;首次 /query 传
+      // newSessionId 让 SDK 用这个 UUID 建会话,成功后才置 true
+      sdkSessionEstablished: false,
     }
     const validated = ChatSessionMetaSchema.safeParse(draft)
     if (!validated.success) {
@@ -417,6 +420,7 @@ export class ChatSessionService {
   /**
    * 字段白名单 PATCH —— 对照 ticket 03 验收:
    * model / permissionMode / mcpServers / additionalDirectories
+   * + sdkSessionEstablished(issue 17)
    *
    * 不接受 sessionId / createdAt / cumulativeUsage(由 Provider 单独 update);
    * 改 model / permissionMode / mcpServers 后写盘,lastQueryAt 同步刷新。
@@ -430,6 +434,8 @@ export class ChatSessionService {
       model?: string
       permissionMode?: ChatPermissionModeT
       mcpServers?: ReadonlyArray<ChatMcpServerConfig>
+      /** issue 17 —— SDK 侧会话已建立(首次 /query 建会话成功后置 true) */
+      sdkSessionEstablished?: boolean
     },
   ): ChatSessionMeta {
     const cur = this.get(requirementId, cardId)
@@ -452,6 +458,9 @@ export class ChatSessionService {
         : {}),
       ...(patch.mcpServers !== undefined
         ? { mcpServers: [...patch.mcpServers] }
+        : {}),
+      ...(patch.sdkSessionEstablished !== undefined
+        ? { sdkSessionEstablished: patch.sdkSessionEstablished }
         : {}),
       lastQueryAt: ts,
     }

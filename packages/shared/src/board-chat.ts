@@ -140,7 +140,17 @@ export type ChatCumulativeUsage = z.infer<typeof ChatCumulativeUsageSchema>
  * 是因为 board chat 与 SDK 紧耦合,跨进程边界。
  */
 export const ChatSessionMetaSchema = z.object({
-  /** SDK session 唯一 id(由 system/init 消息携带) */
+  /**
+   * 会话唯一 id(UUID)—— server 端生成,**同时也是 SDK 的 session id**。
+   *
+   * issue 17 契约:`/query` 首轮把它作为 SDK `options.sessionId` 传下去
+   * (sdk.d.ts:1769 "Use a specific session ID for the conversation instead
+   * of an auto-generated one"),SDK 落盘的 `<sessionId>.jsonl` 文件名就是它;
+   * 后续 query 用它作 `options.resume` 必然命中。
+   *
+   * 不要再回到 issue 16 的"server UUID 与 SDK sessionId 是两个东西"假设 ——
+   * 那会让每次 resume 都必然失败(SDK 库里根本没有这个 id)。
+   */
   sessionId: ChatSessionIdSchema,
   /** 反向引用 Requirement(沿用 req-NNN-slug 格式) */
   requirementId: RequirementIdSchema,
@@ -170,6 +180,17 @@ export const ChatSessionMetaSchema = z.object({
   ownerUserId: z.string().min(1),
   /** 累计 usage(嵌入 ChatCumulativeUsageSchema) */
   cumulativeUsage: ChatCumulativeUsageSchema,
+  /**
+   * SDK 侧会话是否已建立(issue 17)。
+   *
+   * false → `/query` 传 `newSessionId`,让 SDK 用 `sessionId` 建新会话;
+   * true  → `/query` 传 `resumeSessionId` 续会话。
+   *
+   * `.default(false)` 是有意为之的迁移策略:issue 16 时代落盘的老
+   * session.json 没有这个字段 → 读出来是 false → 下次 `/query` 自动走
+   * 新建路径 → 坏 session 自动修好。**不需要迁移脚本,也不需要用户删文件。**
+   */
+  sdkSessionEstablished: z.boolean().default(false),
 })
 export type ChatSessionMeta = z.infer<typeof ChatSessionMetaSchema>
 

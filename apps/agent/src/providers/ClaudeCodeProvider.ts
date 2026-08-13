@@ -1069,6 +1069,13 @@ async function chatQuery(input: ChatQueryInput): Promise<ChatQueryResult> {
   }
   if (input.resumeSessionId) {
     sdkOptions['resume'] = input.resumeSessionId
+  } else if (input.newSessionId) {
+    // issue 17 —— 用调用方指定的 UUID 建新会话,而不是让 SDK 随机生成。
+    // sdk.d.ts:1769: "Use a specific session ID for the conversation instead
+    // of an auto-generated one. Must be a valid UUID. Cannot be used with
+    // `continue` or `resume` unless `forkSession` is also set."
+    // → 与 resume 互斥,所以走 else-if;resume 优先。
+    sdkOptions['sessionId'] = input.newSessionId
   }
 
   // 3) 调 queryFn —— 走注入的 query(测试用 mock,生产用 SDK)

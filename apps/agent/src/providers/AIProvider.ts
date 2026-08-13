@@ -190,8 +190,24 @@ export interface ChatQueryInput {
   model: string
   /** SDK options.permissionMode —— 'default' | 'plan' | 'bypassPermissions' */
   permissionMode: 'default' | 'plan' | 'bypassPermissions'
-  /** SDK sessionId(resume 协议 D9)—— 首次 query 留空,后续 query 必带 */
+  /**
+   * SDK options.resume(resume 协议 D9)—— 续已存在的会话。
+   * 与 `newSessionId` **互斥**(SDK 契约 sdk.d.ts:1766-1767:
+   * `sessionId` cannot be used with `resume` unless `forkSession` is set)。
+   */
   resumeSessionId?: string
+  /**
+   * SDK options.sessionId(issue 17)—— 用**我们指定的 UUID** 建新会话,
+   * 而不是让 SDK 自己随机生成(sdk.d.ts:1769)。
+   *
+   * 这是 board chat sessionId 契约的基石:server 生成 UUID → 传这个字段 →
+   * SDK 用它建会话并落 `<uuid>.jsonl` → 后续 `resumeSessionId` 传同一个
+   * UUID 必然命中。必须是合法 UUID,否则 CLI 启动即拒。
+   *
+   * 与 `resumeSessionId` 互斥 —— 同时传是调用方 bug,Provider 以
+   * `resumeSessionId` 优先并忽略本字段。
+   */
+  newSessionId?: string
   /**
    * resume 协议冻结的 cwd(ADR-0029 D4 + D9):ChatSessionService 从落盘
    * session.json 读到的 cwd,Provider 优先采纳,忽略调用方传入的 cwd。
