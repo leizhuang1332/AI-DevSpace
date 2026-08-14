@@ -1,0 +1,39 @@
+apps/agent/src/__tests__/WorkspaceService-gitignore.test.ts
+  s_75706d5d7e11fb::t_ae2c210f57c496 1-128
+apps/agent/src/__tests__/workspace-route.test.ts
+  s_75706d5d7e11fb::t_332b5a945b7b04 32,35-36,38-39,44,55-56
+apps/agent/src/__tests__/WorkspaceService-migrate.test.ts
+  s_75706d5d7e11fb::t_4bd0d2a54b6677 184-193
+  s_75706d5d7e11fb::t_a18c1fa2c964b9 1-183,194-246
+apps/agent/src/services/WorkspaceService.ts
+  s_75706d5d7e11fb::t_c91be1a44bc580 12,29-32,34,70-71
+  s_75706d5d7e11fb::t_9bf6f482030890 157-165,167,203-206,214
+  s_75706d5d7e11fb::t_09009cfce89a75 35-58
+  s_75706d5d7e11fb::t_8ed6718196f083 90-96,104-111
+  s_75706d5d7e11fb::t_3176636434951d 239-294
+  s_75706d5d7e11fb::t_74bf087e1b3804 59-65
+apps/agent/src/__tests__/WorkspaceService-yaml.test.ts
+  s_75706d5d7e11fb::t_b451ac622e4b97 1-240,242-256,258-391,393-407
+  s_75706d5d7e11fb::t_ef4e41f69c603b 392
+  s_75706d5d7e11fb::t_6a3a44b2c67ad3 241,257
+apps/agent/src/__tests__/workspace-init.test.ts
+  s_75706d5d7e11fb::t_ac82460908678d 201,208-209,212,214
+  s_75706d5d7e11fb::t_2d7849440817db 197-198
+  s_75706d5d7e11fb::t_bdc13a0bc9fc0e 20,22-27,33,41-47,50,60,64-84,91-93,96-98
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "1f4de11da86ddd51f3ba64de0726be5860991736",
+  "prompts": {},
+  "sessions": {
+    "s_75706d5d7e11fb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0ce15e1d-3c89-4d5b-b1b4-4af87518b492",
+        "model": "MiniMax-M3"
+      },
+      "human_author": null
+    }
+  }
+}
