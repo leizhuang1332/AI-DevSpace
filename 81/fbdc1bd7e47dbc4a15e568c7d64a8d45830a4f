@@ -1,0 +1,61 @@
+apps/agent/src/__tests__/repos-attach-clone.e2e.test.ts
+  s_5f95dafd98e9c0::t_1d93248f446d34 1-351,353,364-366,368-375,383-385,387,404,423-430
+  s_5f95dafd98e9c0::t_65f12596d94132 352,354-363,367,376-382,386,388-403,405-422
+apps/agent/src/__tests__/repos-route.test.ts
+  s_5f95dafd98e9c0::t_45555deb775b57 32
+apps/agent/src/routes/requirement.ts
+  s_5f95dafd98e9c0::t_14451014ea6c0a 238,246,268-274
+packages/shared/src/sse.ts
+  s_5f95dafd98e9c0::t_fe7e93673388b3 416-446
+apps/agent/src/codebase/CodebaseManager.ts
+  s_5f95dafd98e9c0::t_adb5a7263221bc 319
+  s_5f95dafd98e9c0::t_6639c5a0b48736 38-52
+  s_5f95dafd98e9c0::t_75e52f167f1849 165-166
+  s_5f95dafd98e9c0::t_e55b08f4e9676f 448
+  s_5f95dafd98e9c0::t_f001b305830bb8 105
+  s_5f95dafd98e9c0::t_7022f95aece2d0 1-32,34-37,53-104,106-164,167-180,183-318,320-447,449-484
+  s_5f95dafd98e9c0::t_02206ea0149a57 181-182
+  s_5f95dafd98e9c0::t_6ea4f0a99ecf48 33
+apps/agent/src/__tests__/codebase/CodebaseManager.test.ts
+  s_5f95dafd98e9c0::t_3ac7e6c755adff 498
+  s_5f95dafd98e9c0::t_b40421fec204d2 1-36,38-137,143-145,147-153,155-497
+  s_5f95dafd98e9c0::t_96e9da40a5523c 37
+  s_5f95dafd98e9c0::t_4b8b487cb3deac 138-142,146,154
+apps/agent/src/services/RequirementService.ts
+  s_5f95dafd98e9c0::t_69f40550829660 256,258-261,263-266,270,272-276,278,285-286,289-295,298,300,304-306,308-315,318-320,324-325,327-336,339,342-344,349-350,352-372,374,378-384,386-389,393,396-403,405-415,419-443,445-447,449-475
+  s_5f95dafd98e9c0::t_91987f3b48797d 2,4,6-9,13-15,46-52,296-297,307,373,375-377,385,444,448
+  s_5f95dafd98e9c0::t_aa8c6621550d6d 112-119,126-128,135-147
+apps/agent/src/routes/repos.ts
+  s_5f95dafd98e9c0::t_45555deb775b57 36
+apps/agent/src/__tests__/requirement.test.ts
+  s_5f95dafd98e9c0::t_f3ab88ab31acac 967
+  s_5f95dafd98e9c0::t_45555deb775b57 16-26,31,37-38,45-47,51,53,123,126,135,152,154,159,167,178-207,211,221,232,243,254,261,263-271,277,280-288,292,296,305,308-310,318,340,347-348,350-373,377-378,388,394,399-403,405-406,408-409,438,687,880
+apps/agent/src/git/createDefaultGitExec.ts
+  s_5f95dafd98e9c0::t_45555deb775b57 25-26,29
+apps/agent/src/__tests__/requirement-attach-async.test.ts
+  s_5f95dafd98e9c0::t_4dee97b28b0f99 390-393
+  s_5f95dafd98e9c0::t_cf831af751707a 423-424,427-428
+  s_5f95dafd98e9c0::t_24f305dd0f05b0 1-17,19-317,320-389,394-422,425-426,429-456,460-461,463-553
+  s_5f95dafd98e9c0::t_b16d8f3f2ad222 457-459,462
+  s_5f95dafd98e9c0::t_fc049fbef20c95 18
+  s_5f95dafd98e9c0::t_d7bedd55ff9583 318-319
+apps/agent/src/server.ts
+  s_5f95dafd98e9c0::t_e03f50652d7b24 21-22
+  s_5f95dafd98e9c0::t_99bea959f3d6df 288-290,292,296-298,300-324
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "81fbdc1bd7e47dbc4a15e568c7d64a8d45830a4f",
+  "prompts": {},
+  "sessions": {
+    "s_5f95dafd98e9c0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1168a176-7253-46da-98ce-6965436bac7b",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
