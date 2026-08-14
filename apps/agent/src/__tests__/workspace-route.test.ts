@@ -29,16 +29,19 @@ function withToken() {
 }
 
 describe('slice 14: server boot init', () => {
-  it('buildServer 后根目录已被初始化', async () => {
+  it('buildServer 后根目录已被初始化 (issue 04 4.1/4.5: SUBDIRS 5 个,.gitignore 仅在 git workspace 写)', async () => {
     expect(existsSync(tmpRoot)).toBe(true)
     expect(existsSync(join(tmpRoot, 'requirements'))).toBe(true)
-    expect(existsSync(join(tmpRoot, '.gitignore'))).toBe(true)
+    // issue 04 4.5:tmp 目录非 git workspace → 不写 .gitignore
+    expect(existsSync(join(tmpRoot, '.gitignore'))).toBe(false)
     expect(existsSync(join(tmpRoot, 'config.yaml'))).toBe(true)
+    // issue 04 4.1:'repos/' 不再是 SUBDIRS
+    expect(existsSync(join(tmpRoot, 'repos'))).toBe(false)
   })
 })
 
 describe('slice 12: GET /api/workspace', () => {
-  it('返回 200 + 完整 WorkspaceInfo', async () => {
+  it('返回 200 + 完整 WorkspaceInfo (issue 04 4.1: subdirs 不含 repos)', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/workspace',
@@ -49,7 +52,8 @@ describe('slice 12: GET /api/workspace', () => {
     expect(body.root).toBe(tmpRoot)
     expect(body.exists).toBe(true)
     expect(body.subdirs.requirements).toBe(true)
-    expect(body.subdirs.repos).toBe(true)
+    // ADR-0030 / issue 04 4.1:'repos/' 已不再是 SUBDIRS
+    expect(body.subdirs.repos).toBeUndefined()
     expect(body.configPath).toBe(join(tmpRoot, 'config.yaml'))
     expect(body.config.workspaceRoot).toBe(tmpRoot)
   })

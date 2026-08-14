@@ -17,19 +17,20 @@ afterEach(() => {
 })
 
 describe('initWorkspace - slice 3: 子目录创建', () => {
-  it('全新场景创建 6 个子目录', async () => {
+  it('全新场景创建 5 个子目录（issue 04 4.1: "repos" 不再是 SUBDIRS）', async () => {
     const r = await ws.initWorkspace()
-    for (const d of [
+    for (const d of ['requirements', 'knowledge', 'skills', 'analysis-skills', 'logs']) {
+      expect(existsSync(join(tmpRoot, d))).toBe(true)
+    }
+    // ADR-0030 / issue 04 4.1:'repos/' 不再是 SUBDIRS(真相源改为 repos.yaml)
+    expect(existsSync(join(tmpRoot, 'repos'))).toBe(false)
+    expect(r.createdDirs).toEqual([
       'requirements',
-      'repos',
       'knowledge',
       'skills',
       'analysis-skills',
       'logs',
-    ]) {
-      expect(existsSync(join(tmpRoot, d))).toBe(true)
-    }
-    expect(r.createdDirs.length).toBeGreaterThanOrEqual(6)
+    ])
     expect(r.existedDirs).toHaveLength(0)
   })
 
@@ -37,35 +38,64 @@ describe('initWorkspace - slice 3: 子目录创建', () => {
     await ws.initWorkspace()
     const r = await ws.initWorkspace()
     expect(r.createdDirs).toHaveLength(0)
-    expect(r.existedDirs.length).toBeGreaterThanOrEqual(6)
+    expect(r.existedDirs).toEqual([
+      'requirements',
+      'knowledge',
+      'skills',
+      'analysis-skills',
+      'logs',
+    ])
   })
 
-  it('部分子目录已存在时只补缺失', async () => {
+  it('部分子目录已存在时只补缺失（issue 04 4.1: 不含 repos）', async () => {
     const { mkdirSync } = await import('node:fs')
     mkdirSync(join(tmpRoot, 'requirements'))
     mkdirSync(join(tmpRoot, 'logs'))
     const r = await ws.initWorkspace()
     expect(r.existedDirs).toContain('requirements')
     expect(r.existedDirs).toContain('logs')
-    expect(r.createdDirs).toContain('repos')
     expect(r.createdDirs).toContain('knowledge')
     expect(r.createdDirs).toContain('skills')
     expect(r.createdDirs).toContain('analysis-skills')
+    expect(r.createdDirs).not.toContain('repos')
   })
 })
 
-describe('initWorkspace - slice 4: .gitignore', () => {
-  it('缺失时写入标准内容', async () => {
-    await ws.initWorkspace()
+describe('initWorkspace - slice 4: .gitignore (issue 04 4.5: 仅 workspace 是 git repo 才写)', () => {
+  it('非 git workspace:缺失时跳过写入,gitignoreCreated=false', async () => {
+    const r = await ws.initWorkspace()
+    // 临时目录不在 git 仓库里 → 不应写 .gitignore
+    expect(existsSync(join(tmpRoot, '.gitignore'))).toBe(false)
+    expect(r.gitignoreCreated).toBe(false)
+  })
+
+  it('非 git workspace:即便 initWorkspace 完成 config / 子目录也照常', async () => {
+    const r = await ws.initWorkspace()
+    // 子目录 + config 都正常,只是 .gitignore 不写
+    expect(existsSync(join(tmpRoot, 'requirements'))).toBe(true)
+    expect(existsSync(join(tmpRoot, 'config.yaml'))).toBe(true)
+    expect(r.configCreated).toBe(true)
+  })
+
+  it('git workspace:缺失时写入标准内容含 codebase/ 规则', async () => {
+    const { mkdirSync } = await import('node:fs')
+    mkdirSync(join(tmpRoot, '.git'))
+    const r = await ws.initWorkspace()
+    expect(r.gitignoreCreated).toBe(true)
     const gi = readFileSync(join(tmpRoot, '.gitignore'), 'utf8')
     expect(gi).toContain('logs/')
     expect(gi).toContain('*/node_modules/')
     expect(gi).toContain('.DS_Store')
     expect(gi).toContain('*.log')
     expect(gi).toContain('snapshots/')
+    // issue 04 4.5 新增的两条
+    expect(gi).toContain('requirements/*/codebase/')
+    expect(gi).toContain('requirements/*/codebase/**/.git/')
   })
 
-  it('存在时不覆盖（保留用户自定义）', async () => {
+  it('git workspace:存在时不覆盖（保留用户自定义）', async () => {
+    const { mkdirSync } = await import('node:fs')
+    mkdirSync(join(tmpRoot, '.git'))
     writeFileSync(join(tmpRoot, '.gitignore'), '# user custom\nfoo\n')
     const r = await ws.initWorkspace()
     expect(r.gitignoreCreated).toBe(false)
@@ -164,23 +194,23 @@ describe('initWorkspace - slice 8: zones 目录退役清理 (ADR-0026 D6.1)', ()
 
     const r2 = await ws.initWorkspace()
     expect(r2.zonesDirRetired).toBe(false)
-    // 其他初始化逻辑仍正常(config / 子目录)
-    expect(r2.existedDirs.length).toBeGreaterThanOrEqual(6)
+    // 其他初始化逻辑仍正常(config / 5 个 SUBDIRS)
+    expect(r2.existedDirs.length).toBeGreaterThanOrEqual(5)
   })
 
-  it('清理 zones 不影响其他子目录 / config / gitignore', async () => {
+  it('清理 zones 不影响其他子目录 / config', async () => {
     const { mkdirSync } = await import('node:fs')
     mkdirSync(join(tmpRoot, 'zones'))
     writeFileSync(join(tmpRoot, 'zones', 'executing.yaml'), 'zone:\n  id: executing\n', 'utf8')
 
     const r = await ws.initWorkspace()
     expect(r.zonesDirRetired).toBe(true)
-    // 6 个合法子目录都在
-    for (const d of ['requirements', 'repos', 'knowledge', 'skills', 'analysis-skills', 'logs']) {
+    // 5 个合法子目录都在(issue 04 4.1: 'repos' 不再是 SUBDIRS)
+    for (const d of ['requirements', 'knowledge', 'skills', 'analysis-skills', 'logs']) {
       expect(existsSync(join(tmpRoot, d))).toBe(true)
     }
-    // config + gitignore 正常写入
+    // config 正常写入;.gitignore 不写,因为 tmp 目录非 git workspace
     expect(existsSync(join(tmpRoot, 'config.yaml'))).toBe(true)
-    expect(existsSync(join(tmpRoot, '.gitignore'))).toBe(true)
+    expect(existsSync(join(tmpRoot, '.gitignore'))).toBe(false)
   })
 })

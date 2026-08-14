@@ -9,7 +9,7 @@ import {
   readdir,
   rm,
 } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import yaml from 'yaml'
 import {
   DEFAULT_CONFIG,
@@ -26,12 +26,49 @@ import {
 const REGISTRY_WRITE_MAX_RETRIES = 5
 const REGISTRY_WRITE_BASE_BACKOFF_MS = 200
 
-const SUBDIRS = ['requirements', 'repos', 'knowledge', 'skills', 'analysis-skills', 'logs'] as const
+// ADR-0030 D2: 仓库真相源从物理目录 `<root>/repos/` 改为 yaml 文件 `<root>/repos.yaml`,
+// 故 SUBDIRS 不再包含 'repos';旧目录由 initWorkspace 一次性迁移(issue 04 4.4),
+// 不在此处 mkdir。
+const SUBDIRS = ['requirements', 'knowledge', 'skills', 'analysis-skills', 'logs'] as const
 
+/**
+ * 从 `<dir>/.git/config` 文本里抽 `[remote "origin"]` 段下的 `url = ...` 行。
+ *
+ * INI 格式示例:
+ * ```
+ * [core]
+ * 	repositoryformatversion = 0
+ * [remote "origin"]
+ * 	url = git@github.com:acme/refund-service.git
+ * 	fetch = +refs/heads/*:refs/remotes/origin/*
+ * ```
+ *
+ * - 没 origin 段 → 返 null(常见情形:local-only repo / 用户手工 git init)
+ * - url 行缺失 / 空白 → 返 null
+ *
+ * 手解而非引入 git2 / libgitten:迁移动作仅启动一次,不值得新增依赖。
+ */
+function parseOriginUrl(text: string): string | null {
+  const originSectionMatch = text.match(/\[remote\s+"origin"\]([\s\S]*?)(?=\n\[|$)/)
+  if (!originSectionMatch) return null
+  const section = originSectionMatch[1] ?? ''
+  const urlMatch = section.match(/^\s*url\s*=\s*(.+?)\s*$/m)
+  return urlMatch?.[1]?.trim() || null
+}
+
+// workspace `.gitignore` 标准内容。
+//
+//  - 行 `requirements/*/codebase/`              : 独立 clone 出的源码目录(每份完整 git worktree,几十 MB)
+//  - 行 `requirements/*/codebase/(..)/.git/`    : 嵌套 git 仓库(`<name>/.git`) → 不污染 workspace 自身的 git status
+//
+// 仅当 workspace 自身是 git 仓库(根下有 .git 目录)时才写这个文件 —— 不需要 git 管理的本地 workspace
+// (例如 CI / 演示环境)不需要 .gitignore 内容。
 const GITIGNORE_CONTENT = [
   '# AI DevSpace workspace',
   'logs/',
   'snapshots/',
+  'requirements/*/codebase/',
+  'requirements/*/codebase/**/.git/',
   '*/node_modules/',
   '.DS_Store',
   '*.log',
@@ -50,6 +87,13 @@ export interface InitWorkspaceResult {
   existedDirs: string[]
   configCreated: boolean
   configBackfilled: boolean
+  /**
+   * `.gitignore` 是否被本调用创建。
+   *
+   * 仅当 workspace 是 git 仓库(根下有 `.git/`)且原本没有 `.gitignore` 时才为 true。
+   * 非 git workspace 永远为 false(issue 04 4.5:避免给不需要 git 管理的本地 workspace
+   * 强制塞一份 .gitignore)。
+   */
   gitignoreCreated: boolean
   /**
    * ADR-0026:一次性清理老用户升级时残留的 `~/.aidevspace/zones/*.yaml`
@@ -57,6 +101,14 @@ export interface InitWorkspaceResult {
    * 失败不阻断启动(仅记日志),详见 `cleanupRetiredZonesDir()`。
    */
   zonesDirRetired: boolean
+  /**
+   * ADR-0030 / issue 04 4.4:旧 `<root>/repos/` 目录里成功迁入 `<root>/repos.yaml`
+   * 的仓库 name 列表(顺序 = readdir 顺序)。空数组 = 无可迁移内容(目录不存在 /
+   * 子目录无 `.git` / 全部 name 已在 yaml 中存在)。
+   *
+   * UI 据此显示一次性提示横幅「旧目录可手动删除 `~/.aidevspace/repos/`」(决策 Q3)。
+   */
+  migratedRepos: string[]
 }
 
 export class WorkspaceService {
@@ -102,9 +154,17 @@ export class WorkspaceService {
       }
     }
 
-    // .gitignore: 缺失才写，存在保留
+    // .gitignore: 仅当 workspace 自身是 git 仓库时才补齐。
+    //
+    // 背景:workspace 如果不被 git 管理(CI / 演示 / 临时容器),往里写 .gitignore 既无意义
+    // 也会让没有 ~/.gitconfig 的用户看到一份「不知道从哪来的」gitignore。issue 04 4.5 显式约定。
+    //
+    // 缺失的 .gitignore + 工作区不是 git 仓库 → 跳过(不写)
+    // 缺失的 .gitignore + 工作区是 git 仓库   → 写
+    // 已存在的 .gitignore                       → 保留(不覆盖)
+    const isGitWorkspace = existsSync(join(this.root, '.git'))
     let gitignoreCreated = false
-    if (!existsSync(this.gitignorePath)) {
+    if (isGitWorkspace && !existsSync(this.gitignorePath)) {
       await this.writeFileAtomic(this.gitignorePath, GITIGNORE_CONTENT)
       gitignoreCreated = true
     }
@@ -140,6 +200,10 @@ export class WorkspaceService {
     // (声明式注册表已退役,改为 web 端 SECTION_META hardcode)。失败不阻断。
     const zonesDirRetired = await this.cleanupRetiredZonesDir()
 
+    // ADR-0030 / issue 04 4.4:旧 `<root>/repos/` 物理目录 → `<root>/repos.yaml`
+    // 一次性迁移。注意:旧目录仍保留(决策 Q3:可能有未 push 提交),不在此处删除。
+    const migratedRepos = await this.migrateOldReposDirIfPresent()
+
     return {
       createdDirs,
       existedDirs,
@@ -147,6 +211,7 @@ export class WorkspaceService {
       configBackfilled,
       gitignoreCreated,
       zonesDirRetired,
+      migratedRepos,
     }
   }
 
@@ -169,6 +234,62 @@ export class WorkspaceService {
       // 静默失败:不阻断启动;zones yaml 残留不影响新逻辑(无消费方)
       return false
     }
+  }
+
+  /**
+   * ADR-0030 / issue 04 4.4:旧 `<root>/repos/` 物理目录 → `<root>/repos.yaml` 一次性迁移。
+   *
+   * 行为契约:
+   * - **不**在此处删旧目录(决策 Q3):用户可能有未 push 的本地提交
+   * - 子目录无 `.git/config` → 跳过(可能是用户误建的随机文件)
+   * - 子目录有 `.git/config` 但找不到 origin URL(罕见,例如 local-only repo)→ 跳过
+   * - name 已在 `repos.yaml` 里存在 → 跳过(保留 yaml 既有条目;避免覆盖用户精编的 gitUrl)
+   * - 单条 addRepo 失败(并发 / IO)→ 跳过该条,不影响其他条目继续迁
+   * - 全部情形 → 返成功迁移的 name 列表(顺序 = readdir 顺序,空数组 = 无可迁)
+   *
+   * 调用方:`initWorkspace()`,仅在 `<root>/repos/` 存在时调用。
+   */
+  private async migrateOldReposDirIfPresent(): Promise<string[]> {
+    const oldDir = join(this.root, 'repos')
+    if (!existsSync(oldDir)) return []
+    return this.migrateOldReposDir(oldDir)
+  }
+
+  /**
+   * 实际迁移旧 `repos/<n>/.git/config` → `repos.yaml`。读 `.git/config` 用 git 仓库标准
+   * INI 格式(text,行:`[remote "origin"]` + `	url = <url>`),手解避免引入 git 库。
+   */
+  private async migrateOldReposDir(oldDir: string): Promise<string[]> {
+    const migrated: string[] = []
+    // sync readdir —— 已知目录小(老用户仓库数 < 100),顺序可预期
+    const entries = readdirSync(oldDir, { withFileTypes: true }).filter((e) =>
+      e.isDirectory(),
+    )
+    for (const entry of entries) {
+      const name = entry.name
+      const configPath = join(oldDir, name, '.git', 'config')
+      if (!existsSync(configPath)) continue
+      let configText = ''
+      try {
+        configText = await readFile(configPath, 'utf8')
+      } catch {
+        // .git/config 不可读(权限 / IO)→ 跳过
+        continue
+      }
+      const gitUrl = parseOriginUrl(configText)
+      if (!gitUrl) continue
+      // name 已存在 → 跳过(避免覆盖用户精编的 gitUrl / description)
+      const existing = await this.findRepoByName(name)
+      if (existing) continue
+      try {
+        await this.addRepo({ name, gitUrl, description: '' })
+        migrated.push(name)
+      } catch {
+        // RegistryConflictError / IO 失败 → 跳过该条,继续迁剩余条目
+        // (next 启动再撞,addRepo 自身的重试会兜底)
+      }
+    }
+    return migrated
   }
 
   async getWorkspaceInfo(): Promise<WorkspaceInfo> {
