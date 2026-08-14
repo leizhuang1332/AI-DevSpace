@@ -1,0 +1,23 @@
+docs/adr/0003-git-worktree-isolation.md
+  s_133c4cd4cfbbfe::t_83d8bc9ad871fa 3-7
+docs/adr/0016-attach-repos-real-pool.md
+  s_133c4cd4cfbbfe::t_d89726f364cd0a 3-7
+docs/adr/0030-repo-registry-and-per-requirement-clone.md
+  s_133c4cd4cfbbfe::t_c07b9713a8f212 1-184
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "793a0e9d2930646bb0c957fbd59da7f56903bd0d",
+  "prompts": {},
+  "sessions": {
+    "s_133c4cd4cfbbfe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "165cb388-b3ce-40e4-bac9-1a75ddbf1bff",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
