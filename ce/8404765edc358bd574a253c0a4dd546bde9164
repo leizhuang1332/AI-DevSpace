@@ -1,0 +1,25 @@
+packages/shared/src/worktree.ts
+  s_ec7cacd4a93482::t_e9a4597f727c34 2,6-11,76,78,81-86,92-94,96,103,107,109,118-119,129,131,136,146-147,150
+packages/shared/src/__tests__/repos.test.ts
+  s_ec7cacd4a93482::t_46a2daceafe535 1-213
+packages/shared/src/__tests__/worktree.test.ts
+  s_ec7cacd4a93482::t_91c2221a4a53ca 1-11,15,107,111,113,119,121,127,129,135-150,153,160-173,180-268,279,281,286,288,296,305,307,312,321-332,337-338,344-368,380,386
+packages/shared/src/repos.ts
+  s_ec7cacd4a93482::t_caa55e32160741 2,5,7-10,12-13,15-16,26,28-47,49-51,53,56,62-63,65-66,68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "ce8404765edc358bd574a253c0a4dd546bde9164",
+  "prompts": {},
+  "sessions": {
+    "s_ec7cacd4a93482": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f176a922-fb74-47fc-9362-db73840accc6",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
