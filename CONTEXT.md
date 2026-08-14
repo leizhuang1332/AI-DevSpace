@@ -3,7 +3,7 @@
 > 本文档是项目的"活字典"。所有领域名词在此有且仅有一个含义。修改任何产品设计前，请先来对照术语。
 >
 > 创建：2026-07-08  
-> 当前版本：v1.0.6（BOARD section + TaskCard 引入；CLARIFYING/DESIGNING/EXECUTING 三工位退役；zones 注册表退役）
+> 当前版本：v1.0.7（仓库注册表化 + 需求级独立 clone；ADR-0003/0016 部分 superseded）
 
 ---
 
@@ -51,26 +51,38 @@ AI 在本平台不是工具栏、不是聊天窗口、不是工作流编排者�
 - 一个 Requirement 可关联多个 Repository（微服务架构场景）
 - **不是** Issue，也不是 Task，是它们的"父容器"
 
-### Repository（仓库）
+### Repository（仓库条目）
 
-Git 仓库（一般是后端微服务），物理上存放在 `~/.aidevspace/repos/<repo-name>/`。
+注册表里的一条记录：仓库名、Git 地址、描述。存放在 `~/.aidevspace/repos.yaml`（独立单文件，顶层 `repos:` 数组）。**name 是全局唯一标识**，也是需求下 `codebase/<name>/` 的目录名——文件名安全、URL 不可改即身份不变。
 
-- **全局共享**：避免多需求重复 clone
-- 通过 `git worktree` 在每个需求下创建独立工作副本：`requirements/<req-id>/repos/<repo-name>/`
-- 多个需求可并发修改同一仓库的不同分支，互不冲突
+- 三字段最小集：`name` / `gitUrl` / `description`
+- **不加** `defaultBranch`（clone 时用 remote HEAD）
+- **不加** `id`（name 即标识，删除既有 `repo-<name>` slug 派生链）
+- 归属 ADR：[ADR-0030](docs/adr/0030-repo-registry-and-per-requirement-clone.md) D1
 
-### RepoPool（仓库池）
+_Avoid_: 主仓库、物理仓库（仓库本身不存盘，"主仓库"暗示存在源码）
 
-Workspace 级的全局仓库集合——源自 `~/.aidevspace/repos/` 物理目录的**子目录列表**，由 Agent `GET /api/repos` 实时 readdir 暴露给前端。
+### RepoRegistry（仓库注册表）
 
-- **目录即真相**：与决策 4 一致，**不**采用配置清单 / `config.yaml` 字段
-- **每次 GET 实时扫**：无缓存；元数据（默认分支 / 语言 / SSH URL）暂不提供，留给后续 `.aidevspace/repo.yaml` 提案
-- **id = `repo-<dirname>` slug**：与既有 `GLOBAL_REPO_POOL` 命名兼容，避免改 chip id
-- **不校验 `.git/`**：误 `mkdir` 是用户自己的责任
-- **目录不存在 = 合法空态**：返 `{repos: []}` 200，前端走"暂无可选仓库"分支
-- 归属 ADR：[ADR-0016](docs/adr/0016-attach-repos-real-pool.md) D1–D6
+Workspace 级的全局仓库**清单**——真相源是 `~/.aidevspace/repos.yaml` 文件而非物理目录。由 Agent `GET /api/repos` 实时读 yaml 暴露给前端。
 
-_Avoid_: 仓库列表 / 全局仓库集合（模糊概念，不指代具体落点）
+- **文件即真相**：3 字段最小集，可提交、可分发、可搬窝
+- **每次 GET 实时读**：无缓存（仓库数 < 100，读 yaml 文件 < 1ms）
+- **不校验 git 地址可达性**：可达性由 `POST /api/repos` 时的 `git ls-remote` 一次性把关
+- 归属 ADR：[ADR-0030](docs/adr/0030-repo-registry-and-per-requirement-clone.md) D1
+
+_Avoid_: 仓库池（"池"暗示里面装着东西，现在只装条目）、仓库列表、全局仓库集合（模糊概念，不指代具体落点）、RepoPool（v1.0.3 术语，已退役）
+
+### Codebase（代码副本）
+
+某需求下某仓库的**独立 git clone 副本**，存放在 `~/.aidevspace/requirements/<req-id>/codebase/<repo-name>/`。每个需求下都是自包含的 `.git` 目录，跨设备 / 跨 IDE / 跨 AI 行为一致。
+
+- 克隆命令：`git clone <gitUrl> <codebasePath>`（完整 clone，无 shallow）
+- 分支：`git -C <codebasePath> checkout -b <branch>`（base = clone 下来的 remote HEAD）
+- 进行中标记：`codebase/.pending-<name>`（agent 启动时扫残留 → 清理半成品）
+- 归属 ADR：[ADR-0030](docs/adr/0030-repo-registry-and-per-requirement-clone.md) D3/D4
+
+_Avoid_: worktree（v1.0 概念，已退役；`.git` 是文件 vs 真目录的差异不能混用）、工作副本、源码目录
 
 ### Task（任务）
 
@@ -517,6 +529,34 @@ ANALYZING 主区不再使用永久 320px 抽屉，改为 **「默认折叠的浮
 | 101 | **zones 注册表整体退役** = `ZONE_META` 数组 + `~/.aidevspace/zones/*.yaml` + `ZoneRegistry.ts` + `ZoneConfig` schema 整套退役;改为 `SECTION_META`(4 section,7 字段 hardcode);`zones` 概念词保留(用户仍称 analyzing 工位),但声明式机制废 | [ADR-0026](docs/adr/0026-zones-registry-retirement.md) D1-D6 |
 | 102 | **BOARD section 引入 + 3 工位退役** = route `/requirements/[id]/board/`(与 drafting/analyzing/wrapup 平级),5 列(backlog / todo / in_progress / in_review / done)按 `status` 字段分组;CLARIFYING / DESIGNING / EXECUTING 路由 + 组件 + 数据加载全部退役;PRD 拆解工作流从 board "[+ 从 PRD 拆]" 按钮触发,Run 仍走父 analyzing transcript(产物落 `analysis/proposals/<run-id>/cards.yaml`) | [ADR-0027](docs/adr/0027-board-section-intro.md) D1-D6 |
 | 103 | **TaskCard transcript 物理独立 + Run 路径不动** = 每张卡片一份 transcript(`board/tasks/<ulid>/transcript.yaml`),仅描述 / 不挂 Run;Run 入口与 Run 上下文契约完全沿用 ADR-0021 / ADR-0022 / ADR-0023,board 详情页右抽屉不渲染 "[开始 Run]" 按钮;transcript 派生父 analyzing transcript 的最后 K 条作为初始快照(`schema_version + snapshot_hash` 标识稳定性) | [ADR-0028](docs/adr/0028-taskcard-transcript-independence.md) D1-D6 |
+
+---
+
+## v1.0.7 增量决策（15 轮 grilling 沉淀 · 2026-08-14）
+
+> 本节是 v1.0.6 锁定后的迭代记录，不修改上面 v1.0 / v1.0.1 / v1.0.2 / v1.0.3 / v1.0.4 / v1.0.5 / v1.0.6 决策。所有增量由 [ADR-0030](docs/adr/0030-repo-registry-and-per-requirement-clone.md) 承载完整内容。
+>
+> 本节是**架构回退**：推翻 [ADR-0003](docs/adr/0003-git-worktree-isolation.md) 全文（worktree 隔离）+ [ADR-0016](docs/adr/0016-attach-repos-real-pool.md) D1/D3/D5（物理目录真相源）。取代动因：**配置可移植 + 简化心智模型**（用户明示选择），代价为「磁盘 n 倍 + 首次关联从秒级变分钟级」（ADR-0003 当年否决此方案的核心理由，本节**显式接受**）。
+>
+> 同期淘汰 `Repository` / `RepoPool` / `worktree` 三术语（已迁移到 `Repository` / `RepoRegistry` / `Codebase`，详见本文档「核心对象」段）。
+
+| # | 决策 | 关联 ADR |
+| --- | ------ | ---------- |
+| 104 | **仓库池 = 注册表，不再含源码**：`~/.aidevspace/repos.yaml` 独立单文件，顶层 `repos:` 数组；与 `config.yaml`（本机设置）职责分离；真相源从「物理目录 readdir」变为「yaml 文件直读」 | [ADR-0030](docs/adr/0030-repo-registry-and-per-requirement-clone.md) D1 |
+| 105 | **`repos.yaml` 字段最小集 = `{name, gitUrl, description}` 三字段**；`name` 全局唯一即标识，删除既有 `repo-<name>` slug 派生链；**不加** `defaultBranch`（clone 用 remote HEAD）；**不加** `id` 字段 | [ADR-0030](docs/adr/0030-repo-registry-and-per-requirement-clone.md) D1 |
+| 106 | **需求关联 = 独立 `git clone` 副本**，路径 `requirements/<req-id>/codebase/<repo-name>/`；`git clone <gitUrl> <codebasePath>` + `git checkout -b <branch>`（base = remote HEAD）；完整 clone，**不** shallow | [ADR-0030](docs/adr/0030-repo-registry-and-per-requirement-clone.md) D3/D4 |
+| 107 | **clone 异步化 + SSE 进度**：POST 立即 202，并行 clone；既有 `requirementEventsRoute` SSE 推 `repo-clone-progress` 事件；RepoBar chip 显示 `⏳ 克隆中 / 🟢 就绪 / 🔴 失败` | [ADR-0030](docs/adr/0030-repo-registry-and-per-requirement-clone.md) D3 |
+| 108 | **clone 状态落盘 = `codebase/.pending-<name>` 标记**：clone 前写、成功/失败都删；F5 后 SSR 仍能读出 `⏳ 克隆中`；agent 启动扫残留 → 清理半成品目录 | [ADR-0030](docs/adr/0030-repo-registry-and-per-requirement-clone.md) D3 |
+| 109 | **clone 幂等 + 失败清理**：目录已存在 → `E_REPO_ALREADY_ATTACHED`（不重复 clone、不摧改动）；中途失败（网络断 / 磁盘满 / 认证失败）→ `rm -rf` 半成品 | [ADR-0030](docs/adr/0030-repo-registry-and-per-requirement-clone.md) D3 |
+| 110 | **git 凭据 = 完全依赖宿主机**（SSH agent / `~/.ssh/` / credential helper / `.gitconfig`），**零密钥落盘**；`E_AUTH` → 提示用户配 git 凭据；`createDefaultGitExec()` 强制注入 `GIT_TERMINAL_PROMPT=0` / `GIT_ASKPASS=""` / `SSH_ASKPASS=""` 防止后台进程交互挂死 | [ADR-0030](docs/adr/0030-repo-registry-and-per-requirement-clone.md) D3 |
+| 111 | **错误码调整**：删 `E_BASE_BRANCH_NOT_FOUND`（clone 必然有 HEAD）、`E_BRANCH_EXISTS`（全新 clone 不可能撞分支）；`E_REPO_NOT_FOUND` 语义改为「注册表无此条目」；新增 `E_REPO_ALREADY_ATTACHED`、`E_REPO_NAME_EXISTS` | [ADR-0030](docs/adr/0030-repo-registry-and-per-requirement-clone.md) D5 |
+| 112 | **`POST /api/repos` 必跑 `git ls-remote --heads`** 验证可达 + 凭据可用，通过才写 yaml；name 唯一 → 重复 `E_REPO_NAME_EXISTS`；原子写入（yaml 库 + 200ms 退避轻量重试覆盖并发） | [ADR-0030](docs/adr/0030-repo-registry-and-per-requirement-clone.md) D8 |
+| 113 | **`PUT /api/repos/:name` + `DELETE /api/repos/:name`**：编辑改 yaml 对应条目、**不**碰已 clone 的 codebase；删除被 N≥1 需求使用时二次确认，从 yaml 移除、**绝不 rm** 任何 `codebase/<name>/` | [ADR-0030](docs/adr/0030-repo-registry-and-per-requirement-clone.md) D8 |
+| 114 | **`/repos` 页面重设计**：卡片 = 仓库名 + gitUrl + 描述 + **「被 N 个需求使用」**（实时派生）；列表页文案改「N 个仓库」；详情页从 worktree 列表改为关联需求列表；客户端过滤三字段 | [ADR-0030](docs/adr/0030-repo-registry-and-per-requirement-clone.md) D6 |
+| 115 | **DRAFTING 弹层"+ 添加新仓库" 入口 = 不启用**，改为跳转引导「没找到？去仓库页添加 →」；兑现 [ADR-0016](docs/adr/0016-attach-repos-real-pool.md) D7 留的欠账 | [ADR-0030](docs/adr/0030-repo-registry-and-per-requirement-clone.md) D7 |
+| 116 | **旧 `~/.aidevspace/repos/` 目录 = 启动时一次性自动迁移**（读各子仓库 `git remote get-url origin` 生成 `repos.yaml` 条目，description 留空）；**不删**旧目录（可能含未 push 提交），UI 提示「可手动删除」；`SUBDIRS` 移除 `'repos'` | [ADR-0030](docs/adr/0030-repo-registry-and-per-requirement-clone.md) D2 |
+| 117 | **旧 `requirements/*/repos/`（worktree 形态）= 不迁移**，代码只认 `codebase/`；老需求显示未关联，用户重新关联即走 clone；worktree 形态一次性出局（不双形态共存，避免清理逻辑长期埋雷） | [ADR-0030](docs/adr/0030-repo-registry-and-per-requirement-clone.md) D4 |
+| 118 | **workspace `.gitignore` 必补 `requirements/*/codebase/`** + `*/codebase/**/.git/`；否则若 workspace 自身是 git 仓库，大量嵌套 git 仓库会污染版本管理 | [ADR-0030](docs/adr/0030-repo-registry-and-per-requirement-clone.md) 负面 |
 
 ---
 
