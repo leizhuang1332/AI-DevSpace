@@ -18,8 +18,12 @@ import { analysisRunRoutes } from './routes/analysis-run.js'
 import { analysisResponseRoutes } from './routes/analysis-response.js'
 import { AnalysisRunService } from './analysis-run/AnalysisRunService.js'
 import { AnalysisSkillService } from './analysis-skill/AnalysisSkillService.js'
-import { createWorktreeManager, createDefaultGitExec } from './worktree/WorktreeManager.js'
+import { createWorktreeManager } from './worktree/WorktreeManager.js'
 import type { GitExec } from './worktree/WorktreeManager.js'
+// issue 05 (ADR-0030 D3 / 决策账本 C5):createDefaultGitExec 从 worktree/ 提到
+// git/ 下,强制注入 GIT_TERMINAL_PROMPT=0 / GIT_ASKPASS="" / SSH_ASKPASS="",
+// 防止缺凭据时 git 在后台进程 stdin 挂死。
+import { createDefaultGitExec } from './git/createDefaultGitExec.js'
 import { RequirementService } from './services/RequirementService.js'
 import { createSseHub, type SseHub } from './sse/SseHub.js'
 import { sseRoutes } from './sse/requirementEventsRoute.js'

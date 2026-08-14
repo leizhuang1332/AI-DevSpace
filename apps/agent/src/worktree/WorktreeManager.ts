@@ -176,28 +176,8 @@ export class GitError extends Error {
   }
 }
 
-/**
- * 默认的 GitExec —— 用 child_process.execFile 调系统 git。
- * 默认实现,不强制使用(便于单元测试注入 fake)。
- */
-export function createDefaultGitExec(): GitExec {
-  // 动态 import 避免在测试环境强制拉入 child_process
-  // (P1 阶段不一定会被使用 —— WorktreeManager 的实现是平台无关的)
-  return async (args: string[]) => {
-    const { execFile } = await import('node:child_process')
-    const { promisify } = await import('node:util')
-    const exec = promisify(execFile)
-    try {
-      const { stdout, stderr } = await exec('git', args, { encoding: 'utf8' })
-      return { code: 0, stdout, stderr }
-    } catch (err) {
-      // execFile reject 时附带了 stdout/stderr/code
-      const e = err as { code?: number; stdout?: string; stderr?: string }
-      return {
-        code: e.code ?? 1,
-        stdout: e.stdout ?? '',
-        stderr: e.stderr ?? String(err),
-      }
-    }
-  }
-}
+// issue 05 (ADR-0030 D3 / 决策账本 C5):
+// createDefaultGitExec 已从 worktree/ 移到 git/createDefaultGitExec.ts,
+// 强制注入 GIT_TERMINAL_PROMPT=0 / GIT_ASKPASS="" / SSH_ASKPASS="" 防止缺凭据
+// 时 git 在后台进程 stdin 挂死。本文件后续 issue 03 会整体删除,届时 GitExec
+// 类型一起迁到 codebase 命名空间。
