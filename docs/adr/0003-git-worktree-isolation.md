@@ -1,7 +1,10 @@
 # ADR-0003: 仓库全局共享 + git worktree 多需求隔离
 
-**Status:** Accepted  
-**Date:** 2026-07-08
+**Status:** Superseded by [ADR-0030](0030-repo-registry-and-per-requirement-clone.md)  
+**Original Date:** 2026-07-08  
+**Superseded Date:** 2026-08-14
+
+> 本 ADR 的「全局共享仓库池 + git worktree 多需求隔离」架构整体被 [ADR-0030](0030-repo-registry-and-per-requirement-clone.md) 取代。取代理由：配置可移植诉求 + 简化心智模型决策——以「磁盘 n 倍 + 首次关联从秒级变分钟级」为代价。详见 ADR-0030 Context。
 
 ## Context
 

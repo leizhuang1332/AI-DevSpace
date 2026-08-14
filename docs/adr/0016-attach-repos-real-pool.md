@@ -1,7 +1,10 @@
 # ADR-0016: 关联仓库弹层对接真实仓库池
 
-**Status:** Accepted
-**Date:** 2026-07-20
+**Status:** Partially superseded by [ADR-0030](0030-repo-registry-and-per-requirement-clone.md)
+**Original Date:** 2026-07-20
+**Superseded Date:** 2026-08-14
+
+> 本 ADR 的 D1（真相源 = 物理目录 readdir）/ D3（字段最小集 `{id, name}`、id = `repo-<dirname>` 派生）/ D5（`GET /api/repos` 来自物理目录）被 [ADR-0030](0030-repo-registry-and-per-requirement-clone.md) 取代；D2（无缓存）/ D4（SSR + 弹层 refetch）/ D6（空目录 200）/ D7（ticket 路径）/ D8（Git URL 入口保留 + 禁用）继续生效。取代理由：可移植配置诉求压倒了 ADR-0016 当年的「双写漂移」顾虑——因为现在仓库池里没有源码了，「目录即真相」本身就不再成立。详见 ADR-0030 D1。
 **Deciders:** 项目负责人(经 `/grill-with-docs` 拍板)
 **关联决策:** [CONTEXT.md](../CONTEXT.md) 决策 4(仓库管理 = 全局共享 + git worktree 隔离)
 **关联 ADR:**
