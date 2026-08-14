@@ -1,0 +1,37 @@
+.scratch/repo-registry-clone/issues/06-web-frontend-followup.md
+  s_133c4cd4cfbbfe::t_9ddfa600de246c 1-160
+.scratch/repo-registry-clone/issues/02-repos-route-crud.md
+  s_133c4cd4cfbbfe::t_362e9a135671ba 1-177
+.scratch/repo-registry-clone/decisions.md
+  s_133c4cd4cfbbfe::t_cc8e2d97460326 1-73
+.scratch/repo-registry-clone/issues/07-repos-page-redesign.md
+  s_133c4cd4cfbbfe::t_04cae001a7639d 1-216
+.scratch/repo-registry-clone/issues/03-codebase-manager.md
+  s_133c4cd4cfbbfe::t_1e72ad55df70ef 1-170
+.scratch/repo-registry-clone/issues/01-shared-schema.md
+  s_133c4cd4cfbbfe::t_fa60a095669824 1-146
+.scratch/repo-registry-clone/issues/05-git-exec-env.md
+  s_133c4cd4cfbbfe::t_796d15bd087787 1-124
+.scratch/repo-registry-clone/PRD.md
+  s_133c4cd4cfbbfe::t_84eebb4939fe61 1-197
+.scratch/repo-registry-clone/issues/04-workspace-yaml.md
+  s_133c4cd4cfbbfe::t_c1ea563ef7c116 1-165
+.scratch/repo-registry-clone/issues/08-rename-path-codebase.md
+  s_133c4cd4cfbbfe::t_fc6bcd5c0af03e 1-133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "d6da38050041c72960f1347f09ae2898bb7940f6",
+  "prompts": {},
+  "sessions": {
+    "s_133c4cd4cfbbfe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "165cb388-b3ce-40e4-bac9-1a75ddbf1bff",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
