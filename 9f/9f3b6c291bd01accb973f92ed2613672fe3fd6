@@ -1,0 +1,50 @@
+apps/agent/src/server.ts
+  s_ec7cacd4a93482::t_4a809c100990db 276-282
+  s_ec7cacd4a93482::t_f19e72cf8ddf98 80-89
+  s_ec7cacd4a93482::t_9aa83f7ef5023f 22
+apps/agent/src/services/WorkspaceService.ts
+  s_ec7cacd4a93482::t_25e798fb6ff1ac 465,472-473,478-505,507-516,519-524
+  s_ec7cacd4a93482::t_de9004e005ea88 69-80
+  s_ec7cacd4a93482::t_dfad128f430e68 411
+  s_ec7cacd4a93482::t_60c3f74a7ee75d 19-22,25-28
+  s_ec7cacd4a93482::t_85935291c952f0 292-294
+  s_ec7cacd4a93482::t_3c98c9c40fe93b 397
+  s_ec7cacd4a93482::t_398ba79f27a210 284-291,295-396,398-410,412-464,466,470-471,474-477,525-566
+  s_ec7cacd4a93482::t_083a39bf77864c 467-469,506,517-518
+apps/agent/src/routes/repos.ts
+  s_ec7cacd4a93482::t_63c4d9e3206af6 246
+  s_ec7cacd4a93482::t_931511e5a40eb1 2,4-6,8-13,15-16,18-20,25-28,30-36,39-42,45-55,59,61-66,68-96,112-115,117-126,130-131,133,140-144,147-149,151,153-154,157,161-176,187-214,216-245,247-336
+  s_ec7cacd4a93482::t_e646b066e91448 97-111,116,127-129,132
+  s_ec7cacd4a93482::t_60aed10914877f 177-184,186
+packages/shared/src/repos.ts
+  s_ec7cacd4a93482::t_96fec1fc8b393d 68-121
+apps/agent/src/__tests__/repos-route.test.ts
+  s_ec7cacd4a93482::t_90870bfc1d6e74 511,516-518,528-529
+  s_ec7cacd4a93482::t_d94a35a11223c8 620,625-626,636
+  s_ec7cacd4a93482::t_f2f6cea1675b64 445-446
+  s_ec7cacd4a93482::t_af2a1e4677c7e9 524,546,551,554,569
+  s_ec7cacd4a93482::t_8d2a97ffeadb85 619,621-624
+  s_ec7cacd4a93482::t_757c122c3d591e 32
+  s_ec7cacd4a93482::t_1b2e40daf65a25 454,466-470,474,486-489
+  s_ec7cacd4a93482::t_19926a3e63b656 261-262
+  s_ec7cacd4a93482::t_926c411c4f3fed 510,512-515
+  s_ec7cacd4a93482::t_bfdd86465cfa19 255,259,273-274,293-294,305
+  s_ec7cacd4a93482::t_1e7ab134d782ce 2,4-8,10-16,19-27,30,33-37,40,43,45-46,48-49,55-150,153-167,170-213,215-218,221-232,235-237,242,245-254,256-258,260,263-264,267-272,275-292,295-304,306-309,313,316,318-319,334-444,447-453,455-465,471-473,475-485,490-501,504-509,519-523,525-527,530-545,547-550,552-553,555-568,570-609,613-618,627-635,637-649,651-779
+  s_ec7cacd4a93482::t_dc7ab8c49506b5 265-266
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "9f9f3b6c291bd01accb973f92ed2613672fe3fd6",
+  "prompts": {},
+  "sessions": {
+    "s_ec7cacd4a93482": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f176a922-fb74-47fc-9362-db73840accc6",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
