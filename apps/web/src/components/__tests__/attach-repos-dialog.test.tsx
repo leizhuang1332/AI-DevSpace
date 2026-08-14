@@ -10,11 +10,28 @@ import {
 // ============================================================================
 // Fixture
 // ============================================================================
+//
+// issue 06 (ADR-0030 D3):repo 字段从 `{ id, name }` 改为
+//   `{ name, gitUrl, description }`,name 即标识。
+// 这里只保留最小集(name / gitUrl / description),不传 id ——
+// 验证组件确实从 `name` 读取,不依赖 id。
 
 const REPOS: AttachReposDialogProps['availableRepos'] = [
-  { id: 'repo-refund', name: 'refund-service' },
-  { id: 'repo-order', name: 'order-service' },
-  { id: 'repo-payment', name: 'payment-gateway' },
+  {
+    name: 'refund-service',
+    gitUrl: 'https://example.com/refund-service.git',
+    description: '退款主服务',
+  },
+  {
+    name: 'order-service',
+    gitUrl: 'https://example.com/order-service.git',
+    description: '订单服务',
+  },
+  {
+    name: 'payment-gateway',
+    gitUrl: 'https://example.com/payment-gateway.git',
+    description: '支付网关',
+  },
 ]
 
 afterEach(() => cleanup())
@@ -35,7 +52,7 @@ function renderDialog(
       titlePrefix="关联仓库"
       requirementTitle="退款功能优化"
       availableRepos={REPOS}
-      pickedRepoIds={[]}
+      pickedRepoNames={[]}
       onSubmit={onSubmit}
       onClose={onClose}
       {...props}
@@ -137,23 +154,26 @@ describe('AttachReposDialog · 渲染', () => {
     ).toContain('暂无可选仓库')
   })
 
-  it('checkbox 列表渲染所有 repos', () => {
+  it('checkbox 列表渲染所有 repos(数据源 = name)', () => {
     renderDialog()
     const opts = screen.getAllByTestId('attach-repos-dialog-repo-option')
     expect(opts).toHaveLength(REPOS.length)
+    // 数据属性已切到 name
     expect(
-      opts.find((o) => o.getAttribute('data-repo-id') === 'repo-refund'),
+      opts.find((o) => o.getAttribute('data-repo-name') === 'refund-service'),
     ).toBeDefined()
     expect(
-      opts.find((o) => o.getAttribute('data-repo-id') === 'repo-order'),
+      opts.find((o) => o.getAttribute('data-repo-name') === 'order-service'),
     ).toBeDefined()
+    // 不再有 data-repo-id(已经 deprecated)
+    opts.forEach((o) => expect(o.getAttribute('data-repo-id')).toBeNull())
   })
 
-  it('pickedRepoIds 已选 → 默认勾选', () => {
-    renderDialog({ pickedRepoIds: ['repo-refund'] })
+  it('pickedRepoNames 已选 → 默认勾选', () => {
+    renderDialog({ pickedRepoNames: ['refund-service'] })
     const refund = screen
       .getAllByTestId('attach-repos-dialog-repo-option')
-      .find((o) => o.getAttribute('data-repo-id') === 'repo-refund')!
+      .find((o) => o.getAttribute('data-repo-name') === 'refund-service')!
     expect(refund.getAttribute('data-checked')).toBe('true')
   })
 
@@ -170,6 +190,37 @@ describe('AttachReposDialog · 渲染', () => {
     expect(dialog.className).toContain('w-[480px]')
     expect(dialog.className).toContain('z-[301]')
   })
+
+  // -------------------------------------------------------------------------
+  // 决策 Q14(issue 06 ticket):删除 Git URL 入口,改为跳转链接
+  // -------------------------------------------------------------------------
+
+  it('issue 06 (决策 Q14):"＋ 添加新仓库(粘贴 Git URL)" 入口已删除', () => {
+    renderDialog()
+    // 不再有 "添加新仓库" / "粘贴 Git URL" / "new-repo-url" / "show-new-repo"
+    expect(screen.queryByTestId('attach-repos-dialog-new-repo-toggle')).toBeNull()
+    expect(screen.queryByTestId('attach-repos-dialog-new-repo-url')).toBeNull()
+    // 兜底:全文不出现 "添加新仓库"
+    expect(document.body.textContent).not.toMatch(/添加新仓库/)
+    expect(document.body.textContent).not.toMatch(/粘贴 Git URL/)
+  })
+
+  it('issue 06:底部 "没找到?去仓库页添加 →" 跳转链接默认指向 /repos', () => {
+    renderDialog()
+    const hint = screen.getByTestId('attach-repos-dialog-repos-hint')
+    expect(hint).toBeInTheDocument()
+    expect(hint.textContent).toContain('没找到?')
+    const link = screen.getByTestId('attach-repos-dialog-repos-link')
+    expect(link).toBeInTheDocument()
+    expect(link.getAttribute('href')).toBe('/repos')
+    expect(link.textContent).toContain('去仓库页添加')
+  })
+
+  it('issue 06:reposPageHref 显式传入 → 链接指向自定义地址', () => {
+    renderDialog({ reposPageHref: '/repos?focus=new' })
+    const link = screen.getByTestId('attach-repos-dialog-repos-link')
+    expect(link.getAttribute('href')).toBe('/repos?focus=new')
+  })
 })
 
 // ============================================================================
@@ -182,7 +233,7 @@ describe('AttachReposDialog · checkbox 切换', () => {
     const user = userEvent.setup()
     const refundOpt = screen
       .getAllByTestId('attach-repos-dialog-repo-option')
-      .find((o) => o.getAttribute('data-repo-id') === 'repo-refund')!
+      .find((o) => o.getAttribute('data-repo-name') === 'refund-service')!
     expect(refundOpt.getAttribute('data-checked')).toBe('false')
     await user.click(refundOpt)
     expect(refundOpt.getAttribute('data-checked')).toBe('true')
@@ -201,51 +252,51 @@ describe('AttachReposDialog · 校验 + 提交', () => {
     expect(screen.getByTestId('attach-repos-dialog-submit')).toBeDisabled()
   })
 
-  it('first 模式:只勾仓库,未填分支名 → 提交按钮 disabled', async () => {
-    renderDialog({ pickedRepoIds: ['repo-refund'] })
-    const user = userEvent.setup()
+  it('first 模式:只勾仓库,未填分支名 → 提交按钮 disabled', () => {
+    renderDialog({ pickedRepoNames: ['refund-service'] })
     // 分支名仍为空,即使仓库勾选也不可提交
     expect(screen.getByTestId('attach-repos-dialog-submit')).toBeDisabled()
   })
 
-  it('first 模式:含非法字符的分支名 → 实时过滤', async () => {
-    renderDialog({ pickedRepoIds: ['repo-refund'] })
+  it('first 模式:含非法字符的分支名 → 实时过滤', () => {
+    renderDialog({ pickedRepoNames: ['refund-service'] })
     const input = screen.getByTestId('attach-repos-dialog-branch') as HTMLInputElement
     fireEvent.change(input, { target: { value: 'feat\\bad:name' } })
     expect(input.value).not.toContain('\\')
     expect(input.value).not.toContain(':')
   })
 
-  it('first 模式:含内部空白的分支名 → 实时过滤(UI-POLISH-SPEC §9.3 禁止空白)', async () => {
-    renderDialog({ pickedRepoIds: ['repo-refund'] })
+  it('first 模式:含内部空白的分支名 → 实时过滤(UI-POLISH-SPEC §9.3 禁止空白)', () => {
+    renderDialog({ pickedRepoNames: ['refund-service'] })
     const input = screen.getByTestId('attach-repos-dialog-branch') as HTMLInputElement
     fireEvent.change(input, { target: { value: 'feat bad name' } })
     expect(input.value).not.toMatch(/\s/)
   })
 
-  it('first 模式:分支名空白 → blur 后显示错误', async () => {
-    renderDialog({ pickedRepoIds: ['repo-refund'] })
+  it('first 模式:分支名空白 → blur 后显示错误', () => {
+    renderDialog({ pickedRepoNames: ['refund-service'] })
     const input = screen.getByTestId('attach-repos-dialog-branch') as HTMLInputElement
     fireEvent.change(input, { target: { value: '   ' } })
     fireEvent.blur(input)
     expect(screen.getByTestId('attach-repos-dialog-branch-error')).toBeInTheDocument()
   })
 
-  it('first 模式:勾 1 仓库 + 填分支名 → 提交按钮 enabled,提交携带正确 payload', async () => {
+  it('first 模式:勾 1 仓库 + 填分支名 → 提交按钮 enabled,提交携带正确 payload(repoNames / branchName)', async () => {
     const { onSubmit } = renderDialog()
     const user = userEvent.setup()
     await user.click(
       screen
         .getAllByTestId('attach-repos-dialog-repo-option')
-        .find((o) => o.getAttribute('data-repo-id') === 'repo-refund')!,
+        .find((o) => o.getAttribute('data-repo-name') === 'refund-service')!,
     )
     fireEvent.change(screen.getByTestId('attach-repos-dialog-branch'), {
       target: { value: 'feat/refund-optimization' },
     })
     await user.click(screen.getByTestId('attach-repos-dialog-submit'))
     expect(onSubmit).toHaveBeenCalledTimes(1)
+    // 字段从 repoIds 改为 repoNames(issue 06 ADR-0030 D5)
     expect(onSubmit).toHaveBeenCalledWith({
-      repoIds: ['repo-refund'],
+      repoNames: ['refund-service'],
       branchName: 'feat/refund-optimization',
     })
   })
@@ -259,11 +310,11 @@ describe('AttachReposDialog · 校验 + 提交', () => {
     await user.click(
       screen
         .getAllByTestId('attach-repos-dialog-repo-option')
-        .find((o) => o.getAttribute('data-repo-id') === 'repo-order')!,
+        .find((o) => o.getAttribute('data-repo-name') === 'order-service')!,
     )
     await user.click(screen.getByTestId('attach-repos-dialog-submit'))
     expect(onSubmit).toHaveBeenCalledWith({
-      repoIds: ['repo-order'],
+      repoNames: ['order-service'],
       branchName: 'feat/refund-optimization',
     })
   })
@@ -274,16 +325,38 @@ describe('AttachReposDialog · 校验 + 提交', () => {
     await user.click(
       screen
         .getAllByTestId('attach-repos-dialog-repo-option')
-        .find((o) => o.getAttribute('data-repo-id') === 'repo-refund')!,
+        .find((o) => o.getAttribute('data-repo-name') === 'refund-service')!,
     )
     await user.click(
       screen
         .getAllByTestId('attach-repos-dialog-repo-option')
-        .find((o) => o.getAttribute('data-repo-id') === 'repo-order')!,
+        .find((o) => o.getAttribute('data-repo-name') === 'order-service')!,
     )
     expect(
       screen.getByTestId('attach-repos-dialog-footer-left').textContent,
     ).toContain('此分支将应用于 2 个仓库')
+  })
+
+  // issue 06 ticket:删除 Git URL 后,提交数 = 选中数;不会出现 "+1 个待创建"
+  it('issue 06:删除 URL 输入后,提交数严格等于 selectedNames.size(没有 "+1 个待创建")', async () => {
+    const { onSubmit } = renderDialog()
+    const user = userEvent.setup()
+    // 勾 2 个 repo,提交数 = 2
+    await user.click(
+      screen
+        .getAllByTestId('attach-repos-dialog-repo-option')
+        .find((o) => o.getAttribute('data-repo-name') === 'refund-service')!,
+    )
+    await user.click(
+      screen
+        .getAllByTestId('attach-repos-dialog-repo-option')
+        .find((o) => o.getAttribute('data-repo-name') === 'order-service')!,
+    )
+    fireEvent.change(screen.getByTestId('attach-repos-dialog-branch'), {
+      target: { value: 'feat/x' },
+    })
+    await user.click(screen.getByTestId('attach-repos-dialog-submit'))
+    expect(onSubmit.mock.calls[0][0].repoNames).toHaveLength(2)
   })
 })
 
@@ -313,8 +386,8 @@ describe('AttachReposDialog · 关闭路径', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it('焦点陷阱:Tab 在末元素 → 回到首元素(issue 01 ticket 验收 #12)', async () => {
-    renderDialog({ pickedRepoIds: ['repo-refund'] })
+  it('焦点陷阱:Tab 在末元素 → 回到首元素(issue 01 ticket 验收 #12)', () => {
+    renderDialog({ pickedRepoNames: ['refund-service'] })
 
     // 把焦点放到最后一个可聚焦元素(提交按钮):先填分支名以启用 submit
     const branchInput = screen.getByTestId('attach-repos-dialog-branch')
@@ -329,8 +402,8 @@ describe('AttachReposDialog · 关闭路径', () => {
     expect(document.activeElement).toBe(close)
   })
 
-  it('焦点陷阱:Shift+Tab 在首元素 → 跳到末元素', async () => {
-    renderDialog({ pickedRepoIds: ['repo-refund'] })
+  it('焦点陷阱:Shift+Tab 在首元素 → 跳到末元素', () => {
+    renderDialog({ pickedRepoNames: ['refund-service'] })
 
     // 先填分支名以启用 submit
     const branchInput = screen.getByTestId('attach-repos-dialog-branch')
@@ -347,7 +420,7 @@ describe('AttachReposDialog · 关闭路径', () => {
     expect(document.activeElement).toBe(submit)
   })
 
-  it('点 backdrop → onClose 触发', async () => {
+  it('点 backdrop → onClose 触发', () => {
     const { onClose } = renderDialog()
     fireEvent.click(screen.getByTestId('attach-repos-dialog-backdrop'))
     expect(onClose).toHaveBeenCalledTimes(1)
@@ -369,7 +442,7 @@ describe('AttachReposDialog · 打开时 reset', () => {
         titlePrefix="关联仓库"
         requirementTitle="退款功能优化"
         availableRepos={REPOS}
-        pickedRepoIds={[]}
+        pickedRepoNames={[]}
         onSubmit={onSubmit}
         onClose={onClose}
       />,
@@ -384,7 +457,7 @@ describe('AttachReposDialog · 打开时 reset', () => {
         titlePrefix="关联仓库"
         requirementTitle="退款功能优化"
         availableRepos={REPOS}
-        pickedRepoIds={[]}
+        pickedRepoNames={[]}
         onSubmit={onSubmit}
         onClose={onClose}
       />,
@@ -396,7 +469,7 @@ describe('AttachReposDialog · 打开时 reset', () => {
         titlePrefix="关联仓库"
         requirementTitle="退款功能优化"
         availableRepos={REPOS}
-        pickedRepoIds={[]}
+        pickedRepoNames={[]}
         onSubmit={onSubmit}
         onClose={onClose}
       />,

@@ -2,7 +2,9 @@
  * DRAFTING 工位数据层(issue 02 — PRD 顶置 + 骨架 + 进入 ANALYZING;
  * 后续 issue 04 — 辅助文件卡片 + 拖拽分割扩展;
  * issue 08 — 仓库底部条 + 软警告 + 启动按钮迁入底部条;
- * issue 06 — 注入真实仓库池 via GET /api/repos)
+ * issue 06 (ADR-0030) — 仓库注册表化,字段从 `id`/`repoIds` 改为 `name`/`repoNames`,
+ *                       `repos` 列表由 SSR 通过 `~/.aidevspace/repos.yaml` 派生,
+ *                       删除全局仓库池 mock(`GLOBAL_REPO_POOL`))
  *
  * 工位布局(issue 08 形态):
  * - 主区:上下两块 — PRD 顶置卡片 + 拖拽分割条 + 辅助文件卡片网格
@@ -19,18 +21,19 @@
  * - 分割比例(issue 04)以 ratio 数值形式暴露给 UI 层;clamp 由 `clampSplitRatio`
  *   纯函数集中负责,UI 仅负责把 mouse drag / 键盘事件映射成 ratio delta
  * - 软警告阈值(issue 08)以纯函数 `shouldShowRepoSoftWarning` 暴露;
- *   UI 仅负责在 selectedRepoIds 变化时调一次拿到 boolean
+ *   UI 仅负责在 selectedRepoNames 变化时调一次拿到 boolean
  *
- * issue 06 注入(ADR-0016):
- * - `emptyDrafting(id)` 保留同步形态,repos 用 GLOBAL_REPO_POOL 作 fixture。
- *   它是单测 / 离线 fallback 的"快照式"工厂 —— 30+ 调用点期望同步返回值,
- *   改异步会触发全量测试 / 调用方重写,违背"最小破坏"原则。
- * - `getDraftingData(id)` 改成 async:调用 `fetchRepoPool()` 拿真实仓库池;
- *   成功 → 用真实数据;失败 → fallback 到 `emptyDrafting(id)`(其内部 repos
- *   仍是 GLOBAL_REPO_POOL),开发环境断网时仍能演示完整 UI。
- * - 真实数据流:`getDraftingData` → 注入 DraftingData.repos → 组件 props
- *   → 弹层打开时由 `drafting-zone` useEffect 再 refetch 一次覆盖,保证
- *   用户主动开弹层时拿到的是最新池(决策 76 / ADR-0016 D4)。
+ * issue 06 (ADR-0030) 形态调整:
+ * - `DraftingRepo` 直接复用 `@ai-devspace/shared` 的 `RepoRegistryEntry`
+ *   (字段最小集:`name` + `gitUrl` + `description`)。name 是全局唯一标识,
+ *   与 `requirements/<req-id>/codebase/<name>/` 目录名同源。
+ * - `selectedRepoIds` → `selectedRepoNames`;`failedRepoIds` → `failedRepoNames`
+ * - 删除 `GLOBAL_REPO_POOL` mock —— yaml 是真相源,失败时沿用 SSR 已注入
+ *   的 `data.repos`(没有 fallback 到写死的列表)。
+ * - `emptyDrafting` 不再注入 mock 仓库池 —— 空草稿态下 `repos = []`,
+  //   由 SSR 注入后用真实仓库列表覆盖(`getDraftingDataFromFs` 负责)。
+  // - `getDraftingData` 仅保留 `req-001` demo 用例;非 req-001 走 emptyDrafting;
+  //   不再调 `fetchRepoRegistry` 做覆盖(SSR 已经注入了仓库池)。
  */
 
 import {
@@ -38,9 +41,9 @@ import {
   validateLaunch,
   type AuxFile,
   type PrdAnchor,
+  type RepoRegistryEntry,
   type UsageTag,
 } from '@ai-devspace/shared'
-import { fetchRepoPool } from './repo-attach'
 
 // ---------------------------------------------------------------------------
 // 类型定义
@@ -56,16 +59,17 @@ export interface DraftingSkill {
 }
 
 /**
- * 关联仓库选项(issue 08 — 仓库底部条 + 软警告)
+ * 关联仓库选项(issue 06 · ADR-0030 D3)
  *
- * UI 用 `id` 做 React key / 受控选中的标识;`name` 是渲染在 chip 上的展示名
- * (如 "refund-service")。本期不做仓库元数据(语言 / 默认分支 / 工作树路径等),
- * 那些留给后续接入 agent API 时再补。
+ * 直接复用 `@ai-devspace/shared` 的 `RepoRegistryEntry`(name 全局唯一即
+ * 标识,gitUrl + description 是注册表元数据),避免 web 端在 DraftingRepo
+ * 与 RepoRegistryEntry 间再做一次窄化/展宽。
+ *
+ * 与旧 id-based 形态的差异(决策 105):
+ * - 删除 `id` 字段(name 即标识,React key / chip data attr / 选中态都用 name)
+ * - 新增 `gitUrl` / `description`(注册表元数据,用于 chip tooltip / 列表渲染)
  */
-export interface DraftingRepo {
-  id: string
-  name: string
-}
+export type DraftingRepo = RepoRegistryEntry
 
 /** 顶部 toolbar 面包屑条目 */
 export interface DraftingToolbarCrumb {
@@ -81,7 +85,7 @@ export interface DraftingToolbar {
 }
 
 /**
- * DRAFTING 工位顶层数据(issue 04 形态)
+ * DRAFTING 工位顶层数据(issue 04 形态 + issue 06 跟改)
  *
  * 与 issue 18 形态的差异:
  * - 删除 acceptanceCriteria / repos / actions
@@ -89,12 +93,14 @@ export interface DraftingToolbar {
  * - 自动保存周期由 autosaveIntervalMs 控制;lastSavedAt 渲染"已保存 x 秒前"
  * - **issue 04** 新增 `auxFiles`:Requirement 的辅助文件列表(卡片网格渲染);
  *   空数据 / 新建需求 时为 [] → 走 EmptyAuxPlaceholder 占位
+ * - **issue 06** selectedRepoIds → selectedRepoNames;repos 由 SSR 注入真实注册表
+ * - **issue 06** lockedBranchName 仍存在,作为 append 模式 + 软警告 + chip 绿点的依据
  */
 export interface DraftingData {
   requirementId: string
   /** 顶部 toolbar(面包屑 + 状态文本) */
   toolbar: DraftingToolbar
-  /** 标题 input 值(独立字段,与 PRD Markdown H1 解耦) */
+  /** 标题 input 值(独立字段,与 PRD 摘要 H1 解耦) */
   title: string
   /** PRD Markdown 源文;空数据(empty=true)时由组件侧 generatePrdSkeleton 填充 */
   prdMarkdown: string
@@ -110,21 +116,24 @@ export interface DraftingData {
    */
   auxFiles: AuxFile[]
   /**
-   * 关联仓库选项(issue 08 + 06)。所有可选仓库(chips 渲染源);与 `selectedRepoIds`
-   * 配合:已选中 = chip "on"(蓝色),未选中 = chip "off"(灰底)。
+   * 关联仓库选项(issue 06 · ADR-0030 D3)。
    *
-   * 数据流(issue 06):SSR 期由 `getDraftingData` 从 Agent `GET /api/repos`
-   * 拉取;弹层打开时由 `drafting-zone` useEffect refetch 兜底覆盖。
+   * 所有可选仓库(chips 渲染源);与 `selectedRepoNames` 配合:
+   * 已选中 = chip "on"(蓝色),未选中 = chip "off"(灰底)。
+   *
+   * 数据流(issue 06):SSR 期由 `getDraftingDataFromFs` 从
+   * `<root>/repos.yaml` 派生;弹层打开时由 `drafting-zone` useEffect refetch
+   * `fetchRepoRegistry` 兜底覆盖。失败时静默保留当前列表(决策 24 不打扰)。
    */
   repos: DraftingRepo[]
   /**
-   * 已选中的仓库 id 列表(issue 08)。
+   * 已选中的仓库 name 列表(issue 06 · 决策 105)。
    *
    * - `length < 2` → 软警告 ⚠ 仅 N 个仓库 · ANALYZING 可能无法完整关联代码上下文
    * - `length >= 2` → 软警告隐藏
    * - **不影响** launch validity(validity 只看 title + PRD,见 `validateLaunch`)
    */
-  selectedRepoIds: string[]
+  selectedRepoNames: string[]
   /**
    * 已锁定的统一分支名(issue 02 ticket + issue 06 ticket 06 SSR 持久化):
    * 首次 attach 后由后端写入 `meta.yaml.branchName`,SSR 读取后注入此处,
@@ -195,7 +204,7 @@ export const DEFAULT_PRD_RATIO = 0.6
  * 辅助文件面板的最小可视高度(像素)—— 至少保留一行辅助文件卡片可见。
  *
  * 拆解:
- * - pane head:`flex items-center justify-between`(标题 + actions slot)≈ 28px
+ * - pane head:`flex items-center align-between`(标题 + actions slot)≈ 28px
  * - 卡片单行最小高度:`minmax(180px, 1fr)` 单元宽 + `.fcard { min-height: 90px }`
  *   ≈ 90px 卡片内容(单行)
  * - 安全 buffer:约 12px(行间间距 / 视觉呼吸)+ 卡片自身的 padding 12px
@@ -256,14 +265,14 @@ export function clampSplitRatio(
  * 故意写成"严格小于 2",不要写成"小于等于 1":前者让边界数字读起来更直观
  * (2 个仓库"刚好不警告");后者混用 ≤ 会增加读代码时的歧义。
  *
- * 纯函数:同一 selectedRepoIds → 同一 boolean;可单测;副作用为 0。
+ * 纯函数:同一 selectedRepoNames → 同一 boolean;可单测;副作用为 0。
  */
-export function shouldShowRepoSoftWarning(selectedRepoIds: readonly string[]): boolean {
-  return selectedRepoIds.length < 2
+export function shouldShowRepoSoftWarning(selectedRepoNames: readonly string[]): boolean {
+  return selectedRepoNames.length < 2
 }
 
 // ---------------------------------------------------------------------------
-// issue 01 · 顶部"未关联仓库"banner 可见性 + 全局仓库池(issue 01 ticket)
+// issue 01 · 顶部"未关联仓库"banner 可见性(纯函数)
 // ---------------------------------------------------------------------------
 
 /**
@@ -275,25 +284,9 @@ export function shouldShowRepoSoftWarning(selectedRepoIds: readonly string[]): b
  * 注意:banner 还有"用户主动 ✕ 关闭"与"错误态"两种受控隐藏,
  * 此函数只表达"是否应该展示"——具体 UI 隐藏由父组件持有额外状态决定。
  */
-export function shouldShowAttachBanner(selectedRepoIds: readonly string[]): boolean {
-  return selectedRepoIds.length === 0
+export function shouldShowAttachBanner(selectedRepoNames: readonly string[]): boolean {
+  return selectedRepoNames.length === 0
 }
-
-/**
- * 全局仓库池 —— 当前 mock 用,后续接入 agent API 后由 server 注入。
- *
- * 设计要点:
- * - 全局池 ≠ 需求私有已选集合;前者是「可选仓库源」,后者是「已选仓库集合」
- * - 故意不包含「＋ 更多仓库…」占位 chip —— 那是 issue 08 RepoBar 的
- *   视觉引导,不属于真实仓库;UI 层遇到 name 以「＋」开头的应跳过
- */
-export const GLOBAL_REPO_POOL: readonly DraftingRepo[] = [
-  { id: 'repo-refund-service', name: 'refund-service' },
-  { id: 'repo-order-service', name: 'order-service' },
-  { id: 'repo-coupon-service', name: 'coupon-service' },
-  { id: 'repo-payment-gateway', name: 'payment-gateway' },
-  { id: 'repo-notification-service', name: 'notification-service' },
-]
 
 const EMPTY_TOOLBAR: DraftingToolbar = {
   crumb: [],
@@ -307,10 +300,11 @@ const EMPTY_TOOLBAR: DraftingToolbar = {
  *   触发 generatePrdSkeleton 骨架填充
  * - skills 暂留空数组(后续可注入,本期不渲染)
  * - **issue 04** auxFiles = [] → AuxFilesPane 走 EmptyAuxPlaceholder 占位
- * - **issue 08** repos = [] / selectedRepoIds = [] → RepoBar 渲染空态;
+ * - **issue 08** repos = [] / selectedRepoNames = [] → RepoBar 渲染空态;
  *   软警告 `shouldShowRepoSoftWarning([]) === true`(0 个仓库触发警告)
- * - **issue 01 ticket** empty 态注入全局仓库池,使得 banner 可见 + RepoBar
- *   N=0 占位 chip 可点;但 selectedRepoIds 仍为空,触发 banner 显示
+ * - **issue 06 (ADR-0030)** 不再注入写死的 mock 仓库池:
+ *   repos 起点是 [];SSR 路径由 `getDraftingDataFromFs` 读 `<root>/repos.yaml`
+ *   覆盖;空草稿态若 yaml 为空也合法(决策 24 不打扰 + 「去仓库页添加 →」引导)。
  */
 export function emptyDrafting(requirementId: string): DraftingData {
   return {
@@ -320,10 +314,10 @@ export function emptyDrafting(requirementId: string): DraftingData {
     prdMarkdown: '',
     skills: [],
     auxFiles: [],
-    // issue 01 ticket:空草稿注入全局仓库池(供 banner / RepoBar / 关联弹层使用);
-    // 但 selectedRepoIds 仍为空 → banner 可见 + RepoBar N=0 占位 chip 显示
-    repos: [...GLOBAL_REPO_POOL],
-    selectedRepoIds: [],
+    // issue 06 (ADR-0030):repos 不再注入写死 mock,改由 SSR `getDraftingDataFromFs`
+    // 读 `<root>/repos.yaml` 后覆盖;空草稿态允许 repos = [] 触发「去仓库页添加 →」引导。
+    repos: [],
+    selectedRepoNames: [],
     autosaveIntervalMs: 30_000,
     lastSavedAt: null,
     empty: true,
@@ -408,54 +402,54 @@ const REFUND_DRAFTING: Omit<DraftingData, 'requirementId'> = {
       converted_to_md: true,
     },
   ],
-  // issue 08:5 个可选仓库 + 默认勾选前 2 个(refund-service / order-service),
-  // 对应设计稿 `19-final-drafting.html` 的样例(2 个仓库触发软警告文案 "⚠ 仅 2 个仓库…";
-  // 本仓库条的可视化刚好命中"软警告阈值边界",验收测试用)。
-  // 故意包含一个 "＋ 更多仓库…" 占位 chip —— 但 id 与现有 repo 不同,
-  // mock 期它是 no-op(不会触发 addRepo 之类的副作用),留给后续接 agent API 时
-  // 扩展。
+  // issue 06 (ADR-0030):5 个示例仓库 —— 字段最小集 name/gitUrl/description,
+  // 对应设计稿 `19-final-drafting.html` 的样例(2 个仓库触发软警告文案
+  // "⚠ 仅 2 个仓库…";本仓库条的可视化刚好命中"软警告阈值边界",验收测试用)。
   repos: [
-    { id: 'repo-refund-service', name: 'refund-service' },
-    { id: 'repo-order-service', name: 'order-service' },
-    { id: 'repo-coupon-service', name: 'coupon-service' },
-    { id: 'repo-payment-gateway', name: 'payment-gateway' },
-    { id: 'repo-more', name: '＋ 更多仓库…' },
+    {
+      name: 'refund-service',
+      gitUrl: 'https://example.com/refund-service.git',
+      description: '退款主服务',
+    },
+    {
+      name: 'order-service',
+      gitUrl: 'https://example.com/order-service.git',
+      description: '订单服务',
+    },
+    {
+      name: 'coupon-service',
+      gitUrl: 'https://example.com/coupon-service.git',
+      description: '优惠券服务',
+    },
+    {
+      name: 'payment-gateway',
+      gitUrl: 'https://example.com/payment-gateway.git',
+      description: '支付网关',
+    },
   ],
-  selectedRepoIds: ['repo-refund-service', 'repo-order-service'],
+  selectedRepoNames: ['refund-service', 'order-service'],
   autosaveIntervalMs: 30_000,
   lastSavedAt: null,
 }
 
 /**
- * 拉取 DRAFTING 工位数据(issue 06 — 注入真实仓库池)。
+ * 拉取 DRAFTING 工位数据(issue 06 跟改 — 同步 mock,无 fallback)。
  *
  * 数据流:
  * 1. 已知 id(req-001)→ REFUND_DRAFTING 样例数据(空 PRD 字段已存,组件不填充)
  * 2. 未知 id / 新建需求 → `emptyDrafting(id)` 路径
- * 3. **任意路径**都会尝试 `fetchRepoPool()` 拿真实仓库池:
- *    - 成功 → 覆盖样例 / 空草稿中的 `repos` 字段(决策 76 / ADR-0016 D4 SSR 初始)
- *    - 失败(网络错 / Agent 鉴权错 / Zod 校验错 / AbortError)→ 静默 fallback
- *      到原样例的 `repos` 字段(REFUND_DRAFTING.repos 或 GLOBAL_REPO_POOL);
- *      **不**抛错 —— 仓库池是次要数据,失败时不应阻塞整个工位渲染
- *      (符合决策 24:不打扰,但陪伴)
+ * 3. **不再**走 `fetchRepoRegistry` 覆盖:仓库池由 SSR `getDraftingDataFromFs`
+ *    从 `<root>/repos.yaml` 派生后注入 `data.repos`(`page.tsx` 调用链);
+ *    mock 路径只用于组件 / 库单测,不调真实 HTTP。
  *
- * 签名仍为 async —— 后续若需再注入其他 server 数据(autosave / lastSavedAt 等)
- * 调用方不用切换。
+ * 签名仍为 async —— 与旧版兼容,后续接入其他 server 数据(autosave /
+ * lastSavedAt 等)时调用方不用切换。
  */
 export async function getDraftingData(
   requirementId: string,
 ): Promise<DraftingData> {
-  const baseData: DraftingData =
-    requirementId === 'req-001'
-      ? { ...REFUND_DRAFTING, requirementId }
-      : emptyDrafting(requirementId)
-
-  // 注入真实仓库池(issue 06 · 决策 76)
-  try {
-    const pool = await fetchRepoPool()
-    return { ...baseData, repos: pool.repos }
-  } catch {
-    // 静默 fallback —— 保留 baseData.repos(REFUND_DRAFTING.repos 或 GLOBAL_REPO_POOL)
-    return baseData
+  if (requirementId === 'req-001') {
+    return { ...REFUND_DRAFTING, requirementId }
   }
+  return emptyDrafting(requirementId)
 }

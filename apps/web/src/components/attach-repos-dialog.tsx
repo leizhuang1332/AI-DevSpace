@@ -5,7 +5,8 @@ import type { DraftingRepo } from '@/lib/drafting'
 import { useTabFocusTrap } from '@/hooks/use-tab-focus-trap'
 
 /**
- * 关联 / 追加仓库弹层(issue 01 ticket · UI-POLISH-SPEC §9)
+ * 关联 / 追加仓库弹层(issue 01 ticket · UI-POLISH-SPEC §9 ·
+ *   repo-registry-clone/issues/06-web-frontend-followup.md)
  *
  * 视觉对照基线:`docs/design/pages/01-new-requirement-modal.html` §5
  *
@@ -16,11 +17,13 @@ import { useTabFocusTrap } from '@/hooks/use-tab-focus-trap'
  *   提示 `将使用统一分支名 <branchName>(创建时已锁定)`
  *
  * 仓库选择(checkbox 列表):
- * - 从 `availableRepos` 渲染(全局仓库池)
- * - 已选中的 id(`pickedRepoIds` prop)默认勾选
- * - 末尾固定一行 `+ 添加新仓库(粘贴 Git URL)`,点击展开一行 input;
- *   提交时若该 input 非空,会作为新的 repo id 合成(以 git URL hash 作 id,可选)
- *   ——本期 mock 不真正持久化新仓库,只把它的 id 传给 onSubmit 让上层处理
+ * - 从 `availableRepos` 渲染(全局仓库池,字段名 name/gitUrl/description)
+ * - 已选中的 name(`pickedRepoNames` prop)默认勾选
+ *
+ * 移除项(决策 Q14):
+ * - 「＋ 添加新仓库(粘贴 Git URL)」入口 —— 改为弹层底部一行链接
+ *   「没找到?去仓库页添加 →」,引导用户跳到 `/repos` 页面添加仓库
+ *   (兑现 ADR-0016 D7 欠账,issue 06 ticket 跟改)
  *
  * 校验:
  * - 至少勾选 1 个仓库
@@ -44,22 +47,24 @@ export interface AttachReposDialogProps {
   titlePrefix: '关联仓库' | '追加仓库'
   /** 弹层标题后缀:需求标题 */
   requirementTitle: string
-  /** 全局仓库池(checkbox 列表渲染源) */
+  /** 全局仓库池(checkbox 列表渲染源,字段名 name/gitUrl/description) */
   availableRepos: readonly DraftingRepo[]
-  /** 已选仓库 id(默认勾选) */
-  pickedRepoIds: readonly string[]
+  /** 已选仓库 name(默认勾选,issue 06 字段从 id 改为 name) */
+  pickedRepoNames: readonly string[]
   /**
    * append 模式下展示「创建时已锁定」的分支名。
    * first 模式下可省略 —— 此时分支名由用户输入。
    */
   lockedBranchName?: string
-  /** 提交:携带 trimmed 后的 repo id 列表 + 统一分支名(first 模式) */
+  /** 提交:携带 trimmed 后的 repo name 列表 + 统一分支名(first 模式) */
   onSubmit: (value: {
-    repoIds: string[]
+    repoNames: string[]
     branchName: string
   }) => void
   /** 关闭弹层 */
   onClose: () => void
+  /** 「去仓库页添加 →」链接的目标地址;缺省时 `/repos`(issue 07 落地后稳定) */
+  reposPageHref?: string
 }
 
 // 路径非法字符 + 空白(参考 UI-POLISH-SPEC §3.3 + §9.3:禁止 `\` `/` `:` `*` `?` `"` `<` `>` `|` 空白)
@@ -96,35 +101,31 @@ export function AttachReposDialog({
   titlePrefix,
   requirementTitle,
   availableRepos,
-  pickedRepoIds,
+  pickedRepoNames,
   lockedBranchName,
   onSubmit,
   onClose,
+  reposPageHref = '/repos',
 }: AttachReposDialogProps) {
   const headingId = useId()
   const branchInputRef = useRef<HTMLInputElement | null>(null)
   const dialogRef = useRef<HTMLFormElement | null>(null)
 
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
   // 受控表单状态
-  // ---------------------------------------------------------------------------
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(
-    () => new Set(pickedRepoIds),
+  // -------------------------------------------------------------------------
+  const [selectedNames, setSelectedNames] = useState<Set<string>>(
+    () => new Set(pickedRepoNames),
   )
   const [branchName, setBranchName] = useState<string>('')
   const [branchError, setBranchError] = useState<string | null>(null)
-  /** 「+ 添加新仓库(粘贴 Git URL)」展开态 + 输入值 */
-  const [showNewRepo, setShowNewRepo] = useState<boolean>(false)
-  const [newRepoUrl, setNewRepoUrl] = useState<string>('')
 
   // 打开时 reset + 移到焦点
   useEffect(() => {
     if (!open) return
-    setSelectedIds(new Set(pickedRepoIds))
+    setSelectedNames(new Set(pickedRepoNames))
     setBranchName('')
     setBranchError(null)
-    setShowNewRepo(false)
-    setNewRepoUrl('')
     // first 模式才 autoFocus 到分支名 input(append 模式无 input)
     if (mode === 'first') {
       const id = window.setTimeout(() => {
@@ -133,8 +134,8 @@ export function AttachReposDialog({
       return () => window.clearTimeout(id)
     }
     return undefined
-    // intentionally only depend on `open` toggle to reset; pickedRepoIds changes mid-mount
-    // are surfaced by the user toggling chips, not by parent re-passing
+    // intentionally only depend on `open` toggle to reset; pickedRepoNames changes
+    // mid-mount are surfaced by the user toggling chips, not by parent re-passing
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, mode])
 
@@ -155,31 +156,28 @@ export function AttachReposDialog({
   // Tab/Shift+Tab 焦点陷阱(issue 01 ticket 验收 #12) — 抽到 useTabFocusTrap 与 new-requirement-modal 复用
   useTabFocusTrap(open, dialogRef)
 
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
   // 派生:校验 + 启用条件
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
   const branchCheck = useMemo(
     () => (mode === 'first' ? validateBranchName(branchName) : null),
     [mode, branchName],
   )
-  const pickedRepoCount = selectedIds.size + (showNewRepo && newRepoUrl.trim() ? 1 : 0)
-  // issue 06 (ADR-0016 D7):"+ 添加新仓库" 入口过渡期处理
-  // - newRepoUrl 非空 → 强制 disabled(后续 ticket 接入 POST /api/repos 后移除)
-  // - 提示文案「📋 粘贴 Git URL · 即将上线」让用户理解按钮被禁用的原因
-  const hasPendingUrl = newRepoUrl.trim() !== ''
+  // issue 06 (ADR-0030 D7 / 决策 Q14):删除 Git URL 入口后,提交数 = 选中数;
+  // 不再有 "+1 个待创建" 的过渡项需要并入。
+  const pickedRepoCount = selectedNames.size
   const canSubmit =
-    !hasPendingUrl &&
     pickedRepoCount > 0 &&
     (mode === 'append' || (branchCheck !== null && branchCheck.ok))
 
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
   // handlers
-  // ---------------------------------------------------------------------------
-  const handleToggleRepo = (repoId: string) => {
-    setSelectedIds((prev) => {
+  // -------------------------------------------------------------------------
+  const handleToggleRepo = (repoName: string) => {
+    setSelectedNames((prev) => {
       const next = new Set(prev)
-      if (next.has(repoId)) next.delete(repoId)
-      else next.add(repoId)
+      if (next.has(repoName)) next.delete(repoName)
+      else next.add(repoName)
       return next
     })
   }
@@ -187,21 +185,10 @@ export function AttachReposDialog({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!canSubmit) return
-    // 防御性:虽然 canSubmit 已经把 hasPendingUrl 排除,这里再 strip 一次
-    // —— 后续 ticket 接入 POST /api/repos 后,这段判断可以删掉
-    const cleanedUrl = newRepoUrl.trim()
-    let finalRepoIds = Array.from(selectedIds)
-    if (showNewRepo && cleanedUrl) {
-      // mock:用 URL 自身作 id(去掉协议 + 路径末尾斜杠,大写统一小写)
-      const slug = cleanedUrl
-        .replace(/^https?:\/\//, '')
-        .replace(/\.git$/, '')
-        .replace(/\/+$/, '')
-      finalRepoIds = [...finalRepoIds, `repo-new-${slug}`]
-    }
+    const finalRepoNames = Array.from(selectedNames)
     const finalBranchName =
       mode === 'first' ? branchCheck?.sanitized ?? '' : lockedBranchName ?? ''
-    onSubmit({ repoIds: finalRepoIds, branchName: finalBranchName })
+    onSubmit({ repoNames: finalRepoNames, branchName: finalBranchName })
   }
 
   const handleBackdropClick = (e: React.MouseEvent) => {
@@ -210,9 +197,9 @@ export function AttachReposDialog({
 
   if (!open) return null
 
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
   // render
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
   return (
     <div
       data-testid="attach-repos-dialog-backdrop"
@@ -288,12 +275,12 @@ export function AttachReposDialog({
                 </div>
               ) : (
                 availableRepos.map((repo) => {
-                  const checked = selectedIds.has(repo.id)
+                  const checked = selectedNames.has(repo.name)
                   return (
                     <label
-                      key={repo.id}
+                      key={repo.name}
                       data-testid="attach-repos-dialog-repo-option"
-                      data-repo-id={repo.id}
+                      data-repo-name={repo.name}
                       data-checked={checked ? 'true' : 'false'}
                       className={[
                         'flex items-center gap-3 px-2 py-1.5 rounded-md cursor-pointer text-sm',
@@ -303,9 +290,9 @@ export function AttachReposDialog({
                       <input
                         type="checkbox"
                         data-testid="attach-repos-dialog-repo-checkbox"
-                        data-repo-id={repo.id}
+                        data-repo-name={repo.name}
                         checked={checked}
-                        onChange={() => handleToggleRepo(repo.id)}
+                        onChange={() => handleToggleRepo(repo.name)}
                         className="w-4 h-4 accent-brand-500"
                       />
                       <span className="font-mono font-medium text-text-1">
@@ -315,51 +302,21 @@ export function AttachReposDialog({
                   )
                 })
               )}
+            </div>
 
-              {/* 添加新仓库(粘贴 Git URL) */}
-              <div
-                data-testid="attach-repos-dialog-new-repo"
-                className="border-t border-border mt-1 pt-2"
+            {/* 「没找到?去仓库页添加 →」跳转引导(决策 Q14) */}
+            <div
+              data-testid="attach-repos-dialog-repos-hint"
+              className="mt-2 text-xs text-text-3"
+            >
+              没找到?{' '}
+              <a
+                href={reposPageHref}
+                data-testid="attach-repos-dialog-repos-link"
+                className="text-brand-600 hover:text-brand-700 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-50 rounded"
               >
-                {!showNewRepo ? (
-                  <button
-                    type="button"
-                    data-testid="attach-repos-dialog-add-new-toggle"
-                    onClick={() => setShowNewRepo(true)}
-                    className="text-xs text-brand-600 hover:text-brand-700 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-50 rounded px-1"
-                  >
-                    ＋ 添加新仓库(粘贴 Git URL)
-                  </button>
-                ) : (
-                  <div className="flex flex-col gap-1.5">
-                    <label
-                      htmlFor="attach-repos-dialog-new-repo-url"
-                      className="text-xs text-text-3"
-                    >
-                      Git URL
-                    </label>
-                    <input
-                      id="attach-repos-dialog-new-repo-url"
-                      type="text"
-                      data-testid="attach-repos-dialog-new-repo-url"
-                      value={newRepoUrl}
-                      onChange={(e) => setNewRepoUrl(e.target.value)}
-                      placeholder="如:https://github.com/your-org/your-repo.git"
-                      spellCheck={false}
-                      className="w-full px-2 h-8 bg-bg border border-border-strong rounded-md text-xs font-mono focus:outline-none focus:border-brand focus:shadow-[0_0_0_3px_var(--brand-50)]"
-                    />
-                    {/* issue 06 (ADR-0016 D7):过渡期 hint
-                        — POST /api/repos(create + clone)端点未实装前禁用提交,
-                          用 hint 文案让用户理解为何按钮被禁用 */}
-                    <div
-                      data-testid="attach-repos-dialog-new-repo-hint"
-                      className="text-xs text-text-3 italic"
-                    >
-                      📋 粘贴 Git URL · 即将上线
-                    </div>
-                  </div>
-                )}
-              </div>
+                去仓库页添加 →
+              </a>
             </div>
           </div>
 

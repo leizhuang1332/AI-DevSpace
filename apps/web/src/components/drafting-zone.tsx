@@ -10,7 +10,7 @@ import {
 } from '@ai-devspace/shared'
 import {
   attachReposToRequirement,
-  fetchRepoPool,
+  fetchRepoRegistry,
   isAttachReposError,
 } from '@/lib/repo-attach'
 import {
@@ -90,8 +90,9 @@ function focusReturnToTrigger(
  * - **issue 04 ticket**:title 不再受控(已由 NewRequirementModal 写入
  *   meta.yaml.title),本组件直接读 data.title 用于弹层标题等场景,
  *   DRAFTING 内不暴露编辑入口。
- * - **issue 08**:selectedRepoIds 由本组件持 state;切换由 RepoBar 触发
- *   onToggleRepo → setSelectedRepoIds(派生软警告 + chip on/off)。
+ * - **issue 08**:selectedRepoNames 由本组件持 state;切换由 RepoBar 触发
+ *   onToggleRepo → setSelectedRepoNames(派生软警告 + chip on/off)。
+ *   issue 06 (ADR-0030 D3) 字段从 id 改为 name。
  * - 上下比例 ratio ∈ [0, 1];clamp 由 `clampSplitRatio` 集中负责
  * - **issue 06**:`auxFiles` 由 props 初始值拷贝到 local state,
  *   创建 / 上传的新文件 append 到 state;创建 / 上传后自动打开抽屉
@@ -119,14 +120,16 @@ export function DraftingZone({ data }: { data: DraftingData }) {
 
   // -------------------------------------------------------------------------
   // 仓库选中(issue 08)—— 由 props 初始值拷贝到 local state
+  // issue 06 (ADR-0030 D3):selectedRepoIds → selectedRepoNames,name 即标识
   // -------------------------------------------------------------------------
-  const [selectedRepoIds, setSelectedRepoIds] = useState<string[]>(
-    data.selectedRepoIds,
+  const [selectedRepoNames, setSelectedRepoNames] = useState<string[]>(
+    data.selectedRepoNames,
   )
 
   // -------------------------------------------------------------------------
-  // 实时仓库池(issue 06 · 决策 76 / ADR-0016 D4)
-  // - 初始值 = data.repos(SSR 期由 `getDraftingData` 注入的真实仓库池)
+  // 实时仓库池(issue 06 · 决策 76 / ADR-0030 D3)
+  // - 初始值 = data.repos(SSR 期由 `getDraftingDataFromFs` 从 `<root>/repos.yaml`
+  //   派生的真实仓库池)
   // - 弹层打开(`attachDialogOpen` 翻 true)时由 useEffect refetch 一次;
   //   成功 → 覆盖;失败 → 静默沿用当前列表,符合决策 24"不打扰"
   // - 用单独的 state 而非直接 mutate data.repos,避免 props 漂移破坏 SSR
@@ -142,11 +145,14 @@ export function DraftingZone({ data }: { data: DraftingData }) {
   // - lockedBranchName:首次关联成功后写入,后续追加模式复用
   // - pendingAttachTrigger:弹层关闭后焦点回触发按钮(banner [+] / RepoBar ＋)
   // - attachInFlight:防止重复提交期间的 UI 闪烁
-  // - failedRepoIds:本次关联中失败的 repo(用于 chip 标红 / 重试该 repo)
+  // - failedRepoNames:本次关联中失败的 repo(用于 chip 标红 / 重试该 repo),
+  //   issue 06 字段从 id 改为 name
+  // - repoCloneStatuses:`repoName -> status` 的 SSE 推送表(issue 03 · ADR-0030 D5)
+  //   用于在 attach 进行时显示每个 repo 的克隆状态(pending / cloning / ready / failed)
   // -------------------------------------------------------------------------
   const [mountSkeletonDone, setMountSkeletonDone] = useState<boolean>(false)
   const [bannerState, setBannerState] = useState<DraftingBannerState>(
-    shouldShowAttachBanner(data.selectedRepoIds) ? 'success' : 'hidden',
+    shouldShowAttachBanner(data.selectedRepoNames) ? 'success' : 'hidden',
   )
   const [bannerDismissed, setBannerDismissed] = useState<boolean>(false)
   const [bannerErrorMessage, setBannerErrorMessage] = useState<string | null>(
@@ -155,7 +161,10 @@ export function DraftingZone({ data }: { data: DraftingData }) {
   const [bannerPartialSummary, setBannerPartialSummary] = useState<
     { succeeded: number; failedNames: string[] } | undefined
   >(undefined)
-  const [failedRepoIds, setFailedRepoIds] = useState<string[]>([])
+  const [failedRepoNames, setFailedRepoNames] = useState<string[]>([])
+  const [repoCloneStatuses, setRepoCloneStatuses] = useState<
+    Record<string, 'pending' | 'cloning' | 'ready' | 'failed'>
+  >({})
   const [attachDialogOpen, setAttachDialogOpen] = useState<boolean>(false)
   const [attachDialogMode, setAttachDialogMode] =
     useState<'first' | 'append'>('first')
@@ -183,38 +192,96 @@ export function DraftingZone({ data }: { data: DraftingData }) {
     return () => window.clearTimeout(id)
   }, [data.empty])
 
-  // 当 selectedRepoIds 首次出现 ≥1 时,自动隐藏 success banner(决策 E10 +
+  // 当 selectedRepoNames 首次出现 ≥1 时,自动隐藏 success banner(决策 E10 +
   // ticket 验收「首次在 RepoBar 成功勾选第一个 repo 后 banner 自动消失」)
-  const prevSelectedCountRef = useRef<number>(data.selectedRepoIds.length)
+  const prevSelectedCountRef = useRef<number>(data.selectedRepoNames.length)
   useEffect(() => {
     const wasZero = prevSelectedCountRef.current === 0
-    const isZero = selectedRepoIds.length === 0
-    prevSelectedCountRef.current = selectedRepoIds.length
+    const isZero = selectedRepoNames.length === 0
+    prevSelectedCountRef.current = selectedRepoNames.length
     if (wasZero && !isZero && bannerState === 'success') {
       setBannerState('hidden')
       setBannerDismissed(false)
     }
-    // 注:用户主动 ✕ 后(bannerDismissed=true)selectedRepoIds 仍为 0 时,
+    // 注:用户主动 ✕ 后(bannerDismissed=true)selectedRepoNames 仍为 0 时,
     // 不再恢复 success —— 保持「关后不闪」的语义(ticket 验收 #7)
-  }, [selectedRepoIds.length, bannerState])
+  }, [selectedRepoNames.length, bannerState])
 
   // -------------------------------------------------------------------------
-  // 弹层打开时 refetch 仓库池(issue 06 · 决策 76 / ADR-0016 D4)
+  // 弹层打开时 refetch 仓库池(issue 06 · 决策 76 / ADR-0030 D3)
   // - 只在 attachDialogOpen 翻 true 时触发(不重复轮询)
   // - 成功 → setLiveRepos(覆盖),失败 → 静默保留当前列表
   // - AbortController:组件 unmount 时取消在飞请求,避免 setState on unmounted
+  // - SSR 期已经由 `getDraftingDataFromFs` 从 `<root>/repos.yaml` 注入了真实仓库池;
+  //   此处 refetch 是兜底(用户长时间停留工位,后台可能有新仓库加入)
   // -------------------------------------------------------------------------
   useEffect(() => {
     if (!attachDialogOpen) return
     const ac = new AbortController()
-    fetchRepoPool({ signal: ac.signal })
-      .then((pool) => setLiveRepos(pool.repos))
+    fetchRepoRegistry({ signal: ac.signal })
+      .then((res) => setLiveRepos(res.repos))
       .catch((err) => {
         if (err?.name === 'AbortError') return
         // 静默 fallback —— 保留 liveRepos(决策 24 不打扰)
       })
     return () => ac.abort()
   }, [attachDialogOpen])
+
+  // -------------------------------------------------------------------------
+  // SSE 订阅 —— `repo-clone-progress` 事件(issue 03 / ADR-0030 D5)
+  //
+  // 后端 `RequirementService.attachRepos` 在并行 clone 期间会逐个 repo 推
+  // {type: 'repo-clone-progress', repoName, status, ts, error?}
+  // 到 req 通道;本订阅用于在 DRAFTING 工位实时显示每个 repo 的克隆状态
+  // (pending → cloning → ready / failed),而不是等 HTTP 响应一次性返回。
+  //
+  // 设计要点:
+  // - mount 期就订阅(不需要等 attachDialogOpen):用户点开 attach 弹层时
+  //   既有 status map 可直接渲染(避免「打开 → 看到空 → 等事件」闪烁)
+  // - 只关注 `repoName` 与本 reqId 匹配的事件(避免错拿其他 req 的进度)
+  // - 事件 status 落到 `repoCloneStatuses` state,供 attach 弹层 / RepoBar 派生
+  // - 用 event-name `repo-clone-progress`,与后端 SSE hub 命名一致
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof EventSource === 'undefined') return
+    const es = new EventSource(`/api/requirement/${data.requirementId}/events`)
+    const onCloneProgress = (e: MessageEvent<string>): void => {
+      try {
+        const parsed = JSON.parse(e.data) as {
+          type?: string
+          reqId?: string
+          repoName?: string
+          status?: 'pending' | 'cloning' | 'ready' | 'failed'
+        }
+        if (
+          parsed.type !== 'repo-clone-progress' ||
+          parsed.reqId !== data.requirementId ||
+          typeof parsed.repoName !== 'string' ||
+          !parsed.status
+        ) {
+          return
+        }
+        setRepoCloneStatuses((prev) => ({
+          ...prev,
+          [parsed.repoName as string]: parsed.status as
+            | 'pending'
+            | 'cloning'
+            | 'ready'
+            | 'failed',
+        }))
+      } catch {
+        /* ignore malformed event */
+      }
+    }
+    es.addEventListener('repo-clone-progress', onCloneProgress)
+    es.addEventListener('error', () => {
+      /* browser will auto-reconnect; nothing to do */
+    })
+    return () => {
+      es.removeEventListener('repo-clone-progress', onCloneProgress)
+      es.close()
+    }
+  }, [data.requirementId])
 
   // -------------------------------------------------------------------------
   // 命令式句柄:DraftingPrdPane 暴露 saveNow(),用于 launch 前立刻落盘
@@ -256,7 +323,7 @@ export function DraftingZone({ data }: { data: DraftingData }) {
     if (lastRequirementId !== data.requirementId) {
       setAuxFiles(data.auxFiles)
       setPrdMarkdown(data.prdMarkdown)
-      setSelectedRepoIds(data.selectedRepoIds)
+      setSelectedRepoNames(data.selectedRepoNames)
       // 切到新 req 时也用 SSR 注入的 lockedBranchName 覆盖(避免"上一个
       // req 锁的分支名串到当前 req");SSR 读 meta.yaml.branchName
       setLockedBranchName(data.lockedBranchName ?? '')
@@ -537,28 +604,24 @@ export function DraftingZone({ data }: { data: DraftingData }) {
 
   // -------------------------------------------------------------------------
   // 仓库 chip 切换(issue 08)—— RepoBar 触发
-  // - 真实仓库可切换;id 以 "repo-more" 开头 / 名为 "＋ 更多仓库…" 的占位
-  //   chip 视为"添加更多"动作(no-op,mock 期无后端联动),不允许进入 selectedRepoIds
-  //   (避免用户误把"占位 chip"当真实仓库勾选,触发软警告/选中数等虚假视觉)
+  // - 真实仓库可切换;issue 06 (ADR-0030 D3) repos 列表由 SSR `<root>/repos.yaml`
+  //   派生,每条都是真实仓库 —— 没有 "＋ 更多仓库…" 占位条目,过滤逻辑删除。
   // -------------------------------------------------------------------------
   const isRealSelectableRepo = useCallback(
-    (repoId: string) => {
-      const repo = liveRepos.find((r) => r.id === repoId)
-      if (!repo) return false
-      // 防御性:任何 name 以 "＋" 开头的占位条目都不可选中
-      if (repo.name.startsWith('＋')) return false
-      return true
+    (repoName: string) => {
+      const repo = liveRepos.find((r) => r.name === repoName)
+      return !!repo
     },
     [liveRepos],
   )
 
   const handleToggleRepo = useCallback(
-    (repoId: string) => {
-      if (!isRealSelectableRepo(repoId)) return
-      setSelectedRepoIds((prev) =>
-        prev.includes(repoId)
-          ? prev.filter((id) => id !== repoId)
-          : [...prev, repoId],
+    (repoName: string) => {
+      if (!isRealSelectableRepo(repoName)) return
+      setSelectedRepoNames((prev) =>
+        prev.includes(repoName)
+          ? prev.filter((name) => name !== repoName)
+          : [...prev, repoName],
       )
     },
     [isRealSelectableRepo],
@@ -566,18 +629,18 @@ export function DraftingZone({ data }: { data: DraftingData }) {
 
   // -------------------------------------------------------------------------
   // 取消关联(issue 09 · × 按钮回调)—— RepoBar 触发
-  // - 一键生效:从 selectedRepoIds 移除该 id,chip 即时消失
+  // - 一键生效:从 selectedRepoNames 移除该 name,chip 即时消失
   // - 不影响全局 repos(可逆,重新 attach 即可)
   // - 不影响 lockedBranchName(分支名仍然锁定,只是少一个 repo 走)
   // -------------------------------------------------------------------------
-  const handleDetachRepo = useCallback((repoId: string) => {
-    if (!repoId) return
-    setSelectedRepoIds((prev) => prev.filter((id) => id !== repoId))
+  const handleDetachRepo = useCallback((repoName: string) => {
+    if (!repoName) return
+    setSelectedRepoNames((prev) => prev.filter((name) => name !== repoName))
   }, [])
 
   // -------------------------------------------------------------------------
   // 关联仓库弹层(issue 01 ticket)—— 入口共两处(banner [+] / RepoBar ＋)
-  // 模式由 selectedRepoIds 当前状态决定:
+  // 模式由 selectedRepoNames 当前状态决定:
   // - 空 → 'first',首次关联,需填分支名
   // - 已选 ≥1 → 'append',追加,分支名沿用 lockedBranchName
   // -------------------------------------------------------------------------
@@ -586,7 +649,7 @@ export function DraftingZone({ data }: { data: DraftingData }) {
       if (attachInFlight) return
       setPendingAttachTrigger(trigger)
       // mode 决策:lockedBranchName 非空 = 已锁定(append);否则 = 首次关联(first)
-      // 注:不能用 selectedRepoIds.length 判定 —— 已有需求(预选 N repo 但未走弹层
+      // 注:不能用 selectedRepoNames.length 判定 —— 已有需求(预选 N repo 但未走弹层
       // 锁定分支)点 ＋ 也会进入 append 模式,但此时 lockedBranchName==='' 会导致
       // 锁定 banner 渲染成「将使用统一分支名 —」(UI-POLISH-SPEC §9.2 语义违和)
       setAttachDialogMode(lockedBranchName ? 'append' : 'first')
@@ -604,72 +667,74 @@ export function DraftingZone({ data }: { data: DraftingData }) {
   }, [pendingAttachTrigger])
 
   // -------------------------------------------------------------------------
-  // 关联仓库提交(issue 01 ticket + ticket 02 真实 worktree 创建)
+  // 关联仓库提交(issue 01 ticket + ticket 02 真实 codebase clone)
   // - 三态:
-  //   - 全部成功 → banner hidden + 锁定 branchName + selectedRepoIds 合并
-  //   - 部分成功 → banner partial(橙色) + 成功的写入 selectedRepoIds
+  //   - 全部成功 → banner hidden + 锁定 branchName + selectedRepoNames 合并
+  //   - 部分成功 → banner partial(橙色) + 成功的写入 selectedRepoNames
   //   - 全部失败 / 网络 / 鉴权错 → banner error + errorMessage
   // - 鉴权 401 单独映射为「鉴权失败」中文文案(不让 AgentError JSON 暴露给用户)
-  // - 重试该 repo:父组件把 failedRepoIds 重新塞进弹层(下次 onSubmit 自动用)
+  // - 重试该 repo:父组件把 failedRepoNames 重新塞进弹层(下次 onSubmit 自动用)
+  // - issue 06 (ADR-0030 D5):响应结果用 `repoName` 替代旧 `repoId`,
+  //   `codebasePath` 替代旧 `worktreePath`
   // -------------------------------------------------------------------------
   const submitAttach = useCallback(
-    async (value: { repoIds: string[]; branchName: string }) => {
+    async (value: { repoNames: string[]; branchName: string }) => {
       setAttachInFlight(true)
       try {
         // 调用真实 Agent 端 API
         const res = await attachReposToRequirement(data.requirementId, {
-          repoIds: value.repoIds,
+          repoNames: value.repoNames,
           branchName: value.branchName,
         })
 
         // 1. 分类 results(类型守卫 done by Zod)
-        const succeededIds: string[] = []
-        const failedIds: string[] = []
+        const succeededNames: string[] = []
+        const failedNamesList: string[] = []
         const failedMessages: string[] = []
         for (const r of res.results) {
-          if (r.ok) succeededIds.push(r.repoId)
+          if (r.ok) succeededNames.push(r.repoName)
           else {
-            failedIds.push(r.repoId)
-            failedMessages.push(`${r.repoId}:${r.message}`)
+            failedNamesList.push(r.repoName)
+            failedMessages.push(`${r.repoName}:${r.message}`)
           }
         }
 
-        // 2. 合并 selectedRepoIds(只增不删,失败的不进)
-        if (succeededIds.length > 0) {
-          setSelectedRepoIds((prev) => {
+        // 2. 合并 selectedRepoNames(只增不删,失败的不进)
+        if (succeededNames.length > 0) {
+          setSelectedRepoNames((prev) => {
             const merged = [...prev]
-            for (const id of succeededIds) {
-              if (!merged.includes(id)) merged.push(id)
+            for (const name of succeededNames) {
+              if (!merged.includes(name)) merged.push(name)
             }
             return merged
           })
         }
 
         // 3. 锁分支名(只有至少 1 个成功才锁定,避免追加模式误锁空分支)
-        if (succeededIds.length > 0 && value.branchName) {
+        if (succeededNames.length > 0 && value.branchName) {
           setLockedBranchName(value.branchName)
         }
 
         // 4. 状态机分支
-        if (failedIds.length === 0) {
+        if (failedNamesList.length === 0) {
           // 全成功
-          setFailedRepoIds([])
+          setFailedRepoNames([])
           setBannerPartialSummary(undefined)
           setBannerState('hidden')
           setBannerErrorMessage(null)
           setBannerDismissed(false)
-        } else if (succeededIds.length > 0) {
+        } else if (succeededNames.length > 0) {
           // 部分成功(橙色 #fff7ed banner)
-          setFailedRepoIds(failedIds)
+          setFailedRepoNames(failedNamesList)
           setBannerPartialSummary({
-            succeeded: succeededIds.length,
-            failedNames: failedIds,
+            succeeded: succeededNames.length,
+            failedNames: failedNamesList,
           })
           setBannerState('partial')
           setBannerErrorMessage(null)
         } else {
           // 全失败(走 error banner,显示首个失败详情)
-          setFailedRepoIds(failedIds)
+          setFailedRepoNames(failedNamesList)
           setBannerPartialSummary(undefined)
           setBannerState('error')
           setBannerErrorMessage(
@@ -684,7 +749,7 @@ export function DraftingZone({ data }: { data: DraftingData }) {
       } catch (err) {
         // 网络错 / 鉴权错 / schema 校验错 等
         setAttachDialogOpen(false)
-        setFailedRepoIds(value.repoIds)
+        setFailedRepoNames(value.repoNames)
         setBannerPartialSummary(undefined)
         setBannerState('error')
         // 401 鉴权失败 → 中文文案(避免 AgentError 的 JSON 直接显示给用户)
@@ -708,7 +773,7 @@ export function DraftingZone({ data }: { data: DraftingData }) {
   }, [])
 
   const handleBannerRetry = useCallback(() => {
-    // 重试:回到 first / append 弹层(由 selectedRepoIds 决定),用户重新选
+    // 重试:回到 first / append 弹层(由 selectedRepoNames 决定),用户重新选
     setBannerErrorMessage(null)
     setBannerState('hidden')
     openAttachDialog('banner-plus')
@@ -717,24 +782,24 @@ export function DraftingZone({ data }: { data: DraftingData }) {
   /**
    * ticket 02 部分成功 → 「重试该 repo」按钮回调
    * - 重新打开 attach dialog,模式由 lockedBranchName 决定
-   * - 把 failedRepoIds 注入 pickedRepoIds 让它们默认勾选(用户提交时直接重试这些)
-   * - 把 failedRepoIds 同步写到 selectedRepoIds state 以让 RepoBar 在 dialog 期间
+   * - 把 failedRepoNames 注入 pickedRepoNames 让它们默认勾选(用户提交时直接重试这些)
+   * - 把 failedRepoNames 同步写到 selectedRepoNames state 以让 RepoBar 在 dialog 期间
    *   显示这些 chip 为"已选中 + 待重试"
    */
   const handleBannerRetryFailed = useCallback(
     (failedNames: string[]) => {
-      // 把失败的 repo 临时加进 selectedRepoIds,这样打开 dialog 时 pickedRepoIds
+      // 把失败的 repo 临时加进 selectedRepoNames,这样打开 dialog 时 pickedRepoNames
       // 会包含它们(默认勾选)
-      setSelectedRepoIds((prev) => {
+      setSelectedRepoNames((prev) => {
         const merged = [...prev]
-        for (const id of failedNames) {
-          if (!merged.includes(id)) merged.push(id)
+        for (const name of failedNames) {
+          if (!merged.includes(name)) merged.push(name)
         }
         return merged
       })
       setBannerErrorMessage(null)
       setBannerPartialSummary(undefined)
-      // 打开弹层;attach-repos-dialog 会用 selectedRepoIds 作 pickedRepoIds 默认勾选
+      // 打开弹层;attach-repos-dialog 会用 selectedRepoNames 作 pickedRepoNames 默认勾选
       openAttachDialog('banner-plus')
     },
     [openAttachDialog],
@@ -816,8 +881,8 @@ export function DraftingZone({ data }: { data: DraftingData }) {
           <div className="mt-0 mb-3">
             <RepoBar
               repos={liveRepos}
-              selectedRepoIds={selectedRepoIds}
-              failedRepoIds={failedRepoIds}
+              selectedRepoNames={selectedRepoNames}
+              failedRepoNames={failedRepoNames}
               attachedBranchName={lockedBranchName}
               onDetachRepo={handleDetachRepo}
               canLaunch={validity.canLaunch}
@@ -910,7 +975,7 @@ export function DraftingZone({ data }: { data: DraftingData }) {
         titlePrefix={attachDialogMode === 'first' ? '关联仓库' : '追加仓库'}
         requirementTitle={data.title || data.requirementId}
         availableRepos={liveRepos}
-        pickedRepoIds={selectedRepoIds}
+        pickedRepoNames={selectedRepoNames}
         lockedBranchName={lockedBranchName}
         onSubmit={submitAttach}
         onClose={closeAttachDialog}

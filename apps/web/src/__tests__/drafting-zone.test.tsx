@@ -968,6 +968,18 @@ describe('DraftingZone · 辅助文件卡片 + 拖拽分割 (issue 04)', () => {
 })
 
 // ============================================================================
+// issue 06 (ADR-0030) 跟改:
+// - `selectedRepoIds` → `selectedRepoNames`(name 即标识,无 `id` 字段)
+// - mock repo 字段 `{ id, name }` → `{ name, gitUrl, description }`
+// - data 属性 `data-repo-id` → `data-repo-name`
+// - POST body `repoIds` → `repoNames`(决策 105)
+// - mock 响应 `repoId` / `worktreePath` → `repoName` / `codebasePath`
+//
+// 历史 repo 池(`GLOBAL_REPO_POOL`)含 `＋ 更多仓库…` 占位条目,issue 06
+// 后该占位已被移除(决策 Q14);所有 fixture 改为 4 个真实仓库。
+// ============================================================================
+
+// ============================================================================
 // issue 05 · 辅助文件抽屉(端到端集成)
 //
 // 验收清单(对照 issue 05 acceptance criteria):
@@ -1150,15 +1162,16 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
     // chip 渲染数量 = 已选仓库数(issue 09 Q8 a:展开态只显示已选)
     const chips = within(bar).getAllByTestId('drafting-repo-chip')
     expect(chips.length).toBeGreaterThan(0)
-    expect(chips).toHaveLength(data.selectedRepoIds.length)
+    expect(chips).toHaveLength(data.selectedRepoNames.length)
     // 占位条目(以 "＋" 开头)不渲染为 chip —— issue 01 ticket 取代
+    // issue 06 跟改:repos 列表只含真实仓库(name 即标识),不再有占位条目
     expect(
       chips.find((c) => c.getAttribute('data-repo-name')?.startsWith('＋')),
     ).toBeUndefined()
     // repo-bar 节点上 data 齐全
     expect(bar.getAttribute('data-repo-count')).toBe(String(data.repos.length))
     expect(bar.getAttribute('data-selected-count')).toBe(
-      String(data.selectedRepoIds.length),
+      String(data.selectedRepoNames.length),
     )
   })
 
@@ -1166,13 +1179,13 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
   it('验收 #4:0 个仓库 → 软警告 ⚠ 仅 0 个仓库 · … 显示', async () => {
     const data = {
       ...emptyDrafting('req-empty'),
-      // 0 仓库:显式覆盖 repos=[] + selectedRepoIds=[](emptyDrafting 自带
-      // GLOBAL_REPO_POOL 5 个 repo;这里覆盖回 0 模拟 issue 08 时代场景)
+      // 0 仓库:显式覆盖 repos=[] + selectedRepoNames=[] (emptyDrafting 自带
+      // 空数组;这里覆盖回 0 模拟 issue 06 全新安装场景)
       title: '退款',
       prdMarkdown: generatePrdSkeleton('退款'),
       empty: false,
       repos: [],
-      selectedRepoIds: [],
+      selectedRepoNames: [],
     }
     render(<DraftingZone data={data} />)
 
@@ -1197,10 +1210,10 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
       prdMarkdown: generatePrdSkeleton('退款'),
       empty: false,
       repos: [
-        { id: 'r1', name: 'refund-service' },
-        { id: 'r2', name: 'order-service' },
+        { name: 'refund-service', gitUrl: 'https://example.com/refund.git', description: '退款' },
+        { name: 'order-service', gitUrl: 'https://example.com/order.git', description: '订单' },
       ],
-      selectedRepoIds: ['r1'],
+      selectedRepoNames: ['refund-service'],
     }
     render(<DraftingZone data={data} />)
 
@@ -1220,10 +1233,10 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
       prdMarkdown: generatePrdSkeleton('退款'),
       empty: false,
       repos: [
-        { id: 'r1', name: 'refund-service' },
-        { id: 'r2', name: 'order-service' },
+        { name: 'refund-service', gitUrl: 'https://example.com/refund.git', description: '退款' },
+        { name: 'order-service', gitUrl: 'https://example.com/order.git', description: '订单' },
       ],
-      selectedRepoIds: ['r1', 'r2'],
+      selectedRepoNames: ['refund-service', 'order-service'],
     }
     render(<DraftingZone data={data} />)
 
@@ -1240,11 +1253,11 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
       prdMarkdown: generatePrdSkeleton('退款'),
       empty: false,
       repos: [
-        { id: 'r1', name: 'refund-service' },
-        { id: 'r2', name: 'order-service' },
-        { id: 'r3', name: 'coupon-service' },
+        { name: 'refund-service', gitUrl: 'https://example.com/refund.git', description: '退款' },
+        { name: 'order-service', gitUrl: 'https://example.com/order.git', description: '订单' },
+        { name: 'coupon-service', gitUrl: 'https://example.com/coupon.git', description: '卡券' },
       ],
-      selectedRepoIds: ['r1', 'r2', 'r3'],
+      selectedRepoNames: ['refund-service', 'order-service', 'coupon-service'],
     }
     render(<DraftingZone data={data} />)
 
@@ -1253,7 +1266,7 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
   })
 
   // 验收 #7 同一 render 内更新警告可见性
-  it('验收 #7:点 × 取消关联 → 软警告在同一 render 内更新(issue 09 折叠 sticky)', async () => {
+  it('验收 #7:点 × 取消关联 → 软警告在同一 render 内更新(issue 09 折叠 sticky · 字段跟改 issue 06)', async () => {
     // 起始:2 个仓库 → 警告隐藏
     const data = {
       ...emptyDrafting('req-toggle'),
@@ -1261,10 +1274,10 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
       prdMarkdown: generatePrdSkeleton('退款'),
       empty: false,
       repos: [
-        { id: 'r1', name: 'refund-service' },
-        { id: 'r2', name: 'order-service' },
+        { name: 'refund-service', gitUrl: 'https://example.com/refund.git', description: '退款' },
+        { name: 'order-service', gitUrl: 'https://example.com/order.git', description: '订单' },
       ],
-      selectedRepoIds: ['r1', 'r2'],
+      selectedRepoNames: ['refund-service', 'order-service'],
     }
     render(<DraftingZone data={data} />)
     const user = userEvent.setup()
@@ -1275,22 +1288,22 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
     // 展开摘要(issue 09 默认折叠)
     await user.click(screen.getByTestId('drafting-repo-bar-summary'))
 
-    // 取消关联 r2 → 仅剩 1 个仓库 → 警告出现
-    const r2Detach = screen
+    // 取消关联 order-service → 仅剩 1 个仓库 → 警告出现
+    const orderDetach = screen
       .getAllByTestId('drafting-repo-chip-detach')
-      .find((b) => b.getAttribute('data-repo-id') === 'r2') as HTMLElement
-    await user.click(r2Detach)
+      .find((b) => b.getAttribute('data-repo-name') === 'order-service') as HTMLElement
+    await user.click(orderDetach)
 
     expect(bar.getAttribute('data-soft-warning')).toBe('true')
     expect(bar.getAttribute('data-selected-count')).toBe('1')
     expect(screen.getByTestId('drafting-repo-soft-warning')).toBeInTheDocument()
 
-    // 再取消关联 r1 → 0 个仓库 → 警告依然显示;此时 RepoBar 进入 N=0 空态
+    // 再取消关联 refund-service → 0 个仓库 → 警告依然显示;此时 RepoBar 进入 N=0 空态
     // (issue 01 ticket 扩展:chips 被替换为 add button + hint)
-    const r1Detach = screen
+    const refundDetach = screen
       .getAllByTestId('drafting-repo-chip-detach')
-      .find((b) => b.getAttribute('data-repo-id') === 'r1') as HTMLElement
-    await user.click(r1Detach)
+      .find((b) => b.getAttribute('data-repo-name') === 'refund-service') as HTMLElement
+    await user.click(refundDetach)
     expect(bar.getAttribute('data-soft-warning')).toBe('true')
     expect(bar.getAttribute('data-selected-count')).toBe('0')
     expect(bar.getAttribute('data-empty-state')).toBe('true')
@@ -1316,7 +1329,7 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
     expect(bar.getAttribute('data-selected-count')).toBe('0')
   })
 
-  it('验收 #7 同步性:展开态 chip data-selected 反映 selectedRepoIds(issue 09)', async () => {
+  it('验收 #7 同步性:展开态 chip data-selected 反映 selectedRepoNames(issue 09 · 字段跟改 issue 06)', async () => {
     // issue 09:展开态只显示已选 chip,data-selected 均为 "true"
     // (chip 自身不再可点击切换,× 才是 detach 入口)
     const data = {
@@ -1325,10 +1338,10 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
       prdMarkdown: generatePrdSkeleton('退款'),
       empty: false,
       repos: [
-        { id: 'r1', name: 'refund-service' },
-        { id: 'r2', name: 'order-service' },
+        { name: 'refund-service', gitUrl: 'https://example.com/refund.git', description: '退款' },
+        { name: 'order-service', gitUrl: 'https://example.com/order.git', description: '订单' },
       ],
-      selectedRepoIds: ['r1'],
+      selectedRepoNames: ['refund-service'],
     }
     render(<DraftingZone data={data} />)
     const user = userEvent.setup()
@@ -1336,16 +1349,16 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
     // 默认折叠 → 展开
     await user.click(screen.getByTestId('drafting-repo-bar-summary'))
 
-    // 只渲染 r1(r2 未选中,不显示)
+    // 只渲染 refund-service(order-service 未选中,不显示)
     const chips = screen.getAllByTestId('drafting-repo-chip')
     expect(chips).toHaveLength(1)
-    const r1 = chips[0]
-    expect(r1.getAttribute('data-repo-id')).toBe('r1')
-    expect(r1.getAttribute('data-selected')).toBe('true')
+    const refundChip = chips[0]
+    expect(refundChip.getAttribute('data-repo-name')).toBe('refund-service')
+    expect(refundChip.getAttribute('data-selected')).toBe('true')
 
-    // 点 × r1 → 0 个仓库,bar 进入空态 + useEffect 自动收起
-    const r1Detach = screen.getByTestId('drafting-repo-chip-detach')
-    await user.click(r1Detach)
+    // 点 × refund-service → 0 个仓库,bar 进入空态 + useEffect 自动收起
+    const refundDetach = screen.getByTestId('drafting-repo-chip-detach')
+    await user.click(refundDetach)
     expect(screen.queryByTestId('drafting-repo-chip')).toBeNull()
     const bar = screen.getByTestId('drafting-repo-bar')
     expect(bar.getAttribute('data-empty-state')).toBe('true')
@@ -1359,7 +1372,7 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
       prdMarkdown: generatePrdSkeleton('退款'),
       empty: false,
       repos: [],
-      selectedRepoIds: [],
+      selectedRepoNames: [],
     }
     render(<DraftingZone data={data} />)
 
@@ -1379,8 +1392,8 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
       ...emptyDrafting('req-one-bad'),
       prdMarkdown: '   ', // 空白 → validateLaunch.trim 非空判断为 false
       empty: false,
-      repos: [{ id: 'r1', name: 'refund-service' }],
-      selectedRepoIds: ['r1'],
+      repos: [{ name: 'refund-service', gitUrl: 'https://example.com/refund.git', description: '退款' }],
+      selectedRepoNames: ['refund-service'],
     }
     render(<DraftingZone data={data} />)
 
@@ -1446,21 +1459,22 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
     expect(routerPush).not.toHaveBeenCalled()
   })
 
-  // issue 01 ticket:旧 issue 08 的「＋ 更多仓库…」占位 chip 已被「＋ 添加仓库…」
-  // 实按钮取代;此处验证"以 '＋' 开头的占位条目**不**作为 chip 渲染,防止误判
-  it('以 "＋" 开头的占位条目不渲染为 chip(issue 01 ticket 取代占位 · issue 09 折叠 sticky)', async () => {
-    // 1 个真仓库 + 1 个 "＋ 更多仓库…" 占位(沿用 issue 08 的 fixture 形态);
-    // r1 预选中以让 chips 进入 DOM,否则 N=0 空态会替换整个 chips 容器
+  // issue 06 (ADR-0030 D3):repos 列表由 SSR `<root>/repos.yaml` 派生,每条都是
+// 真实仓库 —— 「＋ 更多仓库…」占位条目已被删除(决策 Q14)。此处验证:
+// - 没有占位条目时,所有 repos 都作为 chip 候选展示
+// - data-repo-count === repos.length(没有额外占位)
+// - 跳转链接在底部引导用户去 `/repos`(决策 Q14)
+  it('issue 06:repos 列表全是真实仓库 —— 没有 "＋ 更多仓库…" 占位条目', async () => {
     const data = {
-      ...emptyDrafting('req-more'),
+      ...emptyDrafting('req-no-placeholder'),
       title: '退款',
       prdMarkdown: generatePrdSkeleton('退款'),
       empty: false,
       repos: [
-        { id: 'r1', name: 'refund-service' },
-        { id: 'r-more', name: '＋ 更多仓库…' },
+        { name: 'refund-service', gitUrl: 'https://example.com/refund.git', description: '退款' },
+        { name: 'order-service', gitUrl: 'https://example.com/order.git', description: '订单' },
       ],
-      selectedRepoIds: ['r1'],
+      selectedRepoNames: ['refund-service'],
     }
     render(<DraftingZone data={data} />)
     const user = userEvent.setup()
@@ -1470,18 +1484,23 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
     expect(screen.queryByTestId('repo-bar-empty')).toBeNull()
     await user.click(screen.getByTestId('drafting-repo-bar-summary'))
 
-    // 占位条目不作为 chip 渲染(issue 01 ticket 取代)
+    // 真实仓库的初始勾选状态正确(refund-service 已选)
     const allChips = screen.queryAllByTestId('drafting-repo-chip')
-    expect(allChips.find((c) => c.getAttribute('data-repo-id') === 'r-more')).toBeUndefined()
     expect(allChips).toHaveLength(1)
-
-    // 真实仓库的初始勾选状态正确
-    const r1Chip = screen
-      .getAllByTestId('drafting-repo-chip')
-      .find((c) => c.getAttribute('data-repo-id') === 'r1') as HTMLElement
-    expect(r1Chip.getAttribute('data-selected')).toBe('true')
+    const refundChip = allChips.find(
+      (c) => c.getAttribute('data-repo-name') === 'refund-service',
+    ) as HTMLElement
+    expect(refundChip.getAttribute('data-selected')).toBe('true')
+    // data-repo-count === repos.length(没有额外占位)
     const bar = screen.getByTestId('drafting-repo-bar')
+    expect(bar.getAttribute('data-repo-count')).toBe(String(data.repos.length))
     expect(bar.getAttribute('data-selected-count')).toBe('1')
+
+    // 打开 attach 弹层 → 跳转链接在底部(决策 Q14)
+    await user.click(screen.getByTestId('repo-bar-add-more'))
+    expect(screen.getByTestId('attach-repos-dialog')).toBeInTheDocument()
+    expect(screen.getByTestId('attach-repos-dialog-repos-link')).toBeInTheDocument()
+    await user.click(screen.getByTestId('attach-repos-dialog-cancel'))
   })
 
   // 注:历史测试 "launch 按钮点击 → 触发 DraftingPrdPane.handle.saveNow()" 已移除
@@ -1545,17 +1564,17 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
     delete (globalThis as { fetch?: unknown }).fetch
   })
 
-  it('全成功:fetch 200 + 2 ok=true → selectedRepoIds 合并 + lockedBranchName 写入 + banner hidden', async () => {
+  it('全成功:fetch 200 + 2 ok=true → selectedRepoNames 合并 + lockedBranchName 写入 + banner hidden', async () => {
     const data = {
       ...emptyDrafting('req-attach-ok'),
       title: '退款',
       prdMarkdown: generatePrdSkeleton('退款'),
       empty: false,
       repos: [
-        { id: 'r1', name: 'refund-service' },
-        { id: 'r2', name: 'order-service' },
+        { name: 'refund-service', gitUrl: 'https://example.com/refund.git', description: '退款' },
+        { name: 'order-service', gitUrl: 'https://example.com/order.git', description: '订单' },
       ],
-      selectedRepoIds: [],
+      selectedRepoNames: [],
     }
     mockAttachReposFetch({
       requirementId: 'req-attach-ok',
@@ -1563,8 +1582,8 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
       succeeded: 2,
       failed: 0,
       results: [
-        { ok: true, repoId: 'r1', branch: 'feat/refund', worktreePath: '/x/r1', base: 'main' },
-        { ok: true, repoId: 'r2', branch: 'feat/refund', worktreePath: '/x/r2', base: 'main' },
+        { ok: true, repoName: 'refund-service', branch: 'feat/refund', codebasePath: '/x/refund-service', base: 'main' },
+        { ok: true, repoName: 'order-service', branch: 'feat/refund', codebasePath: '/x/order-service', base: 'main' },
       ],
     })
 
@@ -1584,7 +1603,7 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('drafting-banner')).toBeNull()
     })
-    // selectedRepoIds 应包含 r1 + r2
+    // selectedRepoNames 应包含 refund-service + order-service
     const bar = screen.getByTestId('drafting-repo-bar')
     expect(bar.getAttribute('data-selected-count')).toBe('2')
 
@@ -1603,21 +1622,22 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
     expect(url).toContain('/api/requirement/req-attach-ok/repos')
     expect(init.method).toBe('POST')
     const body = JSON.parse(init.body as string)
-    expect(body.repoIds.sort()).toEqual(['r1', 'r2'])
+    // 字段从 repoIds 改为 repoNames(issue 06 ADR-0030 D5)
+    expect(body.repoNames.sort()).toEqual(['order-service', 'refund-service'])
     expect(body.branchName).toBe('feat/refund')
   })
 
-  it('部分成功:1 ok + 1 fail → selectedRepoIds 仅成功 + banner partial(橙色)', async () => {
+  it('部分成功:1 ok + 1 fail → selectedRepoNames 仅成功 + banner partial(橙色)', async () => {
     const data = {
       ...emptyDrafting('req-partial'),
       title: '退款',
       prdMarkdown: generatePrdSkeleton('退款'),
       empty: false,
       repos: [
-        { id: 'r1', name: 'refund-service' },
-        { id: 'r2', name: 'order-service' },
+        { name: 'refund-service', gitUrl: 'https://example.com/refund.git', description: '退款' },
+        { name: 'order-service', gitUrl: 'https://example.com/order.git', description: '订单' },
       ],
-      selectedRepoIds: [],
+      selectedRepoNames: [],
     }
     mockAttachReposFetch({
       requirementId: 'req-partial',
@@ -1625,8 +1645,8 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
       succeeded: 1,
       failed: 1,
       results: [
-        { ok: true, repoId: 'r1', branch: 'feat/x', worktreePath: '/x/r1', base: 'main' },
-        { ok: false, repoId: 'r2', code: 'E_DISK_FULL', message: 'No space left' },
+        { ok: true, repoName: 'refund-service', branch: 'feat/x', codebasePath: '/x/refund-service', base: 'main' },
+        { ok: false, repoName: 'order-service', code: 'E_DISK_FULL', message: 'No space left' },
       ],
     })
 
@@ -1648,9 +1668,10 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
     expect(banner.getAttribute('data-failed-count')).toBe('1')
     expect(banner.textContent).toMatch(/已关联 1/)
     expect(banner.textContent).toMatch(/失败 1/)
-    expect(banner.textContent).toContain('r2')
+    // 字段从 id 改为 name
+    expect(banner.textContent).toContain('order-service')
 
-    // 部分成功:成功 repo 进 selectedRepoIds
+    // 部分成功:成功 repo 进 selectedRepoNames
     const bar = screen.getByTestId('drafting-repo-bar')
     expect(bar.getAttribute('data-selected-count')).toBe('1')
 
@@ -1658,17 +1679,17 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
     expect(screen.getByTestId('drafting-banner-retry-failed')).toBeInTheDocument()
   })
 
-  it('全失败:2 ok=false → banner error + errorMessage 含 repoId', async () => {
+  it('全失败:2 ok=false → banner error + errorMessage 含 repoName', async () => {
     const data = {
       ...emptyDrafting('req-all-fail'),
       title: '退款',
       prdMarkdown: generatePrdSkeleton('退款'),
       empty: false,
       repos: [
-        { id: 'r1', name: 'r1' },
-        { id: 'r2', name: 'r2' },
+        { name: 'refund-service', gitUrl: 'https://example.com/refund.git', description: '退款' },
+        { name: 'order-service', gitUrl: 'https://example.com/order.git', description: '订单' },
       ],
-      selectedRepoIds: [],
+      selectedRepoNames: [],
     }
     mockAttachReposFetch({
       requirementId: 'req-all-fail',
@@ -1676,8 +1697,8 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
       succeeded: 0,
       failed: 2,
       results: [
-        { ok: false, repoId: 'r1', code: 'E_REPO_NOT_FOUND', message: 'r1 not found' },
-        { ok: false, repoId: 'r2', code: 'E_REPO_NOT_FOUND', message: 'r2 not found' },
+        { ok: false, repoName: 'refund-service', code: 'E_REPO_NOT_FOUND', message: 'refund-service not found' },
+        { ok: false, repoName: 'order-service', code: 'E_REPO_NOT_FOUND', message: 'order-service not found' },
       ],
     })
 
@@ -1695,8 +1716,8 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
       expect(screen.getByTestId('drafting-banner')).toHaveAttribute('data-banner-state', 'error')
     })
     const banner = screen.getByTestId('drafting-banner')
-    // 全失败 banner 只显示首个失败 repo(避免文案过长;详细看 failedRepoIds state)
-    expect(banner.textContent).toContain('r1')
+    // 全失败 banner 只显示首个失败 repo(避免文案过长;详细看 failedRepoNames state)
+    expect(banner.textContent).toContain('refund-service')
     // error 态无 partial retry 按钮
     expect(screen.queryByTestId('drafting-banner-retry-failed')).toBeNull()
   })
@@ -1707,8 +1728,8 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
       title: '退款',
       prdMarkdown: generatePrdSkeleton('退款'),
       empty: false,
-      repos: [{ id: 'r1', name: 'r1' }],
-      selectedRepoIds: [],
+      repos: [{ name: 'refund-service', gitUrl: 'https://example.com/refund.git', description: '退款' }],
+      selectedRepoNames: [],
     }
     mockFetch.mockReset()
     // 用 mockImplementation 每次返回新 Response(issue 06 useEffect 触发的 GET 也走同一 mock)
@@ -1741,8 +1762,8 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
       title: '退款',
       prdMarkdown: generatePrdSkeleton('退款'),
       empty: false,
-      repos: [{ id: 'r1', name: 'r1' }],
-      selectedRepoIds: [],
+      repos: [{ name: 'refund-service', gitUrl: 'https://example.com/refund.git', description: '退款' }],
+      selectedRepoNames: [],
     }
     mockFetch.mockReset()
     mockFetch.mockRejectedValue(new Error('Failed to fetch'))
@@ -1765,17 +1786,17 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
   })
 
   // ticket 02 验收 #8:部分成功 → 失败 repo 标红(data-failed=true)
-  it('P3:部分成功 → RepoBar 失败 chip 显示 data-failed="true" + ✕ 图标(issue 09 折叠 sticky)', async () => {
+  it('P3:部分成功 → RepoBar 失败 chip 显示 data-failed="true" + ✕ 图标(issue 09 折叠 sticky · 字段跟改 issue 06)', async () => {
     const data = {
       ...emptyDrafting('req-red'),
       title: '退款',
       prdMarkdown: generatePrdSkeleton('退款'),
       empty: false,
       repos: [
-        { id: 'r1', name: 'refund-svc' },
-        { id: 'r2', name: 'order-svc' },
+        { name: 'refund-service', gitUrl: 'https://example.com/refund.git', description: '退款' },
+        { name: 'order-service', gitUrl: 'https://example.com/order.git', description: '订单' },
       ],
-      selectedRepoIds: [],
+      selectedRepoNames: [],
     }
     mockFetch.mockReset()
     // 用 mockImplementation 每次返回新 Response(issue 06 useEffect 触发的 GET 也走同一 mock)
@@ -1787,8 +1808,8 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
           succeeded: 1,
           failed: 1,
           results: [
-            { ok: true, repoId: 'r1', branch: 'feat/red', worktreePath: '/x/r1', base: 'main' },
-            { ok: false, repoId: 'r2', code: 'E_DISK_FULL', message: 'No space left' },
+            { ok: true, repoName: 'refund-service', branch: 'feat/red', codebasePath: '/x/refund-service', base: 'main' },
+            { ok: false, repoName: 'order-service', code: 'E_DISK_FULL', message: 'No space left' },
           ],
         }),
       ),
@@ -1817,32 +1838,32 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
     // 展开摘要(issue 09 默认折叠)
     await user.click(screen.getByTestId('drafting-repo-bar-summary'))
 
-    // r1 (成功) chip: data-failed=false,data-selected=true
-    const r1 = screen
+    // refund-service (成功) chip: data-failed=false,data-selected=true
+    const refund = screen
       .getAllByTestId('drafting-repo-chip')
-      .find((c) => c.getAttribute('data-repo-id') === 'r1') as HTMLElement
-    expect(r1.getAttribute('data-failed')).toBe('false')
-    expect(r1.getAttribute('data-selected')).toBe('true')
+      .find((c) => c.getAttribute('data-repo-name') === 'refund-service') as HTMLElement
+    expect(refund.getAttribute('data-failed')).toBe('false')
+    expect(refund.getAttribute('data-selected')).toBe('true')
 
-    // r2 (失败) chip: data-failed=true,文案含 ✕ —— 在 issue 09 折叠 sticky 中,
+    // order-service (失败) chip: data-failed=true,文案含 ✕ —— 在 issue 09 折叠 sticky 中,
     // 失败但未选中的 repo 也会在展开态展示(以红色呈现),便于用户感知"刚才 attach 失败"
-    const r2 = screen
+    const order = screen
       .getAllByTestId('drafting-repo-chip')
-      .find((c) => c.getAttribute('data-repo-id') === 'r2') as HTMLElement
-    expect(r2.getAttribute('data-failed')).toBe('true')
-    expect(r2.getAttribute('data-selected')).toBe('false')
-    expect(r2.textContent).toContain('✕')
+      .find((c) => c.getAttribute('data-repo-name') === 'order-service') as HTMLElement
+    expect(order.getAttribute('data-failed')).toBe('true')
+    expect(order.getAttribute('data-selected')).toBe('false')
+    expect(order.textContent).toContain('✕')
   })
 
   // ticket 02 验收 #9:已关联 + 锁定分支名 → chip 显示 🟢 + 分支名
-  it('P4:成功关联后 chip 显示绿色小圆点 🟢 + 分支名(issue 09 折叠 sticky)', async () => {
+  it('P4:成功关联后 chip 显示绿色小圆点 🟢 + 分支名(issue 09 折叠 sticky · 字段跟改 issue 06)', async () => {
     const data = {
       ...emptyDrafting('req-green'),
       title: '退款',
       prdMarkdown: generatePrdSkeleton('退款'),
       empty: false,
-      repos: [{ id: 'r1', name: 'refund-svc' }],
-      selectedRepoIds: [],
+      repos: [{ name: 'refund-service', gitUrl: 'https://example.com/refund.git', description: '退款' }],
+      selectedRepoNames: [],
     }
     mockFetch.mockReset()
     // 用 mockImplementation 每次返回新 Response(issue 06 useEffect 触发的 GET 也走同一 mock)
@@ -1854,7 +1875,7 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
           succeeded: 1,
           failed: 0,
           results: [
-            { ok: true, repoId: 'r1', branch: 'feat/green', worktreePath: '/x/r1', base: 'main' },
+            { ok: true, repoName: 'refund-service', branch: 'feat/green', codebasePath: '/x/refund-service', base: 'main' },
           ],
         }),
       ),
@@ -1878,24 +1899,24 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
     // 展开摘要(issue 09 默认折叠)
     await user.click(screen.getByTestId('drafting-repo-bar-summary'))
 
-    const r1 = screen.getByTestId('drafting-repo-chip')
-    expect(r1.textContent).toContain('🟢')
+    const refund = screen.getByTestId('drafting-repo-chip')
+    expect(refund.textContent).toContain('🟢')
     // 分支名 span 存在
     expect(screen.getByTestId('drafting-repo-chip-branch')).toHaveTextContent('feat/green')
   })
 
-  // ticket 02 验收 #8:重试该 repo → 弹层打开时 failedRepoIds 默认勾选
-  it('P5:点 [重试该 repo] → 弹层打开时 failed repo 默认勾选(pickedRepoIds)', async () => {
+  // ticket 02 验收 #8:重试该 repo → 弹层打开时 failedRepoNames 默认勾选
+  it('P5:点 [重试该 repo] → 弹层打开时 failed repo 默认勾选(pickedRepoNames · issue 06)', async () => {
     const data = {
       ...emptyDrafting('req-retry-failed'),
       title: '退款',
       prdMarkdown: generatePrdSkeleton('退款'),
       empty: false,
       repos: [
-        { id: 'r1', name: 'r1' },
-        { id: 'r2', name: 'r2' },
+        { name: 'refund-service', gitUrl: 'https://example.com/refund.git', description: '退款' },
+        { name: 'order-service', gitUrl: 'https://example.com/order.git', description: '订单' },
       ],
-      selectedRepoIds: [],
+      selectedRepoNames: [],
     }
     mockFetch.mockReset()
     // 用 mockImplementation 每次返回新 Response(issue 06 useEffect 触发的 GET 也走同一 mock)
@@ -1907,8 +1928,8 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
           succeeded: 1,
           failed: 1,
           results: [
-            { ok: true, repoId: 'r1', branch: 'feat/retry', worktreePath: '/x/r1', base: 'main' },
-            { ok: false, repoId: 'r2', code: 'E_DISK_FULL', message: 'No space left' },
+            { ok: true, repoName: 'refund-service', branch: 'feat/retry', codebasePath: '/x/refund-service', base: 'main' },
+            { ok: false, repoName: 'order-service', code: 'E_DISK_FULL', message: 'No space left' },
           ],
         }),
       ),
@@ -1937,17 +1958,17 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
     // 点 [重试该 repo] 按钮
     await user.click(screen.getByTestId('drafting-banner-retry-failed'))
 
-    // 弹层打开,pickedRepoIds 应默认勾选失败的 r2(r1 是成功已勾)
+    // 弹层打开,pickedRepoNames 应默认勾选失败的 order-service(refund-service 是成功已勾)
     const dialogCheckboxes = screen.getAllByTestId(
       'attach-repos-dialog-repo-checkbox',
     ) as HTMLInputElement[]
-    const r1cb = dialogCheckboxes.find(
-      (c) => (c as HTMLElement).getAttribute('data-repo-id') === 'r1',
+    const refundCb = dialogCheckboxes.find(
+      (c) => (c as HTMLElement).getAttribute('data-repo-name') === 'refund-service',
     ) as HTMLInputElement
-    const r2cb = dialogCheckboxes.find(
-      (c) => (c as HTMLElement).getAttribute('data-repo-id') === 'r2',
+    const orderCb = dialogCheckboxes.find(
+      (c) => (c as HTMLElement).getAttribute('data-repo-name') === 'order-service',
     ) as HTMLInputElement
-    expect(r1cb.checked).toBe(true)
-    expect(r2cb.checked).toBe(true)
+    expect(refundCb.checked).toBe(true)
+    expect(orderCb.checked).toBe(true)
   })
 })

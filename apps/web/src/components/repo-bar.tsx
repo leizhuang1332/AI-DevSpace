@@ -35,10 +35,10 @@ import { shouldShowRepoSoftWarning, type DraftingRepo } from '@/lib/drafting'
  *   圆角/阴影仍只属于 PRD)。
  * - **N=0 沿用现状**(Q9 a):N=0 不走折叠,直接显示 issue 01 ticket 的
  *   `[＋ 添加仓库…]` + `💡 首次添加仓库时会请你填写统一分支名` hint。
- * - **× 一键取消关联**(Q1 + Q4 + Q6):点 × 立即从 `selectedRepoIds`
+ * - **× 一键取消关联**(Q1 + Q4 + Q6):点 × 立即从 `selectedRepoNames`
  *   移除,无 toast 无动画。可逆(重新 attach 即可)。
- * - **软警告折叠态外层常驻**(Q7 a):N≤1 时 ⚠ 文案在折叠行显示。
- *   展开态 chip 区下方再保留一份(同一文案,可见性不重复即可)。
+ * - **软警告折叠态外层常驻**(Q7 a):N≤1 时 ⚠ 文卡在折叠行显示。
+ *   展开态 chip 区下方再保留一份(同一文卡,可见性不重复即可)。
  * - **展开区只显示已选 chip + ×**(Q8 a):不混入"可选但未选"——bar 是
  *   清理已选的地方,选/追加走 attach 弹层。
  * - **不耦合 PRD**:本组件不读 prdMarkdown;launch validity 完全由
@@ -53,30 +53,36 @@ import { shouldShowRepoSoftWarning, type DraftingRepo } from '@/lib/drafting'
  *
  * 单一职责:本组件不感知 prdMarkdown / title / 草稿内容,只渲染仓库
  * 选择 UI(launch 转发按需启用,目前未渲染)。
+ *
+ * issue 06 (ADR-0030 D3 / 决策 105) 跟改:
+ * - `selectedRepoIds` → `selectedRepoNames`;`failedRepoIds` → `failedRepoNames`
+ * - chip 显示纯 name(不再加 `repo-` 前缀)
+ * - 删除 `PLACEHOLDER_PREFIX` 过滤 —— repos 列表由 SSR `<root>/repos.yaml`
+ *   派生,每条都是真实仓库(name 即标识,不含 `＋` 开头的占位条目)
  */
 
 export interface RepoBarProps {
-  /** 仓库候选列表(过滤掉 "＋" 开头的占位条目) */
+  /** 仓库候选列表(每条都是真实仓库,字段名 name/gitUrl/description) */
   repos: DraftingRepo[]
-  /** 已选中仓库 id 列表 */
-  selectedRepoIds: string[]
+  /** 已选中仓库 name 列表(issue 06:不再使用 id) */
+  selectedRepoNames: string[]
   /**
-   * 失败的 repo id 列表(ticket 02 验收 #8 partial success)。
-   * 失败的 chip 渲染为红色边框 + 错误图标 + 文案。
+   * 失败的 repo name 列表(ticket 02 验收 #8 partial success · issue 06 跟改)。
+   * 失败的 chip 渲染为红色边框 + 错误图标 + 文卡。
    */
-  failedRepoIds?: readonly string[]
+  failedRepoNames?: readonly string[]
   /**
    * 取消关联回调(issue 09 · detach 按钮):点 × 立即从
-   * `selectedRepoIds` 移除。无确认、无动画。
+   * `selectedRepoNames` 移除。无确认、无动画。
    */
-  onDetachRepo: (repoId: string) => void
+  onDetachRepo: (repoName: string) => void
   /**
    * Launch validity:由父组件基于 title + PRD 内容计算(issue 08 验收 #7)。
-   * 故意不接受 `repos` / `selectedRepoIds` —— 软警告不参与 launch 决策。
+   * 故意不接受 `repos` / `selectedRepoNames` —— 软警告不参与 launch 决策。
    */
   canLaunch: boolean
   /**
-   * 启动按钮 disabled 时显示的辅助提示文案(可选;空表示不显示)。
+   * 启动按钮 disabled 时显示的辅助提示文卡(可选;空表示不显示)。
    * 由父组件(DraftingZone)基于 PRD 字段状态计算并传入,本组件不感知 PRD。
    */
   launchDisabledHint?: string
@@ -95,20 +101,17 @@ export interface RepoBarProps {
   attachedBranchName?: string
 }
 
-/** 仓库软警告文案模板:N 由 selectedRepoIds.length 替换 */
+/** 仓库软警告文卡模板:N 由 selectedRepoNames.length 替换 */
 const SOFT_WARNING_PREFIX = '⚠ 仅 '
 const SOFT_WARNING_SUFFIX = ' 个仓库 · ANALYZING 可能无法完整关联代码上下文'
-
-/** 占位条目 name 前缀(issue 08 mock 期的"＋ 更多仓库…"占位) */
-const PLACEHOLDER_PREFIX = '＋'
 
 /** 摘要行固定高度(px)—— 与 issue 09 spec 视野代价 -70% 的承诺一致 */
 const SUMMARY_ROW_HEIGHT_PX = 40
 
 export function RepoBar({
   repos,
-  selectedRepoIds,
-  failedRepoIds = [],
+  selectedRepoNames,
+  failedRepoNames = [],
   onDetachRepo,
   canLaunch,
   launchDisabledHint,
@@ -126,39 +129,37 @@ export function RepoBar({
   // 这保证下一次 attach 后 bar 默认是折叠的,符合 "N=0 走空态" 不变量
   // -------------------------------------------------------------------------
   useEffect(() => {
-    if (selectedRepoIds.length === 0) {
+    if (selectedRepoNames.length === 0) {
       setCollapsed(true)
     }
-  }, [selectedRepoIds.length])
+  }, [selectedRepoNames.length])
 
   // -------------------------------------------------------------------------
-  // 软警告可见性(纯函数;selectedRepoIds 变化时 O(1) 重新计算)
+  // 软警告可见性(纯函数;selectedRepoNames 变化时 O(1) 重新计算)
   // -------------------------------------------------------------------------
-  const showSoftWarning = shouldShowRepoSoftWarning(selectedRepoIds)
+  const showSoftWarning = shouldShowRepoSoftWarning(selectedRepoNames)
 
   // -------------------------------------------------------------------------
-  // 真实可选仓库列表(过滤掉以 "＋" 开头的占位条目)
+  // issue 06 (ADR-0030 D3):repos 列表由 SSR `<root>/repos.yaml` 派生,
+  // 每条都是真实仓库 —— 不再有 `＋` 开头的占位条目,过滤逻辑删除。
   // -------------------------------------------------------------------------
-  const selectableRepos = onRequestAttach
-    ? repos.filter((r) => !r.name.startsWith(PLACEHOLDER_PREFIX))
-    : repos
 
-  const isEmptyState = selectedRepoIds.length === 0
+  const isEmptyState = selectedRepoNames.length === 0
 
-  // 已选仓库(用于展开态渲染)
-  const selectedRepos = selectableRepos.filter((r) =>
-    selectedRepoIds.includes(r.id),
+  // 已选仓库(用于展开态渲染)—— 按 name 查找
+  const selectedRepos = repos.filter((r) =>
+    selectedRepoNames.includes(r.name),
   )
 
   // 失败但未选中的仓库(ticket 02 验收 #8 partial success)—— 也展示在
   // 展开区(红边 + ✕),让用户看到"刚才 attach 失败的 repo 还没选中";
   // 重试走 banner「重试该 repo」按钮,不在 chip 上提供重试入口
   // (避免和 banner 重试逻辑分裂)。
-  // 用 id Set 做快速去重:同时在 selectedRepoIds 和 failedRepoIds 的
+  // 用 name Set 做快速去重:同时在 selectedRepoNames 和 failedRepoNames 的
   // repo 视为"已选"(以 selectedRepos 为准)。
-  const failedOnlyRepos = selectableRepos.filter(
+  const failedOnlyRepos = repos.filter(
     (r) =>
-      failedRepoIds.includes(r.id) && !selectedRepoIds.includes(r.id),
+      failedRepoNames.includes(r.name) && !selectedRepoNames.includes(r.name),
   )
 
   // -------------------------------------------------------------------------
@@ -169,11 +170,11 @@ export function RepoBar({
   }, [])
 
   const handleDetach = useCallback(
-    (repoId: string) => {
-      if (!selectedRepoIds.includes(repoId)) return
-      onDetachRepo(repoId)
+    (repoName: string) => {
+      if (!selectedRepoNames.includes(repoName)) return
+      onDetachRepo(repoName)
     },
-    [onDetachRepo, selectedRepoIds],
+    [onDetachRepo, selectedRepoNames],
   )
 
   const handleLaunchClick = useCallback(() => {
@@ -182,17 +183,17 @@ export function RepoBar({
   }, [canLaunch, onLaunch])
 
   // -------------------------------------------------------------------------
-  // 摘要文案:N 数字由 selectedRepoIds.length 提供
+  // 摘要文卡:N 数字由 selectedRepoNames.length 提供
   // -------------------------------------------------------------------------
   const summaryLabel =
-    selectedRepoIds.length === 1
+    selectedRepoNames.length === 1
       ? '已选 1 个仓库'
-      : `已选 ${selectedRepoIds.length} 个仓库`
+      : `已选 ${selectedRepoNames.length} 个仓库`
 
   return (
     <div
       data-testid="drafting-repo-bar"
-      data-selected-count={String(selectedRepoIds.length)}
+      data-selected-count={String(selectedRepoNames.length)}
       data-soft-warning={showSoftWarning ? 'true' : 'false'}
       data-can-launch={canLaunch ? 'true' : 'false'}
       data-repo-count={String(repos.length)}
@@ -260,7 +261,7 @@ export function RepoBar({
           {showSoftWarning && (
             <span
               data-testid="drafting-repo-soft-warning"
-              data-warning-count={String(selectedRepoIds.length)}
+              data-warning-count={String(selectedRepoNames.length)}
               role="status"
               className={[
                 'inline-flex items-center gap-1',
@@ -271,7 +272,7 @@ export function RepoBar({
               ].join(' ')}
             >
               {SOFT_WARNING_PREFIX +
-                String(selectedRepoIds.length) +
+                String(selectedRepoNames.length) +
                 SOFT_WARNING_SUFFIX}
             </span>
           )}
@@ -302,7 +303,7 @@ export function RepoBar({
             <button
               type="button"
               data-testid="drafting-repo-bar-summary"
-              data-summary-count={String(selectedRepoIds.length)}
+              data-summary-count={String(selectedRepoNames.length)}
               onClick={handleToggleCollapse}
               aria-expanded={!collapsed}
               aria-controls="drafting-repo-bar-expanded"
@@ -354,7 +355,7 @@ export function RepoBar({
             {showSoftWarning && (
               <span
                 data-testid="drafting-repo-soft-warning"
-                data-warning-count={String(selectedRepoIds.length)}
+                data-warning-count={String(selectedRepoNames.length)}
                 role="status"
                 className={[
                   'inline-flex items-center gap-1',
@@ -365,7 +366,7 @@ export function RepoBar({
                 ].join(' ')}
               >
                 {SOFT_WARNING_PREFIX +
-                  String(selectedRepoIds.length) +
+                  String(selectedRepoNames.length) +
                   SOFT_WARNING_SUFFIX}
               </span>
             )}
@@ -386,7 +387,7 @@ export function RepoBar({
             >
               {selectedRepos.length === 0 && failedOnlyRepos.length === 0 ? (
                 <span className="text-xs text-text-3 italic">
-                  暂无已选仓库(异常状态:selectedRepoIds 非空但 repos 中找不到)
+                  暂无已选仓库(异常状态:selectedRepoNames 非空但 repos 中找不到)
                 </span>
               ) : (
                 <>
@@ -396,9 +397,8 @@ export function RepoBar({
                     const showGreenDot = !!attachedBranchName
                     return (
                       <div
-                        key={repo.id}
+                        key={repo.name}
                         data-testid="drafting-repo-chip"
-                        data-repo-id={repo.id}
                         data-repo-name={repo.name}
                         data-selected="true"
                         data-failed="false"
@@ -425,8 +425,8 @@ export function RepoBar({
                         <button
                           type="button"
                           data-testid="drafting-repo-chip-detach"
-                          data-repo-id={repo.id}
-                          onClick={() => handleDetach(repo.id)}
+                          data-repo-name={repo.name}
+                          onClick={() => handleDetach(repo.name)}
                           aria-label={`取消关联 ${repo.name}`}
                           className={[
                             'inline-flex items-center justify-center',
@@ -449,21 +449,20 @@ export function RepoBar({
                       重试走 banner「重试该 repo」按钮。data-selected="false"。 */}
                   {failedOnlyRepos.map((repo) => (
                     <div
-                      key={`failed-${repo.id}`}
-                      data-testid="drafting-repo-chip"
-                      data-repo-id={repo.id}
-                      data-repo-name={repo.name}
-                      data-selected="false"
-                      data-failed="true"
-                      className={[
-                        'inline-flex items-center gap-1',
-                        'h-[30px] px-3 rounded-full text-sm',
-                        'bg-error-50 border border-error text-error',
-                      ].join(' ')}
-                    >
-                      <span aria-hidden>✕</span>
-                      <span>{repo.name}</span>
-                    </div>
+                          key={`failed-${repo.name}`}
+                          data-testid="drafting-repo-chip"
+                          data-repo-name={repo.name}
+                          data-selected="false"
+                          data-failed="true"
+                          className={[
+                            'inline-flex items-center gap-1',
+                            'h-[30px] px-3 rounded-full text-sm',
+                            'bg-error-50 border border-error text-error',
+                          ].join(' ')}
+                        >
+                          <span aria-hidden>✕</span>
+                          <span>{repo.name}</span>
+                        </div>
                   ))}
                 </>
               )}
@@ -478,7 +477,7 @@ export function RepoBar({
                   className="w-full mt-1 text-xs text-warning"
                 >
                   {SOFT_WARNING_PREFIX +
-                    String(selectedRepoIds.length) +
+                    String(selectedRepoNames.length) +
                     SOFT_WARNING_SUFFIX}
                 </div>
               )}

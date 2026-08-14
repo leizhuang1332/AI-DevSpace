@@ -14,15 +14,15 @@ import {
 } from '@ai-devspace/shared'
 
 // ============================================================================
-// DraftingData 形状(issue 02 + 04 + 08 + 01):
+// DraftingData 形状(issue 02 + 04 + 08 + 01 + 06):
 // - 旧 acceptanceCriteria / actions 字段不再出现
-// - repos / selectedRepoIds 已就位(issue 08);空草稿两者**注入全局仓库池**
-//   + selectedRepoIds 仍为 0(issue 01 ticket:使得 banner 可见 + RepoBar N=0
-//   占位 chip 显示;待用户从关联弹层选仓库后,banner 自动隐藏)
+// - repos / selectedRepoNames 已就位(issue 06 · ADR-0030 D3);空草稿两者
+//   都从空数组开始(SSR 注入前),selectedRepoNames 仍为 0 触发软警告 +
+//   banner 显示(issue 01 ticket)
 // ============================================================================
 
 describe('emptyDrafting', () => {
-  it('返回全空草稿结构(空 title + 空 PRD + empty=true + 全局仓库池)', () => {
+  it('返回全空草稿结构(空 title + 空 PRD + empty=true + 空 repos)', () => {
     const d = emptyDrafting('NEW')
     expect(d.requirementId).toBe('NEW')
     expect(d.title).toBe('')
@@ -40,10 +40,10 @@ describe('emptyDrafting', () => {
     expect(Array.isArray(d.skills)).toBe(true)
     // issue 04:auxFiles 默认为空数组(走 EmptyAuxPlaceholder 占位)
     expect(d.auxFiles).toEqual([])
-    // issue 01 ticket:空草稿注入全局仓库池(≥ 1),selectedRepoIds 仍为 0
-    // —— 这样 banner 与 RepoBar N=0 占位 chip 都能正常显示
-    expect(d.repos.length).toBeGreaterThan(0)
-    expect(d.selectedRepoIds).toEqual([])
+    // issue 06 (ADR-0030):空草稿不再注入写死 mock 仓库池
+    // —— repos 起点是 [],由 SSR 覆盖;selectedRepoNames 仍为 0
+    expect(d.repos).toEqual([])
+    expect(d.selectedRepoNames).toEqual([])
   })
 })
 
@@ -94,11 +94,11 @@ describe('getDraftingData', () => {
 // ============================================================================
 
 describe('validateLaunch(web 端契约)', () => {
-  it('PRD 有非空白内容 → canLaunch=true', () => {
+  it('PRD 有非空白内容时 canLaunch=true', () => {
     expect(validateLaunch({ prdMarkdown: '# PRD' }).canLaunch).toBe(true)
   })
 
-  it('PRD 全空白 → canLaunch=false', () => {
+  it('PRD 全空白时 canLaunch=false', () => {
     expect(
       validateLaunch({ prdMarkdown: '   \n\t  ' }).canLaunch,
     ).toBe(false)
@@ -136,7 +136,7 @@ describe('extractPrdOutline', () => {
 //
 // 关键约束:
 // - DEFAULT_PRD_RATIO = 0.6(验收 #5 默认 60/40)
-// - AUX_PANE_MIN_HEIGHT_PX = 140(行卡片可视 floor)
+// - AUX_PANE_MIN_HEIGHT_PX = 180(行卡片可视 floor)
 // - SPLIT_RESIZER_HEIGHT_PX = 6(设计稿 .split-resizer 高度)
 // - clampSplitRatio 守住这两个边界 + PRD 不被压到 0
 // ============================================================================
@@ -159,7 +159,7 @@ describe('clampSplitRatio', () => {
   // 一个常见容器高度:1200px 主区 → 6px 分割条 → 1194px 可分配
   // 上下限:
   //   min = 6 / 1194 ≈ 0.005
-  //   max = 1 - 140 / 1194 ≈ 0.883
+  //   max = 1 - 180 / 1194 ≈ 0.849
   const COMMON_HEIGHT = 1200
   const expectedMin = SPLIT_RESIZER_HEIGHT_PX / (COMMON_HEIGHT - SPLIT_RESIZER_HEIGHT_PX)
   const expectedMax = 1 - AUX_PANE_MIN_HEIGHT_PX / (COMMON_HEIGHT - SPLIT_RESIZER_HEIGHT_PX)
@@ -199,11 +199,11 @@ describe('clampSplitRatio', () => {
   })
 
   it('容器太小装不下 AUX_PANE_MIN_HEIGHT → 退到 max = min(aux 强制 floor)', () => {
-    // 容器 200px:usable = 194px;若 aux 要 ≥ 140px,则 PRD 占比 ≤ (194-140)/194 ≈ 0.278
+    // 容器 200px:usable = 194px;若 aux 要 ≥ 180px,则 PRD 占比 ≤ (194-180)/194 ≈ 0.072
     const tiny = 200
     const result = clampSplitRatio(0.6, tiny)
     // result 应 ≤ maxPrdRatio;又因 0.6 > maxPrdRatio,被裁到 maxPrdRatio
-    // maxPrdRatio = 1 - 140/194 ≈ 0.278
+    // maxPrdRatio = 1 - 180/194 ≈ 0.072
     expect(result).toBeCloseTo(1 - AUX_PANE_MIN_HEIGHT_PX / 194, 5)
     // 同时这个上限又 ≥ minPrdRatio = 6/194 ≈ 0.031,所以不会反向裁
     expect(result).toBeGreaterThan(SPLIT_RESIZER_HEIGHT_PX / 194 - 1e-9)

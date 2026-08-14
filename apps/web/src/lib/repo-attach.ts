@@ -1,7 +1,9 @@
 /**
- * 关联仓库 API wrapper(.scratch/new-requirement-modal/issues/02-worktree-real-creation.md)
+ * 关联仓库 API wrapper(.scratch/repo-registry-clone/issues/06-web-frontend-followup.md)
  *
- * 调 `POST /api/requirement/:id/repos` 给指定需求创建 git worktree。
+ * 调 `POST /api/requirement/:id/repos` 给指定需求创建 git worktree
+ * (ADR-0030 D5 之后是 per-requirement codebase clone,字段名随 schema
+ * 重写:`repoIds` → `repoNames`、`worktreePath` → `codebasePath`)。
  *
  * 设计:
  * - 入参 schema 二次校验(Zod,即使绕过 attach-repos-dialog 也防御)
@@ -15,10 +17,10 @@ import { z } from 'zod'
 import {
   AttachReposRequestSchema,
   AttachReposResponseSchema,
-  ReposResponseSchema,
+  RepoRegistryResponseSchema,
   type AttachReposRequest,
   type AttachReposResponse,
-  type ReposResponse,
+  type RepoRegistryResponse,
 } from '@ai-devspace/shared'
 import { agentFetch, AgentError } from './agent-client'
 
@@ -73,39 +75,39 @@ export async function attachReposToRequirement(
 }
 
 // ============================================================================
-// issue 06 (ADR-0016):仓库池扫描 — GET /api/repos
+// issue 06 (ADR-0030):仓库注册表 — GET /api/repos
 // ============================================================================
 
 /**
- * 拉取全局仓库池(Agent 实时 readdir `<workspaceRoot>/repos/` 子目录)。
+ * 拉取全局仓库注册表(Agent 实时读 `~/.aidevspace/repos.yaml`)。
  *
- * 用途(决策 76 / ADR-0016 D4):
- * - SSR 初始:`getDraftingData()` 调用一次,把结果注入 `DraftingData.repos`
+ * 用途(ADR-0030 D3 / D7):
+ * - SSR 初始:`getDraftingDataFromFs` 走 fs 直读派生 `data.repos`
  * - 弹层 refetch 兜底:attach-repos-dialog 打开时由 `drafting-zone` useEffect 再调一次
  * - 失败处理:透传 AgentError / 网络错 / ZodError —— 调用方 try/catch 决定 fallback
  *
  * **不**封装为特定 Error 子类 —— 仓库池是次要数据,失败时静默降级比醒目的 banner 更合适
  * (符合决策 24:不打扰,但陪伴)。
  */
-export async function fetchRepoPool(
+export async function fetchRepoRegistry(
   opts?: { signal?: AbortSignal },
-): Promise<ReposResponse> {
+): Promise<RepoRegistryResponse> {
   // 出参 schema 二次校验(防后端契约变更);AgentError / AbortError / 网络错
   // 全部透传,无需包装(Middle Man 避免 —— 与下方 `attachReposToRequirement`
   // 不同,后者需把 AgentError 包成 AttachReposError 让上层按 status 决定 banner 文案)
-  const raw = await agentFetch<ReposResponse>('/api/repos', {
+  const raw = await agentFetch<RepoRegistryResponse>('/api/repos', {
     method: 'GET',
     signal: opts?.signal,
   })
-  return ReposResponseSchema.parse(raw)
+  return RepoRegistryResponseSchema.parse(raw)
 }
 
 // ============================================================================
 // Re-export Zod schema + 类型 —— 让 web 端不必再 import @ai-devspace/shared
 // ============================================================================
 
-export { AttachReposRequestSchema, AttachReposResponseSchema, ReposResponseSchema }
-export type { AttachReposRequest, AttachReposResponse, ReposResponse }
+export { AttachReposRequestSchema, AttachReposResponseSchema, RepoRegistryResponseSchema }
+export type { AttachReposRequest, AttachReposResponse, RepoRegistryResponse }
 
 // Zod 的版本断言 schema(简单 typeguard,避免 web 端 import z 重复声明)
 export function isAttachReposError(err: unknown): err is AttachReposError {

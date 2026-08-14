@@ -6,10 +6,15 @@ import { getDraftingDataFromFs } from '@/lib/drafting.server'
 import { generatePrdSkeleton } from '@ai-devspace/shared'
 
 // ============================================================================
-// fixture 目录隔离(issue: zone-data-fidelity-fixes · 01 · 验收 #6 #7)
+// fixture 目录隔离(issue: zone-data-fidelity-fixes · 01 · 验收 #6 #7 ·
+//   repo-registry-clone/issues/06-web-frontend-followup.md)
 //
 // 用 os.tmpdir() 拉一个临时根,在每个 it 里建 `requirements/<id>/requirement.md`;
 // afterEach 递归删根 —— 避免污染仓库根 `requirements/`(acceptance criteria 明文要求)。
+//
+// issue 06 (ADR-0030) 跟改:
+// - 仓库池派生自 `<root>/repos.yaml`(YAML 真相源),不再是 `<root>/repos/` 子目录
+// - selectedRepoNames 派生自 `<reqDir>/codebase/` 子目录 dirname(无 `repo-` 前缀)
 // ============================================================================
 
 let tmpRoot: string
@@ -38,6 +43,20 @@ function writeMeta(id: string, raw: string): void {
   writeFileSync(join(dir, 'meta.yaml'), raw, 'utf8')
 }
 
+/** 在 tmpRoot 下建 requirements/<id>/codebase/<repo-name>/(issue 06:codebase 不是 repos) */
+function writeAttachedCodebase(id: string, repoNames: string[]): void {
+  const dir = join(tmpRoot, 'requirements', id, 'codebase')
+  mkdirSync(dir, { recursive: true })
+  for (const name of repoNames) {
+    mkdirSync(join(dir, name), { recursive: true })
+  }
+}
+
+/** 在 tmpRoot/repos.yaml 写入 yaml 内容(issue 06:repos 真相源是 yaml 文件) */
+function writeReposYaml(yaml: string): void {
+  writeFileSync(join(tmpRoot, 'repos.yaml'), yaml, 'utf8')
+}
+
 /** 在 tmpRoot/config.yaml 写 workspaceRoot,返回 config 绝对路径(给 `configPath` 选项) */
 function writeWorkspaceRootConfig(workspaceRoot: string): string {
   writeFileSync(
@@ -64,10 +83,10 @@ describe('getDraftingDataFromFs · 文件不存在', () => {
     expect(data.title).toBe('')
     // toolbar crumb 走 emptyDrafting 默认([])+ 不在面包屑渲染中
     expect(data.toolbar.crumb).toEqual([])
-    // auxFiles / selectedRepoIds 空(issue 01 ticket 让 repos 走全局池;
-    // emptyDrafting 的行为对齐)
+    // auxFiles / selectedRepoNames 空(issue 06:emptyDrafting 起点是空数组,
+    // 由 SSR `getDraftingDataFromFs` 读 repos.yaml 后覆盖)
     expect(data.auxFiles).toEqual([])
-    expect(data.selectedRepoIds).toEqual([])
+    expect(data.selectedRepoNames).toEqual([])
   })
 
   it('requirements/ 目录根本不存在 → emptyDrafting(同上)', async () => {
@@ -102,10 +121,10 @@ describe('getDraftingDataFromFs · 文件 ≤ 10 字节', () => {
     expect(data.prdMarkdown).toBe('')
   })
 
-  it('内容 = 10 字节含多字节字符(UTF-8 字节计数)→ emptyDrafting', async () => {
-    // "退款功能" 中文 = 12 字节(每个汉字 3 字节);11 字节 → emptyDrafting
-    writeRequirement('req-cn-11', '退款功能') // 12 字节 → > 10,应该非空
-    const data = await getDraftingDataFromFs('req-cn-11', {
+  it('内容 = 12 字节含多字节字符 → emptyDrafting', async () => {
+    // "退款功能" 中文 = 12 字节(每个汉字 3 字节);12 字节 > 10,应该非空
+    writeRequirement('req-cn-12', '退款功能') // 12 字节 → > 10,应该非空
+    const data = await getDraftingDataFromFs('req-cn-12', {
       requirementsRoot: tmpRoot,
     })
     expect(data.empty).toBe(false)
@@ -146,7 +165,7 @@ describe('getDraftingDataFromFs · 文件 > 10 字节', () => {
     expect(data.prdMarkdown).toBe('hello world')
   })
 
-  it('非空数据 → auxFiles / selectedRepoIds 沿用 emptyDrafting 行为(空 / 空)', async () => {
+  it('非空数据 → auxFiles / selectedRepoNames 沿用 emptyDrafting 行为(空 / 空)', async () => {
     writeRequirement('req-aux', generatePrdSkeleton('退款功能'))
     const data = await getDraftingDataFromFs('req-aux', {
       requirementsRoot: tmpRoot,
@@ -154,11 +173,11 @@ describe('getDraftingDataFromFs · 文件 > 10 字节', () => {
     expect(data.empty).toBe(false)
     // 真实需求没扫描仓库 / 没关联 auxFiles → 保持空集
     expect(data.auxFiles).toEqual([])
-    expect(data.selectedRepoIds).toEqual([])
+    expect(data.selectedRepoNames).toEqual([])
   })
 
-  it('非空数据 + workspace repos/ 空 → repos 为空(issue 06 全新安装)', async () => {
-    // 全新 tmpRoot 没有任何 <tmpRoot>/repos/ 子目录 → repos 为空
+  it('非空数据 + workspace repos.yaml 不存在 → repos 为空(issue 06 全新安装)', async () => {
+    // 全新 tmpRoot 没有任何 <tmpRoot>/repos.yaml → repos 为空
     writeRequirement('req-repos', '足够多的内容触发非空判定')
     const data = await getDraftingDataFromFs('req-repos', {
       requirementsRoot: tmpRoot,
@@ -168,58 +187,106 @@ describe('getDraftingDataFromFs · 文件 > 10 字节', () => {
     expect(data.repos).toEqual([])
   })
 
-  it('issue 06:repos 派生自 workspace <root>/repos/ 子目录(非 GLOBAL_REPO_POOL mock)', async () => {
-    // 模拟用户在 ~/.aidevspace/repos/ 下真实 clone 了 3 个仓库
-    const reposDir = join(tmpRoot, 'repos')
-    mkdirSync(join(reposDir, 'yl-web-ft-export'), { recursive: true })
-    mkdirSync(join(reposDir, 'refund-service'), { recursive: true })
-    mkdirSync(join(reposDir, 'order-service'), { recursive: true })
-
+  it('issue 06:repos 派生自 workspace <root>/repos.yaml(ADR-0030 D3 真相源)', async () => {
+    // 模拟用户在 ~/.aidevspace/repos.yaml 注册了 3 个仓库
+    writeReposYaml(
+      [
+        'version: 1',
+        'repos:',
+        '  - name: refund-service',
+        '    gitUrl: https://example.com/refund-service.git',
+        '    description: 退款主服务',
+        '  - name: order-service',
+        '    gitUrl: https://example.com/order-service.git',
+        '    description: 订单服务',
+        '  - name: yl-web-ft-export',
+        '    gitUrl: https://example.com/yl-web-ft-export.git',
+        '    description: 友盟 FTP',
+        '',
+      ].join('\n'),
+    )
     writeRequirement('req-real-repos', '足够多的内容触发非空判定')
     const data = await getDraftingDataFromFs('req-real-repos', {
       requirementsRoot: tmpRoot,
     })
     expect(data.empty).toBe(false)
+    // 字典序排序
     expect(data.repos.map((r) => r.name)).toEqual([
       'order-service',
       'refund-service',
       'yl-web-ft-export',
     ])
-    expect(data.repos.map((r) => r.id)).toEqual([
-      'repo-order-service',
-      'repo-refund-service',
-      'repo-yl-web-ft-export',
-    ])
+    // 字段最小集(name/gitUrl/description)
+    expect(data.repos[0]).toEqual({
+      name: 'order-service',
+      gitUrl: 'https://example.com/order-service.git',
+      description: '订单服务',
+    })
   })
 
-  it('issue 06:非空数据 → selectedRepoIds 从 <reqDir>/repos/ 子目录派生(repo- 前缀)', async () => {
+  it('issue 06:repos.yaml 多余字段(id / defaultBranch)被忽略(FR-1.2)', async () => {
+    writeReposYaml(
+      [
+        'version: 1',
+        'repos:',
+        '  - name: refund-service',
+        '    gitUrl: https://example.com/r.git',
+        '    description: 退款',
+        '    id: repo-legacy-slug', // 多余字段应被忽略
+        '    defaultBranch: main', // 多余字段应被忽略
+        '',
+      ].join('\n'),
+    )
+    writeRequirement('req-extra', '足够多的内容触发非空判定')
+    const data = await getDraftingDataFromFs('req-extra', {
+      requirementsRoot: tmpRoot,
+    })
+    expect(data.repos).toHaveLength(1)
+    // 不应有 id / defaultBranch 字段
+    expect(data.repos[0]).not.toHaveProperty('id')
+    expect(data.repos[0]).not.toHaveProperty('defaultBranch')
+    expect(data.repos[0].name).toBe('refund-service')
+  })
+
+  it('issue 06:非空数据 → selectedRepoNames 从 <reqDir>/codebase/ 子目录派生(无 repo- 前缀)', async () => {
     const id = 'req-attached'
     writeRequirement(id, '足够多的内容触发非空判定')
-    // 模拟 ticket 02 关联成功后落盘的 worktree 目录:
-    //   <root>/requirements/<id>/repos/<dirname>/
-    const reposDir = join(tmpRoot, 'requirements', id, 'repos')
-    mkdirSync(join(reposDir, 'yl-web-ft-export'), { recursive: true })
-    mkdirSync(join(reposDir, 'refund-service'), { recursive: true })
-    // . 开头的目录应被过滤(对齐后端 deriveRepos 行为)
-    mkdirSync(join(reposDir, '.hidden'), { recursive: true })
+    // 模拟 issue 03 `CodebaseManager.attach` 成功后落盘的 clone 目录:
+    //   <root>/requirements/<id>/codebase/<repo-name>/
+    writeAttachedCodebase(id, ['yl-web-ft-export', 'refund-service'])
+    // 同时制造一个 . 开头的半成品目录(决策 Q13),应被过滤
+    mkdirSync(join(tmpRoot, 'requirements', id, 'codebase', '.pending-foo'), {
+      recursive: true,
+    })
 
     const data = await getDraftingDataFromFs(id, {
       requirementsRoot: tmpRoot,
     })
     expect(data.empty).toBe(false)
-    expect(data.selectedRepoIds.sort()).toEqual([
-      'repo-refund-service',
-      'repo-yl-web-ft-export',
+    // 直接是 dirname,无 `repo-` 前缀(决策 105)
+    expect(data.selectedRepoNames.sort()).toEqual([
+      'refund-service',
+      'yl-web-ft-export',
     ])
   })
 
-  it('issue 06:repos/ 不存在 → selectedRepoIds 为空(全新需求合法空态)', async () => {
-    writeRequirement('req-no-repos', '足够多的内容触发非空判定')
-    const data = await getDraftingDataFromFs('req-no-repos', {
+  it('issue 06:codebase/ 不存在 → selectedRepoNames 为空(全新需求合法空态)', async () => {
+    writeRequirement('req-no-codebase', '足够多的内容触发非空判定')
+    const data = await getDraftingDataFromFs('req-no-codebase', {
       requirementsRoot: tmpRoot,
     })
     expect(data.empty).toBe(false)
-    expect(data.selectedRepoIds).toEqual([])
+    expect(data.selectedRepoNames).toEqual([])
+  })
+
+  it('issue 06:repos.yaml 解析失败 → repos 为空(静默降级,SSR 不抛错)', async () => {
+    writeReposYaml('\x00\x01\x02garbage\xff')
+    writeRequirement('req-bad-yaml', '足够多的内容触发非空判定')
+    const data = await getDraftingDataFromFs('req-bad-yaml', {
+      requirementsRoot: tmpRoot,
+    })
+    expect(data.empty).toBe(false)
+    expect(data.repos).toEqual([])
   })
 
   it('issue 06 ticket 06:meta.yaml 含 branchName → lockedBranchName 注入', async () => {
@@ -321,7 +388,7 @@ describe('getDraftingDataFromFs · req-001 硬编码 mock', () => {
     expect(data.prdMarkdown.length).toBeGreaterThan(10)
     // REFUND_DRAFTING 自带 4 个 auxFiles + 2 个已选中 repo + 3 个 skills
     expect(data.auxFiles.length).toBeGreaterThanOrEqual(4)
-    expect(data.selectedRepoIds.length).toBeGreaterThanOrEqual(2)
+    expect(data.selectedRepoNames.length).toBeGreaterThanOrEqual(2)
     expect(data.skills.length).toBeGreaterThanOrEqual(3)
   })
 

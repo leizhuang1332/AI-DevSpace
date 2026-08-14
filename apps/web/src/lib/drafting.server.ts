@@ -1,5 +1,6 @@
 /**
- * DRAFTING 工位 — server-only 数据层(issue: zone-data-fidelity-fixes · 01)
+ * DRAFTING 工位 — server-only 数据层(issue: zone-data-fidelity-fixes · 01 ·
+ *   repo-registry-clone/issues/06-web-frontend-followup.md)
  *
  * 设计动机(对齐 `analyzing.server.ts` 的 .server.ts 命名约定):
  *
@@ -33,6 +34,11 @@
  *     `title` 从 `meta.yaml.title` 提取)
  *   - 否则 → `emptyDrafting(reqId)`(空草稿态;组件侧生成骨架)
  *
+ * issue 06 (ADR-0030) 跟改:
+ * - 已关联仓库列表派生自 `<reqDir>/codebase/` 子目录,直接是 name(不加 `repo-` 前缀)
+ * - 全局仓库池派生自 `<root>/repos.yaml`(YAML 真相源),而非 `<root>/repos/` 子目录
+ * - `selectedRepoNames` 直接对应 codebase 子目录 dirname(无前缀)
+ *
  * 路径解析(对照 PRD D-6 · ticket 05):
  * - 默认 `<requirementsRoot>` 由 `resolveRequirementsRoot()` 解析
  *   (config.yaml.workspaceRoot → AIDEVSPACE_HOME → cwd + ../.. 三层 fallback)
@@ -43,6 +49,7 @@
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import * as yaml from 'yaml'
 import {
   emptyDrafting,
   getDraftingData,
@@ -100,6 +107,11 @@ function defaultRequirementsRoot(): string {
  *     同目录 `meta.yaml` 的 `title` 字段取)
  *   - 否则 → `emptyDrafting(reqId)`(组件侧 detect 后调用 `generatePrdSkeleton`)
  *
+ * issue 06 (ADR-0030) 跟改:
+ * - `selectedRepoNames` 派生自 `<reqDir>/codebase/` 子目录 dirname(无前缀)
+ * - `repos` 派生自 `<root>/repos.yaml` 的 repos 列表(走 yaml.parse,空文件
+ *   → [])。**不**走 `fetchRepoRegistry` HTTP,SSR 期不绕 cookie / token。
+ *
  * 与原 `getDraftingData(reqId)` 的差异:
  * - 原版对所有非 `req-001` id 直接 `emptyDrafting`,丢掉了真实需求数据;
  *   本版读 fs,新建需求只要 `requirement.md` 超过阈值就拿到非空数据
@@ -139,14 +151,14 @@ export async function getDraftingDataFromFs(
 // 3) 字节数 ≤ 阈值 → emptyDrafting(对齐后端 `deriveStatus`)
   //    注意:这里**不**读 meta.yaml —— 空态语义不应有 title 字段(对齐
   //    `emptyDrafting` 默认行为)
-  //    但 `repos` 仍要派生成真实仓库池(issue 06 / ADR-0016 D1):空草稿态的
-  //    RepoBar 也要展示用户本机真实仓库,而不是 GLOBAL_REPO_POOL 写死 mock。
+  //    但 `repos` 仍要派生成真实仓库池(issue 06 · ADR-0030 D3):空草稿态的
+  //    RepoBar 也要展示用户本机真实仓库,而不是写死 mock。
   if (content === null || Buffer.byteLength(content, 'utf8') <= PRD_EMPTY_THRESHOLD_BYTES) {
-    // 空草稿态仍要派生:repos(避免 mock)+ lockedBranchName(用户可能已经
+    // 空草稿态仍要派生:repos(从 repos.yaml)+ lockedBranchName(用户可能已经
     // attach 过,只是 PRD 还在写)—— 不读 title(空态语义不应有 title)
     return {
       ...emptyDrafting(requirementId),
-      repos: readWorkspaceRepoPool(root),
+      repos: readWorkspaceRepoRegistry(root),
       lockedBranchName: readMetaBranchName(metaFile),
     }
   }
@@ -154,14 +166,14 @@ export async function getDraftingDataFromFs(
 // 4) 构造非空 DraftingData:
   // - prdMarkdown = 文件内容
   // - title = meta.yaml 的 `title` 字段(读不到 → '',向后兼容)
-  // - selectedRepoIds = 派生 `<reqDir>/repos/` 子目录列表(issue 06 / ticket 02
-  //   落盘的 worktree 目录),对齐 backend `RequirementService.deriveRepos` 的语义。
-  //   每个子目录 dirname → `repo-<dirname>` 形式的 id(对齐 issue 06 引入的
-  //   `id = 'repo-' + dirname` 契约)。
-  // - repos = workspace 级全局仓库池(issue 06 / ADR-0016 D1-D3):
-  //   派生 `<root>/repos/` 子目录列表(对齐 backend `apps/agent/src/routes/repos.ts`
-  //   的 readRepoPool 逻辑),不走 GLOBAL_REPO_POOL 写死 mock。
-  //   走 fs 直读而非 HTTP `fetchRepoPool` —— SSR 期不绕 HTTP 减少开销 + 不依赖 cookie。
+  // - selectedRepoNames = 派生 `<reqDir>/codebase/` 子目录 dirname(issue 06 /
+  //   ADR-0030 D5 落盘的 clone 路径,决策 106);**不**加 `repo-` 前缀
+  //   (决策 105:name 即标识)
+  // - repos = workspace 级全局仓库池(issue 06 / ADR-0030 D3):
+  //   派生自 `<root>/repos.yaml` 的 repos 列表(走 yaml.parse),与后端
+  //   `WorkspaceService.readRepoRegistry` 行为对齐,空文件 → []。
+  //   走 fs 直读而非 HTTP `fetchRepoRegistry` —— SSR 期不绕 HTTP 减少开销
+  //   + 不依赖 cookie。
   // - lockedBranchName = 派生 meta.yaml.branchName(issue 06 ticket 06 SSR 持久化):
   //   首次 attach 时后端把 branchName 写入 meta.yaml;SSR 读它让客户端任何重挂载
   //   (F5 / 路由切换 / 父组件 unmount)都能恢复"统一分支名已锁定"语义。
@@ -169,16 +181,16 @@ export async function getDraftingDataFromFs(
   // - 其他字段(auxFiles / skills / statusText / autosaveIntervalMs / lastSavedAt)
   //   沿用 emptyDrafting 行为(空 auxFiles / 空 statusText)
   const title = readMetaTitle(metaFile)
-  const selectedRepoIds = readAttachedRepoIds(
+  const selectedRepoNames = readAttachedRepoNames(
     resolve(root, 'requirements', requirementId),
   )
-  const repos = readWorkspaceRepoPool(root)
+  const repos = readWorkspaceRepoRegistry(root)
   const lockedBranchName = readMetaBranchName(metaFile)
   return {
     ...emptyDrafting(requirementId),
     prdMarkdown: content,
     title,
-    selectedRepoIds,
+    selectedRepoNames,
     repos,
     lockedBranchName,
     toolbar: {
@@ -194,29 +206,29 @@ export async function getDraftingDataFromFs(
 }
 
 /**
- * 派生 attached repo id 列表(issue 06 / ticket 02 落盘 worktree → SSR 持久化)
+ * 派生 attached repo name 列表(issue 06 · ADR-0030 D5 落盘 codebase → SSR 持久化)
  *
- * 数据源:`<reqDir>/repos/` 子目录列表 —— ticket 02 attach 成功后真实
- * worktree 目录位于此(对齐 backend `RequirementService.deriveRepos`)。
+ * 数据源:`<reqDir>/codebase/` 子目录列表 —— issue 03 的 `CodebaseManager.attach`
+ * 成功后真实 clone 目录位于此(对齐 backend `CodebaseManager` + ticket 02)。
  *
- * 映射:`dirname → 'repo-' + dirname`(对齐 issue 06 引入的 id 契约,
- * 也是 POST /api/repos 响应里 `id` 的形态)。
+ * 映射:dirname 直接是 name(对齐决策 105:name 即标识,不加 `repo-` 前缀;
+ * 同步对齐后端 `RequirementService.deriveSelected` 的 dirname 输出)。
  *
  * 容错:
- * - `<reqDir>/repos/` 不存在(全新需求未关联任何 repo)→ `[]`(合法空态,
+ * - `<reqDir>/codebase/` 不存在(全新需求未关联任何 repo)→ `[]`(合法空态,
  *   触发 banner + RepoBar N=0 空态)
  * - readdir 抛错 → `[]`,不阻塞 SSR(决策 30 容错)
  *
- * 过滤:`.` 前缀的子目录忽略 —— 与后端 `deriveRepos` 行为完全一致
- * (`RequirementService.ts:738` 注释"过滤 . 开头")。
+ * 过滤:`.` 前缀的子目录忽略(对齐 `.pending-<name>` 半成品清理机制,
+ * 见决策 Q13 / `CodebaseManager`)—— 与后端 `deriveSelected` 行为一致。
  */
-function readAttachedRepoIds(reqDir: string): string[] {
-  const reposDir = resolve(reqDir, 'repos')
-  if (!existsSync(reposDir)) return []
+function readAttachedRepoNames(reqDir: string): string[] {
+  const codebaseDir = resolve(reqDir, 'codebase')
+  if (!existsSync(codebaseDir)) return []
   try {
-    return readdirSync(reposDir, { withFileTypes: true })
+    return readdirSync(codebaseDir, { withFileTypes: true })
       .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
-      .map((d) => `repo-${d.name}`)
+      .map((d) => d.name)
       .sort((a, b) => a.localeCompare(b))
   } catch {
     return []
@@ -265,27 +277,52 @@ function readMetaBranchName(metaFile: string): string | undefined {
 }
 
 /**
- * 派生 workspace 级全局仓库池(issue 06 / ADR-0016 D1-D3)
+ * 派生 workspace 级全局仓库池(issue 06 / ADR-0030 D3)
  *
- * 数据源:`<root>/repos/` 子目录列表 —— 与 backend
- * `apps/agent/src/routes/repos.ts` 的 `readRepoPool` 逻辑完全一致:
- * - 走 fs 直读,**不**经 HTTP `fetchRepoPool`(SSR 期节省 cookie / token 复杂度)
- * - `dirname → 'repo-' + dirname` id 形态(对齐 issue 06 / ADR-0016 D3)
- * - **不**校验 `.git/` 存在(决策 75 / ADR-0016 D3)
+ * 数据源:`<root>/repos.yaml` 顶层 `{version: 1, repos: [{name, gitUrl, description}]}`
+ * —— 与 backend `WorkspaceService.readRepoRegistry` 完全对齐:
+ * - 走 fs 直读,**不**经 HTTP `fetchRepoRegistry`(SSR 期节省 cookie / token 复杂度)
+ * - 走 `yaml` 第三方库解析(`yaml.server.ts` 仅支持受控 schema / 顶层 scalar,
+ *   不支持顶层 list 形态的 `repos.yaml`,所以这里走 `yaml.parse`)
+ * - 字段最小集 `name` / `gitUrl` / `description`(对齐 ADR-0030 D3 决策 105)
  * - 字典序排序(展示稳定)
  *
  * 容错:
- * - `<root>/repos/` 不存在(全新安装)→ `[]`(合法空态,前端走"暂无可选仓库")
- * - readdir 抛错 → `[]`,不阻塞 SSR(决策 30 容错)
+ * - `<root>/repos.yaml` 不存在(全新安装)→ `[]`(合法空态,前端走"暂无可选仓库")
+ * - yaml 解析失败 / 校验失败 → `[]`,不阻塞 SSR(决策 30 容错);服务端
+ *   异常时不能让前端整页崩
+ * - readFile 抛错 → `[]`,不阻塞 SSR
  */
-function readWorkspaceRepoPool(workspaceRoot: string): DraftingRepo[] {
-  const reposDir = resolve(workspaceRoot, 'repos')
-  if (!existsSync(reposDir)) return []
+function readWorkspaceRepoRegistry(workspaceRoot: string): DraftingRepo[] {
+  const yamlPath = resolve(workspaceRoot, 'repos.yaml')
+  if (!existsSync(yamlPath)) return []
   try {
-    return readdirSync(reposDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => ({ id: `repo-${d.name}`, name: d.name }))
-      .sort((a, b) => a.name.localeCompare(b.name))
+    const text = readFileSync(yamlPath, 'utf8')
+    const parsed = yaml.parse(text)
+    if (!parsed || typeof parsed !== 'object') return []
+    const repos = (parsed as { repos?: unknown }).repos
+    if (!Array.isArray(repos)) return []
+    // 仅取字段最小集(name / gitUrl / description);多余字段忽略,
+    // 字段类型不对 → 跳过该 entry(对齐 `RepoRegistryEntrySchema` 的容错语义)。
+    const out: DraftingRepo[] = []
+    for (const r of repos) {
+      if (!r || typeof r !== 'object') continue
+      const obj = r as Record<string, unknown>
+      const name = obj.name
+      const gitUrl = obj.gitUrl
+      const description = obj.description
+      if (
+        typeof name !== 'string' ||
+        name.length === 0 ||
+        typeof gitUrl !== 'string' ||
+        gitUrl.length === 0 ||
+        typeof description !== 'string'
+      ) {
+        continue
+      }
+      out.push({ name, gitUrl, description })
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name))
   } catch {
     return []
   }

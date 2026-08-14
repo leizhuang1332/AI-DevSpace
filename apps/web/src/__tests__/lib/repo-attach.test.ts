@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   AttachReposError,
   attachReposToRequirement,
+  fetchRepoRegistry,
   isAttachReposError,
   safeParseAttachReposResponse,
 } from '@/lib/repo-attach'
@@ -34,13 +35,13 @@ describe('attachReposToRequirement', () => {
       succeeded: 2,
       failed: 0,
       results: [
-        { ok: true, repoId: 'r1', branch: 'feat/test', worktreePath: '/a/r1', base: 'main' },
-        { ok: true, repoId: 'r2', branch: 'feat/test', worktreePath: '/a/r2', base: 'master' },
+        { ok: true, repoName: 'r1', branch: 'feat/test', codebasePath: '/a/r1', base: 'main' },
+        { ok: true, repoName: 'r2', branch: 'feat/test', codebasePath: '/a/r2', base: 'master' },
       ],
     })
 
     const out = await attachReposToRequirement('req-001', {
-      repoIds: ['r1', 'r2'],
+      repoNames: ['r1', 'r2'],
       branchName: 'feat/test',
     })
 
@@ -54,7 +55,7 @@ describe('attachReposToRequirement', () => {
     expect(path).toBe('/api/requirement/req-001/repos')
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body as string)).toEqual({
-      repoIds: ['r1', 'r2'],
+      repoNames: ['r1', 'r2'],
       branchName: 'feat/test',
     })
   })
@@ -66,12 +67,12 @@ describe('attachReposToRequirement', () => {
       succeeded: 1,
       failed: 1,
       results: [
-        { ok: true, repoId: 'r1', branch: 'feat/test', worktreePath: '/a/r1', base: 'main' },
-        { ok: false, repoId: 'r2', code: 'E_DISK_FULL', message: 'No space left' },
+        { ok: true, repoName: 'r1', branch: 'feat/test', codebasePath: '/a/r1', base: 'main' },
+        { ok: false, repoName: 'r2', code: 'E_DISK_FULL', message: 'No space left' },
       ],
     })
     const out = await attachReposToRequirement('req-001', {
-      repoIds: ['r1', 'r2'],
+      repoNames: ['r1', 'r2'],
       branchName: 'feat/test',
     })
     expect(out.succeeded).toBe(1)
@@ -85,7 +86,7 @@ describe('attachReposToRequirement', () => {
 
     await expect(
       attachReposToRequirement('req-001', {
-        repoIds: ['r1'],
+        repoNames: ['r1'],
         branchName: 'feat/test',
       }),
     ).rejects.toMatchObject({
@@ -99,16 +100,16 @@ describe('attachReposToRequirement', () => {
     mockAgentFetch.mockRejectedValue(new Error('Network down'))
     await expect(
       attachReposToRequirement('req-001', {
-        repoIds: ['r1'],
+        repoNames: ['r1'],
         branchName: 'feat/test',
       }),
     ).rejects.toThrow(/Network down/)
   })
 
-  it('入参 schema 校验失败:repoIds 为空 → ZodError', async () => {
+  it('入参 schema 校验失败:repoNames 为空 → ZodError', async () => {
     await expect(
       attachReposToRequirement('req-001', {
-        repoIds: [],
+        repoNames: [],
         branchName: 'feat/test',
       }),
     ).rejects.toThrow()
@@ -119,7 +120,7 @@ describe('attachReposToRequirement', () => {
   it('入参 schema 校验失败:branchName 过长 → ZodError', async () => {
     await expect(
       attachReposToRequirement('req-001', {
-        repoIds: ['r1'],
+        repoNames: ['r1'],
         branchName: 'a'.repeat(101),
       }),
     ).rejects.toThrow()
@@ -135,7 +136,7 @@ describe('attachReposToRequirement', () => {
     })
     await expect(
       attachReposToRequirement('req-001', {
-        repoIds: ['r1'],
+        repoNames: ['r1'],
         branchName: 'feat/test',
       }),
     ).rejects.toThrow()
@@ -150,7 +151,7 @@ describe('attachReposToRequirement', () => {
       results: [],
     })
     await attachReposToRequirement('req/with/slash', {
-      repoIds: ['r1'],
+      repoNames: ['r1'],
       branchName: 'feat/test',
     })
     expect(mockAgentFetch.mock.calls[0][0]).toBe(
@@ -169,10 +170,69 @@ describe('attachReposToRequirement', () => {
     const controller = new AbortController()
     await attachReposToRequirement(
       'req-001',
-      { repoIds: ['r1'], branchName: 'feat/test' },
+      { repoNames: ['r1'], branchName: 'feat/test' },
       { signal: controller.signal },
     )
     expect(mockAgentFetch.mock.calls[0][1].signal).toBe(controller.signal)
+  })
+})
+
+describe('fetchRepoRegistry', () => {
+  it('GET /api/repos 返回 repos[] + 二次校验', async () => {
+    mockAgentFetch.mockResolvedValue({
+      repos: [
+        { name: 'refund-service', gitUrl: 'https://x/r.git', description: '退款主服务' },
+        { name: 'order-service', gitUrl: 'https://x/o.git', description: '订单服务' },
+      ],
+    })
+
+    const out = await fetchRepoRegistry()
+    expect(out.repos).toHaveLength(2)
+    expect(out.repos[0].name).toBe('refund-service')
+    expect(out.repos[0].gitUrl).toBe('https://x/r.git')
+    expect(out.repos[0].description).toBe('退款主服务')
+
+    // 验证调用路径 + method
+    expect(mockAgentFetch).toHaveBeenCalledTimes(1)
+    const [path, init] = mockAgentFetch.mock.calls[0]
+    expect(path).toBe('/api/repos')
+    expect(init.method).toBe('GET')
+  })
+
+  it('repos=[](空注册表)合法通过', async () => {
+    mockAgentFetch.mockResolvedValue({ repos: [] })
+    const out = await fetchRepoRegistry()
+    expect(out.repos).toEqual([])
+  })
+
+  it('契约破了(缺 name 字段)→ ZodError', async () => {
+    mockAgentFetch.mockResolvedValue({
+      repos: [{ gitUrl: 'x', description: 'y' }],
+    })
+    await expect(fetchRepoRegistry()).rejects.toThrow()
+  })
+
+  it('契约破了(额外字段被忽略)→ 仍通过(FR-1.2)', async () => {
+    mockAgentFetch.mockResolvedValue({
+      repos: [
+        { name: 'r1', gitUrl: 'x', description: 'y', id: 'legacy', defaultBranch: 'main' },
+      ],
+    })
+    const out = await fetchRepoRegistry()
+    expect(out.repos).toHaveLength(1)
+    expect(out.repos[0].name).toBe('r1')
+  })
+
+  it('AbortSignal 透传', async () => {
+    mockAgentFetch.mockResolvedValue({ repos: [] })
+    const controller = new AbortController()
+    await fetchRepoRegistry({ signal: controller.signal })
+    expect(mockAgentFetch.mock.calls[0][1].signal).toBe(controller.signal)
+  })
+
+  it('网络错透传(不包装为特定 Error)', async () => {
+    mockAgentFetch.mockRejectedValue(new Error('boom'))
+    await expect(fetchRepoRegistry()).rejects.toThrow(/boom/)
   })
 })
 
