@@ -1,0 +1,22 @@
+CONTEXT.md
+  s_133c4cd4cfbbfe::t_6acffefe65429a 6
+  s_133c4cd4cfbbfe::t_d87cfb8a640236 54,56,58-61,63,65,67,69-85
+  s_133c4cd4cfbbfe::t_45c84aa1bf0d96 535-559
+  s_133c4cd4cfbbfe::t_c11108198f1f5b 560-562
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "0a10d0ae2eded9a621f6985647c98eefec8b50bc",
+  "prompts": {},
+  "sessions": {
+    "s_133c4cd4cfbbfe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "165cb388-b3ce-40e4-bac9-1a75ddbf1bff",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
