@@ -19,6 +19,7 @@ import { analysisResponseRoutes } from './routes/analysis-response.js'
 import { AnalysisRunService } from './analysis-run/AnalysisRunService.js'
 import { AnalysisSkillService } from './analysis-skill/AnalysisSkillService.js'
 import { createWorktreeManager, createDefaultGitExec } from './worktree/WorktreeManager.js'
+import type { GitExec } from './worktree/WorktreeManager.js'
 import { RequirementService } from './services/RequirementService.js'
 import { createSseHub, type SseHub } from './sse/SseHub.js'
 import { sseRoutes } from './sse/requirementEventsRoute.js'
@@ -76,6 +77,16 @@ export interface BuildServerOptions {
    * 避免 CI 触发真 SDK 子进程。
    */
   provider?: AIProvider
+  /**
+   * issue 02 (ADR-0030 D8):POST /api/repos / PUT /api/repos/:name 必跑
+   * `git ls-remote` 验证可达 + 凭据可用(决策 Q5)。未传时默认构造
+   * `createDefaultGitExec()`(生产);测试可通过 `buildServer({ git: fakeExec })`
+   * 注入 fake git exec,避免 CI 触发真 git 子进程。
+   *
+   * 注意:这个 git 实例也用于 RequirementService.attachRepos(issue 02 worktree
+   * 路径) —— 那条路径在 issue 03 切到 clone 后会改用 clone exec(届时再调整)。
+   */
+  git?: GitExec
 }
 
 /**
@@ -262,9 +273,13 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   fastify.get('/api/health', { config: { public: true } }, async () => healthService.collect())
   await fastify.register(workspaceRoutes, { workspace })
 
-  // issue 06 (ADR-0016):GET /api/repos —— 实时 readdir `<root>/repos/`,
-  // 无 service 依赖(纯 IO + 字典序排序 + schema 校验)。
-  await fastify.register(reposRoutes, { workspaceRoot: workspace.root })
+  // issue 02 (ADR-0030 D8):`/api/repos` CRUD —— GET 读 yaml 注册表;
+  // POST / PUT 必跑 `git ls-remote` 验证可达 + 凭据可用(决策 Q5);
+  // DELETE 检查 codebase 复用 + force 标记;详见 issue 02 ticket。
+  await fastify.register(reposRoutes, {
+    workspace: workspace,
+    git: opts.git ?? createDefaultGitExec(),
+  })
 
   // ticket 02:实装 POST /api/requirement/:id/repos(worktree 真实创建)
   // - 默认注入 createDefaultGitExec(生产)

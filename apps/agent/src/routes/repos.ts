@@ -1,91 +1,337 @@
 /**
- * GET /api/repos —— 仓库池扫描(issue 06 / ADR-0016)
+ * `/api/repos` CRUD routes —— issue 02-repos-route-crud.md / ADR-0030 D1 / D6 / D8
  *
- * 数据源:`<workspaceRoot>/repos/` 物理目录的**子目录列表**(决策 73)。
+ * 真相源 = `<root>/repos.yaml`(独立单文件,顶层 {version: 1, repos: []})。
+ * route 层不直接 fs —— 所有读写通过 WorkspaceService 收敛,避免并发
+ * read-modify-write 漂移(issue 02 风险"macOS / Windows 文件锁语义差异")。
  *
- * 行为(对照 ADR-0016 D2-D6):
- * - 每次请求实时 readdir,**无**缓存(决策 74)
- * - 子目录名 → `{id: 'repo-<dirname>', name: '<dirname>'}`(决策 α 沿用既有 slug)
- * - **不**校验 `.git/` 存在 —— 误 mkdir 是用户自己的责任(决策 75)
- * - 目录不存在 → 返 `{repos: []}` 200,**不** 404(决策 78)
- * - 目录存在但无子目录 → 返 `{repos: []}` 200
- * - 读取失败(权限等) → 500 + `{error: 'E_REPO_DIR_READ_FAILED'}`
+ * 端点矩阵:
+ * - GET    /api/repos           读 yaml → {repos: [{name, gitUrl, description}]}
+ * - POST   /api/repos           ls-remote 验证 + 写 yaml;name 重复 → 409
+ * - PUT    /api/repos/:name     改 gitUrl 必跑 ls-remote;不改 gitUrl 不跑
+ * - DELETE /api/repos/:name     检查 codebase 复用;被使用 + force=false → 409;
+ *                              force=true 直接删(保留 codebase/ 目录,决策 113)
  *
- * 命名空间(决策 77):workspace 顶层资源,不复用 `/api/workspace/repos`
- * (workspace 命名空间当前未启用)。
+ * 命名空间:workspace 顶层资源,与 `POST /api/requirement/:id/repos`(issue 03
+ * 待改造) 形成"全局池 vs 需求关联"对照(决策 77 沿用)。
  *
- * 历史背景(决策 / issue tracker):
- * - issue 06 ticket:本期实装 GET /api/repos(轻量端点,无 service 依赖)
- * - 与 `POST /api/requirement/:id/repos`(issue 02 · `requirement.ts`)
- *   形成"全局池 vs 需求关联"对照:本端点**只读**,不创建任何状态。
+ * 历史背景:
+ * - issue 06 ticket(ADR-0016):本期 GET /api/repos 读 `<root>/repos/` 物理目录
+ * - issue 02 ticket(ADR-0030):整体切到 yaml 注册表 + 加 POST/PUT/DELETE 三端点
  */
 
-import { readdirSync } from 'node:fs'
-import { join } from 'node:path'
 import type { FastifyInstance } from 'fastify'
 import {
-  ReposResponseSchema,
-  type RepoPoolEntry,
-  type ReposResponse,
+  PostRepoRegistryRequestSchema,
+  PutRepoRegistryRequestSchema,
+  RepoRegistryResponseSchema,
+  type RepoRegistryEntry,
 } from '@ai-devspace/shared'
+import type { WorkspaceService } from '../services/WorkspaceService.js'
+import {
+  RegistryConflictError,
+  RegistryNotFoundError,
+  RegistryWriteError,
+} from '../services/WorkspaceService.js'
+import type { GitExec } from '../worktree/WorktreeManager.js'
 
 export interface ReposRouteDeps {
-  /** Workspace 根目录;repos 目录位于 `<root>/repos/` */
-  workspaceRoot: string
-}
-
-/** 单点真相:`<workspaceRoot>/repos/` 绝对路径。route + 纯函数共享。 */
-export function reposDirFor(workspaceRoot: string): string {
-  return join(workspaceRoot, 'repos')
+  /** Workspace service —— 所有 yaml CRUD 走这里(避免并发漂移) */
+  workspace: WorkspaceService
+  /** git exec 抽象 —— POST/PUT 必跑 ls-remote 验证可达 + 凭据可用(决策 Q5) */
+  git: GitExec
 }
 
 /**
- * 纯函数:把 `repos/` 子目录列表转为 `RepoPoolEntry[]`。
+ * 跑 `git ls-remote --heads <gitUrl>` —— 通过抽象层调,便于测试注入 fake。
  *
- * 抽出便于单测,不必启动 Fastify。
- *
- * - dirent.name → `{id: 'repo-' + dirent.name, name: dirent.name}`
- * - **不**校验 `.git/`(决策 75)
- * - 排序:按 `name` 字典序,便于前端展示稳定
+ * 返回 `{ code, stdout, stderr }` 与 `createDefaultGitExec()` 一致;
+ * 超时由 caller 控制(本实装未注入 timeout,但未来 issue 05 强制 env 后可在此加)。
  */
-export function readRepoPool(workspaceRoot: string): RepoPoolEntry[] {
-  const entries = readdirSync(reposDirFor(workspaceRoot), { withFileTypes: true })
-  return entries
-    .filter((d) => d.isDirectory())
-    .map((d) => ({
-      id: `repo-${d.name}`,
-      name: d.name,
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name))
+async function lsRemote(
+  git: GitExec,
+  gitUrl: string,
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  return git(['ls-remote', '--heads', gitUrl])
+}
+
+/**
+ * 把 ls-remote 的 stderr 文本映射成错误码。
+ *
+ * 启发式匹配(精确枚举真实 git 1.x / 2.x 输出):
+ * - 含 `Permission denied` / `publickey` / `Authentication failed` → E_AUTH
+ * - 含 `Could not resolve host` / `Network is unreachable` → E_NETWORK
+ * - 含 `Connection timed out` / `Operation timed out` → E_TIMEOUT
+ * - 其他(stderr 非空)→ E_NETWORK(保守:网络类优先)
+ * - stderr 空(不应发生,ls-remote 失败必有错)→ E_INTERNAL
+ */
+function mapLsRemoteError(stderr: string): {
+  code: 'E_AUTH' | 'E_NETWORK' | 'E_TIMEOUT' | 'E_INTERNAL'
+  httpStatus: 401 | 502 | 408 | 500
+} {
+  const s = stderr.toLowerCase()
+  if (
+    s.includes('permission denied') ||
+    s.includes('publickey') ||
+    s.includes('authentication failed')
+  ) {
+    return { code: 'E_AUTH', httpStatus: 401 }
+  }
+  if (s.includes('timed out') || s.includes('timeout')) {
+    return { code: 'E_TIMEOUT', httpStatus: 408 }
+  }
+  if (
+    s.includes('could not resolve host') ||
+    s.includes('network is unreachable') ||
+    s.includes('connection refused') ||
+    s.includes('unable to access')
+  ) {
+    return { code: 'E_NETWORK', httpStatus: 502 }
+  }
+  if (stderr.trim().length === 0) {
+    return { code: 'E_INTERNAL', httpStatus: 500 }
+  }
+  return { code: 'E_NETWORK', httpStatus: 502 }
+}
+
+/** ls-remote 错误 → 固定对外文案(不暴露 stderr,可能含凭据片段) */
+function lsRemoteErrorMessage(code: string): string {
+  switch (code) {
+    case 'E_AUTH':
+      return 'git ls-remote 鉴权失败'
+    case 'E_NETWORK':
+      return 'git ls-remote 网络不可达'
+    case 'E_TIMEOUT':
+      return 'git ls-remote 超时'
+    case 'E_INTERNAL':
+    default:
+      return 'git ls-remote 失败'
+  }
+}
+
+/** 校验 `git ls-remote` 是否成功,失败时返对应的 HTTP reply;成功返 null。 */
+async function verifyGitUrl(
+  git: GitExec,
+  gitUrl: string,
+  log: { error: (...args: unknown[]) => void } | undefined,
+): Promise<
+  | null
+  | {
+      httpStatus: 401 | 408 | 500 | 502
+      body: { error: string; message: string }
+    }
+> {
+  const result = await lsRemote(git, gitUrl)
+  if (result.code === 0) return null
+  const { code, httpStatus } = mapLsRemoteError(result.stderr)
+  // stderr 仅进 server log(可能含 user:token@host / ssh key 路径等敏感片段);
+  // 响应 body 用固定文案,避免把凭据泄漏给前端
+  log?.error({ stderr: result.stderr, code, gitUrl }, 'git ls-remote failed')
+  return {
+    httpStatus,
+    body: { error: code, message: lsRemoteErrorMessage(code) },
+  }
 }
 
 export async function reposRoutes(
   app: FastifyInstance,
   deps: ReposRouteDeps,
 ): Promise<void> {
+  const { workspace, git } = deps
+
+  // ==========================================================================
+  // GET /api/repos —— 读 yaml 注册表
+  // ==========================================================================
   app.get('/api/repos', async (_req, reply) => {
-    let entries: RepoPoolEntry[]
     try {
-      entries = readRepoPool(deps.workspaceRoot)
+      const reg = await workspace.readRepoRegistry()
+      const body = RepoRegistryResponseSchema.parse({ repos: reg.repos })
+      return reply.code(200).send(body)
     } catch (err) {
-      // readdirSync 在 ENOENT(目录不存在)也会抛;与权限 / IO 错一并
-      // 区分对待:ENOENT → 返空(决策 78);其余 → 500
-      const code = (err as NodeJS.ErrnoException)?.code
-      if (code === 'ENOENT') {
-        const body: ReposResponse = { repos: [] }
-        return reply.code(200).send(body)
-      }
+      // yaml 解析 / Zod 校验失败 → 500(用户可手动修复 yaml 文件)
       _req.log.error(
-        { err, dir: reposDirFor(deps.workspaceRoot) },
-        'read repo pool failed',
+        { err, path: workspace.repoRegistryPath },
+        'read repos.yaml failed',
       )
       return reply.code(500).send({
-        error: 'E_REPO_DIR_READ_FAILED',
+        error: 'E_REPO_REGISTRY_READ_FAILED',
+        message: err instanceof Error ? err.message : 'unknown error',
+      })
+    }
+  })
+
+  // ==========================================================================
+  // POST /api/repos —— 创建仓库条目
+  // ==========================================================================
+  app.post<{ Body: unknown }>('/api/repos', async (req, reply) => {
+    // 1. body schema 校验
+    const parsed = PostRepoRegistryRequestSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: 'invalid_body',
+        details: parsed.error.issues,
+      })
+    }
+    const { name, gitUrl, description } = parsed.data
+
+    // 2. 先跑 ls-remote(决策 Q5 + 防 SSRF):
+    //    - 先做网络验证再查唯一性,避免攻击者用别人已有的 name 反复 POST
+    //      第三方 git URL 触发服务端对任意主机做端口扫描 / 探测
+    //    - 鉴权失败 stderr 也不直接回给客户端(M1 净化)
+    const fail = await verifyGitUrl(git, gitUrl, req.log)
+    if (fail) {
+      return reply.code(fail.httpStatus).send(fail.body)
+    }
+
+    // 3. name 唯一性(在 ls-remote 通过后做,失败可放心返 409)
+    const existing = await workspace.findRepoByName(name)
+    if (existing) {
+      return reply.code(409).send({
+        error: 'E_REPO_NAME_EXISTS',
+        message: `仓库名 ${name} 已存在`,
+      })
+    }
+
+    // 4. 原子写入 yaml
+    try {
+      await workspace.addRepo({ name, gitUrl, description })
+    } catch (err) {
+      // 唯一可能:并发 race 撞 name(理论上 findRepoByName 已经查过,
+      // 但服务层 mutateRegistry 兜底抛 RegistryConflictError)
+      if (err instanceof RegistryConflictError) {
+        return reply.code(409).send({
+          error: err.code,
+          message: err.message,
+        })
+      }
+      req.log.error({ err, name, gitUrl }, 'addRepo failed')
+      return reply.code(500).send({
+        error: 'E_REGISTRY_WRITE_FAILED',
         message: err instanceof Error ? err.message : 'unknown error',
       })
     }
 
-    const body = ReposResponseSchema.parse({ repos: entries })
-    return reply.code(200).send(body)
+    return reply.code(201).send({ name, gitUrl, description })
   })
+
+  // ==========================================================================
+  // PUT /api/repos/:name —— 改 gitUrl / description
+  // ==========================================================================
+  app.put<{ Params: { name: string }; Body: unknown }>(
+    '/api/repos/:name',
+    async (req, reply) => {
+      const { name } = req.params
+
+      // 1. body schema 校验(gitUrl / description 至少传一个)
+      const parsed = PutRepoRegistryRequestSchema.safeParse(req.body)
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'invalid_body',
+          details: parsed.error.issues,
+        })
+      }
+      const { gitUrl: newGitUrl, description: newDescription } = parsed.data
+
+      // 2. 查存在性(404 提前于 ls-remote)
+      const existing = await workspace.findRepoByName(name)
+      if (!existing) {
+        return reply.code(404).send({
+          error: 'E_REPO_NOT_FOUND',
+          message: `仓库 ${name} 不存在`,
+        })
+      }
+
+      // 3. 改了 gitUrl 才跑 ls-remote(不改 gitUrl 不触发网络 IO,Q5 验证只在变化时跑)
+      if (newGitUrl !== undefined && newGitUrl !== existing.gitUrl) {
+        const fail = await verifyGitUrl(git, newGitUrl, req.log)
+        if (fail) {
+          return reply.code(fail.httpStatus).send(fail.body)
+        }
+      }
+
+      // 4. 写盘(name 是 URL path 唯一标识,body 里的 name 字段被忽略,
+      //    Zod schema 已经不让传 name,这里只是兜底)
+      let updated: RepoRegistryEntry
+      try {
+        const patch: {
+          gitUrl?: string
+          description?: string
+        } = {}
+        if (newGitUrl !== undefined) patch.gitUrl = newGitUrl
+        if (newDescription !== undefined) patch.description = newDescription
+        updated = await workspace.updateRepo(name, patch)
+      } catch (err) {
+        if (err instanceof RegistryNotFoundError) {
+          // 并发删除 race:findRepoByName 与 updateRepo 之间被删
+          return reply.code(404).send({
+            error: err.code,
+            message: err.message,
+          })
+        }
+        if (err instanceof RegistryWriteError) {
+          req.log.error({ err, name }, 'updateRepo write failed')
+          return reply.code(500).send({
+            error: 'E_REGISTRY_WRITE_FAILED',
+            message: err.message,
+          })
+        }
+        throw err
+      }
+
+      return reply.code(200).send(updated)
+    },
+  )
+
+  // ==========================================================================
+  // DELETE /api/repos/:name —— 移除仓库条目(不动 codebase/)
+  // ==========================================================================
+  app.delete<{ Params: { name: string }; Querystring: { force?: string } }>(
+    '/api/repos/:name',
+    async (req, reply) => {
+      const { name } = req.params
+      const force = req.query.force === 'true'
+
+      // 1. 存在性
+      const existing = await workspace.findRepoByName(name)
+      if (!existing) {
+        return reply.code(404).send({
+          error: 'E_REPO_NOT_FOUND',
+          message: `仓库 ${name} 不存在`,
+        })
+      }
+
+      // 2. 检查被多少需求使用(.pending-<name> 视作克隆中,不计入 usage)
+      const usage = await workspace.findCodebaseUsage(name)
+      if (usage.length > 0 && !force) {
+        return reply.code(409).send({
+          error: 'E_REPO_IN_USE',
+          message: `该仓库被 ${usage.length} 个需求使用`,
+          usage,
+        })
+      }
+
+      // 3. 写盘
+      try {
+        await workspace.removeRepo(name)
+      } catch (err) {
+        if (err instanceof RegistryNotFoundError) {
+          // 并发删除 race
+          return reply.code(404).send({
+            error: err.code,
+            message: err.message,
+          })
+        }
+        if (err instanceof RegistryWriteError) {
+          req.log.error({ err, name }, 'removeRepo write failed')
+          return reply.code(500).send({
+            error: 'E_REGISTRY_WRITE_FAILED',
+            message: err.message,
+          })
+        }
+        throw err
+      }
+
+      return reply.code(204).send()
+    },
+  )
 }

@@ -66,3 +66,56 @@ export const RepoRegistryResponseSchema = z.object({
   repos: z.array(RepoRegistryEntrySchema),
 })
 export type RepoRegistryResponse = z.infer<typeof RepoRegistryResponseSchema>
+
+// ---------------------------------------------------------------------------
+// Route-level request schemas —— issue 02-repos-route-crud.md 2.2 / 2.3
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/repos body —— 创建新仓库条目。
+ *
+ * 必跑 `git ls-remote --heads <gitUrl>` 验证可达 + 凭据可用(决策 Q5),
+ * 失败 → 401 / 502 / 408,不写 yaml。
+ *
+ * description 可空(issue 01-shared-schema 决策:迁移期允许空串)。
+ */
+export const PostRepoRegistryRequestSchema = z.object({
+  name: z.string().min(1).max(100),
+  gitUrl: z.string().min(1).max(500),
+  description: z.string().max(500),
+})
+export type PostRepoRegistryRequest = z.infer<typeof PostRepoRegistryRequestSchema>
+
+/**
+ * PUT /api/repos/:name body —— 改 gitUrl / description(不允许改 name,name 是标识)。
+ *
+ * 两个字段都可省略;改了 gitUrl 时 route 必跑 ls-remote 重新验证(Q5 + 决策 111),
+ * 不改 gitUrl 不跑(原 description 不动 → 跳过)。
+ */
+export const PutRepoRegistryRequestSchema = z
+  .object({
+    gitUrl: z.string().min(1).max(500).optional(),
+    description: z.string().max(500).optional(),
+  })
+  .refine(
+    (v) => v.gitUrl !== undefined || v.description !== undefined,
+    { message: 'gitUrl / description 至少传一个' },
+  )
+export type PutRepoRegistryRequest = z.infer<typeof PutRepoRegistryRequestSchema>
+
+// ---------------------------------------------------------------------------
+// Service-level contract —— issue 02 / 04 (workspace service 暴露的形态)
+// ---------------------------------------------------------------------------
+
+/**
+ * 单条 codebase 使用记录 —— DELETE /api/repos/:name 二次确认时回给前端。
+ *
+ * `requirementId` 是 `~/.aidevspace/requirements/<id>/` 目录名;`branch` 是
+ * 用户当初关联时起的统一分支名(从 meta.yaml 派生);`codebasePath` 是
+ * `requirements/<id>/codebase/<repo-name>/` 的真实路径,前端用来在 UI 显示本地路径。
+ */
+export interface CodebaseUsageEntry {
+  requirementId: string
+  branch: string
+  codebasePath: string
+}

@@ -16,7 +16,15 @@ import {
   type Config,
   type WorkspaceInfo,
   type ConfigPatch,
+  type RepoRegistry,
+  type RepoRegistryEntry,
+  RepoRegistrySchema,
+  type CodebaseUsageEntry,
 } from '@ai-devspace/shared'
+
+/** yaml 注册表读写最大退避重试次数(并发覆盖 —— issue 02 风险"macOS / Windows 文件锁语义差异") */
+const REGISTRY_WRITE_MAX_RETRIES = 5
+const REGISTRY_WRITE_BASE_BACKOFF_MS = 200
 
 const SUBDIRS = ['requirements', 'repos', 'knowledge', 'skills', 'analysis-skills', 'logs'] as const
 
@@ -57,6 +65,18 @@ export class WorkspaceService {
     const override = env.AIDEVSPACE_HOME?.trim()
     return override && override.length > 0 ? override : join(homedir(), '.aidevspace')
   }
+
+  /**
+   * 注册表写互斥锁 —— 在进程内串行化所有 mutateRegistry 调用。
+   *
+   * 单纯 read-modify-write + 退避重试覆盖不了「读后写中间被穿插」
+   * 的并发场景:两个线程读到 [],各自追加不同 name,各自写入 —— 后写
+   * 的把先写的整文件覆盖掉,造成 lost update。
+   *
+   * 加 in-process mutex 后,所有 read→mutate→write 原子段被串行,
+   * 不存在穿插;跨进程并发仍由 fs 文件锁 + 退避兜底(决策 113 沿用)。
+   */
+  private registryLock: Promise<void> = Promise.resolve()
 
   constructor(public readonly root: string) {}
 
@@ -260,5 +280,288 @@ export class WorkspaceService {
       }
     }
     return total
+  }
+
+  // ===========================================================================
+  // RepoRegistry CRUD —— issue 02-repos-route-crud.md / ADR-0030 D1 / D8
+  //
+  // 真相源 = `<root>/repos.yaml`(独立单文件,顶层 {version: 1, repos: []})
+  // 与 config.yaml 职责分离(本机设置 vs 可移植清单,决策 Q2)。
+  //
+  // 所有读 / 写都走 service 层:route handler 不直接 fs,避免并发 read-modify-write
+  // 漂移(issue 02 风险"macOS / Windows 文件锁语义差异")。并发保护分两层:
+  // - 进程内:registryLock(简单 Promise chain)串行化所有 read→mutate→write
+  // - 跨进程:200ms 退避重试 + yaml.stringify 覆盖写(决策 113 沿用)
+  // ===========================================================================
+
+  /** `<root>/repos.yaml` 绝对路径 —— service 内部 + 测试共享 */
+  get repoRegistryPath(): string {
+    return join(this.root, 'repos.yaml')
+  }
+
+  /**
+   * 读 `<root>/repos.yaml` → RepoRegistry。
+   *
+   * - 文件不存在 → 返 `{version: 1, repos: []}`(全新安装合法态,沿用 ADR-0016 D6 语义)
+   * - 解析失败 / 校验失败 → 抛 `Error`(route 层映射 500 E_REPO_REGISTRY_READ_FAILED)
+   */
+  async readRepoRegistry(): Promise<RepoRegistry> {
+    if (!existsSync(this.repoRegistryPath)) {
+      return { version: 1, repos: [] }
+    }
+    const raw = await readFile(this.repoRegistryPath, 'utf8')
+    const parsed = yaml.parse(raw)
+    // 空文件 / 解析返 null → 当空注册表处理(yaml.parse 对空字符串 / '# comment only' 返 null)
+    if (parsed === null || parsed === undefined) {
+      return { version: 1, repos: [] }
+    }
+    // Zod 校验 —— 多余字段 strip / 缺字段报错
+    return RepoRegistrySchema.parse(parsed)
+  }
+
+  /**
+   * 按 name 找仓库条目;不存在返 null。
+   *
+   * name 是全局唯一即标识(决策 105),无需处理 "repo-<name>" slug 派生链
+   * —— ADR-0016 时代的 `id` 字段已退役。
+   */
+  async findRepoByName(name: string): Promise<RepoRegistryEntry | null> {
+    const reg = await this.readRepoRegistry()
+    return reg.repos.find((r) => r.name === name) ?? null
+  }
+
+  /**
+   * 追加一条仓库条目 —— 必须在外部先跑 ls-remote 验证可达(Q5)。
+   *
+   * 写盘 = read-modify-write 全文件,加 200ms 退避的轻量重试(最多 5 次)
+   * 覆盖 yaml 库 / fs 层面的并发竞态。**不**保留读到的条目顺序之外的状态;
+   * add 永远追加到尾部。
+   *
+   * 抛错条件:
+   * - name 已被占用(由调用方预先查 `findRepoByName` 决定 —— 此处不重复查,
+   *   走 read-modify-write 自然撞 → 抛 RegistryConflictError)
+   * - yaml 写失败(磁盘满 / IO 错)
+   */
+  async addRepo(entry: RepoRegistryEntry): Promise<void> {
+    await this.mutateRegistry((current) => {
+      if (current.repos.some((r) => r.name === entry.name)) {
+        throw new RegistryConflictError(
+          `仓库名 ${entry.name} 已存在`,
+          'E_REPO_NAME_EXISTS',
+        )
+      }
+      return { ...current, repos: [...current.repos, entry] }
+    })
+  }
+
+  /**
+   * 按 name 更新 gitUrl / description。
+   *
+   * - name 字段不可改(标识)
+   * - 改动 gitUrl 时调用方必须先跑 ls-remote 验证(Q5)
+   * - 未提供字段保持原值
+   * - name 不存在抛 RegistryNotFoundError
+   */
+  async updateRepo(
+    name: string,
+    patch: Partial<Pick<RepoRegistryEntry, 'gitUrl' | 'description'>>,
+  ): Promise<RepoRegistryEntry> {
+    let updated: RepoRegistryEntry | null = null
+    await this.mutateRegistry((current) => {
+      const idx = current.repos.findIndex((r) => r.name === name)
+      if (idx === -1) {
+        throw new RegistryNotFoundError(`仓库 ${name} 不存在`, 'E_REPO_NOT_FOUND')
+      }
+      const next: RepoRegistryEntry = {
+        ...current.repos[idx]!,
+        ...(patch.gitUrl !== undefined ? { gitUrl: patch.gitUrl } : {}),
+        ...(patch.description !== undefined
+          ? { description: patch.description }
+          : {}),
+      }
+      const nextRepos = [...current.repos]
+      nextRepos[idx] = next
+      updated = next
+      return { ...current, repos: nextRepos }
+    })
+    if (!updated) {
+      // 防御性:mutateRegistry 失败时这里不会到;留给类型系统兜底
+      throw new RegistryNotFoundError(`仓库 ${name} 不存在`, 'E_REPO_NOT_FOUND')
+    }
+    return updated
+  }
+
+  /**
+   * 按 name 移除仓库条目;name 不存在抛 RegistryNotFoundError。
+   *
+   * **绝不** rm 任何 `requirements/<req-id>/codebase/<name>/` 目录(决策 113)——
+   * 注册表与 codebase 是两套真相源,解耦。
+   */
+  async removeRepo(name: string): Promise<void> {
+    await this.mutateRegistry((current) => {
+      const next = current.repos.filter((r) => r.name !== name)
+      if (next.length === current.repos.length) {
+        throw new RegistryNotFoundError(`仓库 ${name} 不存在`, 'E_REPO_NOT_FOUND')
+      }
+      return { ...current, repos: next }
+    })
+  }
+
+  /**
+   * 扫 `requirements/<req-id>/codebase/<name>/` 派生「该仓库被 N 个需求使用」(决策 Q6 / 114)。
+   *
+   * 路径:`<root>/requirements/<reqId>/codebase/<name>/` —— `.pending-<name>`
+   * 标记视作「克隆中」,不计入 usage(未就绪不算关联)。
+   *
+   * 性能:仓库数 < 100,需求数通常 < 50,N×M 远低于 5000;filesystem stat 无并发问题。
+   * 单次 readdir 不抛 ENOENT(目录不存在 → 返空数组)。
+   */
+  async findCodebaseUsage(name: string): Promise<CodebaseUsageEntry[]> {
+    const reqDir = join(this.root, 'requirements')
+    if (!existsSync(reqDir)) return []
+    const out: CodebaseUsageEntry[] = []
+    for (const e of await readdir(reqDir, { withFileTypes: true })) {
+      if (!e.isDirectory()) continue
+      const reqId = e.name
+      const codeDir = join(reqDir, reqId, 'codebase', name)
+      if (!existsSync(codeDir)) continue
+      // 跳过 .pending-<name>(克隆中标记,不算关联)
+      // —— directory 实体本身就是 codeDir,不被 prefix 过滤,需要单独看
+      // pending 标记文件存在 → 跳过整条 usage
+      const pendingMarker = join(reqDir, reqId, 'codebase', `.pending-${name}`)
+      if (existsSync(pendingMarker)) continue
+      // 读 meta.yaml 拿 branchName(SSR 持久化契约沿用)
+      const branch = await this.readBranchNameSafe(join(reqDir, reqId))
+      out.push({
+        requirementId: reqId,
+        branch,
+        codebasePath: codeDir,
+      })
+    }
+    return out
+  }
+
+  /** 读 `requirements/<id>/meta.yaml` 的 branchName 字段;失败返 ''(不阻断 usage 列表) */
+  private async readBranchNameSafe(reqDir: string): Promise<string> {
+    const metaPath = join(reqDir, 'meta.yaml')
+    if (!existsSync(metaPath)) return ''
+    try {
+      const raw = await readFile(metaPath, 'utf8')
+      const parsed = yaml.parse(raw)
+      if (parsed && typeof parsed === 'object' && 'branchName' in parsed) {
+        const b = (parsed as Record<string, unknown>).branchName
+        if (typeof b === 'string') return b
+      }
+      return ''
+    } catch {
+      return ''
+    }
+  }
+
+  /**
+   * 注册表 read-modify-write 原子操作(轻量重试覆盖并发)。
+   *
+   * 行为:
+   * - 串行化:所有调用通过 registryLock 排队,避免 read→mutate→write 中间被穿插
+   * - 读 → 改(由 mutator 计算)→ 写
+   * - mutator 抛冲突错(RegistryConflictError / RegistryNotFoundError)
+   *   → 不重试,直接抛出 —— 这是业务级冲突,与并发无关
+   * - 写失败(ENOENT / EEXIST / EAGAIN 等 IO 错)→ 200ms 退避重试,最多 5 次
+   * - 超过 5 次 → 抛 RegistryWriteError(让 route 层映射 500 E_REGISTRY_WRITE_FAILED)
+   *
+   * 注:yaml 库本身不保证并发安全;靠 in-process mutex + 退避重试兜底,
+   * 跨进程并发仍由 fs 文件锁 + 退避兜底(决策 113 沿用)。
+   */
+  private async mutateRegistry(
+    mutator: (current: RepoRegistry) => RepoRegistry,
+  ): Promise<void> {
+    const prevLock = this.registryLock
+    let release: () => void
+    this.registryLock = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    try {
+      await prevLock
+      let lastErr: unknown
+      for (let attempt = 0; attempt < REGISTRY_WRITE_MAX_RETRIES; attempt++) {
+        let next: RepoRegistry
+        try {
+          const current = await this.readRepoRegistry()
+          next = mutator(current)
+        } catch (err) {
+          // 业务级冲突(mutor 主动抛出)—— 不重试,直接抛给 caller
+          if (
+            err instanceof RegistryConflictError ||
+            err instanceof RegistryNotFoundError
+          ) {
+            throw err
+          }
+          // 读阶段意外错(理论上 readRepoRegistry 自身不会抛业务错)—— 当 write 错处理
+          lastErr = err
+          if (attempt < REGISTRY_WRITE_MAX_RETRIES - 1) {
+            const backoffMs = REGISTRY_WRITE_BASE_BACKOFF_MS * (attempt + 1)
+            await new Promise((r) => setTimeout(r, backoffMs))
+          }
+          continue
+        }
+        try {
+          await this.writeRegistryFile(next)
+          return
+        } catch (err) {
+          lastErr = err
+          if (attempt < REGISTRY_WRITE_MAX_RETRIES - 1) {
+            // 200ms 起步的线性退避(简单;并发冲突低概率,无需指数)
+            const backoffMs = REGISTRY_WRITE_BASE_BACKOFF_MS * (attempt + 1)
+            await new Promise((r) => setTimeout(r, backoffMs))
+          }
+        }
+      }
+      throw new RegistryWriteError(
+        `repos.yaml 写入失败(重试 ${REGISTRY_WRITE_MAX_RETRIES} 次)`,
+        lastErr,
+      )
+    } finally {
+      release!()
+    }
+  }
+
+  private async writeRegistryFile(reg: RepoRegistry): Promise<void> {
+    // 序列化前再过一遍 Zod(防御性 —— 防止 mutator 计算出非法数据)
+    const validated = RepoRegistrySchema.parse(reg)
+    const text = yaml.stringify(validated, { indent: 2, lineWidth: 0 })
+    await this.writeFileAtomic(this.repoRegistryPath, text)
+  }
+}
+
+/** 注册表并发写失败(超过 5 次重试仍失败) */
+export class RegistryWriteError extends Error {
+  constructor(
+    message: string,
+    public readonly cause: unknown,
+  ) {
+    super(message)
+    this.name = 'RegistryWriteError'
+  }
+}
+
+/** 注册表写撞重(name 已被占用) */
+export class RegistryConflictError extends Error {
+  constructor(
+    message: string,
+    public readonly code: 'E_REPO_NAME_EXISTS',
+  ) {
+    super(message)
+    this.name = 'RegistryConflictError'
+  }
+}
+
+/** 注册表查 / 改 / 删撞不存在 */
+export class RegistryNotFoundError extends Error {
+  constructor(
+    message: string,
+    public readonly code: 'E_REPO_NOT_FOUND',
+  ) {
+    super(message)
+    this.name = 'RegistryNotFoundError'
   }
 }
