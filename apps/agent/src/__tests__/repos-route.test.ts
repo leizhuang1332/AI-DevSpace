@@ -29,7 +29,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import yaml from 'yaml'
 import { buildServer } from '../server.js'
-import type { GitExec } from '../worktree/WorktreeManager.js'
+import type { GitExec } from '../codebase/CodebaseManager.js'
 import {
   WorkspaceService,
   RegistryConflictError,

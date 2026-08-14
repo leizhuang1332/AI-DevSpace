@@ -1,18 +1,18 @@
 /**
- * RequirementService —— ticket 02 worktree 真实创建
+ * RequirementService —— issue 03 (ADR-0030 D3 / D5) 需求关联独立 clone
  *
- * 封装对每个 repo 走 `git worktree add` 的业务逻辑:
+ * 封装对每个 repo 走 `git clone` + `git checkout -b` 的业务逻辑:
  * 1. 校验 req 目录是否存在
- * 2. 探测 base 分支(main → master fallback)
- * 3. 调 WorktreeManager.createWorktree
- * 4. stderr → RepoAttachErrorCode 映射
- * 5. 网络错自动重试 3 次(决策 30)
+ * 2. 校验 repo 在 workspace 注册表里(否则 E_REPO_NOT_FOUND)
+ * 3. 调 CodebaseManager.clone(reqId, repoName, gitUrl, branchName)
+ * 4. 任一成功 → 写 meta.yaml.branchName(SSR 持久化契约沿用)
+ * 5. 通过 SseHub 推 `repo-clone-progress` 事件(panding → cloning → ready/failed)
  *
  * 设计要点:
  * - 纯函数语义:每个 repo 的失败独立处理,不抛到调用方
- * - GitExec / WorktreeManager 通过 DI 注入,单元测试用 fake git
- * - 不复用 WorktreeManager.createWorktree 的 default base(`'master'`),
- *   而是由本服务先 resolveBaseBranch 再显式传 base —— 保证 main 优先
+ * - 并行执行(`Promise.allSettled`),每个 repo 独立推进
+ * - CodebaseManager 通过 DI 注入,单元测试用 fake codebasemgr
+ * - SseHub 可选注入(测试时给 fakeHub 验证事件顺序)
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -36,7 +36,6 @@ import {
   slugify,
   type AssetMeta,
   type AttachRepoResult,
-  type RepoAttachErrorCodeT,
   type RequirementMeta,
   type RequirementStatusT,
   type RequirementSummary,
@@ -44,6 +43,13 @@ import {
   type UploadValidationReason,
   type UploadValidationResult as SharedUploadValidationResult,
 } from '@ai-devspace/shared'
+import type {
+  CodebaseManager,
+  GitExec,
+} from '../codebase/CodebaseManager.js'
+import { createCodebaseManager } from '../codebase/CodebaseManager.js'
+import type { SseHub } from '../sse/SseHub.js'
+import type { WorkspaceService } from './WorkspaceService.js'
 
 /**
  * 抽出 `name.ext` 末尾的扩展名(无 `.` 前缀);`a.b.c` → `c`,`a` → `''`。
@@ -66,25 +72,6 @@ function compareResourceNodes(a: ResourceTreeNode, b: ResourceTreeNode): number 
   if (a.name > b.name) return 1
   return 0
 }
-
-/**
- * 在 per-repo `AttachRepoResult` 失败分支 `code` 字段允许的错误码。
- * 与 PER_REPO_ERROR_CODES 一致 —— E_INVALID_BRANCH_NAME / E_REQUIREMENT_NOT_FOUND
- * 是路由层(顶层 catch)处理,不在 per-repo 结果里出现。
- */
-type PerRepoCode =
-  | 'E_BASE_BRANCH_NOT_FOUND'
-  | 'E_DISK_FULL'
-  | 'E_NETWORK'
-  | 'E_REPO_NOT_FOUND'
-  | 'E_BRANCH_EXISTS'
-  | 'E_INTERNAL'
-import {
-  createWorktreeManager,
-  GitError,
-  type GitExec,
-  type WorktreeManager,
-} from '../worktree/WorktreeManager.js'
 
 // mammoth 1.12 运行时仍提供 convertToMarkdown,但类型声明遗漏了该兼容 API。
 const mammothWithMarkdown = mammoth as typeof mammoth & {
@@ -122,76 +109,42 @@ function extractDataUriImages(markdown: string): ParsedUploadImage[] {
 
 export interface RequirementServiceDeps {
   root: string
-  git: GitExec
-  worktreeMgr?: WorktreeManager
-  maxRetries?: number
-  retryDelayMs?: number
+  /** 兼容旧构造 — 不再使用,保留字段以避免构造时大改测试 fixture */
+  git?: GitExec
+  /** clone 路径管理(issue 03);默认用 createCodebaseManager 构造 */
+  codebaseMgr?: CodebaseManager
+  /** workspace 注册表:用于 repoNames → gitUrl 解析 */
+  workspace?: WorkspaceService
+  /** SSE 通道:attachRepos 推送 `repo-clone-progress` 事件 */
+  sseHub?: SseHub
   /** 测试钩子:用真实 setTimeout 时禁用以便测速 */
   sleep?: (ms: number) => Promise<void>
 }
 
-/**
- * stderr 文本 → 错误码 + 默认消息。
- *
- * 注意:此函数只读 stderr 文本,不依赖抛错方;用于：
- * - `show-ref --verify` 失败(stderr 含 "fatal: ambiguous argument" 等)→ E_BASE_BRANCH_NOT_FOUND
- * - `worktree add -b X` 失败(stderr 含具体原因)→ 各错误码
- *
- * 网络错识别:**仅** 在 stderr 含网络错关键字时返回 E_NETWORK,
- * 其他一律按确定性错误处理(retry 不会触发)。
- */
-export function mapGitError(stderr: string): RepoAttachErrorCodeT {
-  const s = stderr || ''
-  // 网络错(可重试)
-  if (
-    /\b(EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|ECONNRESET|ETIMEDOUT)\b/.test(s) ||
-    /Could not resolve host/.test(s) ||
-    /Connection (refused|reset)/i.test(s) ||
-    /network is unreachable/i.test(s)
-  ) {
-    return RepoAttachErrorCode.E_NETWORK
-  }
-  // 磁盘满
-  if (/No space left on device|ENOSPC|disk full/i.test(s)) {
-    return RepoAttachErrorCode.E_DISK_FULL
-  }
-  // 分支已存在
-  if (/A branch named .* already exists/.test(s)) {
-    return RepoAttachErrorCode.E_BRANCH_EXISTS
-  }
-  // base 分支不存在(reference / unknown revision)
-  if (/invalid reference|not a valid ref|unknown revision|needed a single revision/.test(s)) {
-    return RepoAttachErrorCode.E_BASE_BRANCH_NOT_FOUND
-  }
-  // repo 不存在(not a git repository / No such file or directory / .git missing)
-  if (/not a git repository|Not a directory|No such file or directory/.test(s)) {
-    return RepoAttachErrorCode.E_REPO_NOT_FOUND
-  }
-  return RepoAttachErrorCode.E_INTERNAL
-}
-
-export function isNetworkErrorCode(code: RepoAttachErrorCodeT): boolean {
-  return code === RepoAttachErrorCode.E_NETWORK
-}
-
 export class RequirementService {
   private readonly root: string
-  private readonly git: GitExec
-  private readonly worktreeMgr: WorktreeManager
-  private readonly maxRetries: number
-  private readonly retryDelayMs: number
+  private readonly codebaseMgr: CodebaseManager
+  private readonly workspace?: WorkspaceService
+  private readonly sseHub?: SseHub
   private readonly sleep: (ms: number) => Promise<void>
 
   constructor(deps: RequirementServiceDeps) {
     this.root = deps.root
-    this.git = deps.git
-    this.maxRetries = deps.maxRetries ?? 3
-    this.retryDelayMs = deps.retryDelayMs ?? 200
     this.sleep =
       deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)))
-    // 默认用统一 git exec 构造 manager;调用方可注入自己的 manager
-    this.worktreeMgr =
-      deps.worktreeMgr ?? createWorktreeManager({ root: deps.root, git: deps.git })
+    // 默认构造 CodebaseManager(需要一个 GitExec);如果调用方既不传 codebaseMgr
+    // 也不传 git,这里降级为 undefined 抛错 —— 显式优于隐式。
+    if (deps.codebaseMgr) {
+      this.codebaseMgr = deps.codebaseMgr
+    } else if (deps.git) {
+      this.codebaseMgr = createCodebaseManager({ root: deps.root, git: deps.git })
+    } else {
+      throw new Error(
+        'RequirementService: 必须提供 codebaseMgr 或 git(用于构造默认 CodebaseManager)',
+      )
+    }
+    this.workspace = deps.workspace
+    this.sseHub = deps.sseHub
   }
 
   async parseUpload(buffer: Buffer, filename: string): Promise<ParseUploadResult> {
@@ -300,200 +253,226 @@ export class RequirementService {
   }
 
   /**
-   * 探测 base 分支:优先 main,fallback master。
-   * - 两者都存在 → 返回 'main'(优先)
-   * - 仅 master → 返回 'master'
-   * - 两者都不存在 → 返回 null(调用方转 E_BASE_BRANCH_NOT_FOUND)
+   * 探测 base 分支:优先 main,fallback master —— 已废弃(issue 03 取消 base 探测)。
    *
-   * 用 `git show-ref --verify` 是 idempotent + 不修改仓库状态。
+   * 历史:旧 WorktreeManager 路径需要在已 clone 的主仓库里探测 main/master
+   * 才能 worktree add -b。新 CodebaseManager 直接 `git clone + git checkout -b`,
+   * clone 必然带 HEAD,不依赖 base 探测。本方法保留仅为不破坏旧测试,所有内部
+   * 调用都已删除;未来若有用户调到这里,直接抛错指引新路径。
    */
-  async resolveBaseBranch(repoPath: string): Promise<'main' | 'master' | null> {
-    // 先试 main
-    const mainRes = await this.git([
-      '-C',
-      repoPath,
-      'show-ref',
-      '--verify',
-      '--quiet',
-      'refs/heads/main',
-    ])
-    if (mainRes.code === 0) return 'main'
-    // fallback master
-    const masterRes = await this.git([
-      '-C',
-      repoPath,
-      'show-ref',
-      '--verify',
-      '--quiet',
-      'refs/heads/master',
-    ])
-    if (masterRes.code === 0) return 'master'
-    return null
+  async resolveBaseBranch(_repoPath: string): Promise<null> {
+    throw new Error(
+      'resolveBaseBranch 已废弃(issue 03):CodebaseManager.clone 不再需要 base 探测',
+    )
   }
 
   /**
-   * pool repo 是否存在(基于 `<root>/repos/<repoName>/.git` 存在性)
+   * 为单个 repo 跑 clone(issue 03 新实装)。
    *
-   * 故意检查 `.git` 而非纯目录:避免空目录被误判为合法 repo。
-   * 真实 clone 后 `.git` 一定存在。
-   */
-  repoExistsInPool(repoName: string): boolean {
-    const poolPath = this.worktreeMgr.getPoolRepoPath(repoName)
-    return existsSync(join(poolPath, '.git'))
-  }
-
-  /**
-   * 为单个 repo 创建 worktree,带网络错重试。
+   * 流程:
+   * 1. 查注册表(workspace.findRepoByName)→ 拿到 gitUrl;缺失返 E_REPO_NOT_FOUND
+   * 2. setPending(写 `.pending-<name>` 标记)
+   * 3. codebaseMgr.clone(reqId, repoName, gitUrl, branchName) → 真实 git clone
+   * 4. clearPending(无论成败 —— 标记已写就清掉,半成品由 codebaseMgr 内部清理)
    *
-   * 错误码语义:
-   * - 提前失败(未调 git):`E_REPO_NOT_FOUND` / `E_BASE_BRANCH_NOT_FOUND`
-   * - 调 git 后失败:由 `mapGitError` 决定
-   * - 网络错:重试 maxRetries 次后仍失败才返回 `E_NETWORK`
-   *
-   * @returns AttachRepoResult (ok=true 给 worktree path,ok=false 给 code + message)
+   * @returns AttachRepoResult (ok=true 给 codebasePath,ok=false 给 code + message)
    */
   async attachRepo(
     reqId: string,
     repoName: string,
     branchName: string,
   ): Promise<AttachRepoResult> {
-    // 1. repo 存在性
-    if (!this.repoExistsInPool(repoName)) {
+    // 1. 查注册表
+    if (!this.workspace) {
       return {
         ok: false,
-        repoId: repoName,
+        repoName,
+        code: RepoAttachErrorCode.E_INTERNAL,
+        message: 'RequirementService.workspace 未注入,无法查注册表',
+      }
+    }
+    const entry = await this.workspace.findRepoByName(repoName)
+    if (!entry) {
+      return {
+        ok: false,
+        repoName,
         code: RepoAttachErrorCode.E_REPO_NOT_FOUND,
-        message: `仓库 ${repoName} 不存在于全局池(<root>/repos/${repoName}/.git)`,
+        message: `注册表无仓库 ${repoName}`,
       }
     }
 
-    const repoPath = this.worktreeMgr.getPoolRepoPath(repoName)
+    // 2. 推 pending + 落半成品标记
+    await this.codebaseMgr.setPending(reqId, repoName)
+    this.broadcastProgress(reqId, repoName, 'cloning')
 
-    // 2. base 分支探测
-    const base = await this.resolveBaseBranch(repoPath)
-    if (base === null) {
+    // 3. clone
+    let result: Awaited<ReturnType<typeof this.codebaseMgr.clone>>
+    try {
+      result = await this.codebaseMgr.clone(reqId, repoName, entry.gitUrl, branchName)
+    } catch (err) {
+      // clone 不应抛(默认实现都返 result);兜底
+      await this.codebaseMgr.clearPending(reqId, repoName)
+      this.broadcastProgress(reqId, repoName, 'failed', (err as Error).message)
       return {
         ok: false,
-        repoId: repoName,
-        code: RepoAttachErrorCode.E_BASE_BRANCH_NOT_FOUND,
-        message: 'main 与 master 分支都不存在;无法确定 base 分支',
+        repoName,
+        code: RepoAttachErrorCode.E_INTERNAL,
+        message: (err as Error).message,
       }
     }
 
-    // 3. worktree add,网络错重试
-    const worktreePath = this.worktreeMgr.getWorktreePath(reqId, repoName)
-    let lastErr: { code: PerRepoCode; message: string } | null = null
+    // 4. 清 pending(无论成败 —— 标记已写就清掉)
+    await this.codebaseMgr.clearPending(reqId, repoName)
 
-    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
-      if (attempt > 0) {
-        // 指数退避:200 / 400 / 800ms
-        const delay = this.retryDelayMs * Math.pow(2, attempt - 1)
-        await this.sleep(delay)
+    if (result.ok) {
+      this.broadcastProgress(reqId, repoName, 'ready')
+      // base 字段保留为 'main'(ADR-0030:clone 必然带 HEAD,语义与 'main' 等价;
+      // 此处不依赖本地探测,统一返回 'main' 给 web 端做条件渲染兼容)
+      return {
+        ok: true,
+        repoName,
+        branch: branchName,
+        codebasePath: result.path,
+        base: 'main',
       }
-      const args = [
-        '-C',
-        repoPath,
-        'worktree',
-        'add',
-        worktreePath,
-        '-b',
-        branchName,
-        base,
-      ]
-      let res: { code: number; stdout: string; stderr: string }
-      try {
-        res = await this.git(args)
-      } catch (err) {
-        // GitExec 自己 throw(罕见;默认实现不会 throw,直接返回 code)
-        lastErr = {
-          code: RepoAttachErrorCode.E_INTERNAL,
-          message: err instanceof Error ? err.message : String(err),
-        }
-        continue
-      }
-      if (res.code === 0) {
-        return {
-          ok: true,
-          repoId: repoName,
-          branch: branchName,
-          worktreePath,
-          base,
-        }
-      }
-      const code = mapGitError(res.stderr)
-      // mapGitError 不会返回 E_INVALID_BRANCH_NAME / E_REQUIREMENT_NOT_FOUND,
-      // 这两个是路由层处理的。这里 cast 到 PerRepoCode 满足类型约束。
-      lastErr = { code: code as PerRepoCode, message: res.stderr.trim() || `git exited with code ${res.code}` }
-      // 仅网络错重试;其他错误立即返回
-      if (!isNetworkErrorCode(code)) break
     }
-
-    // 4. 失败
+    this.broadcastProgress(reqId, repoName, 'failed', result.message)
     return {
       ok: false,
-      repoId: repoName,
-      code: lastErr?.code ?? RepoAttachErrorCode.E_INTERNAL,
-      message: lastErr?.message ?? 'unknown git failure',
+      repoName,
+      code: result.code,
+      message: result.message,
     }
   }
 
   /**
-   * 批量 attach:逐个串行处理,任一 repo 失败不影响其他。
-   * 错误码映射策略见 `attachRepo`。
+   * 推 `repo-clone-progress` 事件到 req 通道(Web 端订阅后实时显示哪个 repo
+   * 还在 cloning / 已 ready / failed)。
    *
-   * 成功路径副作用:首次(或任意成功)attach 完成后,把 `branchName` 写进
-   * `meta.yaml`(issue 06 ticket 06 SSR 持久化):
-   * - meta.yaml 是 req 级持久状态源,DRAFTING SSR 读它派生 `data.lockedBranchName`
-   * - 客户端 `lockedBranchName` state 原本只在内存,任何重挂载(F5 / 路由切换
-   *   / 父组件 unmount)都会让 RepoBar 的 🟢 + 分支名 消失、append 模式锁定
-   *   banner 失效
-   * - 写盘只覆盖 `branchName` 字段(其他字段保留),用 `readMetaYaml` + 改写 +
-   *   `writeMetaYaml` 模式,避免对 ticket 04 创建时构造的初始 meta 造成破坏
+   * - status: 'pending' | 'cloning' | 'ready' | 'failed'
+   * - failed 时附 error 字段
+   * - SseHub 没注入时 silently no-op(单元测试环境常见)
+   *
+   * 不耦合具体 SseEvent variant 定义 —— `SseHub.publish` 接受 SseEvent 联合,
+   * 这里直接构造一个 `{type: 'repo-clone-progress', ...}` 形状对象。
+   */
+  private broadcastProgress(
+    reqId: string,
+    repoName: string,
+    status: 'pending' | 'cloning' | 'ready' | 'failed',
+    error?: string,
+  ): void {
+    if (!this.sseHub) return
+    const event = {
+      type: 'repo-clone-progress' as const,
+      reqId,
+      repoName,
+      status,
+      ts: Date.now(),
+      ...(error ? { error } : {}),
+    }
+    this.sseHub.publish(reqId, event)
+  }
+
+  /**
+   * 批量 attach(issue 03):并行 + 异步,任一成功 → meta.yaml 持久化 branchName。
+   *
+   * 流程:
+   * 0. 校验:所有 repoName 必须在注册表存在(否则提前返 E_REPO_NOT_FOUND)
+   * 1. 给每个 repo 推 pending 事件
+   * 2. `Promise.allSettled` 并行跑 attachRepo,失败不影响其他
+   * 3. 收集 results;任一成功 → 写 meta.yaml.branchName
+   *
+   * 设计要点:
+   * - 任一 repo 失败都独立返,符合 attach-repos-dialog 的部分成功渲染
+   * - 半成品目录由 CodebaseManager.clone 在 checkout 失败时自清
+   * - meta.yaml 写失败只 warn,不回滚已成功的 clone
    */
   async attachRepos(
     reqId: string,
-    repoIds: readonly string[],
+    repoNames: readonly string[],
     branchName: string,
   ): Promise<AttachRepoResult[]> {
-    const out: AttachRepoResult[] = []
-    for (const id of repoIds) {
-      out.push(await this.attachRepo(reqId, id, branchName))
+    // 0. 校验(注册表里必须有所有 repo)
+    if (!this.workspace) {
+      return repoNames.map((name) => ({
+        ok: false,
+        repoName: name,
+        code: RepoAttachErrorCode.E_INTERNAL,
+        message: 'RequirementService.workspace 未注入,无法查注册表',
+      }))
     }
-
-    // 至少 1 个成功 → 把 branchName 写入 meta.yaml
-    // - 已存在 meta.yaml(ticket 04 createRequirement 落地)→ 合并 + 只覆盖 branchName
-    // - **不存在** meta.yaml(罕见:attach 前没走 createRequirement)→ 兜底创建
-    //   一个最小 meta.yaml(id / title 暂用 reqId / createdAt now),让后续
-    //   SSR 读得到 branchName。title 后续可由前端 / 自动 migrate 补齐。
-    if (out.some((r) => r.ok)) {
-      try {
-        const reqDir = this.requirementDirPath(reqId)
-        // reqDir 不存在时(测试绕过 createRequirement / 早期 call site):
-        // 兜底 mkdirSync,避免 writeMetaYaml 抛 ENOENT
-        if (!existsSync(reqDir)) {
-          mkdirSync(reqDir, { recursive: true, mode: 0o700 })
-        }
-        const existing = this.readMetaYaml(reqDir)
-        const nextMeta: RequirementMeta = existing
-          ? { ...existing, branchName }
-          : {
-              id: reqId,
-              title: reqId,
-              createdAt: new Date().toISOString(),
-              branchName,
-            }
-        this.writeMetaYaml(reqDir, nextMeta)
-      } catch (err) {
-        // meta.yaml 写盘失败不应回滚 worktree(已落盘)—— 仅日志告警
-        // eslint-disable-next-line no-console
-        console.warn(
-          `[RequirementService] failed to persist branchName to meta.yaml for ${reqId}:`,
-          err,
-        )
+    for (const name of repoNames) {
+      const entry = await this.workspace.findRepoByName(name)
+      if (!entry) {
+        return [
+          {
+            ok: false,
+            repoName: name,
+            code: RepoAttachErrorCode.E_REPO_NOT_FOUND,
+            message: `注册表无仓库 ${name}`,
+          },
+        ]
       }
     }
 
-    return out
+    // 1. pending 事件(每个 repo 一次,不等 clone 启动就告诉前端「马上开始」)
+    for (const name of repoNames) {
+      this.broadcastProgress(reqId, name, 'pending')
+    }
+
+    // 2. 并行跑 attachRepo
+    const settled = await Promise.allSettled(
+      repoNames.map((name) => this.attachRepo(reqId, name, branchName)),
+    )
+
+    // 3. 收集结果
+    const results: AttachRepoResult[] = settled.map((r) =>
+      r.status === 'fulfilled'
+        ? r.value
+        : {
+            ok: false as const,
+            repoName: '?',
+            code: RepoAttachErrorCode.E_INTERNAL,
+            message: r.reason instanceof Error ? r.reason.message : String(r.reason),
+          },
+    )
+
+    // 4. 任一成功 → 写 meta.yaml.branchName(SSR 持久化契约)
+    if (results.some((r) => r.ok)) {
+      this.persistBranchName(reqId, branchName)
+    }
+
+    return results
+  }
+
+  /** 把 branchName 写入 meta.yaml —— 抽出独立方法便于 attachRepos 调用 */
+  private persistBranchName(reqId: string, branchName: string): void {
+    try {
+      const reqDir = this.requirementDirPath(reqId)
+      // reqDir 不存在时(测试绕过 createRequirement / 早期 call site):
+      // 兜底 mkdirSync,避免 writeMetaYaml 抛 ENOENT
+      if (!existsSync(reqDir)) {
+        mkdirSync(reqDir, { recursive: true, mode: 0o700 })
+      }
+      const existing = this.readMetaYaml(reqDir)
+      const nextMeta: RequirementMeta = existing
+        ? { ...existing, branchName }
+        : {
+            id: reqId,
+            title: reqId,
+            createdAt: new Date().toISOString(),
+            branchName,
+          }
+      this.writeMetaYaml(reqDir, nextMeta)
+    } catch (err) {
+      // meta.yaml 写盘失败不应回滚已成功的 clone —— 仅日志告警
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[RequirementService] failed to persist branchName to meta.yaml for ${reqId}:`,
+        err,
+      )
+    }
   }
 
   // ===========================================================================

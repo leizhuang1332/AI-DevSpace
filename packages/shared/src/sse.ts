@@ -413,5 +413,36 @@ export type SseEvent =
       granularity: import('./prd-split.js').PrdSplitGranularityT
       actualCount: number
     }
+  // -------------------------------------------------------------------------
+  // Codebase 克隆进度(issue 03 · ADR-0030 D5)
+  //
+  // RequirementService.attachRepos 在并行 clone 期间,逐个 repo 推这条事件到
+  // req 通道。Web 端 attach-repos-dialog 订阅后实时显示每个 repo 的克隆状态
+  // (pending → cloning → ready / failed),而不是等 HTTP 响应一次性收到。
+  //
+  // 推送时序(issue 03 验收):
+  //   - 每个 repo 启动前推 `pending`
+  //   - 启动 clone 后立即推 `cloning`
+  //   - clone 成功后推 `ready`(不附 error)
+  //   - clone 失败后推 `failed`(附 error message,来自 stderr 净化)
+  // -------------------------------------------------------------------------
+  /**
+   * 单个 repo 的克隆进度事件。
+   *
+   * - `repoName` —— 仓库 name(注册表唯一标识)
+   * - `status` —— 4 态:`pending`(已排队但还没启动) / `cloning`(真实
+   *   `git clone` 在跑) / `ready`(成功,codebasePath 已落盘) / `failed`
+   *   (克隆失败,可能伴随半成品清理)
+   * - `error` —— 仅 `status === 'failed'` 时附,前端用作红色 banner 文案
+   * - `ts` —— 推送时刻 epoch ms(便于前端计算耗时)
+   */
+  | {
+      type: 'repo-clone-progress'
+      reqId: string
+      repoName: string
+      status: 'pending' | 'cloning' | 'ready' | 'failed'
+      ts: number
+      error?: string
+    }
 
 export const SSE_HEARTBEAT_MS = 30_000

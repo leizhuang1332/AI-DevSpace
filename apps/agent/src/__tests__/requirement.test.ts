@@ -13,44 +13,49 @@ import {
 import { createSseHub, type SseHub } from '../sse/SseHub.js'
 import type { SseEvent } from '@ai-devspace/shared'
 
+/**
+ * requirement routes — issue 03 重写后契约(ADR-0030):
+ * - `repoNames` 取代旧 `repoIds`(name 全局唯一即标识,决策 105)
+ * - `codebasePath` 取代旧 `worktreePath`(`requirements/<id>/codebase/<name>/`,决策 106)
+ * - 不再做 `repo-` 前缀剥除(那是旧 ADR-0016 时代的物理目录映射,issue 03 删除)
+ * - base 探测取消(clone 必然带 HEAD,决策 111)—— service 默认返 'main'
+ *
+ * 本文件覆盖 issue 03 之前的 ticket 02 / 03 / 04 / 07a 验收 + issue 03
+ * 自身契约(repoNames / codebasePath / 200 全成功 / 部分成功 / 401 / 404 / 503)。
+ */
+
 let app: FastifyInstance
 let root: string
 let token: string
 let service: RequirementService
-const serviceCalls: Array<{ reqId: string; repoIds: string[]; branchName: string }> = []
+const serviceCalls: Array<{ reqId: string; repoNames: string[]; branchName: string }> = []
 
 beforeEach(async () => {
   root = mkdtempSync(join(tmpdir(), 'aidevsp-req-'))
   const tm = new TokenManager(root)
   token = await tm.ensure()
-  // 默认 git fake: show-ref refs/heads/main 成功 → base=main
-  const gitFake = vi.fn(async (args: string[]) => {
-    if (args.includes('show-ref') && args.includes('refs/heads/main')) {
-      return { code: 0, stdout: '', stderr: '' }
-    }
-    return { code: 0, stdout: '', stderr: '' }
-  })
+  // 默认 git fake:issue 03 取消 base 探测,这里只需始终返 ok 给 CodebaseManager 用
+  const gitFake = vi.fn(async () => ({ code: 0, stdout: '', stderr: '' }))
   service = new RequirementService({
     root,
     git: gitFake as RequirementServiceDeps['git'],
     sleep: () => Promise.resolve(),
   })
   // spy attachRepos 调用
-  vi.spyOn(service, 'attachRepos').mockImplementation(async (reqId, repoIds, branchName) => {
-    serviceCalls.push({ reqId, repoIds: [...repoIds], branchName })
-    // 默认 1 个成功 + 1 个失败,允许 per-test 覆盖
+  vi.spyOn(service, 'attachRepos').mockImplementation(async (reqId, repoNames, branchName) => {
+    serviceCalls.push({ reqId, repoNames: [...repoNames], branchName })
+    // 默认 1 个成功;测试可覆盖返部分失败
     return [
       {
         ok: true,
-        repoId: repoIds[0] ?? 'r1',
+        repoName: repoNames[0] ?? 'r1',
         branch: branchName,
-        worktreePath: join(root, 'requirements', reqId, 'repos', repoIds[0] ?? 'r1'),
+        codebasePath: join(root, 'requirements', reqId, 'codebase', repoNames[0] ?? 'r1'),
         base: 'main',
       },
     ]
   })
   vi.spyOn(service, 'checkRequirementExists').mockImplementation(async (id) => {
-    // 默认 true,允许 per-test 覆盖
     return existsSync(join(root, 'requirements', id))
   })
 
@@ -88,10 +93,6 @@ async function authed(
 }
 
 describe('requirement routes return 501 not_implemented', () => {
-  // 注:ticket 07a 实装 GET /api/requirements(由文件系统派生),
-  // 它的完整断言在下面"GET /api/requirements — ticket 07a list endpoint"
-  // describe 块。这里只保留仍为 stub 的 3 个 endpoint 的 501 断言。
-
   it('GET /api/requirement/:id 缺失 req → 404 with E_REQUIREMENT_NOT_FOUND (ticket 02 实装)', async () => {
     const { statusCode, body } = await authed('GET', '/api/requirement/REFUND-001')
     expect(statusCode).toBe(404)
@@ -119,12 +120,11 @@ describe('requirement routes return 501 not_implemented', () => {
 })
 
 // ============================================================================
-// POST /api/requirement/:id/repos —— ticket 02 worktree 创建
+// POST /api/requirement/:id/repos —— issue 03 codebase 真实 clone
 // ============================================================================
 
-describe('POST /api/requirement/:id/repos — worktree attach', () => {
+describe('POST /api/requirement/:id/repos — codebase attach', () => {
   beforeEach(() => {
-    // 让 checkRequirementExists 默认通过
     ;(service.checkRequirementExists as ReturnType<typeof vi.fn>).mockResolvedValue(true)
   })
 
@@ -132,7 +132,7 @@ describe('POST /api/requirement/:id/repos — worktree attach', () => {
     const { statusCode, body } = await authed(
       'POST',
       '/api/requirement/req-001/repos',
-      { repoIds: ['refund-service'], branchName: 'feat/test' },
+      { repoNames: ['refund-service'], branchName: 'feat/test' },
     )
     expect(statusCode).toBe(200)
     expect(body).toMatchObject({
@@ -149,14 +149,14 @@ describe('POST /api/requirement/:id/repos — worktree attach', () => {
     ;(service.attachRepos as ReturnType<typeof vi.fn>).mockResolvedValue([
       {
         ok: true,
-        repoId: 'r1',
+        repoName: 'r1',
         branch: 'feat/test',
-        worktreePath: '/a/b/r1',
+        codebasePath: '/a/b/codebase/r1',
         base: 'main',
       },
       {
         ok: false,
-        repoId: 'r2',
+        repoName: 'r2',
         code: 'E_DISK_FULL',
         message: 'No space left',
       },
@@ -164,7 +164,7 @@ describe('POST /api/requirement/:id/repos — worktree attach', () => {
     const { statusCode, body } = await authed(
       'POST',
       '/api/requirement/req-001/repos',
-      { repoIds: ['r1', 'r2'], branchName: 'feat/test' },
+      { repoNames: ['r1', 'r2'], branchName: 'feat/test' },
     )
     expect(statusCode).toBe(200)
     expect(body.succeeded).toBe(1)
@@ -175,11 +175,40 @@ describe('POST /api/requirement/:id/repos — worktree attach', () => {
     expect(results[1].code).toBe('E_DISK_FULL')
   })
 
-  it('400 invalid_body: repoIds 为空', async () => {
+  it('200:response 的 repoId 来自入参 repoNames(顺序对齐)', async () => {
+    ;(service.attachRepos as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        ok: true,
+        repoName: 'r1',
+        branch: 'feat/test',
+        codebasePath: '/a/b/codebase/r1',
+        base: 'main',
+      },
+      {
+        ok: false,
+        repoName: 'r2',
+        code: 'E_REPO_NOT_FOUND',
+        message: 'no .git',
+      },
+    ])
     const { statusCode, body } = await authed(
       'POST',
       '/api/requirement/req-001/repos',
-      { repoIds: [], branchName: 'feat/test' },
+      { repoNames: ['r1', 'r2'], branchName: 'feat/test' },
+    )
+    expect(statusCode).toBe(200)
+    const results = body.results as Array<{ ok: boolean; repoId: string }>
+    // 路由层把入参 repoNames[idx] 回填到 result.repoId(契约:repoName 是注册表 name,
+    // 路由层不剥前缀,所以二者一致)
+    expect(results[0].repoId).toBe('r1')
+    expect(results[1].repoId).toBe('r2')
+  })
+
+  it('400 invalid_body: repoNames 为空', async () => {
+    const { statusCode, body } = await authed(
+      'POST',
+      '/api/requirement/req-001/repos',
+      { repoNames: [], branchName: 'feat/test' },
     )
     expect(statusCode).toBe(400)
     expect(body.error).toBe('invalid_body')
@@ -189,7 +218,7 @@ describe('POST /api/requirement/:id/repos — worktree attach', () => {
     const { statusCode, body } = await authed(
       'POST',
       '/api/requirement/req-001/repos',
-      { repoIds: ['r1'] },
+      { repoNames: ['r1'] },
     )
     expect(statusCode).toBe(400)
     expect(body.error).toBe('invalid_body')
@@ -197,11 +226,10 @@ describe('POST /api/requirement/:id/repos — worktree attach', () => {
 
   it('含路径非法字符 \\ → strict reject(400 E_INVALID_BRANCH_NAME)', async () => {
     // ticket 02 验收 #11:Agent 端再校验一次(前端已过滤,后端兜底)
-    // strict 模式:含任何非法字符即 reject,即使 strip 后仍合法也不算通过
     const { statusCode, body } = await authed(
       'POST',
       '/api/requirement/req-001/repos',
-      { repoIds: ['r1'], branchName: 'feat\\bad' },
+      { repoNames: ['r1'], branchName: 'feat\\bad' },
     )
     expect(statusCode).toBe(400)
     expect(body.error).toBe('E_INVALID_BRANCH_NAME')
@@ -212,7 +240,7 @@ describe('POST /api/requirement/:id/repos — worktree attach', () => {
     const { statusCode, body } = await authed(
       'POST',
       '/api/requirement/req-001/repos',
-      { repoIds: ['r1'], branchName: '\\\\:*?"<>|' },
+      { repoNames: ['r1'], branchName: '\\\\:*?"<>|' },
     )
     expect(statusCode).toBe(400)
     expect(body.error).toBe('E_INVALID_BRANCH_NAME')
@@ -223,91 +251,49 @@ describe('POST /api/requirement/:id/repos — worktree attach', () => {
     const { statusCode, body } = await authed(
       'POST',
       '/api/requirement/missing-id/repos',
-      { repoIds: ['r1'], branchName: 'feat/test' },
+      { repoNames: ['r1'], branchName: 'feat/test' },
     )
     expect(statusCode).toBe(404)
     expect(body.error).toBe('E_REQUIREMENT_NOT_FOUND')
     expect(body.requirementId).toBe('missing-id')
   })
 
-  // ============================================================================
-  // ticket 06 (ADR-0016 D3):repoId 是 'repo-' + dirname(GET /api/repos 契约);
-  // 路由层需剥前缀映射到 dirname 再传给 service,response 再 echo 回带前缀 id。
-  // ============================================================================
-
-  it('issue 06:接收 repoId 带 "repo-" 前缀 → 路由剥前缀传给 service,response echo 回带前缀 id', async () => {
-    // mock service 替换默认实现:记录入参 + 返回带 dirname 的结果
+  it('issue 03:成功结果含 codebasePath(requirements/<id>/codebase/<name>/)', async () => {
     ;(service.attachRepos as ReturnType<typeof vi.fn>).mockImplementation(
-      async (reqId, repoIds, branchName) => {
-        serviceCalls.push({ reqId, repoIds: [...repoIds], branchName })
-        return [
-          {
-            ok: true as const,
-            repoId: repoIds[0] ?? 'yl-web-ft-export',
-            branch: 'feat/test',
-            worktreePath: '/a/b/yl-web-ft-export',
-            base: 'main' as const,
-          },
-        ]
+      async (reqId, repoNames, branchName) => {
+        serviceCalls.push({ reqId, repoNames: [...repoNames], branchName })
+        return repoNames.map((n) => ({
+          ok: true as const,
+          repoName: n,
+          branch: branchName,
+          codebasePath: join(root, 'requirements', reqId, 'codebase', n),
+          base: 'main' as const,
+        }))
       },
     )
-
     const { statusCode, body } = await authed(
       'POST',
       '/api/requirement/req-001/repos',
-      { repoIds: ['repo-yl-web-ft-export'], branchName: 'feat/test' },
+      { repoNames: ['yl-web-ft-export'], branchName: 'feat/test' },
     )
-
     expect(statusCode).toBe(200)
-    // service 收到的是 dirname(剥前缀后)
-    expect(serviceCalls[0]?.repoIds).toEqual(['yl-web-ft-export'])
-    // response 的 repoId 是带前缀 id(契约对齐 GET /api/repos)
-    expect(body.results[0].repoId).toBe('repo-yl-web-ft-export')
-    expect(body.results[0].ok).toBe(true)
+    expect(serviceCalls[0]?.repoNames).toEqual(['yl-web-ft-export'])
+    const results = body.results as Array<{
+      ok: boolean
+      repoId: string
+      codebasePath: string
+    }>
+    expect(results[0].repoId).toBe('yl-web-ft-export')
+    expect(results[0].codebasePath).toBe(
+      join(root, 'requirements', 'req-001', 'codebase', 'yl-web-ft-export'),
+    )
   })
 
-  it('issue 06:混合(repo- 前缀 + 裸 dirname)都正确处理', async () => {
-    ;(service.attachRepos as ReturnType<typeof vi.fn>).mockImplementation(
-      async (reqId, repoIds, branchName) => {
-        serviceCalls.push({ reqId, repoIds: [...repoIds], branchName })
-        return [
-          {
-            ok: true as const,
-            repoId: repoIds[0] ?? 'a',
-            branch: 'feat/test',
-            worktreePath: '/a',
-            base: 'main' as const,
-          },
-          {
-            ok: true as const,
-            repoId: repoIds[1] ?? 'b',
-            branch: 'feat/test',
-            worktreePath: '/b',
-            base: 'main' as const,
-          },
-        ]
-      },
-    )
-
-    const { statusCode, body } = await authed(
-      'POST',
-      '/api/requirement/req-001/repos',
-      { repoIds: ['repo-a', 'b'], branchName: 'feat/test' },
-    )
-
-    expect(statusCode).toBe(200)
-    // service 收到 ['a', 'b'] —— 前缀剥掉,裸 dirname 原样
-    expect(serviceCalls[0]?.repoIds).toEqual(['a', 'b'])
-    // response echo 回原 repoIds 顺序
-    expect(body.results[0].repoId).toBe('repo-a')
-    expect(body.results[1].repoId).toBe('b')
-  })
-
-  it('issue 06:失败结果(repo- 前缀 id)的 repoId 也 echo 回带前缀 id', async () => {
+  it('issue 03:失败结果(repoName)的 repoId 也 echo 回入参 repoName(不再剥 repo- 前缀)', async () => {
     ;(service.attachRepos as ReturnType<typeof vi.fn>).mockResolvedValue([
       {
         ok: false,
-        repoId: 'missing-repo',
+        repoName: 'missing-repo',
         code: 'E_REPO_NOT_FOUND',
         message: 'no .git',
       },
@@ -316,12 +302,12 @@ describe('POST /api/requirement/:id/repos — worktree attach', () => {
     const { statusCode, body } = await authed(
       'POST',
       '/api/requirement/req-001/repos',
-      { repoIds: ['repo-missing-repo'], branchName: 'feat/test' },
+      { repoNames: ['missing-repo'], branchName: 'feat/test' },
     )
-
     expect(statusCode).toBe(200)
-    expect(body.results[0].repoId).toBe('repo-missing-repo')
-    expect(body.results[0].code).toBe('E_REPO_NOT_FOUND')
+    const results = body.results as Array<{ repoId: string; code: string }>
+    expect(results[0].repoId).toBe('missing-repo')
+    expect(results[0].code).toBe('E_REPO_NOT_FOUND')
   })
 
   it('401 无 token', async () => {
@@ -329,7 +315,7 @@ describe('POST /api/requirement/:id/repos — worktree attach', () => {
       method: 'POST',
       url: '/api/requirement/req-001/repos',
       headers: { 'content-type': 'application/json' },
-      payload: JSON.stringify({ repoIds: ['r1'], branchName: 'feat/test' }),
+      payload: JSON.stringify({ repoNames: ['r1'], branchName: 'feat/test' }),
     })
     expect(res.statusCode).toBe(401)
   })
@@ -351,25 +337,45 @@ describe('POST /api/requirement/:id/repos — worktree attach', () => {
         'x-aidevspace-token': altToken,
         'content-type': 'application/json',
       },
-      payload: JSON.stringify({ repoIds: ['r1'], branchName: 'feat/test' }),
+      payload: JSON.stringify({ repoNames: ['r1'], branchName: 'feat/test' }),
     })
     expect(res.statusCode).toBe(503)
     expect(res.json().error).toBe('service_not_ready')
     await altApp.close()
   })
 
-  it('真实路径:makePoolRepo + makeRequirementDir → 全成功', async () => {
-    // 重置 spy —— 通过新 register
+  it('真实路径:mock codebaseMgr/workspace → 全成功,codebasePath 落到 requirements/<id>/codebase/<name>/', async () => {
+    // 重置 spy —— 通过新 register,跑真实的 attachRepos(走 codebaseMgr.clone)
     await app.close()
-    const realGit = vi.fn(async (args: string[]) => {
-      if (args.includes('show-ref') && args.includes('refs/heads/main')) {
-        return { code: 0, stdout: '', stderr: '' }
-      }
-      return { code: 0, stdout: '', stderr: '' }
-    })
+    // 注入一个 fake workspace(注册表里有 r1)
+    const fakeWorkspace = {
+      findRepoByName: vi.fn(async (name: string) =>
+        name === 'r1' ? { name: 'r1', gitUrl: 'git@x', description: '' } : null,
+      ),
+    } as unknown as ConstructorParameters<typeof RequirementService>[0]['workspace']
+    // 注入一个 codebaseMgr fake —— 直接返 ok
+    const fakeCodebaseMgr = {
+      getCodebasePath: (reqId: string, name: string) =>
+        join(root, 'requirements', reqId, 'codebase', name),
+      getPendingPath: () => '',
+      clone: vi.fn(async () => ({
+        ok: true as const,
+        path: '/a/b/codebase/r1',
+        head: 'abc',
+        branch: 'feat/real',
+      })),
+      remove: async () => undefined,
+      listByRepo: async () => [],
+      setPending: async () => undefined,
+      clearPending: async () => undefined,
+      scanOrphanedPending: async () => [],
+    } as unknown as ConstructorParameters<typeof RequirementService>[0]['codebaseMgr']
+    const realGit = vi.fn(async () => ({ code: 0, stdout: '', stderr: '' }))
     const realService = new RequirementService({
       root,
       git: realGit as RequirementServiceDeps['git'],
+      codebaseMgr: fakeCodebaseMgr,
+      workspace: fakeWorkspace,
       sleep: () => Promise.resolve(),
     })
     app = Fastify({ logger: false })
@@ -379,22 +385,28 @@ describe('POST /api/requirement/:id/repos — worktree attach', () => {
     await app.register(requirementRoutes, { requirementService: realService })
     await app.ready()
 
-    // 创建 pool repo + req 目录
-    mkdirSync(join(root, 'repos', 'r1', '.git'), { recursive: true })
+    // 建 req 目录(attachRepos 校验存在)
     mkdirSync(join(root, 'requirements', 'req-real'), { recursive: true })
 
     const { statusCode, body } = await authed(
       'POST',
       '/api/requirement/req-real/repos',
-      { repoIds: ['r1'], branchName: 'feat/real' },
+      { repoNames: ['r1'], branchName: 'feat/real' },
     )
     expect(statusCode).toBe(200)
     expect(body.succeeded).toBe(1)
     expect(body.failed).toBe(0)
-    const results = body.results as Array<{ ok: boolean; worktreePath?: string; base?: string }>
+    const results = body.results as Array<{
+      ok: boolean
+      codebasePath?: string
+      base?: string
+    }>
     expect(results[0].ok).toBe(true)
-    expect(results[0].worktreePath).toBe(join(root, 'requirements', 'req-real', 'repos', 'r1'))
+    // codebasePath 来自 CodebaseManager.clone 的 path 字段(fake 返 '/a/b/codebase/r1')
+    expect(results[0].codebasePath).toBe('/a/b/codebase/r1')
     expect(results[0].base).toBe('main')
+    // 真实 clone 调用过 1 次
+    expect((fakeCodebaseMgr.clone as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1)
   })
 })
 
@@ -423,12 +435,7 @@ async function freshApp(opts?: { hub?: SseHub }): Promise<{
   const localRoot = mkdtempSync(join(tmpdir(), 'aidevsp-create-'))
   const tm = new TokenManager(localRoot)
   const localToken = await tm.ensure()
-  const realGit = vi.fn(async (args: string[]) => {
-    if (args.includes('show-ref') && args.includes('refs/heads/main')) {
-      return { code: 0, stdout: '', stderr: '' }
-    }
-    return { code: 0, stdout: '', stderr: '' }
-  }) as RequirementServiceDeps['git']
+  const realGit = vi.fn(async () => ({ code: 0, stdout: '', stderr: '' })) as RequirementServiceDeps['git']
   const realService = new RequirementService({
     root: localRoot,
     git: realGit,
@@ -472,23 +479,18 @@ describe('POST /api/requirements — ticket 04 文件落盘', () => {
       expect(body.id).toBe('req-001-退款功能优化')
       expect(body.title).toBe('退款功能优化')
       expect(typeof body.createdAt).toBe('string')
-      // 验证 ISO 时间戳
       expect(Number.isFinite(Date.parse(body.createdAt))).toBe(true)
 
-      // 验证文件落盘
       const reqDir = join(root, 'requirements', body.id)
       expect(existsSync(reqDir)).toBe(true)
       expect(existsSync(join(reqDir, 'meta.yaml'))).toBe(true)
       expect(existsSync(join(reqDir, 'requirement.md'))).toBe(true)
 
-      // 验证 meta.yaml 内容
       const metaText = readFileSync(join(reqDir, 'meta.yaml'), 'utf8')
       expect(metaText).toContain(`id: ${body.id}`)
       expect(metaText).toContain(`title: 退款功能优化`)
-      // yaml 库输出 ISO 时间戳默认不带引号(可解析为字符串)
       expect(metaText).toContain(`createdAt: ${body.createdAt}`)
 
-      // 验证 requirement.md 内容
       const reqText = readFileSync(join(reqDir, 'requirement.md'), 'utf8')
       expect(reqText).toContain('# 退款功能优化')
       expect(reqText).toContain('DRAFTING')
@@ -614,7 +616,6 @@ describe('POST /api/requirements — ticket 04 文件落盘', () => {
         const body = res.json() as CreateResBody
         expect(body.id).toBe(`req-00${i}-需求-${i}`)
       }
-      // 验证 3 个目录都建了
       expect(existsSync(join(root, 'requirements', 'req-001-需求-1'))).toBe(true)
       expect(existsSync(join(root, 'requirements', 'req-002-需求-2'))).toBe(true)
       expect(existsSync(join(root, 'requirements', 'req-003-需求-3'))).toBe(true)
@@ -626,7 +627,6 @@ describe('POST /api/requirements — ticket 04 文件落盘', () => {
   it('ID 冲突:已有 req-001-* → 新建自动 +1 → req-002', async () => {
     const { app, root, token, cleanup } = await freshApp()
     try {
-      // 预存 req-001 占位
       mkdirSync(join(root, 'requirements', 'req-001-退款功能'), { recursive: true })
       const res = await app.inject({
         method: 'POST',
@@ -646,9 +646,6 @@ describe('POST /api/requirements — ticket 04 文件落盘', () => {
   })
 
   it('ID 冲突:nextRequirementId 4 次全失败 → 抛 E_ID_COLLISION', async () => {
-    // 直接单测 nextRequirementId:startSeq 显式传 1,
-    // 让 pre-create 的 4 个 dir(req-001..req-004)正好覆盖 attempts 1..4。
-    // 不能用 maxRequirementSeq(因为它会扫到 pre-create 的 dir,把 start 顶到 5)
     const localRoot = mkdtempSync(join(tmpdir(), 'aidevsp-collide-'))
     try {
       const svc = new RequirementService({
@@ -656,12 +653,10 @@ describe('POST /api/requirements — ticket 04 文件落盘', () => {
         git: vi.fn(async () => ({ code: 0, stdout: '', stderr: '' })) as RequirementServiceDeps['git'],
         sleep: () => Promise.resolve(),
       })
-      // pre-create attempts 的 4 个 dir
       mkdirSync(join(localRoot, 'requirements', 'req-001-冲突'), { recursive: true })
       mkdirSync(join(localRoot, 'requirements', 'req-002-冲突'), { recursive: true })
       mkdirSync(join(localRoot, 'requirements', 'req-003-冲突'), { recursive: true })
       mkdirSync(join(localRoot, 'requirements', 'req-004-冲突'), { recursive: true })
-      // 显式 startSeq=1 → attempts 1/2/3/4 全被 pre-create 占用 → 抛 E_ID_COLLISION
       expect(() => svc.nextRequirementId('冲突', 1)).toThrow(/E_ID_COLLISION|Failed to allocate/)
     } finally {
       rmSync(localRoot, { recursive: true, force: true })
@@ -689,7 +684,7 @@ describe('POST /api/requirements — ticket 04 文件落盘', () => {
     const localToken = await tm.ensure()
     const localApp = Fastify({ logger: false })
     await localApp.register(authPlugin, { tokenManager: tm, allowedOrigins: [] })
-    await localApp.register(requirementRoutes) // 无 deps
+    await localApp.register(requirementRoutes)
     await localApp.ready()
     const res = await localApp.inject({
       method: 'POST',
@@ -711,7 +706,6 @@ describe('POST /api/requirements — ticket 04 文件落盘', () => {
     const { app, token, cleanup } = await freshApp({ hub })
     try {
       const received: SseEvent[] = []
-      // 先发请求拿到 id,再订阅(模拟 Web 端 router.push 后的路径)
       const res = await app.inject({
         method: 'POST',
         url: '/api/requirements',
@@ -723,15 +717,12 @@ describe('POST /api/requirements — ticket 04 文件落盘', () => {
       })
       const body = res.json() as CreateResBody
 
-      // 订阅新建 id 通道,推送 1 个延迟事件验证 hub 仍可投递(成功事件已发送过;后续推送无则只验证 channel 存在)
       const unsub = hub.subscribe(body.id, (e) => received.push(e))
-      // 触发一次额外 publish 验证订阅生效
       hub.publish(body.id, {
         type: 'heartbeat',
         ts: Date.now(),
       })
       unsub()
-      // 断言:心跳事件已被订阅者收到(说明成功事件已经能正常走通 hub)
       expect(received.some((e) => e.type === 'heartbeat')).toBe(true)
     } finally {
       await cleanup()
@@ -742,11 +733,6 @@ describe('POST /api/requirements — ticket 04 文件落盘', () => {
     const hub = createSseHub()
     const { app, root, token, cleanup } = await freshApp({ hub })
     try {
-      // 先创建一个占位 req 目录,模拟「弹窗提交后 Web 已在新 id 的 /events 上订阅」
-      // 真实流:web 在 router.push 之前已经在 /api/requirement/:id/events 上订阅;
-      // 但 /api/requirements 路径返回的 id 是后端生成,前端无法预订阅;
-      // 所以本测试的语义是「hub 仍可正常 publish,订阅机制不被破坏」。
-      // 先发请求拿到 id,再订阅,再触发一次心跳验证订阅生效。
       const res = await app.inject({
         method: 'POST',
         url: '/api/requirements',
@@ -759,11 +745,9 @@ describe('POST /api/requirements — ticket 04 文件落盘', () => {
       const body = res.json() as CreateResBody
       const received: SseEvent[] = []
       const unsub = hub.subscribe(body.id, (e) => received.push(e))
-      // 触发心跳模拟后续推送
       hub.publish(body.id, { type: 'heartbeat', ts: 1 })
       unsub()
       expect(received.some((e) => e.type === 'heartbeat')).toBe(true)
-      // 验证目录存在(文件落盘主路径走通)
       expect(existsSync(join(root, 'requirements', body.id))).toBe(true)
     } finally {
       await cleanup()
@@ -784,13 +768,11 @@ describe('POST /api/requirements — ticket 04 文件落盘', () => {
       })
       const body = res.json() as CreateResBody
       const metaText = readFileSync(join(root, 'requirements', body.id, 'meta.yaml'), 'utf8')
-      // 用 yaml 解析验证
       const yaml = await import('yaml')
       const parsed = yaml.parse(metaText) as { id: string; title: string; createdAt: string }
       expect(parsed.id).toBe(body.id)
       expect(parsed.title).toBe('yaml 验证')
       expect(parsed.createdAt).toBe(body.createdAt)
-      // 不应该出现 status / current_focus(决策 15 / 57)
       expect((parsed as Record<string, unknown>).status).toBeUndefined()
     } finally {
       await cleanup()
@@ -895,7 +877,7 @@ describe('GET /api/requirements — ticket 07a list endpoint', () => {
     const localToken = await tm.ensure()
     const localApp = Fastify({ logger: false })
     await localApp.register(authPlugin, { tokenManager: tm, allowedOrigins: [] })
-    await localApp.register(requirementRoutes) // 无 deps
+    await localApp.register(requirementRoutes)
     await localApp.ready()
     const res = await localApp.inject({
       method: 'GET',
@@ -909,7 +891,6 @@ describe('GET /api/requirements — ticket 07a list endpoint', () => {
   })
 
   it('500:service.listRequirements 抛错 → E_INTERNAL', async () => {
-    // 重新构造 app + service,spyOn listRequirements 让它抛错
     const localRoot = mkdtempSync(join(tmpdir(), 'aidevsp-list-500-'))
     try {
       const tm = new TokenManager(localRoot)
@@ -951,10 +932,8 @@ describe('POST /api/requirements — ticket 07a SSE 双推(per-req + global)', (
     try {
       const perReqReceived: SseEvent[] = []
       const globalReceived: SseEvent[] = []
-      // 先订阅全局通道(模拟 dashboard / list 页面已连接)
       const unsubGlobal = hub.subscribe('requirements', (e) => globalReceived.push(e))
 
-      // 提交创建
       const res = await app.inject({
         method: 'POST',
         url: '/api/requirements',
@@ -966,18 +945,14 @@ describe('POST /api/requirements — ticket 07a SSE 双推(per-req + global)', (
       })
       const body = res.json() as CreateResBody
 
-      // 在 publish 之后订阅 per-req(模拟 web router.push 后订阅)
       const unsubPerReq = hub.subscribe(body.id, (e) => perReqReceived.push(e))
-      // 触发心跳验证订阅生效
       hub.publish(body.id, { type: 'heartbeat', ts: 1 })
       unsubPerReq()
 
       unsubGlobal()
 
-      // per-req:心跳到达(说明订阅 + 投递机制正常)
       expect(perReqReceived.some((e) => e.type === 'heartbeat')).toBe(true)
 
-      // global:全局通道已收到 requirement_created(POST 双推时已发送)
       expect(globalReceived.some((e) => e.type === 'requirement_created')).toBe(true)
       const ev = globalReceived.find((e) => e.type === 'requirement_created')
       expect(ev).toBeDefined()
@@ -989,7 +964,4 @@ describe('POST /api/requirements — ticket 07a SSE 双推(per-req + global)', (
       await cleanup()
     }
   })
-
-  // 注:失败路径(createRequirement 抛错)的全局通道推送留给后续 ticket
-  // —— plan 步骤 3 只要求成功路径双推,失败路径目前仅推 per-req 占位 channel。
 })

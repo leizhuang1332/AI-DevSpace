@@ -33,7 +33,7 @@ import {
   RegistryNotFoundError,
   RegistryWriteError,
 } from '../services/WorkspaceService.js'
-import type { GitExec } from '../worktree/WorktreeManager.js'
+import type { GitExec } from '../codebase/CodebaseManager.js'
 
 export interface ReposRouteDeps {
   /** Workspace service —— 所有 yaml CRUD 走这里(避免并发漂移) */

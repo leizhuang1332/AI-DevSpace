@@ -22,11 +22,11 @@
  *   reject 并带 `killed: true, signal: 'SIGTERM'` —— 我们把它映射成 code=124
  *   (沿用 `timeout(1)` 命令的退出码),方便上层判断。
  *
- * 类型 `GitExec` 仍在 `../worktree/WorktreeManager.ts` 里(issue 03 会把
- * WorktreeManager 整体删掉,届时 GitExec 类型迁移到 codebase 命名空间);
+ * 类型 `GitExec` 在 `../codebase/CodebaseManager.ts` 里(issue 03 把
+ * WorktreeManager 整体删掉,GitExec 类型已迁移到 codebase 命名空间);
  * 本文件只 import 类型,避免运行时循环依赖。
  */
-import type { GitExec } from '../worktree/WorktreeManager.js'
+import type { GitExec } from '../codebase/CodebaseManager.js'
 
 /**
  * 默认的 GitExec —— 用 child_process.execFile 调系统 git。

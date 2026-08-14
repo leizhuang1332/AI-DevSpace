@@ -235,7 +235,7 @@ export async function requirementRoutes(
       return reply.code(503).send({ error: 'service_not_ready' })
     }
 
-    // 1. body schema 校验(repoIds 非空 + 长度上限;branchName 长度 ≤ 100)
+    // 1. body schema 校验(repoNames 非空 + 长度上限;branchName 长度 ≤ 100)
     const parsed = AttachReposRequestSchema.safeParse(req.body)
     if (!parsed.success) {
       return reply.code(400).send({
@@ -243,7 +243,7 @@ export async function requirementRoutes(
         details: parsed.error.issues,
       })
     }
-    const { repoIds, branchName } = parsed.data
+    const { repoNames, branchName } = parsed.data
 
     // 2. 分支名校验(strict 模式:原始输入含任何非法字符即 reject,
     //    ticket 02 验收 #11"Agent 端再校验一次(前端已过滤,后端兜底)")
@@ -264,19 +264,14 @@ export async function requirementRoutes(
       })
     }
 
-    // 3b. issue 06 / ADR-0016 D3:`id = 'repo-' + dirname`(GET /api/repos 响应约定)。
-    //     客户端整 id 发过来,后端 fs 查找走 dirname(<root>/repos/<dirname>/.git),
-    //     需要剥前缀映射。失败保持空(无法映射 → 服务层自然抛 E_REPO_NOT_FOUND)
-    //     —— prefix 不匹配视为非法输入,被 service 的目录存在性检查兜底。
-    const repoDirNames = repoIds.map((rid) =>
-      rid.startsWith('repo-') ? rid.slice('repo-'.length) : rid,
-    )
-
     // 4. 逐 repo 创建,收集 results(部分失败不中断)
-    const rawResults = await service.attachRepos(id, repoDirNames, sanitizedBranch)
-    // response 的 repoId 仍回填**带前缀**的 id(契约对齐 GET /api/repos,
-    // 客户端可继续用 React key / 状态机跟踪具体 repo)
-    const results = rawResults.map((r, idx) => ({ ...r, repoId: repoIds[idx]! }))
+    //    issue 03:repoNames 直接就是注册表 name(全局唯一即标识,决策 105),
+    //    不再做 'repo-' 前缀剥除(那是旧 ADR-0016 时代的物理目录映射)
+    const rawResults = await service.attachRepos(id, repoNames, sanitizedBranch)
+    const results = rawResults.map((r, idx) => ({
+      ...r,
+      repoId: repoNames[idx] ?? '?',
+    }))
     const succeeded = results.filter((r) => r.ok).length
     const failed = results.length - succeeded
 

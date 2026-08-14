@@ -18,8 +18,8 @@ import { analysisRunRoutes } from './routes/analysis-run.js'
 import { analysisResponseRoutes } from './routes/analysis-response.js'
 import { AnalysisRunService } from './analysis-run/AnalysisRunService.js'
 import { AnalysisSkillService } from './analysis-skill/AnalysisSkillService.js'
-import { createWorktreeManager } from './worktree/WorktreeManager.js'
-import type { GitExec } from './worktree/WorktreeManager.js'
+import { createCodebaseManager } from './codebase/CodebaseManager.js'
+import type { GitExec } from './codebase/CodebaseManager.js'
 // issue 05 (ADR-0030 D3 / 决策账本 C5):createDefaultGitExec 从 worktree/ 提到
 // git/ 下,强制注入 GIT_TERMINAL_PROMPT=0 / GIT_ASKPASS="" / SSH_ASKPASS="",
 // 防止缺凭据时 git 在后台进程 stdin 挂死。
@@ -285,16 +285,43 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     git: opts.git ?? createDefaultGitExec(),
   })
 
-  // ticket 02:实装 POST /api/requirement/:id/repos(worktree 真实创建)
-  // - 默认注入 createDefaultGitExec(生产)
-  // - 测试 buildServer 时可通过 BuildServerOptions 覆盖 deps(后续 ticket 拓展)
+  // issue 03 (ADR-0030 D3 / D5):实装 POST /api/requirement/:id/repos(独立 clone)
+  // - 默认注入 createDefaultGitExec(生产,强制 env 注入)
+  // - 测试 buildServer 时可通过 BuildServerOptions 覆盖 deps
   const gitExec = createDefaultGitExec()
-  const worktreeMgr = createWorktreeManager({ root: workspaceRoot, git: gitExec })
+  const codebaseMgr = createCodebaseManager({ root: workspaceRoot, git: gitExec })
   const requirementService = new RequirementService({
     root: workspaceRoot,
     git: gitExec,
-    worktreeMgr,
+    codebaseMgr,
+    sseHub: hub,
+    workspace,
   })
+
+  // issue 03 · 启动时收敛 orphan pending 半成品
+  // 场景:Agent 异常退出(kill -9 / OOM)→ clone 进行中但 pending 标记残留,
+  // 下次启动必须清半成品目录 + 标记,避免"显示已关联但 git 不可用"的脏态
+  try {
+    const orphans = await codebaseMgr.scanOrphanedPending()
+    for (const { reqId, repoName, path } of orphans) {
+      fastify.log.warn(
+        { reqId, repoName, path },
+        'codebase: cleaning orphaned clone on boot',
+      )
+      await codebaseMgr.remove(reqId, repoName)
+      await codebaseMgr.clearPending(reqId, repoName)
+    }
+    if (orphans.length > 0) {
+      fastify.log.info(
+        { count: orphans.length },
+        'codebase: orphan pending cleaned on boot',
+      )
+    }
+  } catch (err) {
+    // 启动时清理失败不应阻断 agent 启动;仅记日志
+    fastify.log.error({ err }, 'codebase: orphan pending cleanup failed on boot')
+  }
+
   // ticket 04:注入 sseHub 让 POST /api/requirements 创建成功 / 失败时推
   // `requirement_created` 事件到新建 id 通道,Web 端 DRAFTING 据此切正常态 / 红色 banner
   await fastify.register(requirementRoutes, { requirementService, sseHub: hub })
