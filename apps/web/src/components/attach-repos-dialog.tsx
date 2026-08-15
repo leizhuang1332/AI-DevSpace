@@ -56,6 +56,19 @@ export interface AttachReposDialogProps {
    * first 模式下可省略 —— 此时分支名由用户输入。
    */
   lockedBranchName?: string
+  /**
+   * 提交 in-flight(issue 14):true 时 disable submit + 显示 spinner,
+   * 锁定 ESC / backdrop 关闭,branch input + repo checkbox 全部只读。
+   * 由父组件在 onSubmit 调起 HTTP 请求期间置 true,响应回来后置 false。
+   */
+  inFlight?: boolean
+  /**
+   * 实时 clone 进度(issue 14,数据源来自父组件 SSE 订阅 `repo-clone-progress`):
+   * `repoName -> 'pending' | 'cloning' | 'ready' | 'failed'`。
+   * 提交后用这个表渲染每个 repo 旁边的状态 badge,让用户看到
+   * 「正在 clone multica...」实时反馈,不靠 HTTP 响应那一刻才知道进度。
+   */
+  cloneStatuses?: Readonly<Record<string, 'pending' | 'cloning' | 'ready' | 'failed'>>
   /** 提交:携带 trimmed 后的 repo name 列表 + 统一分支名(first 模式) */
   onSubmit: (value: {
     repoNames: string[]
@@ -103,6 +116,8 @@ export function AttachReposDialog({
   availableRepos,
   pickedRepoNames,
   lockedBranchName,
+  inFlight = false,
+  cloneStatuses,
   onSubmit,
   onClose,
   reposPageHref = '/repos',
@@ -140,10 +155,17 @@ export function AttachReposDialog({
   }, [open, mode])
 
   // Escape 关闭(issue 01 ticket 验收 #12) — stopPropagation 防止 store 全局 Esc 同时重置其他 overlay。
+  // Issue 14:in-flight 期间禁止 ESC 关闭(避免用户误关丢掉 in-progress 状态)
   useEffect(() => {
     if (!open) return
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        if (inFlight) {
+          // 静默吞掉 ESC —— 等 HTTP 响应回来后由父组件关闭
+          e.preventDefault()
+          e.stopPropagation()
+          return
+        }
         e.preventDefault()
         e.stopPropagation()
         onClose()
@@ -151,7 +173,7 @@ export function AttachReposDialog({
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [open, onClose])
+  }, [open, onClose, inFlight])
 
   // Tab/Shift+Tab 焦点陷阱(issue 01 ticket 验收 #12) — 抽到 useTabFocusTrap 与 new-requirement-modal 复用
   useTabFocusTrap(open, dialogRef)
@@ -166,9 +188,11 @@ export function AttachReposDialog({
   // issue 06 (ADR-0030 D7 / 决策 Q14):删除 Git URL 入口后,提交数 = 选中数;
   // 不再有 "+1 个待创建" 的过渡项需要并入。
   const pickedRepoCount = selectedNames.size
+  // Issue 14:in-flight 期间强制 disabled,防止用户连点触发重复提交
   const canSubmit =
     pickedRepoCount > 0 &&
-    (mode === 'append' || (branchCheck !== null && branchCheck.ok))
+    (mode === 'append' || (branchCheck !== null && branchCheck.ok)) &&
+    !inFlight
 
   // -------------------------------------------------------------------------
   // handlers
@@ -192,7 +216,7 @@ export function AttachReposDialog({
   }
 
   const handleBackdropClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) onClose()
+    if (e.target === e.currentTarget && !inFlight) onClose()
   }
 
   if (!open) return null
@@ -276,6 +300,8 @@ export function AttachReposDialog({
               ) : (
                 availableRepos.map((repo) => {
                   const checked = selectedNames.has(repo.name)
+                  // Issue 14:SSE 进度表里有此 repo → 显示 status badge
+                  const status = cloneStatuses?.[repo.name]
                   return (
                     <label
                       key={repo.name}
@@ -283,7 +309,10 @@ export function AttachReposDialog({
                       data-repo-name={repo.name}
                       data-checked={checked ? 'true' : 'false'}
                       className={[
-                        'flex items-center gap-3 px-2 py-1.5 rounded-md cursor-pointer text-sm',
+                        'flex items-center gap-3 px-2 py-1.5 rounded-md text-sm',
+                        inFlight
+                          ? 'cursor-not-allowed opacity-70'
+                          : 'cursor-pointer',
                         checked ? 'bg-bg-elevated' : 'hover:bg-bg-elevated',
                       ].join(' ')}
                     >
@@ -293,11 +322,16 @@ export function AttachReposDialog({
                         data-repo-name={repo.name}
                         checked={checked}
                         onChange={() => handleToggleRepo(repo.name)}
-                        className="w-4 h-4 accent-brand-500"
+                        disabled={inFlight}
+                        className="w-4 h-4 accent-brand-500 disabled:opacity-50"
                       />
-                      <span className="font-mono font-medium text-text-1">
+                      <span className="font-mono font-medium text-text-1 flex-1">
                         {repo.name}
                       </span>
+                      {/* Issue 14:实时 clone 进度 badge(只在 in-flight + 有状态时显示) */}
+                      {inFlight && status && (
+                        <CloneStatusBadge status={status} />
+                      )}
                     </label>
                   )
                 })
@@ -339,6 +373,7 @@ export function AttachReposDialog({
                 data-testid="attach-repos-dialog-branch"
                 value={branchName}
                 maxLength={BRANCH_MAX_LENGTH}
+                readOnly={inFlight}
                 onChange={(e) => {
                   const next = e.target.value.replace(BRANCH_FORBIDDEN_RE, '')
                   setBranchName(next)
@@ -389,8 +424,9 @@ export function AttachReposDialog({
             <button
               type="button"
               onClick={onClose}
+              disabled={inFlight}
               data-testid="attach-repos-dialog-cancel"
-              className="inline-flex items-center h-8 px-3 rounded-md text-sm font-medium text-text-2 hover:text-text-1 focus:outline-none focus:ring-2 focus:ring-brand-50"
+              className="inline-flex items-center h-8 px-3 rounded-md text-sm font-medium text-text-2 hover:text-text-1 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-brand-50"
             >
               取消
             </button>
@@ -398,13 +434,116 @@ export function AttachReposDialog({
               type="submit"
               disabled={!canSubmit}
               data-testid="attach-repos-dialog-submit"
+              data-in-flight={inFlight ? 'true' : 'false'}
               className="inline-flex items-center h-8 px-3 rounded-md text-sm font-medium bg-brand text-white hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-brand-50"
             >
-              ✓ 添加
+              {inFlight ? (
+                <>
+                  <svg
+                    className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    />
+                  </svg>
+                  关联中...
+                </>
+              ) : (
+                <>✓ 添加</>
+              )}
             </button>
           </div>
         </div>
       </form>
     </div>
+  )
+}
+
+/**
+ * Issue 14:实时 clone 进度 badge。
+ * pending → 灰色「排队中」;cloning → 蓝色 spinner「克隆中」;
+ * ready → 绿色 ✓「完成」;failed → 红色 ✗「失败」。
+ *
+ * 数据源来自父组件 SSE 订阅 `repo-clone-progress` 事件,
+ * 经 `cloneStatuses` prop 传入(避免 dialog 自行订阅导致与父组件 race)。
+ */
+function CloneStatusBadge({
+  status,
+}: {
+  status: 'pending' | 'cloning' | 'ready' | 'failed'
+}): JSX.Element {
+  if (status === 'pending') {
+    return (
+      <span
+        data-testid="clone-status-badge-pending"
+        className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-bg-elevated text-text-3 border border-border"
+      >
+        排队中
+      </span>
+    )
+  }
+  if (status === 'cloning') {
+    return (
+      <span
+        data-testid="clone-status-badge-cloning"
+        className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-brand-50 text-brand-700 border border-brand"
+      >
+        <svg
+          className="animate-spin h-2.5 w-2.5"
+          xmlns="http://www.w3.org/2000/svg"
+          fill="none"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <circle
+            className="opacity-25"
+            cx="12"
+            cy="12"
+            r="10"
+            stroke="currentColor"
+            strokeWidth="4"
+          />
+          <path
+            className="opacity-75"
+            fill="currentColor"
+            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+          />
+        </svg>
+        克隆中
+      </span>
+    )
+  }
+  if (status === 'ready') {
+    return (
+      <span
+        data-testid="clone-status-badge-ready"
+        className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-green-50 text-green-700 border border-green-200"
+      >
+        ✓ 完成
+      </span>
+    )
+  }
+  // failed
+  return (
+    <span
+      data-testid="clone-status-badge-failed"
+      className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-red-50 text-red-700 border border-red-200"
+    >
+      ✗ 失败
+    </span>
   )
 }

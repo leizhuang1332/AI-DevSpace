@@ -748,6 +748,13 @@ export function DraftingZone({ data }: { data: DraftingData }) {
         }
 
         setAttachDialogOpen(false)
+        // Issue 14:清掉本批 repo 的 SSE 进度状态,避免下次 attach 弹层显示旧 badge
+        const cleaned: Record<string, 'pending' | 'cloning' | 'ready' | 'failed'> = {}
+        for (const [name, st] of Object.entries(repoCloneStatuses)) {
+          // 失败 repo 保留 'failed' 状态,让用户重试前知道上次失败过
+          if (st === 'failed') cleaned[name] = 'failed'
+        }
+        setRepoCloneStatuses(cleaned)
         const trigger = pendingAttachTrigger
         setPendingAttachTrigger(null)
         if (trigger) focusReturnToTrigger(trigger)
@@ -973,7 +980,8 @@ export function DraftingZone({ data }: { data: DraftingData }) {
         onSubmit={handleAuxCreateSubmit}
       />
 
-      {/* 关联 / 追加仓库弹层(issue 01 ticket)—— 受控 mode + open */}
+      {/* 关联 / 追加仓库弹层(issue 01 ticket)—— 受控 mode + open
+          Issue 14:inFlight + 实时 SSE clone 进度(避免「按了没反应」) */}
       <AttachReposDialog
         open={attachDialogOpen}
         mode={attachDialogMode}
@@ -982,6 +990,8 @@ export function DraftingZone({ data }: { data: DraftingData }) {
         availableRepos={liveRepos}
         pickedRepoNames={selectedRepoNames}
         lockedBranchName={lockedBranchName}
+        inFlight={attachInFlight}
+        cloneStatuses={repoCloneStatuses}
         onSubmit={submitAttach}
         onClose={closeAttachDialog}
       />
