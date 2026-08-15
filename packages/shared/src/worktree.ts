@@ -73,17 +73,20 @@ export function validateBranchName(
 // ---------------------------------------------------------------------------
 
 /**
- * RepoAttach / Codebase 错误码 —— ADR-0030 D5 调整后:
+ * RepoAttach / Codebase 错误码 —— ADR-0030 D5 + ADR-0031:
  *
  * - `E_AUTH` 不进 per-repo 结果 —— authPlugin 在路由前已拦截 401/403;
  *   前端 agentFetch 收到非 2xx 抛 AgentError,在 catch 层根据 status === 401
  *   映射为 `code: 'E_AUTH'`,banner 渲染红色 + [查看] 按钮跳设置页
  * - `E_REPO_NAME_EXISTS`:POST /api/repos 时 yaml 已有同名条目
  * - `E_REPO_ALREADY_ATTACHED`:`codebase/<name>/` 已存在(幂等校验,决策 109)
+ * - `E_BRANCH_EXISTS`(ADR-0031):branchName 与 upstream 默认分支同名,
+ *   `git checkout -b <branchName>` 会报 fatal,前置拦截避免产生孤儿 .git
  *
- * 删除(决策 111):
- * - `E_BASE_BRANCH_NOT_FOUND`:clone 下来必然有 HEAD
- * - `E_BRANCH_EXISTS`:全新 clone 不可能撞本地分支
+ * 决策 111 边界修正(ADR-0031):
+ * - 原注释「全新 clone 不可能撞本地分支」是错的:clone 本身不撞,但
+ *   `git checkout -b <branchName>` 在 clone 后会撞(origin 默认分支已存在)。
+ * - `E_BRANCH_EXISTS` 在「branchName 与 origin 默认分支同名」时使用(前置校验)。
  */
 export const RepoAttachErrorCode = {
   E_AUTH: 'E_AUTH',
@@ -92,6 +95,7 @@ export const RepoAttachErrorCode = {
   E_REPO_NOT_FOUND: 'E_REPO_NOT_FOUND', // 语义改:注册表无此条目(决策 111)
   E_REPO_NAME_EXISTS: 'E_REPO_NAME_EXISTS', // 新增:POST /api/repos 时 name 重复
   E_REPO_ALREADY_ATTACHED: 'E_REPO_ALREADY_ATTACHED', // 新增:codebase/<name>/ 已存在
+  E_BRANCH_EXISTS: 'E_BRANCH_EXISTS', // 新增:branchName 与 default 同名(ADR-0031)
   E_REQUIREMENT_NOT_FOUND: 'E_REQUIREMENT_NOT_FOUND',
   E_NETWORK: 'E_NETWORK',
   E_INTERNAL: 'E_INTERNAL',
@@ -107,6 +111,7 @@ export const PER_REPO_ERROR_CODES = [
   RepoAttachErrorCode.E_AUTH,
   RepoAttachErrorCode.E_REPO_NOT_FOUND,
   RepoAttachErrorCode.E_REPO_ALREADY_ATTACHED,
+  RepoAttachErrorCode.E_BRANCH_EXISTS,
   RepoAttachErrorCode.E_INTERNAL,
 ] as const
 

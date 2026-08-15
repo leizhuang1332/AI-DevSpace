@@ -126,6 +126,7 @@ export class RequirementService {
   private readonly codebaseMgr: CodebaseManager
   private readonly workspace?: WorkspaceService
   private readonly sseHub?: SseHub
+  private readonly git?: GitExec
   private readonly sleep: (ms: number) => Promise<void>
 
   constructor(deps: RequirementServiceDeps) {
@@ -145,6 +146,9 @@ export class RequirementService {
     }
     this.workspace = deps.workspace
     this.sseHub = deps.sseHub
+    // Issue 12:前置校验(fetchDefaultBranch)直接复用 git。
+    // 未注入时不阻断 attachRepo —— 走原 clone 路径(降级策略,见 ADR-0031)。
+    this.git = deps.git
   }
 
   async parseUpload(buffer: Buffer, filename: string): Promise<ParseUploadResult> {
@@ -301,6 +305,27 @@ export class RequirementService {
       }
     }
 
+    // 1.5 Issue 12:前置校验 —— branchName 不能与 upstream 默认分支同名
+    //    (避免走到 git checkout -b 必败路径,产生孤儿 .git)
+    //    ls-remote 失败(网络 / 鉴权 / 仓库空)→ 降级 null,不阻断。
+    if (this.git) {
+      const defaultBranch = await this.fetchDefaultBranch(this.git, entry.gitUrl)
+      if (defaultBranch && defaultBranch === branchName) {
+        this.broadcastProgress(
+          reqId,
+          repoName,
+          'failed',
+          `branchName "${branchName}" 与 upstream 默认分支同名,无法创建`,
+        )
+        return {
+          ok: false,
+          repoName,
+          code: RepoAttachErrorCode.E_BRANCH_EXISTS,
+          message: `branchName "${branchName}" 与 ${entry.gitUrl} 默认分支同名`,
+        }
+      }
+    }
+
     // 2. 推 pending + 落半成品标记
     await this.codebaseMgr.setPending(reqId, repoName)
     this.broadcastProgress(reqId, repoName, 'cloning')
@@ -372,6 +397,33 @@ export class RequirementService {
       ...(error ? { error } : {}),
     }
     this.sseHub.publish(reqId, event)
+  }
+
+  /**
+   * Issue 12 / ADR-0031:`git ls-remote --symref <gitUrl> HEAD` 拿 upstream
+   * 默认分支名(如 'main' / 'master')。
+   *
+   * - 成功 → 返回分支名
+   * - 失败(网络 / 鉴权 / 仓库空 / stdout 无 symref)→ 返 null(降级,不阻断 attach)
+   * - 抛错(罕见,execFile 默认不抛)→ catch 后返 null
+   *
+   * 一次 ~200ms 网络调用,但 attach 是低频操作(< 10 次/用户/天),
+   * 总延迟影响可忽略。鉴权失败 / hang 由 `createDefaultGitExec` 的 5min
+   * timeout + 强制 env(Issue 05)兜底。
+   */
+  private async fetchDefaultBranch(
+    git: GitExec,
+    gitUrl: string,
+  ): Promise<string | null> {
+    try {
+      const res = await git(['ls-remote', '--symref', gitUrl, 'HEAD'])
+      if (res.code !== 0) return null
+      // stdout 格式: "ref: refs/heads/main\t<commit-sha>"
+      const match = res.stdout.match(/ref:\s*refs\/heads\/(\S+)/)
+      return match?.[1] ?? null
+    } catch {
+      return null
+    }
   }
 
   /**

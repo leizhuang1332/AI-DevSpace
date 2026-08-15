@@ -737,9 +737,14 @@ export function DraftingZone({ data }: { data: DraftingData }) {
           setFailedRepoNames(failedNamesList)
           setBannerPartialSummary(undefined)
           setBannerState('error')
-          setBannerErrorMessage(
-            failedMessages[0] ?? '关联失败,请重试',
-          )
+          // Issue 12 / ADR-0031:E_BRANCH_EXISTS 显示专属文案,避免把 gitUrl
+          // 等技术字段直接抛给用户
+          const firstResult = res.results[0]
+          const errorMessage =
+            firstResult && !firstResult.ok && firstResult.code === 'E_BRANCH_EXISTS'
+              ? `分支名 "${value.branchName}" 与上游默认分支冲突,请改名后重试`
+              : (failedMessages[0] ?? '关联失败,请重试')
+          setBannerErrorMessage(errorMessage)
         }
 
         setAttachDialogOpen(false)

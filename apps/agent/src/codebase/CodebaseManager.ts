@@ -545,10 +545,18 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
  * clone 的 stderr 文本 → 错误码。
  *
  * 与旧 `mapGitError`(针对 `worktree add`)的区别:
- * - 没有 E_BRANCH_EXISTS(全新 clone 不可能撞本地分支,决策 111)
  * - 没有 E_BASE_BRANCH_NOT_FOUND(clone 必带 HEAD)
  * - 增加 E_REPO_NOT_FOUND(注册表无 gitUrl 时不传到这里 —— 这是更上层的校验,
  *   这里保留只是兜底 stderr 含 "Repository not found")
+ *
+ * 决策 111-v2(ADR-0031)边界澄清:
+ * - E_BRANCH_EXISTS 由 RequirementService.attachRepo **前置校验**返,
+ *   不依赖 clone / checkout -b 的 stderr 文本(不保证出现 "A branch named 'x'
+ *   already exists" 这种固定格式)。所以本函数不再生成 E_BRANCH_EXISTS,
+ *   仅在 RepoAttachErrorCode 联合里占位。
+ * - clone 本身不会撞本地分支(全新仓库,本地无分支);但 `git checkout -b
+ *   <branchName>` 在 clone 后会撞(origin 默认分支已存在)。前置拦截避免
+ *   走到必败路径。
  *
  * 启发式匹配:
  * - 网络关键字 → E_NETWORK

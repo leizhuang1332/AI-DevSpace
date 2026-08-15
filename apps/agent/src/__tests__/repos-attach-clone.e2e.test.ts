@@ -568,6 +568,95 @@ describe.skipIf(process.platform === 'win32')(
       },
       30_000,
     )
+
+    it(
+      'issue 12: branchName === upstream default → E_BRANCH_EXISTS,不调 clone',
+      async () => {
+        const { url, root, token } = await boot()
+        // makeUpstreamRepo 默认 init '-b main'(见 line 98)
+        const { barePath } = await makeUpstreamRepo(root, 'branch-name-clash')
+        await registerRepo(
+          url,
+          token,
+          'branch-name-clash',
+          `file://${barePath}`,
+        )
+        mkdirSync(
+          join(root, 'requirements', 'req-branch-clash'),
+          { recursive: true },
+        )
+
+        // 用户填 branchName: 'main' —— 与 upstream 默认分支同名
+        // 期望:服务端前置校验返 E_BRANCH_EXISTS,不调 git clone
+        const res = await fetch(
+          `${url}/api/requirement/req-branch-clash/repos`,
+          {
+            method: 'POST',
+            headers: {
+              'x-aidevspace-token': token,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              repoNames: ['branch-name-clash'],
+              branchName: 'main',
+            }),
+          },
+        )
+        expect(res.status).toBe(200)
+        const body = (await res.json()) as {
+          succeeded: number
+          failed: number
+          results: Array<{ ok: boolean; code?: string; message?: string }>
+        }
+        expect(body.succeeded).toBe(0)
+        expect(body.failed).toBe(1)
+        expect(body.results[0]?.ok).toBe(false)
+        expect(body.results[0]?.code).toBe('E_BRANCH_EXISTS')
+        // 不调 clone → codebase 目录不应存在
+        const codebasePath = join(
+          root,
+          'requirements',
+          'req-branch-clash',
+          'codebase',
+          'branch-name-clash',
+        )
+        expect(existsSync(codebasePath)).toBe(false)
+      },
+      30_000,
+    )
+
+    it(
+      'issue 12: branchName !== upstream default → 正常 clone 成功(回归)',
+      async () => {
+        const { url, root, token } = await boot()
+        const { barePath } = await makeUpstreamRepo(root, 'branch-name-ok')
+        await registerRepo(url, token, 'branch-name-ok', `file://${barePath}`)
+        mkdirSync(join(root, 'requirements', 'req-branch-ok'), { recursive: true })
+
+        const res = await fetch(
+          `${url}/api/requirement/req-branch-ok/repos`,
+          {
+            method: 'POST',
+            headers: {
+              'x-aidevspace-token': token,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              repoNames: ['branch-name-ok'],
+              branchName: 'feat/cool-feature',
+            }),
+          },
+        )
+        expect(res.status).toBe(200)
+        const body = (await res.json()) as {
+          succeeded: number
+          results: Array<{ ok: boolean; code?: string }>
+        }
+        expect(body.succeeded).toBe(1)
+        expect(body.results[0]?.ok).toBe(true)
+      },
+      30_000,
+    )
   },
 )
 

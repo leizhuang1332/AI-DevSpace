@@ -549,5 +549,191 @@ describe('RequirementService.attachRepo', () => {
   })
 })
 
+// ============================================================================
+// Issue 12: branchName 与 upstream 默认分支同名 → E_BRANCH_EXISTS
+// ============================================================================
+
+describe('RequirementService.attachRepo · branchName vs default branch (issue 12)', () => {
+  let realRoot: string
+
+  beforeEach(() => {
+    realRoot = mkdtempSync(join(tmpdir(), 'aidevsp-issue12-'))
+  })
+
+  afterEach(() => {
+    rmSync(realRoot, { recursive: true, force: true })
+  })
+
+  /**
+   * ls-remote mock —— 匹配 args 返预设 stdout。
+   * 不传 match 时默认返「ref: refs/heads/main\t<sha>」(默认分支 main)。
+   */
+  function makeLsRemoteGit(
+    match?: (args: string[]) => { code: number; stdout: string; stderr: string } | null,
+  ): CodebaseManagerDeps['git'] {
+    return vi.fn(async (args: string[]) => {
+      if (args[0] === 'ls-remote') {
+        const override = match?.(args)
+        if (override) return override
+        // 默认 ls-remote 返 main 为默认分支
+        return { code: 0, stdout: 'ref: refs/heads/main\tabc123\n', stderr: '' }
+      }
+      return { code: 0, stdout: '', stderr: '' }
+    }) as CodebaseManagerDeps['git']
+  }
+
+  it('branchName === upstream default → E_BRANCH_EXISTS,不调 clone', async () => {
+    const mockMgr = makeMockCodebaseMgr()
+    const ws = makeFakeWorkspace({
+      foo: { name: 'foo', gitUrl: 'git@x', description: '' },
+    })
+    const { hub } = makeFakeHub()
+    // 默认分支 main;用户也填 main → 应该返 E_BRANCH_EXISTS
+    const git = makeLsRemoteGit()
+    const svc = new RequirementService({
+      root: realRoot,
+      codebaseMgr: mockMgr,
+      workspace: ws,
+      sseHub: hub,
+      git,
+    })
+
+    const r = await svc.attachRepo('req-001', 'foo', 'main')
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.code).toBe(RepoAttachErrorCode.E_BRANCH_EXISTS)
+      expect(r.message).toContain('main')
+    }
+    // 关键:clone 不被调
+    expect(mockMgr.cloneCalls).toHaveLength(0)
+    // 前置校验在 setPending 之前就返了 → 不产生 pending 标记
+    expect(mockMgr.setPendingCalls).toHaveLength(0)
+    expect(mockMgr.clearPendingCalls).toHaveLength(0)
+  })
+
+  it('branchName 不同于 upstream default → 走原 clone 路径,行为不变', async () => {
+    const mockMgr = makeMockCodebaseMgr()
+    const ws = makeFakeWorkspace({
+      foo: { name: 'foo', gitUrl: 'git@x', description: '' },
+    })
+    const { hub } = makeFakeHub()
+    const git = makeLsRemoteGit() // 默认 main
+    const svc = new RequirementService({
+      root: realRoot,
+      codebaseMgr: mockMgr,
+      workspace: ws,
+      sseHub: hub,
+      git,
+    })
+
+    const r = await svc.attachRepo('req-001', 'foo', 'feat/x')
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.branch).toBe('feat/x')
+      // mock 默认 cloneImpl 返 path: '/tmp/cb';断言非空,精确值由 makeMockCodebaseMgr 决定
+      expect(r.codebasePath).toBeTruthy()
+    }
+    // clone 被调
+    expect(mockMgr.cloneCalls).toHaveLength(1)
+  })
+
+  it('ls-remote 失败(网络/鉴权/仓库空)→ 降级 null,不阻断(走原 clone 路径)', async () => {
+    const mockMgr = makeMockCodebaseMgr()
+    const ws = makeFakeWorkspace({
+      foo: { name: 'foo', gitUrl: 'git@x', description: '' },
+    })
+    const { hub } = makeFakeHub()
+    // ls-remote 失败(code ≠ 0)
+    const git = makeLsRemoteGit(() => ({
+      code: 128,
+      stdout: '',
+      stderr: 'fatal: Could not resolve host',
+    }))
+    const svc = new RequirementService({
+      root: realRoot,
+      codebaseMgr: mockMgr,
+      workspace: ws,
+      sseHub: hub,
+      git,
+    })
+
+    const r = await svc.attachRepo('req-001', 'foo', 'main')
+    // ls-remote 失败 → 不知道 default 分支 → 不阻断 → 走原 clone 路径
+    expect(r.ok).toBe(true)
+    expect(mockMgr.cloneCalls).toHaveLength(1)
+  })
+
+  it('ls-remote stdout 无 symref(空仓库)→ 降级 null,不阻断', async () => {
+    const mockMgr = makeMockCodebaseMgr()
+    const ws = makeFakeWorkspace({
+      foo: { name: 'foo', gitUrl: 'git@x', description: '' },
+    })
+    const { hub } = makeFakeHub()
+    // ls-remote 返成功但 stdout 无 symref 行(空仓库常见)
+    const git = makeLsRemoteGit(() => ({
+      code: 0,
+      stdout: '',
+      stderr: '',
+    }))
+    const svc = new RequirementService({
+      root: realRoot,
+      codebaseMgr: mockMgr,
+      workspace: ws,
+      sseHub: hub,
+      git,
+    })
+
+    const r = await svc.attachRepo('req-001', 'foo', 'main')
+    expect(r.ok).toBe(true)
+    expect(mockMgr.cloneCalls).toHaveLength(1)
+  })
+
+  it('未注入 git → fetchDefaultBranch no-op,走原 clone 路径(向后兼容)', async () => {
+    const mockMgr = makeMockCodebaseMgr()
+    const ws = makeFakeWorkspace({
+      foo: { name: 'foo', gitUrl: 'git@x', description: '' },
+    })
+    const svc = new RequirementService({
+      root: realRoot,
+      codebaseMgr: mockMgr,
+      workspace: ws,
+      // 不传 git
+    })
+
+    const r = await svc.attachRepo('req-001', 'foo', 'main')
+    // 即使 branchName 是 main,因为没注入 git,前置校验跳过 → 走原 clone
+    expect(r.ok).toBe(true)
+    expect(mockMgr.cloneCalls).toHaveLength(1)
+  })
+
+  it('upstream 默认分支是 master + 用户填 master → 同样命中 E_BRANCH_EXISTS', async () => {
+    const mockMgr = makeMockCodebaseMgr()
+    const ws = makeFakeWorkspace({
+      foo: { name: 'foo', gitUrl: 'git@x', description: '' },
+    })
+    const { hub } = makeFakeHub()
+    // ls-remote 返 master 为默认分支
+    const git = makeLsRemoteGit(() => ({
+      code: 0,
+      stdout: 'ref: refs/heads/master\tdef456\n',
+      stderr: '',
+    }))
+    const svc = new RequirementService({
+      root: realRoot,
+      codebaseMgr: mockMgr,
+      workspace: ws,
+      sseHub: hub,
+      git,
+    })
+
+    const r = await svc.attachRepo('req-001', 'foo', 'master')
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.code).toBe(RepoAttachErrorCode.E_BRANCH_EXISTS)
+    }
+    expect(mockMgr.cloneCalls).toHaveLength(0)
+  })
+})
+
 // 占位避免 lint
 void ({} as CodebaseManagerDeps)
