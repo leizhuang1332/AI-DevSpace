@@ -322,6 +322,10 @@ describe('mapCloneError', () => {
     expect(mapCloneError('fatal: Authentication failed')).toBe(
       RepoAttachErrorCode.E_AUTH,
     )
+    // Issue 15:could not read Username 是 interactive auth 失败 → 归 AUTH
+    expect(mapCloneError('could not read Username for https://x.com')).toBe(
+      RepoAttachErrorCode.E_AUTH,
+    )
   })
 
   it('磁盘满 → E_DISK_FULL', () => {
@@ -333,6 +337,32 @@ describe('mapCloneError', () => {
   it('repo 不存在 → E_REPO_NOT_FOUND', () => {
     expect(mapCloneError('fatal: Repository not found.')).toBe(
       RepoAttachErrorCode.E_REPO_NOT_FOUND,
+    )
+  })
+
+  it('远程 fatal (Issue 15)→ 优先识别 fatal 末行,不只看关键字', () => {
+    // Issue 15:之前 git 中文 locale 「致命错误」miss → 落到 E_INTERNAL
+    // 现在强制 LANG=C 后,所有 fatal 都有 'fatal: ' 前缀,加规则统一识别
+    expect(
+      mapCloneError(
+        "Cloning into 'foo'...\nfatal: unable to access 'https://x.com/foo.git': Could not resolve host x.com",
+      ),
+    ).toBe(RepoAttachErrorCode.E_NETWORK)
+    // HTTP 401/403 → E_AUTH
+    expect(
+      mapCloneError(
+        "fatal: unable to access 'x': The requested URL returned error: 401",
+      ),
+    ).toBe(RepoAttachErrorCode.E_AUTH)
+    expect(
+      mapCloneError(
+        "fatal: unable to access 'x': The requested URL returned error: 403",
+      ),
+    ).toBe(RepoAttachErrorCode.E_AUTH)
+    // 中文 locale 的「致命错误」(旧 fallback 场景) → 修 LANG=C 后不会出现,
+    // 但保留 fallback 测试作为防御
+    expect(mapCloneError('致命错误:仓库 \'x\' 未找到')).toBe(
+      RepoAttachErrorCode.E_INTERNAL,
     )
   })
 
@@ -1206,11 +1236,76 @@ describe('CodebaseManager.clone · 第 1 步失败清半成品 (issue 13)', () =
       }
       return ok()
     }) as CodebaseManagerDeps['git']
-    const mgr = createCodebaseManager({ root: realRoot, git })
+    const mgr = createCodebaseManager({root: realRoot, git})
 
     const r = await mgr.clone('req-001', 'foo', 'git@x', 'feat/x')
     expect(r.ok).toBe(false)
     expect(existsSync(dir)).toBe(false)
+  })
+})
+
+// Issue 15:clone 失败消息净化 —— 不裸暴露 stderr 全文给前端
+describe('CodebaseManager.clone · 失败消息净化 (issue 15)', () => {
+  let realRoot: string
+  beforeEach(() => {
+    realRoot = mkdtempSync(join(tmpdir(), 'aidevsp-issue15-'))
+    mkdirSync(join(realRoot, 'requirements', 'req-001'), { recursive: true })
+  })
+  afterEach(() => {
+    rmSync(realRoot, { recursive: true, force: true })
+  })
+
+  it('git 中文 locale 输出(混入进度行)→ 提取致命行,不暴露进度行', async () => {
+    const git = vi.fn(async (args: string[]) => {
+      if (args[0] === 'clone') {
+        return fail(
+          [
+            '正克隆到 \'/Users/Ray/.aidevspace/...\'...',
+            'remote: Repository not found',
+            '致命错误:仓库 \'xxx\' 未找到',
+            'fatal: repository \'xxx\' not found',
+          ].join('\n'),
+          128,
+        )
+      }
+      return ok()
+    }) as CodebaseManagerDeps['git']
+    const mgr = createCodebaseManager({root: realRoot, git})
+
+    const r = await mgr.clone('req-001', 'foo', 'git@x', 'feat/x')
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      // 必须识别为 E_REPO_NOT_FOUND(不落到 E_INTERNAL)
+      expect(r.code).toBe(RepoAttachErrorCode.E_REPO_NOT_FOUND)
+      // 消息不能含「正克隆到」(progress 行)
+      expect(r.message).not.toContain('正克隆到')
+      // 消息只显示末行 fatal 关键信息
+      expect(r.message.length).toBeLessThan(120)
+    }
+  })
+
+  it('stderr 含进度 + fatal 网络错 → 提取 fatal 网络错(issue 15)', async () => {
+    const git = vi.fn(async (args: string[]) => {
+      if (args[0] === 'clone') {
+        return fail(
+          [
+            'Cloning into \'foo\'...',
+            'fatal: unable to access \'https://x.com/foo.git\': Could not resolve host x.com',
+          ].join('\n'),
+          128,
+        )
+      }
+      return ok()
+    }) as CodebaseManagerDeps['git']
+    const mgr = createCodebaseManager({root: realRoot, git})
+
+    const r = await mgr.clone('req-001', 'foo', 'git@x', 'feat/x')
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.code).toBe(RepoAttachErrorCode.E_NETWORK)
+      expect(r.message).not.toContain('Cloning into')
+      expect(r.message).toMatch(/resolve host|网络/)
+    }
   })
 })
 

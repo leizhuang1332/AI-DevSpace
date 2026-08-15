@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   mockConvertToMarkdown,
+  RepoAttachErrorCode,
+  type RepoAttachErrorCodeT,
   validateLaunch,
   type AuxFile,
   type UsageTag,
@@ -41,6 +43,40 @@ import { AttachReposDialog } from './attach-repos-dialog'
  * 用 setTimeout 0 等 React commit 完成后再 focus(避免被卸载的 dialog 抢回焦点)。
  * trigger 是触发的入口标识;N=0 时 banner [+] 通常已被自动隐藏,可能落空 no-op。
  */
+/**
+ * Issue 12 + Issue 15:per-repo 错误码 → 友好中文文案映射。
+ * 替代直接展示后端 message(可能是 raw stderr、gitUrl、绝对路径等技术字段)。
+ *
+ * 设计:每个错误码都对应一条用户可读文案 + 简短行动指引。
+ * 后端 `code` 字段是真相源,文案在前端只在这里写一遍,避免散落多处。
+ */
+function errorCodeToMessage(
+  code: RepoAttachErrorCodeT,
+  branchName: string,
+): string {
+  switch (code) {
+    case RepoAttachErrorCode.E_BRANCH_EXISTS:
+      return `分支名 "${branchName}" 与上游默认分支冲突,请改名后重试`
+    case RepoAttachErrorCode.E_AUTH:
+      return '鉴权失败:请检查仓库凭据(SSH key / Token)是否正确'
+    case RepoAttachErrorCode.E_NETWORK:
+      return '网络不可达:请检查网络或 Git 远程地址是否正确'
+    case RepoAttachErrorCode.E_REPO_NOT_FOUND:
+      return '仓库不存在:请确认远程地址是否正确,或在 /repos 重新注册'
+    case RepoAttachErrorCode.E_DISK_FULL:
+      return '磁盘空间不足:请清理后重试'
+    case RepoAttachErrorCode.E_REPO_ALREADY_ATTACHED:
+      return '该仓库已关联:请勿重复添加'
+    case RepoAttachErrorCode.E_REQUIREMENT_NOT_FOUND:
+      return '需求不存在:请刷新页面后重试'
+    case RepoAttachErrorCode.E_INVALID_BRANCH_NAME:
+      return '分支名非法:请使用合法字符'
+    case RepoAttachErrorCode.E_INTERNAL:
+    default:
+      return '关联失败:请稍后重试,或查看 agent.log 排查'
+  }
+}
+
 function focusReturnToTrigger(
   trigger: 'banner-plus' | 'repo-bar-add',
 ): void {
@@ -737,13 +773,12 @@ export function DraftingZone({ data }: { data: DraftingData }) {
           setFailedRepoNames(failedNamesList)
           setBannerPartialSummary(undefined)
           setBannerState('error')
-          // Issue 12 / ADR-0031:E_BRANCH_EXISTS 显示专属文案,避免把 gitUrl
-          // 等技术字段直接抛给用户
+          // Issue 12 / ADR-0031 + Issue 15:每个错误码都有友好中文文案,
+          // 避免把 raw stderr / gitUrl / 代码路径等抛给用户。
           const firstResult = res.results[0]
-          const errorMessage =
-            firstResult && !firstResult.ok && firstResult.code === 'E_BRANCH_EXISTS'
-              ? `分支名 "${value.branchName}" 与上游默认分支冲突,请改名后重试`
-              : (failedMessages[0] ?? '关联失败,请重试')
+          const errorMessage = firstResult && !firstResult.ok
+            ? errorCodeToMessage(firstResult.code, value.branchName)
+            : '关联失败,请重试'
           setBannerErrorMessage(errorMessage)
         }
 

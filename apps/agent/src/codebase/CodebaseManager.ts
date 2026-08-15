@@ -326,11 +326,17 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
         /* 同上 */
       }
       const code = mapCloneError(cloneRes.stderr)
-      return {
-        ok: false,
-        code,
-        message: cloneRes.stderr.trim() || `git clone exited with code ${cloneRes.code}`,
-      }
+      // Issue 15:不暴露 stderr 全文(progress 行 + debug + 路径等)
+      // 给前端。只取 fatal 末行(若没有 → 空字符串),让前端错误码 → 友好文案映射兜底
+      // 完整 stderr 进 server log(便于排查,见 server.ts attach 路径)
+      const fatalLine = extractFatalLine(cloneRes.stderr)
+      const message = fatalLine ?? `git clone exited with code ${cloneRes.code}`
+      // stderr 落 server log(server.ts 已经在 request log 里打,这里仅保留必要的 hint)
+      logger?.warn(
+        { stderr: cloneRes.stderr.trim(), code: cloneRes.code },
+        'clone: git clone failed',
+      )
+      return { ok: false, code, message }
     }
 
     // 2. checkout -b <branchName>(在 clone 出来的目录里)
@@ -610,28 +616,56 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
  */
 export function mapCloneError(stderr: string): CloneErrorCodeT {
   const s = stderr || ''
+  // Issue 15:优先看 fatal 末行(远程拒绝 / 鉴权等场景,根因在 fatal 行)
+  const fatalLine = extractFatalLine(s)
+  const haystack = fatalLine ?? s
+
   if (
-    /\b(EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|ECONNRESET|ETIMEDOUT)\b/.test(s) ||
-    /Could not resolve host/.test(s) ||
-    /Connection (refused|reset)/i.test(s) ||
-    /network is unreachable/i.test(s)
+    /\b(EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|ECONNRESET|ETIMEDOUT)\b/.test(haystack) ||
+    /Could not resolve host/.test(haystack) ||
+    /Connection (refused|reset)/i.test(haystack) ||
+    /network is unreachable/i.test(haystack)
   ) {
     return RepoAttachErrorCode.E_NETWORK
   }
   if (
-    /Permission denied/.test(s) ||
-    /publickey/.test(s) ||
-    /Authentication failed/.test(s)
+    /Permission denied/.test(haystack) ||
+    /publickey/.test(haystack) ||
+    /Authentication failed/.test(haystack) ||
+    // Issue 15:remote URL 401/403 包装在 fatal: unable to access 里
+    /returned error: (401|403)/.test(haystack) ||
+    // interactive auth prompt failure
+    /could not read Username/i.test(haystack) ||
+    /could not read Password/i.test(haystack)
   ) {
     return RepoAttachErrorCode.E_AUTH
   }
-  if (/No space left on device|ENOSPC|disk full/i.test(s)) {
+  if (/No space left on device|ENOSPC|disk full/i.test(haystack)) {
     return RepoAttachErrorCode.E_DISK_FULL
   }
-  if (/Repository not found|not found/i.test(s)) {
+  if (/Repository not found|not found/i.test(haystack)) {
     return RepoAttachErrorCode.E_REPO_NOT_FOUND
   }
   return RepoAttachErrorCode.E_INTERNAL
+}
+
+/**
+ * Issue 15:从 stderr 文本提取 fatal 行(若有)。
+ * git 失败时 stderr 通常是:
+ *   [progress line(s)]
+ *   fatal: <root cause>
+ * 我们只关心 fatal 行 —— progress 行(中文/英文都一样,「正克隆到」/「Cloning into」)
+ * 不应暴露给前端,且会被 mapCloneError 启发式匹配误判为一般文本。
+ *
+ * 返回最后一行含 'fatal' 的内容(若有),否则 null。
+ */
+function extractFatalLine(stderr: string): string | null {
+  const lines = stderr.split('\n')
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]
+    if (line && /\bfatal\b/i.test(line)) return line
+  }
+  return null
 }
 
 /**

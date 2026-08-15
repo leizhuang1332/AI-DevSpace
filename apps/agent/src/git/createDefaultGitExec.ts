@@ -49,6 +49,12 @@ export function createDefaultGitExec(): GitExec {
         timeout: 60_000 * 5, // 5 分钟上限（clone 大仓库超时）
         env: {
           ...process.env,
+          // Issue 15:强制 LANG=C 让 git 错误输出英文 —— 后端
+          // `mapCloneError` 的启发式正则只匹配英文关键字(macOS 默认
+          // 英文,但某些 shell / IDE 启动 agent 时会注入 LANG=zh_CN,
+          // git 跟着用中文输出 → 全部 miss → 落到 E_INTERNAL)。
+          LANG: 'C',
+          LC_ALL: 'C',
           GIT_TERMINAL_PROMPT: '0',
           GIT_ASKPASS: '',
           SSH_ASKPASS: '',

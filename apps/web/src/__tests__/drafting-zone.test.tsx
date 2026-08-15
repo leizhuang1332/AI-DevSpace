@@ -1716,8 +1716,9 @@ describe('DraftingZone · 关联仓库 API 接入 (ticket 02)', () => {
       expect(screen.getByTestId('drafting-banner')).toHaveAttribute('data-banner-state', 'error')
     })
     const banner = screen.getByTestId('drafting-banner')
-    // 全失败 banner 只显示首个失败 repo(避免文案过长;详细看 failedRepoNames state)
-    expect(banner.textContent).toContain('refund-service')
+    // Issue 15:error banner 显示 E_REPO_NOT_FOUND 友好文案,不再裸暴露 stderr/repoName
+    // (用户可以从 Retry + 弹层重看具体哪些 repo 失败)
+    expect(banner.textContent).toContain('仓库不存在')
     // error 态无 partial retry 按钮
     expect(screen.queryByTestId('drafting-banner-retry-failed')).toBeNull()
   })
