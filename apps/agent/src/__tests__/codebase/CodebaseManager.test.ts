@@ -816,3 +816,154 @@ describe('CodebaseManagerDeps.logger (issue 09)', () => {
     // 不抛 = 通过
   })
 })
+
+// ============================================================================
+// Issue 10: scanOrphanedCodebases 启动期扫 .git-only 残留
+// ============================================================================
+
+describe('CodebaseManager.scanOrphanedCodebases (issue 10)', () => {
+  let realRoot: string
+
+  beforeEach(() => {
+    realRoot = mkdtempSync(join(tmpdir(), 'aidevsp-orphan-codebase-'))
+  })
+
+  afterEach(() => {
+    rmSync(realRoot, { recursive: true, force: true })
+  })
+
+  /** 构造一个完整仓库的 codebase fixture(.git/HEAD + README.md + ls-files 返 README.md) */
+  function makeCompleteCodebase(codebaseDir: string): void {
+    mkdirSync(join(codebaseDir, '.git'), { recursive: true })
+    writeFileSync(
+      join(codebaseDir, '.git', 'HEAD'),
+      'ref: refs/heads/main\n',
+      'utf8',
+    )
+    writeFileSync(join(codebaseDir, 'README.md'), '# ok\n', 'utf8')
+  }
+
+  /** 构造一个半成品 codebase fixture(只有 .git 无 HEAD) */
+  function makeHalfBakedCodebase(codebaseDir: string): void {
+    mkdirSync(join(codebaseDir, '.git'), { recursive: true })
+    // 不写 .git/HEAD
+  }
+
+  /** 构造一个 .git/HEAD 存在但 working tree 空的 codebase(HEAD 指向空 commit) */
+  function makeEmptyTreeCodebase(codebaseDir: string): void {
+    mkdirSync(join(codebaseDir, '.git'), { recursive: true })
+    writeFileSync(
+      join(codebaseDir, '.git', 'HEAD'),
+      'ref: refs/heads/main\n',
+      'utf8',
+    )
+    // 没有 tracked 文件
+  }
+
+  it('空 requirements 目录 → []', async () => {
+    const { git } = makeFakeGit()
+    const mgr = createCodebaseManager({ root: realRoot, git })
+    expect(await mgr.scanOrphanedCodebases()).toEqual([])
+  })
+
+  it('完整仓库 → 不出现在结果中', async () => {
+    const dir = join(realRoot, 'requirements', 'req-A', 'codebase', 'order-svc')
+    makeCompleteCodebase(dir)
+
+    const { git } = makeCloneFlowGit({ lsFiles: 'README.md\n' })
+    const mgr = createCodebaseManager({ root: realRoot, git })
+
+    const orphans = await mgr.scanOrphanedCodebases()
+    expect(orphans).toEqual([])
+  })
+
+  it('只有 .git 无 .git/HEAD(残留半成品)→ 出现在结果中', async () => {
+    const dir = join(realRoot, 'requirements', 'req-A', 'codebase', 'half-baked')
+    makeHalfBakedCodebase(dir)
+
+    // isCompleteCodebase 内部:不存在 .git/HEAD → 返 false。ls-files 不会被调
+    const { git } = makeFakeGit()
+    const mgr = createCodebaseManager({ root: realRoot, git })
+
+    const orphans = await mgr.scanOrphanedCodebases()
+    expect(orphans).toEqual([
+      {
+        reqId: 'req-A',
+        repoName: 'half-baked',
+        path: dir,
+      },
+    ])
+  })
+
+  it('.git/HEAD 存在 + ls-files 空(working tree 空)→ 出现在结果中', async () => {
+    const dir = join(realRoot, 'requirements', 'req-A', 'codebase', 'empty-tree')
+    makeEmptyTreeCodebase(dir)
+
+    // isCompleteCodebase 会调 ls-files,返空 → 判定为不完整 → 报孤儿
+    const { git } = makeCloneFlowGit({ lsFiles: '' })
+    const mgr = createCodebaseManager({ root: realRoot, git })
+
+    const orphans = await mgr.scanOrphanedCodebases()
+    expect(orphans).toEqual([
+      {
+        reqId: 'req-A',
+        repoName: 'empty-tree',
+        path: dir,
+      },
+    ])
+  })
+
+  it('.pending-<name> 半成品标记目录 → 不出现(由 scanOrphanedPending 处理)', async () => {
+    // .pending-order-svc 是文件,不是目录 → 不会进入孤儿扫描
+    const codeDir = join(realRoot, 'requirements', 'req-A', 'codebase')
+    mkdirSync(codeDir, { recursive: true })
+    writeFileSync(join(codeDir, '.pending-order-svc'), '', 'utf8')
+
+    const { git } = makeFakeGit()
+    const mgr = createCodebaseManager({ root: realRoot, git })
+
+    const orphans = await mgr.scanOrphanedCodebases()
+    expect(orphans).toEqual([])
+  })
+
+  it('多 req × 多 repo 混合:只报未完成的', async () => {
+    // req-A:order-svc(完整)、refund-svc(半成品)
+    const codeA = join(realRoot, 'requirements', 'req-A', 'codebase')
+    makeCompleteCodebase(join(codeA, 'order-svc'))
+    makeHalfBakedCodebase(join(codeA, 'refund-svc'))
+    // req-B:only 半成品
+    const codeB = join(realRoot, 'requirements', 'req-B', 'codebase')
+    makeHalfBakedCodebase(join(codeB, 'lonely-svc'))
+    // req-C:无 codebase 目录(应跳过)
+
+    const { git } = makeCloneFlowGit({ lsFiles: 'README.md\n' })
+    const mgr = createCodebaseManager({ root: realRoot, git })
+
+    const orphans = await mgr.scanOrphanedCodebases()
+    const sorted = orphans.sort((a, b) => a.repoName.localeCompare(b.repoName))
+    expect(sorted).toEqual([
+      {
+        reqId: 'req-B',
+        repoName: 'lonely-svc',
+        path: join(codeB, 'lonely-svc'),
+      },
+      {
+        reqId: 'req-A',
+        repoName: 'refund-svc',
+        path: join(codeA, 'refund-svc'),
+      },
+    ])
+  })
+
+  it('非 req- 命名的目录:被跳过', async () => {
+    // .tmp-debug/codebase/ 下的 .git-only 不应被扫
+    const code = join(realRoot, 'requirements', '.tmp-debug', 'codebase', 'foo')
+    makeHalfBakedCodebase(code)
+
+    const { git } = makeFakeGit()
+    const mgr = createCodebaseManager({ root: realRoot, git })
+
+    const orphans = await mgr.scanOrphanedCodebases()
+    expect(orphans).toEqual([])
+  })
+})

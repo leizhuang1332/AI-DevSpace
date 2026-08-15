@@ -207,6 +207,32 @@ export interface CodebaseManager {
    * 「只扫最近启动过 clone 的需求」推迟到后续。
    */
   scanOrphanedPending(): Promise<OrphanedPendingEntry[]>
+
+  /**
+   * Issue 10:启动期扫「.git 残留但 working tree 空」的 codebase 目录。
+   *
+   * 与 `scanOrphanedPending` 的边界:
+   * - `scanOrphanedPending` 只清带 `.pending-<name>` 标记的目录
+   *   (clone 异常退出留下的真正半成品)
+   * - `scanOrphanedCodebases` 清「.git 残留但 working tree 空」的目录
+   *   (上次 attach checkout 失败 + safeRm 漏过后留下的孤儿)
+   *
+   * 启动钩子会 rm -rf 每个 entry + 记 warn log,让用户可排查之前的失败 attach。
+   *
+   * 性能:每个候选跑 `git ls-files`,~50ms;本期沿用「简单全扫」策略
+   * (与 `scanOrphanedPending` 同风格)。
+   */
+  scanOrphanedCodebases(): Promise<OrphanedCodebaseEntry[]>
+}
+
+/**
+ * Issue 10:孤儿 codebase 扫描结果条目 —— `.git` 残留但 working tree 空的目录。
+ * 启动钩子会 rm -rf 每个 entry + 记 warn log。
+ */
+export interface OrphanedCodebaseEntry {
+  reqId: string
+  repoName: string
+  path: string
 }
 
 export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManager {
@@ -444,6 +470,60 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
     return out
   }
 
+  /**
+   * Issue 10:启动期扫所有「.git 残留但 working tree 空」的 codebase 目录。
+   *
+   * 与 `scanOrphanedPending` 的边界(见接口注释):本函数不查 `.pending-` 标记,
+   * 只看每个候选 `codebase/<name>/` 目录本身是否完整 —— 复用 Issue 09 的
+   * `isCompleteCodebase` 判定。
+   *
+   * 容错:
+   * - requirements 目录不存在 → `[]`(与 scanOrphanedPending 一致)
+   * - 单个 codebase 目录 readdir / stat 失败 → 跳过该 entry,不阻塞其他
+   * - `isCompleteCodebase` 内部已 swallow git 失败,返 false → 报为孤儿
+   */
+  async function scanOrphanedCodebases(): Promise<OrphanedCodebaseEntry[]> {
+    const out: OrphanedCodebaseEntry[] = []
+    const reqDir = join(root, 'requirements')
+    if (!existsSync(reqDir)) return out
+    let reqEntries: string[]
+    try {
+      reqEntries = readdirSync(reqDir)
+    } catch {
+      return out
+    }
+    for (const reqId of reqEntries) {
+      if (!reqId.startsWith('req-')) continue
+      const codebaseDir = join(reqDir, reqId, 'codebase')
+      if (!existsSync(codebaseDir)) continue
+      let entries: string[]
+      try {
+        entries = readdirSync(codebaseDir)
+      } catch {
+        continue
+      }
+      for (const name of entries) {
+        // 跳过 .pending-<name> 标记(由 scanOrphanedPending 处理)
+        // + 隐藏文件(.DS_Store / .archived 等)
+        if (name.startsWith('.')) continue
+        const path = join(codebaseDir, name)
+        // 仅扫目录(同名非目录文件跳过)
+        try {
+          const st = statSync(path)
+          if (!st.isDirectory()) continue
+        } catch {
+          continue
+        }
+        // 复用 Issue 09 判定:不完整 = 孤儿
+        const complete = await isCompleteCodebase(git, path)
+        if (!complete) {
+          out.push({ reqId, repoName: name, path })
+        }
+      }
+    }
+    return out
+  }
+
   return {
     getCodebasePath,
     getPendingPath,
@@ -453,6 +533,7 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
     setPending,
     clearPending,
     scanOrphanedPending,
+    scanOrphanedCodebases,
   }
 }
 

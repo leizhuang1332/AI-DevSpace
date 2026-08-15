@@ -327,6 +327,36 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     fastify.log.error({ err }, 'codebase: orphan pending cleanup failed on boot')
   }
 
+  // issue 10 · 启动时收敛 orphan `.git-only` codebase 目录
+  // 场景:上次 attach 走到 `git checkout -b` 失败(branchName 与 default 分支同名等),
+  // safeRm 又因 fd 竞争漏过 .git 残留 → 半成品盘上无 .pending- 标记,
+  // scanOrphanedPending 扫不到。复用 Issue 09 的 isCompleteCodebase 判定
+  // 「.git 残留但 working tree 空」的目录并统一清掉。
+  // 调用顺序:先 scanOrphanedPending 再 scanOrphanedCodebases —— 前者清更严重的「半成品」,
+  // 后者只清「半完整」残留。
+  try {
+    const orphanCodebases = await codebaseMgr.scanOrphanedCodebases()
+    for (const { reqId, repoName, path } of orphanCodebases) {
+      fastify.log.warn(
+        { reqId, repoName, path },
+        'codebase: cleaning orphaned .git-only directory on boot',
+      )
+      await codebaseMgr.remove(reqId, repoName)
+    }
+    if (orphanCodebases.length > 0) {
+      fastify.log.info(
+        { count: orphanCodebases.length },
+        'codebase: orphan .git-only directory cleaned on boot',
+      )
+    }
+  } catch (err) {
+    // 启动期清理失败不应阻断 agent 启动;仅日志告警
+    fastify.log.error(
+      { err },
+      'codebase: orphan .git-only cleanup failed on boot',
+    )
+  }
+
   // ticket 04:注入 sseHub 让 POST /api/requirements 创建成功 / 失败时推
   // `requirement_created` 事件到新建 id 通道,Web 端 DRAFTING 据此切正常态 / 红色 banner
   await fastify.register(requirementRoutes, { requirementService, sseHub: hub })

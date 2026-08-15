@@ -423,6 +423,54 @@ describe.skipIf(process.platform === 'win32')(
       },
       30_000,
     )
+
+    it(
+      'issue 10: agent 启动收敛 orphan `.git-only` codebase 目录(.git 残留但无 working tree)',
+      async () => {
+        // 制造孤儿:.git 残留 + 半成品文件(模拟上次 attach checkout 失败
+        // + safeRm 漏过的状态 —— 没有 .pending- 标记,所以 orphan pending
+        // 扫描扫不到,只有 issue 10 的 scanOrphanedCodebases 能识别)
+        const orphanRoot = mkdtempSync(join(tmpdir(), 'aidevsp-e2e-orphan-cb-'))
+        writeFileSync(join(orphanRoot, 'config.yaml'), 'name: dev\n')
+        const orphanReq = 'req-orphan-cb'
+        const orphanRepo = 'leftover-svc'
+        const orphanDir = join(
+          orphanRoot,
+          'requirements',
+          orphanReq,
+          'codebase',
+          orphanRepo,
+        )
+        mkdirSync(join(orphanDir, '.git'), { recursive: true })
+        // .git/HEAD 存在 + 无 tracked 文件(典型:checkout 失败中途 HEAD 已落地)
+        writeFileSync(
+          join(orphanDir, '.git', 'HEAD'),
+          'ref: refs/heads/main\n',
+          'utf8',
+        )
+
+        // sanity:启动前 orphan 还在
+        expect(existsSync(orphanDir)).toBe(true)
+
+        // 启动 buildServer 触发 boot 钩子(issue 10: scanOrphanedCodebases)
+        const app = await buildServer({
+          workspaceRoot: orphanRoot,
+          logFilePath: join(orphanRoot, 'agent.log'),
+        })
+
+        // 验证:orphan `.git-only` 目录被清
+        expect(existsSync(orphanDir)).toBe(false)
+
+        // 验证:agent 仍可响应 —— boot 钩子失败不应阻断启动(spec §验收清单)
+        const url = await app.listen({ port: 0, host: '127.0.0.1' })
+        const res = await fetch(`${url}/api/health`)
+        expect(res.status).toBe(200)
+
+        await app.close()
+        rmSync(orphanRoot, { recursive: true, force: true })
+      },
+      30_000,
+    )
   },
 )
 
