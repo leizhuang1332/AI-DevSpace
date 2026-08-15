@@ -107,6 +107,23 @@ export type CloneResult =
 export interface CodebaseManagerDeps {
   root: string
   git: GitExec
+  /**
+   * 可选 logger —— Issue 09(决策账本待补):
+   * 用于 `safeRm` 失败 / 半成品残留清理路径打 warn 日志。
+   * 不注入时所有 warn 静默 no-op(向后兼容)。
+   *
+   * 契约:pino / fastify.log 风格 —— `warn(obj, msg?)`,
+   * 其中 obj 是结构化字段,msg 是可读短串。
+   */
+  logger?: SafeRmLogger
+}
+
+/**
+ * safeRm / 半成品清理用的 logger 抽象 —— 只用到 warn 一档。
+ * 解耦 pino / fastify.log,便于单测注入 fake(数组收集器)。
+ */
+export interface SafeRmLogger {
+  warn: (obj: Record<string, unknown>, msg?: string) => void
 }
 
 /**
@@ -193,7 +210,7 @@ export interface CodebaseManager {
 }
 
 export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManager {
-  const { root, git } = deps
+  const { root, git, logger } = deps
 
   /** OS-native path,用于 fs 系统调用 */
   function getCodebasePath(reqId: string, repoName: string): string {
@@ -213,14 +230,24 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
   ): Promise<CloneResult> {
     const codebasePath = getCodebasePath(reqId, repoName)
 
-    // 0. 路径已存在 → E_REPO_ALREADY_ATTACHED(幂等校验)
-    //    不删已有内容,让上层路由决定如何处理(决策 109)
-    if (existsSync(codebasePath)) {
-      return {
-        ok: false,
-        code: RepoAttachErrorCode.E_REPO_ALREADY_ATTACHED,
-        message: `codebase ${repoName} 已被 req ${reqId} 关联`,
+    // 0. 路径已存在 + 是完整仓库 → E_REPO_ALREADY_ATTACHED(幂等校验,决策 109)
+    //    路径已存在但**不完整**(只有 .git 没 working tree / 残留半成品)
+    //    → log warn + safeRm 后继续 clone(Issue 09)
+    const existing = existsSync(codebasePath)
+    if (existing) {
+      const complete = await isCompleteCodebase(git, codebasePath)
+      if (complete) {
+        return {
+          ok: false,
+          code: RepoAttachErrorCode.E_REPO_ALREADY_ATTACHED,
+          message: `codebase ${repoName} 已被 req ${reqId} 关联`,
+        }
       }
+      logger?.warn(
+        { reqId, repoName, path: codebasePath },
+        'clone: found orphan half-baked codebase, removing before retry',
+      )
+      await safeRm(codebasePath, logger)
     }
 
     // 确保父目录存在(首次 attach 时)
@@ -269,7 +296,7 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
       checkoutRes = await git(checkoutArgs)
     } catch (err) {
       // checkout 抛错罕见(默认 execFile 不抛),仅做兜底
-      await safeRm(codebasePath)
+      await safeRm(codebasePath, logger)
       return {
         ok: false,
         code: RepoAttachErrorCode.E_INTERNAL,
@@ -278,7 +305,7 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
     }
     if (checkoutRes.code !== 0) {
       // checkout 失败 → 半成品目录清掉(决策 110:不留半成品)
-      await safeRm(codebasePath)
+      await safeRm(codebasePath, logger)
       return {
         ok: false,
         code: RepoAttachErrorCode.E_INTERNAL,
@@ -297,7 +324,7 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
 
   async function remove(reqId: string, repoName: string): Promise<void> {
     const codebasePath = getCodebasePath(reqId, repoName)
-    await safeRm(codebasePath)
+    await safeRm(codebasePath, logger)
   }
 
   async function listByRepo(repoName: string): Promise<CodebaseByReq[]> {
@@ -471,13 +498,74 @@ export function mapCloneError(stderr: string): CloneErrorCodeT {
   return RepoAttachErrorCode.E_INTERNAL
 }
 
-/** rm -rf 兜底:目录可能不存在,任何错误都 swallow(清理不应抛) */
-async function safeRm(p: string): Promise<void> {
+/**
+ * 「codebase 路径是不是一个完整 git 仓库 + working tree」
+ * - 不存在 → false
+ * - 仅 .git 存在但 working tree 为空(残留半成品 / HEAD 指向空 commit)→ false
+ * - 完整仓库 + 至少有 1 个 tracked 文件 → true
+ *
+ * 实现(Issue 09):<path>/.git/HEAD 存在 + `git -C <path> ls-files` 非空。
+ * 仅在 clone() 入口做幂等判断时跑(只有 existsSync 命中才调),不污染干净路径。
+ *
+ * 导出(供 Issue 10 `scanOrphanedCodebases` 复用):本质是「判定函数」,
+ * 测试也可以直接验 4 种状态。
+ */
+export async function isCompleteCodebase(
+  git: GitExec,
+  path: string,
+): Promise<boolean> {
+  if (!existsSync(path)) return false
+  const gitHead = join(path, '.git', 'HEAD')
+  if (!existsSync(gitHead)) return false
   try {
-    rmSync(p, { recursive: true, force: true })
+    const res = await git(['-C', toPosixPath(path), 'ls-files'])
+    if (res.code !== 0) return false
+    return res.stdout.trim().length > 0
   } catch {
-    /* swallow */
+    return false
   }
+}
+
+/**
+ * rm -rf 兜底(Issue 09):目录可能不存在,任何错误都 swallow(清理不应抛)
+ * —— 但**不再**静默:失败必须 warn;fd 竞争下 retry 3 次兜底。
+ *
+ * macOS Finder / Spotlight 索引偶尔会持有 fd,rmSync 会 EBUSY / EACCES;
+ * 旧实现静默吞错导致 .git 残留 + 下次 attach 命中 E_REPO_ALREADY_ATTACHED
+ * 永久 working tree 空(Issue 09 修复)。
+ *
+ * 导出供测试直接验证 4 种行为:no-op / 成功 / 部分失败 / 全失败。
+ * `rmFn` 默认是 `fs.rmSync`,测试可注入可控 rm(避免 vi.spyOn 在 ESM 下
+ * 「Cannot redefine property」的兼容问题)。
+ */
+export async function safeRm(
+  p: string,
+  logger?: SafeRmLogger,
+  rmFn: (path: string, opts: { recursive: boolean; force: boolean }) => void = rmSync,
+): Promise<void> {
+  const tryRm = (): boolean => {
+    try {
+      rmFn(p, { recursive: true, force: true })
+      return true
+    } catch {
+      return false
+    }
+  }
+  if (tryRm()) {
+    if (!existsSync(p)) return
+    logger?.warn({ path: p }, 'safeRm: directory still exists after rmSync')
+  } else {
+    logger?.warn({ path: p }, 'safeRm: rmSync threw, will retry')
+  }
+  // fd 竞争 retry:macOS Finder/Spotlight 索引偶尔会持有 fd,等 100ms 重试
+  for (let i = 0; i < 3; i++) {
+    await new Promise((r) => setTimeout(r, 100))
+    if (tryRm() && !existsSync(p)) return
+  }
+  logger?.warn(
+    { path: p },
+    'safeRm: gave up after 3 retries, directory may persist',
+  )
 }
 
 // 重新导出 posixJoin 供调用方(比如 spec 测试)使用;CodebaseManager 内部仍依赖。

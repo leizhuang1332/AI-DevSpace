@@ -32,6 +32,7 @@ import { RepoAttachErrorCode } from '@ai-devspace/shared'
 import {
   createCodebaseManager,
   mapCloneError,
+  safeRm,
   type CodebaseManagerDeps,
 } from '../../codebase/CodebaseManager.js'
 import { toPosixPath } from '../../worktree/pathUtil.js'
@@ -69,6 +70,32 @@ function makeFakeGit(
     return respond ? respond(args) : ok()
   })
   return { git, calls }
+}
+
+/**
+ * Helper for tests that mock the standard clone-path sequence:
+ * clone → checkout -b → rev-parse HEAD, plus an optional ls-files reply
+ * for the `isCompleteCodebase` probe.
+ *
+ * 用于消除 Issue 09 新增 describe blocks 里 5+ 处重复的 vi.fn 模板。
+ */
+function makeCloneFlowGit(opts?: {
+  revParseSha?: string
+  lsFiles?: string
+}): {
+  git: CodebaseManagerDeps['git']
+  calls: string[][]
+} {
+  return makeFakeGit((args) => {
+    if (args[0] === 'clone') return ok()
+    if (args.includes('rev-parse') && args.includes('HEAD')) {
+      return ok(`${opts?.revParseSha ?? 'newsha'}\n`)
+    }
+    if (args.includes('ls-files')) {
+      return ok(opts?.lsFiles ?? '')
+    }
+    return ok()
+  })
 }
 
 // ============================================================================
@@ -187,17 +214,18 @@ describe('CodebaseManager.clone · failure', () => {
     rmSync(realRoot, { recursive: true, force: true })
   })
 
-  it('codebase 路径已存在 → E_REPO_ALREADY_ATTACHED(幂等,不动 fs)', async () => {
-    // 模拟 req 已 clone 了 order-svc
-    mkdirSync(join(realRoot, 'requirements', 'req-001', 'codebase', 'order-svc'), {
-      recursive: true,
-    })
-    writeFileSync(
-      join(realRoot, 'requirements', 'req-001', 'codebase', 'order-svc', 'README.md'),
-      'untouched',
-      'utf8',
-    )
-    const { git, calls } = makeFakeGit()
+  it('codebase 路径已存在(完整仓库)→ E_REPO_ALREADY_ATTACHED(幂等,不动 fs)', async () => {
+    // 模拟 req 已 clone 了 order-svc —— Issue 09 要求是「完整仓库」才会短路
+    const dir = join(realRoot, 'requirements', 'req-001', 'codebase', 'order-svc')
+    mkdirSync(join(dir, '.git'), { recursive: true })
+    writeFileSync(join(dir, '.git', 'HEAD'), 'ref: refs/heads/main\n', 'utf8')
+    writeFileSync(join(dir, 'README.md'), 'untouched', 'utf8')
+
+    // ls-files mock 返非空 → isCompleteCodebase 识别为完整仓库
+    const git = vi.fn(async (args: string[]) => {
+      if (args.includes('ls-files')) return ok('README.md\n')
+      return ok()
+    }) as CodebaseManagerDeps['git']
     const mgr = createCodebaseManager({ root: realRoot, git })
 
     const r = await mgr.clone('req-001', 'order-svc', 'git@x', 'feat/x')
@@ -207,10 +235,11 @@ describe('CodebaseManager.clone · failure', () => {
       expect(r.code).toBe(RepoAttachErrorCode.E_REPO_ALREADY_ATTACHED)
       expect(r.message).toContain('order-svc')
     }
-    // 不调 git
-    expect(calls.length).toBe(0)
+    // ls-files 被调 1 次(isCompleteCodebase 判定);clone 没被调
+    const cloneCalls = git.mock.calls.filter((c) => c[0]?.[0] === 'clone')
+    expect(cloneCalls.length).toBe(0)
     // 已有内容不被破坏
-    expect(existsSync(join(realRoot, 'requirements', 'req-001', 'codebase', 'order-svc', 'README.md'))).toBe(true)
+    expect(existsSync(join(dir, 'README.md'))).toBe(true)
   })
 
   it('clone git 失败 → 错误码映射;半成品目录存在时**不**清(由调用方决定)', async () => {
@@ -496,3 +525,294 @@ describe('CodebaseManager.listByRepo', () => {
 // ROOT 占位(纯路径测试用)
 void ROOT
 void readdirSync
+
+// ============================================================================
+// Issue 09: safeRm 不静默吞错 + retry 兜底
+// ============================================================================
+
+describe('safeRm (issue 09)', () => {
+  let realRoot: string
+
+  beforeEach(() => {
+    realRoot = mkdtempSync(join(tmpdir(), 'aidevsp-safrm-'))
+  })
+
+  afterEach(() => {
+    rmSync(realRoot, { recursive: true, force: true })
+  })
+
+  function makeLogger() {
+    const warns: Array<{ obj: Record<string, unknown>; msg?: string }> = []
+    return {
+      warns,
+      warn: (obj: Record<string, unknown>, msg?: string) => {
+        warns.push({ obj, msg })
+      },
+    }
+  }
+
+  it('路径不存在 → no-op,无 warn', async () => {
+    const logger = makeLogger()
+    await safeRm(join(realRoot, 'does-not-exist'), logger)
+    expect(logger.warns).toHaveLength(0)
+  })
+
+  it('路径存在 → rmSync 成功,无 warn', async () => {
+    const dir = join(realRoot, 'sub')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'f.txt'), 'x', 'utf8')
+    const logger = makeLogger()
+    await safeRm(dir, logger)
+    expect(existsSync(dir)).toBe(false)
+    expect(logger.warns).toHaveLength(0)
+  })
+
+  it('rmSync 第一次抛错,第二次成功 → 删除成功 + warn "rmSync threw"', async () => {
+    const dir = join(realRoot, 'flaky')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'f.txt'), 'x', 'utf8')
+    const logger = makeLogger()
+
+    let calls = 0
+    const rmFn = (p: string, _opts: { recursive: boolean; force: boolean }): void => {
+      calls++
+      if (calls === 1) {
+        throw new Error('EBUSY: resource busy or locked')
+      }
+      // 后续调原生 rmSync
+      rmSync(p, { recursive: true, force: true })
+    }
+
+    await safeRm(dir, logger, rmFn)
+    expect(existsSync(dir)).toBe(false)
+    // 应该有一次 retry 路径的 warn
+    expect(logger.warns.length).toBeGreaterThan(0)
+    expect(logger.warns.some((w) => String(w.msg).includes('rmSync threw'))).toBe(true)
+  })
+
+  it('rmSync 持续抛错(3 次 retry 全失败) → final warn "gave up"', async () => {
+    const dir = join(realRoot, 'stuck')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'f.txt'), 'x', 'utf8')
+    const logger = makeLogger()
+
+    const rmFn = (): void => {
+      throw new Error('EBUSY: resource busy or locked')
+    }
+
+    await safeRm(dir, logger, rmFn)
+    // 目录残留(rmSync 全失败)
+    expect(existsSync(dir)).toBe(true)
+    // 应该出现 "gave up" final warn
+    expect(logger.warns.some((w) => String(w.msg).includes('gave up'))).toBe(true)
+  })
+})
+
+// ============================================================================
+// Issue 09: isCompleteCodebase 4 种状态
+// ============================================================================
+
+describe('isCompleteCodebase (issue 09)', () => {
+  let realRoot: string
+
+  beforeEach(() => {
+    realRoot = mkdtempSync(join(tmpdir(), 'aidevsp-iscomplete-'))
+  })
+
+  afterEach(() => {
+    rmSync(realRoot, { recursive: true, force: true })
+  })
+
+  it('路径不存在 → false(不调 ls-files)', async () => {
+    // 真测 isCompleteCodebase 第一行 `if (!existsSync(path)) return false`:
+    // 不 mkdir 目录,直接调
+    const git = vi.fn(async () => ok()) as CodebaseManagerDeps['git']
+    // 直接 import isCompleteCodebase 不可(它是 export 的;但通过 clone() 行为
+    // 间接验证更贴近集成路径)。这里用「clone 不存在的 req」,前置 mkdir 缺失
+    // 会触发 mkdir 路径,但 isCompleteCodebase 永远不被调(因为 existsSync 假)
+    // —— 所以这个 case 单独走 isCompleteCodebase 直调
+    const { isCompleteCodebase } = await import(
+      '../../codebase/CodebaseManager.js'
+    )
+    const result = await isCompleteCodebase(
+      git,
+      join(realRoot, 'requirements', 'req-001', 'codebase', 'ghost'),
+    )
+    expect(result).toBe(false)
+    // ls-files 永远不被调(早 return 在 existsSync 命中)
+    const lsFilesCalls = git.mock.calls.filter((c) =>
+      Array.isArray(c[0]) && (c[0] as string[]).includes('ls-files'),
+    )
+    expect(lsFilesCalls.length).toBe(0)
+  })
+
+  it('只有 .git 无 .git/HEAD → false(残留半成品)', async () => {
+    // 残留半成品 fixture:目录存在 + .git 子目录存在,但 .git/HEAD 缺失
+    const dir = join(realRoot, 'requirements', 'req-001', 'codebase', 'half-baked')
+    mkdirSync(join(dir, '.git'), { recursive: true })
+    // 不写 .git/HEAD
+
+    const { git } = makeCloneFlowGit({ lsFiles: 'README.md\n' })
+    const mgr = createCodebaseManager({ root: realRoot, git })
+
+    const r = await mgr.clone('req-001', 'half-baked', 'git@x', 'feat/x')
+    expect(r.ok).toBe(true)
+    // git 被调过(走正常 clone 路径)
+    expect(git).toHaveBeenCalled()
+  })
+
+  it('.git/HEAD 存在 + ls-files 非空 → true(完整仓库)', async () => {
+    const dir = join(realRoot, 'requirements', 'req-001', 'codebase', 'complete')
+    mkdirSync(join(dir, '.git'), { recursive: true })
+    writeFileSync(join(dir, '.git', 'HEAD'), 'ref: refs/heads/main\n', 'utf8')
+    writeFileSync(join(dir, 'README.md'), '# hi\n', 'utf8')
+
+    // ls-files mock 返 README.md(非空)
+    const { git } = makeCloneFlowGit({ lsFiles: 'README.md\n' })
+    const mgr = createCodebaseManager({ root: realRoot, git })
+
+    // clone 应命中 E_REPO_ALREADY_ATTACHED(完整仓库)
+    const r = await mgr.clone('req-001', 'complete', 'git@x', 'feat/x')
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.code).toBe(RepoAttachErrorCode.E_REPO_ALREADY_ATTACHED)
+    }
+    // README.md 仍在(幂等不破坏)
+    expect(existsSync(join(dir, 'README.md'))).toBe(true)
+  })
+
+  it('.git/HEAD 存在 + ls-files 空(working tree 空) → false', async () => {
+    const dir = join(realRoot, 'requirements', 'req-001', 'codebase', 'empty-tree')
+    mkdirSync(join(dir, '.git'), { recursive: true })
+    writeFileSync(join(dir, '.git', 'HEAD'), 'ref: refs/heads/main\n', 'utf8')
+
+    // ls-files mock 返空(working tree 空)
+    const { git } = makeCloneFlowGit({ lsFiles: '' })
+    const mgr = createCodebaseManager({ root: realRoot, git })
+
+    // clone 应识别为不完整 → safeRm + 重 clone
+    const r = await mgr.clone('req-001', 'empty-tree', 'git@x', 'feat/x')
+    expect(r.ok).toBe(true)
+    // clone 被调过
+    const cloneCalls = (git as unknown as { mock: { calls: string[][] } }).mock.calls
+    const cloneCallsFiltered = cloneCalls.filter((c) => c[0]?.[0] === 'clone')
+    expect(cloneCallsFiltered.length).toBeGreaterThanOrEqual(1)
+  })
+})
+
+// ============================================================================
+// Issue 09: clone() 入口 3 种路径
+// ============================================================================
+
+describe('CodebaseManager.clone · entry dispatch (issue 09)', () => {
+  let realRoot: string
+
+  beforeEach(() => {
+    realRoot = mkdtempSync(join(tmpdir(), 'aidevsp-entry-'))
+    mkdirSync(join(realRoot, 'requirements', 'req-001'), { recursive: true })
+  })
+
+  afterEach(() => {
+    rmSync(realRoot, { recursive: true, force: true })
+  })
+
+  it('半成品残留(只有 .git 无 .git/HEAD)→ safeRm 后正常 clone 成功', async () => {
+    const dir = join(realRoot, 'requirements', 'req-001', 'codebase', 'foo')
+    mkdirSync(join(dir, '.git'), { recursive: true })
+    // 不建 .git/HEAD —— 模拟「残留半成品」fixture
+
+    const { git, calls } = makeCloneFlowGit({
+      revParseSha: 'abc',
+      lsFiles: 'README.md\n',
+    })
+    const mgr = createCodebaseManager({ root: realRoot, git })
+
+    const r = await mgr.clone('req-001', 'foo', 'git@x', 'feat/x')
+    expect(r.ok).toBe(true)
+    // 半成品被识别 + safeRm 清掉 + 走正常 clone 路径 → clone 被调 1 次
+    const cloneCount = calls.filter((c) => c[0] === 'clone').length
+    expect(cloneCount).toBe(1)
+    // 旧残留 .git 目录已被删
+    expect(existsSync(dir)).toBe(false)
+  })
+
+  it('完整仓库(README.md 已存在 + .git/HEAD 存在)→ E_REPO_ALREADY_ATTACHED,不动 fs', async () => {
+    const dir = join(realRoot, 'requirements', 'req-001', 'codebase', 'foo')
+    mkdirSync(join(dir, '.git'), { recursive: true })
+    writeFileSync(join(dir, '.git', 'HEAD'), 'ref: refs/heads/main\n', 'utf8')
+    writeFileSync(join(dir, 'README.md'), 'untouched\n', 'utf8')
+
+    const { git, calls } = makeCloneFlowGit({ lsFiles: 'README.md\n' })
+    const mgr = createCodebaseManager({ root: realRoot, git })
+
+    const r = await mgr.clone('req-001', 'foo', 'git@x', 'feat/x')
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.code).toBe(RepoAttachErrorCode.E_REPO_ALREADY_ATTACHED)
+    }
+    // git 没被调 clone
+    const cloneCount = calls.filter((c) => c[0] === 'clone').length
+    expect(cloneCount).toBe(0)
+    // README.md 仍在
+    expect(existsSync(join(dir, 'README.md'))).toBe(true)
+  })
+
+  it('路径不存在 → 走正常 clone 路径', async () => {
+    const { git, calls } = makeFakeGit()
+    const mgr = createCodebaseManager({ root: realRoot, git })
+
+    const r = await mgr.clone('req-001', 'foo', 'git@x', 'feat/x')
+    expect(r.ok).toBe(true)
+    // clone 被调 1 次(没残留,直接走)
+    const cloneCalls = calls.filter((c) => c[0] === 'clone')
+    expect(cloneCalls.length).toBe(1)
+  })
+})
+
+// ============================================================================
+// Issue 09: logger 注入链
+// ============================================================================
+
+describe('CodebaseManagerDeps.logger (issue 09)', () => {
+  let realRoot: string
+  beforeEach(() => {
+    realRoot = mkdtempSync(join(tmpdir(), 'aidevsp-logger-'))
+    mkdirSync(join(realRoot, 'requirements', 'req-001'), { recursive: true })
+  })
+  afterEach(() => {
+    rmSync(realRoot, { recursive: true, force: true })
+  })
+
+  it('注入 logger 后,半成品清理路径会触发 logger.warn', async () => {
+    const dir = join(realRoot, 'requirements', 'req-001', 'codebase', 'foo')
+    mkdirSync(join(dir, '.git'), { recursive: true })
+
+    const warns: string[] = []
+    const logger = {
+      warn: (obj: Record<string, unknown>, msg?: string) => {
+        warns.push(msg ?? '')
+      },
+    }
+
+    const { git } = makeCloneFlowGit({ lsFiles: 'README.md\n' })
+    const mgr = createCodebaseManager({ root: realRoot, git, logger })
+
+    const r = await mgr.clone('req-001', 'foo', 'git@x', 'feat/x')
+    expect(r.ok).toBe(true)
+    // 期望至少有一条 orphan warn
+    expect(warns.some((w) => w.includes('orphan'))).toBe(true)
+  })
+
+  it('不注入 logger → 静默 no-op(向后兼容)', async () => {
+    const dir = join(realRoot, 'requirements', 'req-001', 'codebase', 'foo')
+    mkdirSync(join(dir, '.git'), { recursive: true })
+
+    const { git } = makeCloneFlowGit({ lsFiles: 'README.md\n' })
+    // 不传 logger
+    const mgr = createCodebaseManager({ root: realRoot, git })
+
+    const r = await mgr.clone('req-001', 'foo', 'git@x', 'feat/x')
+    expect(r.ok).toBe(true)
+    // 不抛 = 通过
+  })
+})

@@ -288,8 +288,13 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   // issue 03 (ADR-0030 D3 / D5):实装 POST /api/requirement/:id/repos(独立 clone)
   // - 默认注入 createDefaultGitExec(生产,强制 env 注入)
   // - 测试 buildServer 时可通过 BuildServerOptions 覆盖 deps
+  // Issue 09:注入 fastify.log 作 safeRm 的 logger,让 fd 竞争 / 半成品残留可观测
   const gitExec = createDefaultGitExec()
-  const codebaseMgr = createCodebaseManager({ root: workspaceRoot, git: gitExec })
+  const codebaseMgr = createCodebaseManager({
+    root: workspaceRoot,
+    git: gitExec,
+    logger: fastify.log,
+  })
   const requirementService = new RequirementService({
     root: workspaceRoot,
     git: gitExec,
