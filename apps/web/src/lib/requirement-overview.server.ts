@@ -28,7 +28,7 @@
  *      - `meta.title` ← meta.yaml 的 `title` 字段(读不到 → '')
  *      - `meta.status` ← 按子目录派生(.archived > wrapup > analysis > ...
  *        简化,只到 analysis,因为 web 端 ADR-0027 把后续工位吸收到 board)
- *      - `meta.repos` ← `<reqDir>/repos/` 子目录列表
+ *      - `meta.repos` ← `<reqDir>/codebase/` 子目录列表(issue 08)
  *      - `meta.owner` ← meta.yaml 的 `owner`(读不到 → '')
  *      - `meta.createdAt` ← meta.yaml 的 `createdAt`(读不到 → reqDir mtime)
  *      - `meta.updatedAt` ← reqDir mtime
@@ -190,7 +190,7 @@ export async function getRequirementOverviewFromFs(
  *  - `status` ← 按子目录派生(简化版 `deriveStatus`,与后端 `RequirementService`
  *    同序:.archived > wrapup > analysis > requirement.md 已写 → drafting,
  *    否则 draft)
- *  - `repos` ← `<reqDir>/repos/` 子目录列表(过滤 . 开头)
+ *  - `repos` ← `<reqDir>/codebase/` 子目录列表(过滤 . 开头,issue 08)
  *  - `owner` ← meta.yaml 的 `owner` 字段,读不到 → ''
  *  - `createdAt` ← meta.yaml 的 `createdAt` 字段,读不到 → reqDir mtime
  *  - `updatedAt` ← reqDir mtime(ISO 字符串,与后端 `deriveUpdatedAt` 行为一致)
@@ -255,15 +255,21 @@ function deriveStatus(reqDir: string): RequirementStatusT {
 /**
  * 派生 attached repo name 列表(对齐后端 `RequirementService.deriveRepos`)。
  *
- *  - 数据源:`<reqDir>/repos/` 子目录名(过滤 . 开头)
+ *  - 数据源:`<reqDir>/codebase/` 子目录名(过滤 . 开头)
  *  - 字典序排序(展示稳定)
  *  - 失败 / 不存在 → []
+ *
+ *  issue 08 (ADR-0030 D5 · Q11):路径常量 `repos/` → `codebase/`,对齐
+ * `CodebaseManager` 的 clone 落盘形态 + 后端 `RequirementService.deriveRepos`。
+ * 老形态 `requirements/<id>/repos/<name>/` (旧 WorktreeManager 的 worktree 目录)
+ * 保留在盘上**不被迁移**,这里**只**读 `codebase/`;前端 DRAFTING 弹层显示为
+ * 「未关联」,等用户在 RepoBar 重新关联后由 `CodebaseManager.clone` 落新目录。
  */
 function readAttachedRepoNames(reqDir: string): string[] {
-  const reposDir = resolve(reqDir, 'repos')
-  if (!existsSync(reposDir)) return []
+  const codebaseDir = resolve(reqDir, 'codebase')
+  if (!existsSync(codebaseDir)) return []
   try {
-    return readdirSync(reposDir, { withFileTypes: true })
+    return readdirSync(codebaseDir, { withFileTypes: true })
       .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
       .map((d) => d.name)
       .sort((a, b) => a.localeCompare(b))

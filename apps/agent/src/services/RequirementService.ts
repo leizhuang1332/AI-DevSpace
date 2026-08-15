@@ -657,7 +657,7 @@ export class RequirementService {
    * 2. 每个 reqDir 读 meta.yaml → { id, title, createdAt }
    * 3. 派生 status(方案 β,见 deriveStatus)
    * 4. 派生 progress = STATUS_PROGRESS_MAP[status]
-   * 5. 派生 repos = requirements/<id>/repos/ 子目录名列表(过滤 . 开头)
+   * 5. 派生 repos = requirements/<id>/codebase/ 子目录名列表(过滤 . 开头,issue 08)
    * 6. 派生 updatedAt = fs.statSync(reqDir).mtime.toISOString()
    * 7. 排序:按 updatedAt 倒序
    *
@@ -756,12 +756,28 @@ export class RequirementService {
     return 'draft'
   }
 
-  /** 派生 repos = reqDir/repos/ 子目录名列表(过滤 . 开头) */
+  /** 派生 repos = reqDir/codebase/ 子目录名列表(过滤 . 开头 + 非目录)
+   *
+   * issue 08 (ADR-0030 D5 · Q11):路径常量 `repos/` → `codebase/`,对齐
+   * issue 03 的 `CodebaseManager` clone 落盘形态。
+   *
+   * - 老形态 `requirements/<id>/repos/<name>/` (旧 WorktreeManager 的 worktree
+   *   目录)保留在盘上**不被迁移**,代码只读 `codebase/`;决策 Q11 显式接受
+   *   「老 worktree 内未 push 的本地提交不可恢复」代价,UI 提示「重新关联会
+   *   丢失本地未提交改动」是 P2 优化。
+   * - `.pending-<name>` 半成品标记(由 `CodebaseManager.setPending` 创建)
+   *   一并被过滤,与后端 `CodebaseManager.listByRepo` 行为一致。
+   * - 同名非目录(如用户误放的 `README.md` / `.DS_Store`)**不**被当作
+   *   「仓库」返回;与 `CodebaseManager.scanOrphanedPending`、
+   *   `WorkspaceService.scanLegacyPerRequirementRepos` 行为一致。
+   */
   private deriveRepos(reqDir: string): string[] {
-    const reposDir = join(reqDir, 'repos')
-    if (!existsSync(reposDir)) return []
+    const codebaseDir = join(reqDir, 'codebase')
+    if (!existsSync(codebaseDir)) return []
     try {
-      return readdirSync(reposDir).filter((n) => !n.startsWith('.'))
+      return readdirSync(codebaseDir, { withFileTypes: true })
+        .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
+        .map((d) => d.name)
     } catch {
       return []
     }

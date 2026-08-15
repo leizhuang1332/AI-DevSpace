@@ -103,7 +103,7 @@ export default async function RequirementReposPage({ params }: Props) {
 
               <div className="mt-4 p-3 bg-bg-subtle rounded-md font-mono text-xs text-text-2 flex items-center gap-2">
                 <span>📂</span>
-                <span>~/.aidevspace/requirements/{r.branch}/repos/</span>
+                <span>~/.aidevspace/requirements/{r.branch}/codebase/</span>
                 <span className="text-text-1">{r.name}</span>
               </div>
             </div>

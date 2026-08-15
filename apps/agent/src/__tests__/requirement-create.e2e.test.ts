@@ -41,8 +41,16 @@ interface BootResult {
   token: string
 }
 
-async function boot(): Promise<BootResult> {
+/**
+ * 启一个真 agent 实例。
+ *
+ * `preSetupRoot` 在 `buildServer`(→ `WorkspaceService.initWorkspace`)之前
+ * 同步跑 —— 用于预先建 `<root>/repos/<name>/` 物理目录,让启动期一次性迁移
+ * (`migrateOldReposDir`)把仓库迁到 `<root>/repos.yaml` 注册表。
+ */
+async function boot(preSetupRoot?: (root: string) => void): Promise<BootResult> {
   const root = mkdtempSync(join(tmpdir(), 'aidevsp-e2e-create-'))
+  if (preSetupRoot) preSetupRoot(root)
   writeFileSync(join(root, 'config.yaml'), 'name: dev\n')
   const app = await buildServer({
     workspaceRoot: root,
@@ -165,14 +173,48 @@ describe.skipIf(process.platform === 'win32')('POST /api/requirements — 真实
     expect(existsSync(reqDir)).toBe(true)
     expect(existsSync(join(reqDir, 'meta.yaml'))).toBe(true)
     expect(existsSync(join(reqDir, 'requirement.md'))).toBe(true)
-    // 不预先建 worktree(决策 4 + Q7:worktree 在 DRAFTING 首次关联时建)
-    expect(existsSync(join(reqDir, 'repos'))).toBe(false)
+    // 不预先建 codebase(决策 4 + Q7:codebase 在 DRAFTING 首次关联时建,
+    // issue 03 路径常量从 `repos/` → `codebase/`)
+    expect(existsSync(join(reqDir, 'codebase'))).toBe(false)
   }, 15_000)
 
-  it('与 POST /api/requirement/:id/repos 衔接:先 create 再 attach worktree', async () => {
-    const { url, root, token } = await boot()
+  it('与 POST /api/requirement/:id/repos 衔接:先 create 再 attach codebase', async () => {
+    // preSetupRoot:在 buildServer 之前预先建 `<root>/repos/shared-svc/` 物理
+    // 目录,让 `WorkspaceService.initWorkspace` 启动时一次性迁移到 yaml。
+    const { url, root, token } = await boot((bootRoot) => {
+      const repoDir = join(bootRoot, 'repos', 'shared-svc')
+      mkdirSync(repoDir, { recursive: true })
+    })
 
-    // step 1: create
+    // step 1: 真 git init + commit(必须在 server 启动之后做,因为迁移只读 .git/config 字段)
+    const { execFile: _execFile } = await import('node:child_process')
+    const { promisify } = await import('node:util')
+    const execFileP = promisify(_execFile)
+    const repoDir = join(root, 'repos', 'shared-svc')
+    await execFileP('git', ['-C', repoDir, 'init', '-q', '-b', 'master'])
+    await execFileP('git', ['-C', repoDir, 'config', 'user.email', 'test@aidevspace'])
+    await execFileP('git', ['-C', repoDir, 'config', 'user.name', 'Test'])
+    await execFileP('git', ['-C', repoDir, 'commit', '--allow-empty', '-q', '-m', 'init'])
+    void _execFile
+
+    // 这里没法让 server 重新跑 initWorkspace,所以用 POST /api/repos 显式注册仓库
+    // (issue 07 D4 接口):name=shared-svc,gitUrl=file:// 本地 path
+    const gitUrl = `file://${repoDir}`
+    const addRepoRes = await fetch(`${url}/api/repos`, {
+      method: 'POST',
+      headers: {
+        'x-aidevspace-token': token,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: 'shared-svc',
+        gitUrl,
+        description: 'e2e pool repo',
+      }),
+    })
+    expect(addRepoRes.status).toBe(201)
+
+    // step 2: create req
     const createRes = await fetch(`${url}/api/requirements`, {
       method: 'POST',
       headers: {
@@ -184,19 +226,12 @@ describe.skipIf(process.platform === 'win32')('POST /api/requirements — 真实
     expect(createRes.status).toBe(201)
     const { id } = (await createRes.json()) as { id: string }
 
-    // step 2: 准备 pool repo(让 /repos 走真实 fs + git)
-    const { execFile: _execFile } = await import('node:child_process')
-    const { promisify } = await import('node:util')
-    const execFileP = promisify(_execFile)
-    const repoDir = join(root, 'repos', 'shared-svc')
-    mkdirSync(repoDir, { recursive: true })
-    await execFileP('git', ['-C', repoDir, 'init', '-q', '-b', 'master'])
-    await execFileP('git', ['-C', repoDir, 'config', 'user.email', 'test@aidevspace'])
-    await execFileP('git', ['-C', repoDir, 'config', 'user.name', 'Test'])
-    await execFileP('git', ['-C', repoDir, 'commit', '--allow-empty', '-q', '-m', 'init'])
-    void _execFile
-
     // step 3: attach repo to created req
+    //
+    // issue 03 重写后契约:
+    // - body 字段名 `repoIds` → `repoNames`(name 全局唯一即标识,决策 105)
+    // - 成功字段名 `worktreePath` → `codebasePath`(决策 106)
+    // - 落盘路径 `requirements/<id>/repos/<name>/` → `requirements/<id>/codebase/<name>/`
     const attachRes = await fetch(`${url}/api/requirement/${id}/repos`, {
       method: 'POST',
       headers: {
@@ -204,18 +239,18 @@ describe.skipIf(process.platform === 'win32')('POST /api/requirements — 真实
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        repoIds: ['shared-svc'],
+        repoNames: ['shared-svc'],
         branchName: 'feat/chain',
       }),
     })
     expect(attachRes.status).toBe(200)
     const attachBody = (await attachRes.json()) as {
-      results: Array<{ ok: boolean; worktreePath: string }>
+      results: Array<{ ok: boolean; codebasePath: string }>
     }
     expect(attachBody.results[0].ok).toBe(true)
-    expect(attachBody.results[0].worktreePath).toBe(
-      join(root, 'requirements', id, 'repos', 'shared-svc'),
+    expect(attachBody.results[0].codebasePath).toBe(
+      join(root, 'requirements', id, 'codebase', 'shared-svc'),
     )
-    expect(existsSync(attachBody.results[0].worktreePath)).toBe(true)
+    expect(existsSync(attachBody.results[0].codebasePath)).toBe(true)
   }, 20_000)
 })

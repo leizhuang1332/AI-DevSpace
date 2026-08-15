@@ -64,7 +64,22 @@ function touchWrapup(id: string): void {
   mkdirSync(join(tmpRoot, 'requirements', id, 'wrapup'), { recursive: true })
 }
 
-function touchRepos(id: string, names: string[]): void {
+function touchCodebase(id: string, names: string[]): void {
+  // issue 08 (ADR-0030 D5 · Q11):路径常量 `repos/` → `codebase/`,对齐
+  // `CodebaseManager` 的 clone 落盘形态。
+  const dir = join(tmpRoot, 'requirements', id, 'codebase')
+  mkdirSync(dir, { recursive: true })
+  for (const n of names) {
+    mkdirSync(join(dir, n), { recursive: true })
+  }
+}
+
+/**
+ * 建老形态 `repos/<name>/` 目录 —— 模拟旧 WorktreeManager 时代的 worktree
+ * 落盘位置。issue 08 决策 Q11:老形态保留在盘上但代码不识别,这里用 `touchLegacyRepos`
+ * 配合 `touchCodebase` 验证「双形态共存时只识别 codebase/」的派生语义。
+ */
+function touchLegacyRepos(id: string, names: string[]): void {
   const dir = join(tmpRoot, 'requirements', id, 'repos')
   mkdirSync(dir, { recursive: true })
   for (const n of names) {
@@ -138,13 +153,13 @@ describe('getRequirementOverviewFromFs · 文件 ≤ 10 字节', () => {
 // ============================================================================
 
 describe('getRequirementOverviewFromFs · 文件 > 10 字节(用户 bug 修复核心)', () => {
-  it('"这下可以了吧" 场景:requirement.md 25k + meta.yaml + analysis/ + board/ + repos/ → 满数据', async () => {
+  it('"这下可以了吧" 场景:requirement.md 25k + meta.yaml + analysis/ + board/ + codebase/ → 满数据', async () => {
     // 模拟用户实际 req-003 场景:
     //   - requirement.md 25776 字节
     //   - meta.yaml: id / title / createdAt / branchName
     //   - analysis/ 存在
     //   - board/tasks/ 22 个 .json
-    //   - repos/ 2 个仓库
+    //   - codebase/ 2 个仓库(issue 08:`codebase/` 取代旧 `repos/`)
     const id = 'req-003-这下可以了吧'
     writeRequirement(id, 'A'.repeat(25776))
     writeMeta(
@@ -158,7 +173,7 @@ describe('getRequirementOverviewFromFs · 文件 > 10 字节(用户 bug 修复�
     )
     touchAnalysis(id)
     touchBoardTasks(id, 22)
-    touchRepos(id, ['yl-jms-spmibill-capacity-share', 'yl-web-ft-export'])
+    touchCodebase(id, ['yl-jms-spmibill-capacity-share', 'yl-web-ft-export'])
 
     const data = await getRequirementOverviewFromFs(id, {
       requirementsRoot: tmpRoot,
@@ -172,7 +187,7 @@ describe('getRequirementOverviewFromFs · 文件 > 10 字节(用户 bug 修复�
     expect(data.meta.title).toBe('这下可以了吧')
     // status:有 analysis/ → 'analyzing'(对齐后端 deriveStatus 简化版)
     expect(data.meta.status).toBe('analyzing')
-    // repos:repos/ 子目录
+    // repos:codebase/ 子目录(issue 08:`codebase/` 取代旧 `repos/`)
     expect(data.meta.repos).toEqual([
       'yl-jms-spmibill-capacity-share',
       'yl-web-ft-export',
@@ -268,14 +283,75 @@ describe('getRequirementOverviewFromFs · 文件 > 10 字节(用户 bug 修复�
     )
   })
 
-  it('repos/ 下 . 开头的目录被过滤', async () => {
+  it('codebase/ 下 . 开头的目录被过滤(.pending- 半成品标记)', async () => {
     const id = 'req-repos-filter'
     writeRequirement(id, '足够多的内容触发非空判定')
-    touchRepos(id, ['valid-repo', '.hidden', 'another'])
+    touchCodebase(id, ['valid-repo', '.hidden', 'another'])
     const data = await getRequirementOverviewFromFs(id, {
       requirementsRoot: tmpRoot,
     })
     expect(data.meta.repos).toEqual(['another', 'valid-repo'])
+  })
+
+  // ==========================================================================
+  // issue 08 (ADR-0030 D5 · Q11):路径常量 `repos/` → `codebase/`
+  //
+  // 老形态 `requirements/<id>/repos/<name>/` (旧 WorktreeManager 的 worktree
+  // 目录)保留在盘上**不被迁移**,代码只读 `codebase/`。
+  // 本组测试覆盖双形态共存场景:
+  // - 仅 codebase/<n>/ → 派生 [n]
+  // - 仅老形态 repos/<n>/ → 派生 [] (不被识别)
+  // - 双形态共存 → 派生 [codebase 里的],老形态忽略
+  // ==========================================================================
+
+  it('issue 08:仅 codebase/<n>/ → meta.repos=[n](新形态正常派生)', async () => {
+    const id = 'req-008-codebase-only'
+    writeRequirement(id, '足够多的内容触发非空判定')
+    touchCodebase(id, ['refund-service'])
+
+    const data = await getRequirementOverviewFromFs(id, {
+      requirementsRoot: tmpRoot,
+    })
+    expect(data.meta.repos).toEqual(['refund-service'])
+  })
+
+  it('issue 08:仅老形态 repos/<n>/(无 codebase/)→ meta.repos=[]', async () => {
+    // 决策 Q11:老 worktree 形态目录保留在盘上但不识别;
+    // 前端 DRAFTING 弹层显示为「未关联」,等用户重新关联后由
+    // `CodebaseManager.clone` 落新 `codebase/` 目录。
+    const id = 'req-008-legacy-only'
+    writeRequirement(id, '足够多的内容触发非空判定')
+    touchLegacyRepos(id, ['legacy-worktree'])
+
+    const data = await getRequirementOverviewFromFs(id, {
+      requirementsRoot: tmpRoot,
+    })
+    expect(data.meta.repos).toEqual([])
+  })
+
+  it('issue 08:codebase/<n1>/ + 老形态 repos/<n2>/ 共存 → 只派生 [n1],n2 被忽略', async () => {
+    // 集成 e2e 场景:老用户升级路径 —— 老 worktree 仍在盘上,
+    // 但新 attach 已落 `codebase/`;老形态不被识别。
+    const id = 'req-008-mixed'
+    writeRequirement(id, '足够多的内容触发非空判定')
+    touchCodebase(id, ['new-attach'])
+    touchLegacyRepos(id, ['legacy-worktree'])
+
+    const data = await getRequirementOverviewFromFs(id, {
+      requirementsRoot: tmpRoot,
+    })
+    expect(data.meta.repos).toEqual(['new-attach'])
+    expect(data.meta.repos).not.toContain('legacy-worktree')
+  })
+
+  it('issue 08:codebase/ 与老形态 repos/ 都不存在 → meta.repos=[]', async () => {
+    const id = 'req-008-bare'
+    writeRequirement(id, '足够多的内容触发非空判定')
+
+    const data = await getRequirementOverviewFromFs(id, {
+      requirementsRoot: tmpRoot,
+    })
+    expect(data.meta.repos).toEqual([])
   })
 
   it('meta.yaml 解析失败 → title=""(静默降级,不抛错)', async () => {

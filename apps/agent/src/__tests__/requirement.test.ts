@@ -922,6 +922,180 @@ describe('GET /api/requirements — ticket 07a list endpoint', () => {
 })
 
 // ============================================================================
+// issue 08 — deriveRepos 路径常量 repos → codebase(ADR-0030 D5 · Q11)
+//
+// 老 worktree 形态目录 `requirements/<id>/repos/<name>/` 保留在盘上,
+// 但代码只读 `codebase/`;老形态目录即使有内容也不再被识别为"已关联仓库"。
+// ============================================================================
+
+describe('GET /api/requirements — issue 08 路径 codebase/ vs 老形态 repos/ 共存', () => {
+  /** 替测试 req 写 meta.yaml,让 listRequirements 能扫到 */
+  function writeReqMeta(root: string, id: string): void {
+    const reqDir = join(root, 'requirements', id)
+    mkdirSync(reqDir, { recursive: true })
+    writeFileSync(
+      join(reqDir, 'meta.yaml'),
+      `id: ${id}\ntitle: fixture\ncreatedAt: 2026-08-01T00:00:00.000Z\n`,
+      'utf8',
+    )
+  }
+
+  /** 在 req 下建 codebase/<name>/ 子目录(issue 03 的真实落盘形态) */
+  function touchCodebase(root: string, id: string, names: string[]): void {
+    for (const n of names) {
+      mkdirSync(join(root, 'requirements', id, 'codebase', n), {
+        recursive: true,
+      })
+    }
+  }
+
+  /** 在 req 下建老形态 repos/<name>/ 子目录(issue 08 前的老 worktree 形态) */
+  function touchLegacyRepos(root: string, id: string, names: string[]): void {
+    for (const n of names) {
+      mkdirSync(join(root, 'requirements', id, 'repos', n), { recursive: true })
+    }
+  }
+
+  it('issue 08:仅 codebase/foo/ 存在 → repos=[foo]', async () => {
+    const { app, root, token, cleanup } = await freshApp()
+    try {
+      writeReqMeta(root, 'req-001-codebase-only')
+      touchCodebase(root, 'req-001-codebase-only', ['foo'])
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/requirements',
+        headers: { 'x-aidevspace-token': token },
+      })
+      const body = res.json() as {
+        requirements: Array<{ id: string; repos: string[] }>
+      }
+      const req = body.requirements.find((r) => r.id === 'req-001-codebase-only')
+      expect(req?.repos).toEqual(['foo'])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('issue 08:仅老形态 repos/bar/ 存在(无 codebase)→ repos=[]', async () => {
+    // 决策 Q11:老 worktree 形态目录保留在盘上但不识别;前端显示「未关联」
+    const { app, root, token, cleanup } = await freshApp()
+    try {
+      writeReqMeta(root, 'req-002-legacy-only')
+      touchLegacyRepos(root, 'req-002-legacy-only', ['bar'])
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/requirements',
+        headers: { 'x-aidevspace-token': token },
+      })
+      const body = res.json() as {
+        requirements: Array<{ id: string; repos: string[] }>
+      }
+      const req = body.requirements.find((r) => r.id === 'req-002-legacy-only')
+      expect(req?.repos).toEqual([])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('issue 08:codebase/foo + 老形态 repos/bar 共存 → 只返 [foo](bar 被忽略)', async () => {
+    // 集成 e2e 场景:老用户升级路径 —— 老 worktree 仍在盘上,但新 attach 已落 codebase/
+    const { app, root, token, cleanup } = await freshApp()
+    try {
+      writeReqMeta(root, 'req-003-mixed')
+      touchCodebase(root, 'req-003-mixed', ['foo'])
+      touchLegacyRepos(root, 'req-003-mixed', ['bar'])
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/requirements',
+        headers: { 'x-aidevspace-token': token },
+      })
+      const body = res.json() as {
+        requirements: Array<{ id: string; repos: string[] }>
+      }
+      const req = body.requirements.find((r) => r.id === 'req-003-mixed')
+      expect(req?.repos).toEqual(['foo'])
+      expect(req?.repos).not.toContain('bar')
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('issue 08:codebase/ 下 . 开头的目录被过滤(.pending- 标记)(与后端 deriveRepos 一致)', async () => {
+    const { app, root, token, cleanup } = await freshApp()
+    try {
+      writeReqMeta(root, 'req-004-pending')
+      touchCodebase(root, 'req-004-pending', ['valid', '.pending-stale'])
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/requirements',
+        headers: { 'x-aidevspace-token': token },
+      })
+      const body = res.json() as {
+        requirements: Array<{ id: string; repos: string[] }>
+      }
+      const req = body.requirements.find((r) => r.id === 'req-004-pending')
+      expect(req?.repos).toEqual(['valid'])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('issue 08:codebase/ 与 repos/ 都不存在 → repos=[]', async () => {
+    const { app, root, token, cleanup } = await freshApp()
+    try {
+      writeReqMeta(root, 'req-005-bare')
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/requirements',
+        headers: { 'x-aidevspace-token': token },
+      })
+      const body = res.json() as {
+        requirements: Array<{ id: string; repos: string[] }>
+      }
+      const req = body.requirements.find((r) => r.id === 'req-005-bare')
+      expect(req?.repos).toEqual([])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('issue 08:codebase/ 下同名非目录文件(README.md)不当作仓库(防御性,与 scanLegacy 一致)', async () => {
+    // code-review spec 反馈指出的轻 bug:用户可能在 codebase/ 下误放
+    // README.md / .DS_Store 等文件,这些不是仓库,不应出现在 deriveRepos
+    // 输出里。
+    const { app, root, token, cleanup } = await freshApp()
+    try {
+      const id = 'req-006-non-dir-file'
+      writeReqMeta(root, id)
+      mkdirSync(join(root, 'requirements', id, 'codebase'), { recursive: true })
+      // 真仓库
+      mkdirSync(join(root, 'requirements', id, 'codebase', 'real-repo'), {
+        recursive: true,
+      })
+      // 非目录同名文件(误放)
+      writeFileSync(
+        join(root, 'requirements', id, 'codebase', 'README.md'),
+        'fake',
+        'utf8',
+      )
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/requirements',
+        headers: { 'x-aidevspace-token': token },
+      })
+      const body = res.json() as {
+        requirements: Array<{ id: string; repos: string[] }>
+      }
+      const req = body.requirements.find((r) => r.id === id)
+      expect(req?.repos).toEqual(['real-repo'])
+      expect(req?.repos).not.toContain('README.md')
+    } finally {
+      await cleanup()
+    }
+  })
+})
+
+// ============================================================================
 // ticket 07a — POST /api/requirements 双推 SSE(全局 + per-req)
 // ============================================================================
 
