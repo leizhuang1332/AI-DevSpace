@@ -273,7 +273,17 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
         { reqId, repoName, path: codebasePath },
         'clone: found orphan half-baked codebase, removing before retry',
       )
-      await safeRm(codebasePath, logger)
+      // Issue 13:safeRm 失败必须 throw,clone() 入口不再继续
+      // (避免在脏目录上跑 git clone 必败 → 永久循环)
+      try {
+        await safeRm(codebasePath, logger)
+      } catch (err) {
+        return {
+          ok: false,
+          code: RepoAttachErrorCode.E_INTERNAL,
+          message: `safeRm 失败,无法清理残留半成品 ${codebasePath}: ${(err as Error).message}`,
+        }
+      }
     }
 
     // 确保父目录存在(首次 attach 时)
@@ -294,6 +304,13 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
     try {
       cloneRes = await git(cloneArgs)
     } catch (err) {
+      // Issue 13:git clone 中途被 kill(SIGTERM / 超时)可能已部分创建
+      // codebasePath(含 .git 残留),必须 safeRm 清理
+      try {
+        await safeRm(codebasePath, logger)
+      } catch {
+        /* safeRm 失败抛错也 swallow —— 外层会返 E_INTERNAL */
+      }
       return {
         ok: false,
         code: RepoAttachErrorCode.E_INTERNAL,
@@ -301,6 +318,13 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
       }
     }
     if (cloneRes.code !== 0) {
+      // Issue 13:git clone 失败时 codebasePath 可能已部分创建(典型:
+      // 网络超时后 git 留 .git 残余但 exit code ≠ 0),必须 safeRm 清理
+      try {
+        await safeRm(codebasePath, logger)
+      } catch {
+        /* 同上 */
+      }
       const code = mapCloneError(cloneRes.stderr)
       return {
         ok: false,
@@ -322,7 +346,12 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
       checkoutRes = await git(checkoutArgs)
     } catch (err) {
       // checkout 抛错罕见(默认 execFile 不抛),仅做兜底
-      await safeRm(codebasePath, logger)
+      // Issue 13:safeRm 可能抛(失败 swallow 到外层 E_INTERNAL)
+      try {
+        await safeRm(codebasePath, logger)
+      } catch {
+        /* safeRm 失败不掩盖 git checkout 原始错误 */
+      }
       return {
         ok: false,
         code: RepoAttachErrorCode.E_INTERNAL,
@@ -331,7 +360,12 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
     }
     if (checkoutRes.code !== 0) {
       // checkout 失败 → 半成品目录清掉(决策 110:不留半成品)
-      await safeRm(codebasePath, logger)
+      // Issue 13:safeRm 失败 swallow
+      try {
+        await safeRm(codebasePath, logger)
+      } catch {
+        /* safeRm 失败不掩盖 git checkout 原始错误 */
+      }
       return {
         ok: false,
         code: RepoAttachErrorCode.E_INTERNAL,
@@ -354,7 +388,16 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
 
   async function remove(reqId: string, repoName: string): Promise<void> {
     const codebasePath = getCodebasePath(reqId, repoName)
-    await safeRm(codebasePath, logger)
+    // Issue 13:safeRm 失败抛错 —— remove 是公开 API,swallow 兜底
+    // (调用方 server.ts boot 钩子应该用 try/catch 容忍,不该阻断启动)
+    try {
+      await safeRm(codebasePath, logger)
+    } catch (err) {
+      logger?.warn(
+        { reqId, repoName, path: codebasePath, err: (err as Error).message },
+        'remove: safeRm failed, directory may persist',
+      )
+    }
   }
 
   async function listByRepo(repoName: string): Promise<CodebaseByReq[]> {
@@ -672,15 +715,25 @@ export async function ensureWorkingTree(
 }
 
 /**
- * rm -rf 兜底(Issue 09):目录可能不存在,任何错误都 swallow(清理不应抛)
+ * rm -rf 兜底(Issue 09 + Issue 13):
+ * - 失败必须 warn(不再静默,fd 竞争下 retry 3 次兜底)
+ * - **Issue 13 修正:失败必须 throw**(原 swallow 行为导致半成品永远残留)
  *
- * macOS Finder / Spotlight 索引偶尔会持有 fd,rmSync 会 EBUSY / EACCES;
- * 旧实现静默吞错导致 .git 残留 + 下次 attach 命中 E_REPO_ALREADY_ATTACHED
- * 永久 working tree 空(Issue 09 修复)。
+ * macOS Finder / Spotlight 索引偶尔会持有 fd,rmSync 会 EBUSY / EACCES。
  *
- * 导出供测试直接验证 4 种行为:no-op / 成功 / 部分失败 / 全失败。
- * `rmFn` 默认是 `fs.rmSync`,测试可注入可控 rm(避免 vi.spyOn 在 ESM 下
- * 「Cannot redefine property」的兼容问题)。
+ * 历史(Issue 09):
+ * - 原实现静默吞错 → .git 残留 + 下次 attach 命中 E_REPO_ALREADY_ATTACHED
+ * - 改为 fd retry 3 次后仍 warn(不抛)
+ *
+ * Issue 13 全局修复:
+ * - 旧设计「清理不应抛」导致 bug 链:clone() 第 1 步失败残留 .git →
+ *   下次 attach 入口 safeRm 也失败 → 代码继续走 git clone → 在有 .git
+ *   的目录上必败 → 永远循环
+ * - 改为 throw 让调用方决定:clone() 入口直接放弃(避免在脏目录上 git clone);
+ *   其他调用点(remove / boot cleanup)用 try/catch 兜底
+ *
+ * 导出供测试验证 4 种行为:no-op / 成功 / 部分失败 / 全失败(throw)。
+ * `rmFn` 默认是 `fs.rmSync`,测试可注入可控 rm。
  */
 export async function safeRm(
   p: string,
@@ -706,10 +759,10 @@ export async function safeRm(
     await new Promise((r) => setTimeout(r, 100))
     if (tryRm() && !existsSync(p)) return
   }
-  logger?.warn(
-    { path: p },
-    'safeRm: gave up after 3 retries, directory may persist',
-  )
+  // Issue 13:失败必须 throw,不再 swallow(让调用方知道「半成品还在」)
+  const message = `safeRm gave up after 3 retries, directory may persist: ${p}`
+  logger?.warn({ path: p }, message)
+  throw new Error(message)
 }
 
 // 重新导出 posixJoin 供调用方(比如 spec 测试)使用;CodebaseManager 内部仍依赖。
