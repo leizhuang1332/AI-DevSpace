@@ -166,6 +166,12 @@ export interface CodebaseManager {
     repoName: string,
     gitUrl: string,
     branchName: string,
+    /**
+     * Issue 16:retry 通知回调 —— 每次准备 retry 时调一次(attempt = 1..MAX_RETRIES)。
+     * 不传 → silent no-op(向后兼容现有调用方 + 单测)。
+     * 用途:RequirementService 用来推 SSE `retrying` 状态给前端 badge。
+     */
+    onRetry?: (attempt: number) => void,
   ): Promise<CloneResult>
 
   /**
@@ -253,6 +259,7 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
     repoName: string,
     gitUrl: string,
     branchName: string,
+    onRetry?: (attempt: number) => void,
   ): Promise<CloneResult> {
     const codebasePath = getCodebasePath(reqId, repoName)
 
@@ -299,22 +306,63 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
     }
 
     // 1. git clone <gitUrl> <codebasePath>
+    //    Issue 16:前插 git config 加固项 + retry-with-backoff
+    //    - protocol.version=2 / core.precomposeUnicode / http.postBuffer
+    //      减少 sideband packet 错位(并发 clone 主因之一)
+    //    - 仅 E_NETWORK 重试(瞬态网络抖动);鉴权/404/磁盘满/branch 冲突
+    //      等都不重试(重试也错,会误导用户或锁账号)
+// Issue 16.2:git config 加固(protocol.version=2 / core.precomposeUnicode /
+// http.postBuffer)由 createDefaultGitExec wrapper 层自动 prepend,这里
+// 不再重复,避免和 wrapper 双层 prefix
     const cloneArgs = ['clone', gitUrl, toPosixPath(codebasePath)]
-    let cloneRes: GitExecResult
-    try {
-      cloneRes = await git(cloneArgs)
-    } catch (err) {
-      // Issue 13:git clone 中途被 kill(SIGTERM / 超时)可能已部分创建
-      // codebasePath(含 .git 残留),必须 safeRm 清理
+    const MAX_RETRIES = 2
+    // backoff(单位 ms)按 retry 顺序取:第 1 次 1s, 第 2 次 2s
+    const BACKOFF_MS = [1000, 2000]
+    let cloneRes: GitExecResult | null = null
+    let lastError: { code: CloneErrorCodeT; stderr: string } = {
+      code: RepoAttachErrorCode.E_INTERNAL,
+      stderr: '',
+    }
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      if (attempt > 0) {
+        const backoff = BACKOFF_MS[attempt - 1] ?? 2000
+        await new Promise((r) => setTimeout(r, backoff))
+        logger?.warn(
+          { reqId, repoName, attempt, path: codebasePath, backoff },
+          `clone: retry attempt ${attempt + 1}/${MAX_RETRIES + 1} after backoff`,
+        )
+        // Issue 16:通知外部 SSE 推送 retrying 状态
+        onRetry?.(attempt)
+      }
+      try {
+        cloneRes = await git(cloneArgs)
+      } catch (err) {
+        // execFile reject(SIGTERM / 抛错)→ 默认 E_INTERNAL,不重试
+        lastError = {
+          code: RepoAttachErrorCode.E_INTERNAL,
+          stderr: (err as Error)?.message ?? '',
+        }
+        break
+      }
+      if (cloneRes.code === 0) break
+      lastError = {
+        code: mapCloneError(cloneRes.stderr),
+        stderr: cloneRes.stderr,
+      }
+      // 仅 E_NETWORK 重试;其他错误码不重试
+      if (lastError.code !== RepoAttachErrorCode.E_NETWORK) break
+    }
+    if (!cloneRes) {
+      // execFile reject 路径(默认 E_INTERNAL)
       try {
         await safeRm(codebasePath, logger)
       } catch {
-        /* safeRm 失败抛错也 swallow —— 外层会返 E_INTERNAL */
+        /* safeRm 失败 swallow */
       }
       return {
         ok: false,
         code: RepoAttachErrorCode.E_INTERNAL,
-        message: `git clone threw: ${(err as Error).message}`,
+        message: `git clone threw: ${lastError.stderr}`,
       }
     }
     if (cloneRes.code !== 0) {
@@ -325,18 +373,17 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
       } catch {
         /* 同上 */
       }
-      const code = mapCloneError(cloneRes.stderr)
       // Issue 15:不暴露 stderr 全文(progress 行 + debug + 路径等)
       // 给前端。只取 fatal 末行(若没有 → 空字符串),让前端错误码 → 友好文案映射兜底
       // 完整 stderr 进 server log(便于排查,见 server.ts attach 路径)
       const fatalLine = extractFatalLine(cloneRes.stderr)
       const message = fatalLine ?? `git clone exited with code ${cloneRes.code}`
-      // stderr 落 server log(server.ts 已经在 request log 里打,这里仅保留必要的 hint)
+      // stderr 落 server log
       logger?.warn(
         { stderr: cloneRes.stderr.trim(), code: cloneRes.code },
         'clone: git clone failed',
       )
-      return { ok: false, code, message }
+      return { ok: false, code: lastError.code, message }
     }
 
     // 2. checkout -b <branchName>(在 clone 出来的目录里)

@@ -21,6 +21,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { execFile as realExecFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { createDefaultGitExec, ISSUE16_GIT_CONFIG_PREFIX } from '../git/createDefaultGitExec.js'
 
 // ============================================================================
 // 5.2.1 单元测试 —— env 注入契约 + 返回结构
@@ -55,7 +56,6 @@ vi.mock('node:util', async () => {
 // 的 node:child_process(node:util 同理)。
 // createDefaultGitExec 内部用 `await import('node:child_process')` 动态加载,
 // vitest 对动态 import 同样会触发 mock,这是稳定的。
-import { createDefaultGitExec } from '../git/createDefaultGitExec.js'
 
 /**
  * promisify(execFile) 的 callback 形态:`(cmd, args, opts, cb)`,cb 第一个参数是
@@ -162,14 +162,46 @@ describe('createDefaultGitExec · env 注入契约 (issue 05 5.2.1)', () => {
     expect(opts.env?.PATH).toBe('/usr/bin:/bin')
   })
 
-  it('timeout: 5 分钟(60_000 * 5),传给 execFile', async () => {
+  it('timeout: 15 分钟(60_000 * 15,Issue 16 放宽大仓库超时),传给 execFile', async () => {
     replyOk()
 
     const git = createDefaultGitExec()
     await git(['status'])
 
     const opts = mockExecFile.mock.calls[0]?.[2] as { timeout?: number }
-    expect(opts.timeout).toBe(60_000 * 5)
+    expect(opts.timeout).toBe(60_000 * 15)
+  })
+
+  it('Issue 16.2:每次 git 调用 args 自动前插 ISSUE16_GIT_CONFIG_PREFIX 6 个元素', async () => {
+    replyOk()
+
+    const git = createDefaultGitExec()
+    await git(['ls-remote', '--symref', 'git@x', 'HEAD'])
+
+    // execFile 签名 execFile(file, args, callback):mock.calls[0] = [file, args, ...]
+    const args = mockExecFile.mock.calls[0]?.[1] as string[]
+    // 前 6 个元素是 3 个 `-c key=value` 对
+    expect(args.slice(0, 6)).toEqual([
+      '-c',
+      'protocol.version=2',
+      '-c',
+      'core.precomposeUnicode=true',
+      '-c',
+      'http.postBuffer=524288000',
+    ])
+    // 后面紧跟用户传的 args
+    expect(args.slice(6)).toEqual(['ls-remote', '--symref', 'git@x', 'HEAD'])
+  })
+
+  it('ISSUE16_GIT_CONFIG_PREFIX 导出常量内容正确(防止误改)', () => {
+    expect(ISSUE16_GIT_CONFIG_PREFIX).toEqual([
+      '-c',
+      'protocol.version=2',
+      '-c',
+      'core.precomposeUnicode=true',
+      '-c',
+      'http.postBuffer=524288000',
+    ])
   })
 
   it('成功:execFile 返 stdout/stderr → {code: 0, stdout, stderr}', async () => {

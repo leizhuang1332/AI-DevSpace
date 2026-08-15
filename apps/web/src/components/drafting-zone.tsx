@@ -6,6 +6,7 @@ import {
   mockConvertToMarkdown,
   RepoAttachErrorCode,
   type RepoAttachErrorCodeT,
+  type RepoCloneProgressStatus,
   validateLaunch,
   type AuxFile,
   type UsageTag,
@@ -199,7 +200,7 @@ export function DraftingZone({ data }: { data: DraftingData }) {
   >(undefined)
   const [failedRepoNames, setFailedRepoNames] = useState<string[]>([])
   const [repoCloneStatuses, setRepoCloneStatuses] = useState<
-    Record<string, 'pending' | 'cloning' | 'ready' | 'failed'>
+    Record<string, { status: RepoCloneProgressStatus; attempt?: number }>
   >({})
   const [attachDialogOpen, setAttachDialogOpen] = useState<boolean>(false)
   const [attachDialogMode, setAttachDialogMode] =
@@ -287,7 +288,8 @@ export function DraftingZone({ data }: { data: DraftingData }) {
           type?: string
           reqId?: string
           repoName?: string
-          status?: 'pending' | 'cloning' | 'ready' | 'failed'
+          status?: RepoCloneProgressStatus
+          attempt?: number
         }
         if (
           parsed.type !== 'repo-clone-progress' ||
@@ -299,11 +301,12 @@ export function DraftingZone({ data }: { data: DraftingData }) {
         }
         setRepoCloneStatuses((prev) => ({
           ...prev,
-          [parsed.repoName as string]: parsed.status as
-            | 'pending'
-            | 'cloning'
-            | 'ready'
-            | 'failed',
+          [parsed.repoName as string]: {
+            status: parsed.status as RepoCloneProgressStatus,
+            ...(typeof parsed.attempt === 'number'
+              ? { attempt: parsed.attempt }
+              : {}),
+          } as { status: RepoCloneProgressStatus; attempt?: number },
         }))
       } catch {
         /* ignore malformed event */
@@ -784,10 +787,10 @@ export function DraftingZone({ data }: { data: DraftingData }) {
 
         setAttachDialogOpen(false)
         // Issue 14:清掉本批 repo 的 SSE 进度状态,避免下次 attach 弹层显示旧 badge
-        const cleaned: Record<string, 'pending' | 'cloning' | 'ready' | 'failed'> = {}
-        for (const [name, st] of Object.entries(repoCloneStatuses)) {
+        const cleaned: Record<string, { status: RepoCloneProgressStatus; attempt?: number }> = {}
+        for (const [name, info] of Object.entries(repoCloneStatuses)) {
           // 失败 repo 保留 'failed' 状态,让用户重试前知道上次失败过
-          if (st === 'failed') cleaned[name] = 'failed'
+          if (info.status === 'failed') cleaned[name] = info
         }
         setRepoCloneStatuses(cleaned)
         const trigger = pendingAttachTrigger

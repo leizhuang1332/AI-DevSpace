@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { DraftingRepo } from '@/lib/drafting'
+import type { RepoCloneProgressStatus } from '@ai-devspace/shared'
 import { useTabFocusTrap } from '@/hooks/use-tab-focus-trap'
 
 /**
@@ -64,11 +65,14 @@ export interface AttachReposDialogProps {
   inFlight?: boolean
   /**
    * 实时 clone 进度(issue 14,数据源来自父组件 SSE 订阅 `repo-clone-progress`):
-   * `repoName -> 'pending' | 'cloning' | 'ready' | 'failed'`。
+   * `repoName -> { status, attempt? }`。
    * 提交后用这个表渲染每个 repo 旁边的状态 badge,让用户看到
    * 「正在 clone multica...」实时反馈,不靠 HTTP 响应那一刻才知道进度。
+   * `attempt` 仅在 `status === 'retrying'` 时附(issue 16),badge 用此显示「第 N/2 次重试」。
    */
-  cloneStatuses?: Readonly<Record<string, 'pending' | 'cloning' | 'ready' | 'failed'>>
+  cloneStatuses?: Readonly<
+    Record<string, { status: RepoCloneProgressStatus; attempt?: number }>
+  >
   /** 提交:携带 trimmed 后的 repo name 列表 + 统一分支名(first 模式) */
   onSubmit: (value: {
     repoNames: string[]
@@ -301,7 +305,8 @@ export function AttachReposDialog({
                 availableRepos.map((repo) => {
                   const checked = selectedNames.has(repo.name)
                   // Issue 14:SSE 进度表里有此 repo → 显示 status badge
-                  const status = cloneStatuses?.[repo.name]
+                  const statusInfo = cloneStatuses?.[repo.name]
+                  const status = statusInfo?.status
                   return (
                     <label
                       key={repo.name}
@@ -328,9 +333,12 @@ export function AttachReposDialog({
                       <span className="font-mono font-medium text-text-1 flex-1">
                         {repo.name}
                       </span>
-                      {/* Issue 14:实时 clone 进度 badge(只在 in-flight + 有状态时显示) */}
+                      {/* Issue 14 + 16:实时 clone 进度 badge(只在 in-flight + 有状态时显示) */}
                       {inFlight && status && (
-                        <CloneStatusBadge status={status} />
+                        <CloneStatusBadge
+                          status={status}
+                          attempt={statusInfo?.attempt}
+                        />
                       )}
                     </label>
                   )
@@ -483,8 +491,11 @@ export function AttachReposDialog({
  */
 function CloneStatusBadge({
   status,
+  attempt,
 }: {
-  status: 'pending' | 'cloning' | 'ready' | 'failed'
+  status: RepoCloneProgressStatus
+  /** Issue 16:仅 `status === 'retrying'` 时显示「第 N/2 次重试」 */
+  attempt?: number
 }): JSX.Element {
   if (status === 'pending') {
     return (
@@ -534,6 +545,39 @@ function CloneStatusBadge({
         className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-green-50 text-green-700 border border-green-200"
       >
         ✓ 完成
+      </span>
+    )
+  }
+  if (status === 'retrying') {
+    // Issue 16.5:spec 要求蓝色 spinner + 「第 N/2 次重试」文案(N = attempt, 2 = MAX_RETRIES)
+    const label = attempt ? `第 ${attempt}/2 次重试` : '重试中'
+    return (
+      <span
+        data-testid="clone-status-badge-retrying"
+        className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-brand-50 text-brand-700 border border-brand"
+      >
+        <svg
+          className="animate-spin h-2.5 w-2.5"
+          xmlns="http://www.w3.org/2000/svg"
+          fill="none"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <circle
+            className="opacity-25"
+            cx="12"
+            cy="12"
+            r="10"
+            stroke="currentColor"
+            strokeWidth="4"
+          />
+          <path
+            className="opacity-75"
+            fill="currentColor"
+            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+          />
+        </svg>
+        {label}
       </span>
     )
   }

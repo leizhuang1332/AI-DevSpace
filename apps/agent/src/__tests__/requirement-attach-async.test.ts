@@ -20,7 +20,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { RepoAttachErrorCode } from '@ai-devspace/shared'
 import { RequirementService } from '../services/RequirementService.js'
-import type { CodebaseManager, CodebaseManagerDeps } from '../codebase/CodebaseManager.js'
+import { createCodebaseManager, type CodebaseManager, type CodebaseManagerDeps } from '../codebase/CodebaseManager.js'
+
+function ok(stdout = '', stderr = ''): { code: number; stdout: string; stderr: string } {
+  return { code: 0, stdout, stderr }
+}
+function fail(stderr: string, code = 1): { code: number; stdout: string; stderr: string } {
+  return { code, stdout: '', stderr }
+}
 import type { WorkspaceService } from '../services/WorkspaceService.js'
 import type { RepoRegistryEntry } from '@ai-devspace/shared'
 
@@ -284,6 +291,48 @@ describe('RequirementService.attachRepos — async parallel', () => {
 // meta.yaml.branchName 持久化时机
 // ----------------------------------------------------------------------------
 
+describe('RequirementService.attachRepos · 串行执行 (issue 16)', () => {
+  it('3 个 repo:attachRepo 必须串行调用(2 完成 → 3 开始),非并行', async () => {
+    const mockMgr = makeMockCodebaseMgr()
+    const ws = makeFakeWorkspace({
+      a: { name: 'a', gitUrl: 'git@a', description: '' },
+      b: { name: 'b', gitUrl: 'git@b', description: '' },
+      c: { name: 'c', gitUrl: 'git@c', description: '' },
+    })
+    const { hub } = makeFakeHub()
+    const svc = new RequirementService({
+      root: realRoot,
+      codebaseMgr: mockMgr,
+      workspace: ws,
+      sseHub: hub,
+    })
+
+    // 模拟 3 个 attachRepo,每个都 async 返回 → 验证它们不会同时进入 in-flight
+    // (Issue 16:串行化避免并发 git clone 网络 race)
+    const callOrder: string[] = []
+    mockMgr.cloneImpl = async (_reqId, name, _gitUrl, _branchName) => {
+      callOrder.push(`start:${name}`)
+      // 用 setTimeout 0 让 event loop 切一下 → 并行调用会立刻产生「start:a + start:b + start:c」
+      // 串行调用下,前一个 await 完成才进下一个 → 产生「start:a → end:a → start:b → end:b → start:c → end:c」
+      await new Promise((r) => setTimeout(r, 10))
+      callOrder.push(`end:${name}`)
+      return { ok: true as const, path: `/cb/${name}`, head: 'sha', branch: 'feat/x' }
+    }
+
+    await svc.attachRepos('req-001', ['a', 'b', 'c'], 'feat/x')
+    // 串行断言:任意时刻只可能有一个 start 在 in-flight
+    // 即序列必须严格 start:a → end:a → start:b → end:b → start:c → end:c
+    expect(callOrder).toEqual([
+      'start:a',
+      'end:a',
+      'start:b',
+      'end:b',
+      'start:c',
+      'end:c',
+    ])
+  })
+})
+
 describe('RequirementService.attachRepos · branchName 持久化', () => {
   it('任一成功 → 写 meta.yaml.branchName(SSR 契约)', async () => {
     const mockMgr = makeMockCodebaseMgr()
@@ -546,6 +595,61 @@ describe('RequirementService.attachRepo', () => {
     const r = await svc.attachRepo('req-001', 'a', 'feat/x')
     expect(r.ok).toBe(false)
     expect(mockMgr.clearPendingCalls).toHaveLength(1)
+  })
+})
+
+// ============================================================================
+// Issue 16: SSE retrying 序列 —— 真实 CodebaseManager + mock git 触发 retry,
+//   验证 RequirementService 推 SSE 事件 status=retrying + attempt 1-based 数字
+// ============================================================================
+
+describe('RequirementService.attachRepo · Issue 16 SSE retrying 序列', () => {
+  it('clone retry 时 SSE 事件流含 retrying + attempt 1-based 数字', async () => {
+    const ws = makeFakeWorkspace({
+      a: { name: 'a', gitUrl: 'git@a', description: '' },
+    })
+    const { hub, events } = makeFakeHub()
+    // 真实 CodebaseManager + mock git:第 1 次 git clone 返 E_NETWORK,
+    // 第 2 次(第 1 次 retry)返 ok
+    let gitCalls = 0
+    const fakeGit = vi.fn(async (args: string[]) => {
+      if (args.includes('clone')) {
+        gitCalls++
+        if (gitCalls === 1) {
+          return fail('fatal: Could not resolve host: github.com', 128)
+        }
+        return ok()
+      }
+      return ok()
+    })
+    const realMgr = createCodebaseManager({ root: realRoot, git: fakeGit })
+    const svc = new RequirementService({
+      root: realRoot,
+      codebaseMgr: realMgr,
+      workspace: ws,
+      sseHub: hub,
+    })
+
+    await svc.attachRepo('req-001', 'a', 'feat/x')
+
+    // 提取所有 repo-clone-progress 事件
+    const repoEvents = events
+      .filter(
+        (e) =>
+          typeof e.event === 'object' &&
+          e.event !== null &&
+          (e.event as { type?: string }).type === 'repo-clone-progress',
+      )
+      .map((e) => e.event as { status: string; attempt?: number })
+
+    // 序列应含:pending → cloning → retrying(attempt=1)→ ready
+    const statuses = repoEvents.map((e) => e.status)
+    expect(statuses).toContain('retrying')
+
+    const retryingEvent = repoEvents.find((e) => e.status === 'retrying')
+    expect(retryingEvent).toBeDefined()
+    // attempt 是 1-based 次数(第 1 次 retry)
+    expect(retryingEvent?.attempt).toBe(1)
   })
 })
 

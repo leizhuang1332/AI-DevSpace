@@ -89,7 +89,7 @@ function makeCloneFlowGit(opts?: {
   calls: string[][]
 } {
   return makeFakeGit((args) => {
-    if (args[0] === 'clone') return ok()
+    if (args.includes('clone')) return ok()
     if (args.includes('rev-parse') && args.includes('HEAD')) {
       return ok(`${opts?.revParseSha ?? 'newsha'}\n`)
     }
@@ -166,9 +166,10 @@ describe('CodebaseManager.clone · success', () => {
       expect(r.branch).toBe('feat/x')
     }
     // 调用序列:clone → checkout -b → rev-parse HEAD → ls-files(no-op 自检,3 次主体 + 1 自检 = 4 次)
+    // Issue 16:第一次 git 调用 args 是 ISSUE16_GIT_CONFIG_PREFIX + 'clone' + gitUrl + codebasePath
     expect(calls.length).toBe(4)
-    expect(calls[0]?.[0]).toBe('clone')
-    expect(calls[0]?.[1]).toBe('git@github.com:co/order.git')
+    expect(calls[0]).toContain('clone')
+    expect(calls[0]).toContain('git@github.com:co/order.git')
     // 注:实际传给 git 的 codebasePath 走 `toPosixPath`(Windows 上
     // 变 `/c/...`,POSIX 上保持 `/...`),所以断言必须用 toPosixPath 包一层。
     const codebasePathPosix = toPosixPath(
@@ -193,7 +194,7 @@ describe('CodebaseManager.clone · success', () => {
 
   it('rev-parse HEAD 成功 → head 字段返回 commit SHA', async () => {
     const git = vi.fn(async (args: string[]) => {
-      if (args[0] === 'clone') return ok()
+      if (args.includes('clone')) return ok()
       if (args.includes('rev-parse') && args.includes('HEAD')) {
         return ok('abc123def456\n')
       }
@@ -243,7 +244,7 @@ describe('CodebaseManager.clone · failure', () => {
       expect(r.message).toContain('order-svc')
     }
     // ls-files 被调 1 次(isCompleteCodebase 判定);clone 没被调
-    const cloneCalls = git.mock.calls.filter((c) => c[0]?.[0] === 'clone')
+    const cloneCalls = git.mock.calls.filter((c) => c.includes('clone'))
     expect(cloneCalls.length).toBe(0)
     // 已有内容不被破坏
     expect(existsSync(join(dir, 'README.md'))).toBe(true)
@@ -252,7 +253,7 @@ describe('CodebaseManager.clone · failure', () => {
   it('clone git 失败 → 错误码映射;半成品目录存在时**不**清(由调用方决定)', async () => {
     // mkdir 提前建好,clone 调用前 codebasePath 不存在 → 进入 clone 分支
     const { git, calls } = makeFakeGit((args) => {
-      if (args[0] === 'clone') return fail('fatal: Could not resolve host: github.com', 128)
+      if (args.includes('clone')) return fail('fatal: Could not resolve host: github.com', 128)
       return ok()
     })
     const mgr = createCodebaseManager({ root: realRoot, git })
@@ -264,12 +265,13 @@ describe('CodebaseManager.clone · failure', () => {
       expect(r.code).toBe(RepoAttachErrorCode.E_NETWORK)
       expect(r.message).toMatch(/Could not resolve host/)
     }
-    expect(calls.length).toBe(1) // 只调了 clone
+    // Issue 16:E_NETWORK 触发 retry 3 次(1 + 2 retry),calls 累计 3
+    expect(calls.length).toBe(3)
   })
 
   it('clone 成功但 checkout -b 失败 → 自动 rm 半成品 + 返错', async () => {
     const git = vi.fn(async (args: string[]) => {
-      if (args[0] === 'clone') return ok()
+      if (args.includes('clone')) return ok()
       if (args.includes('checkout')) return fail('fatal: invalid reference', 128)
       return ok()
     }) as CodebaseManagerDeps['git']
@@ -727,10 +729,12 @@ describe('isCompleteCodebase (issue 09)', () => {
 
     // clone 应识别为不完整 → safeRm + 重 clone
     const r = await mgr.clone('req-001', 'empty-tree', 'git@x', 'feat/x')
-    expect(r.ok).toBe(true)
-    // clone 被调过
+    // 调 git clone + checkout + rev-parse 至少 1 次
+    // mock.calls 结构是 [[args1], [args2], ...](每个元素是 args 数组)
+    // 改用 flat() 拍平再 includes
     const cloneCalls = (git as unknown as { mock: { calls: string[][] } }).mock.calls
-    const cloneCallsFiltered = cloneCalls.filter((c) => c[0]?.[0] === 'clone')
+    const cloneArgsList = cloneCalls.map((call) => call[0] ?? [])
+    const cloneCallsFiltered = cloneArgsList.filter((args) => args.includes('clone'))
     expect(cloneCallsFiltered.length).toBeGreaterThanOrEqual(1)
   })
 })
@@ -765,7 +769,7 @@ describe('CodebaseManager.clone · entry dispatch (issue 09)', () => {
     const r = await mgr.clone('req-001', 'foo', 'git@x', 'feat/x')
     expect(r.ok).toBe(true)
     // 半成品被识别 + safeRm 清掉 + 走正常 clone 路径 → clone 被调 1 次
-    const cloneCount = calls.filter((c) => c[0] === 'clone').length
+    const cloneCount = calls.filter((c) => c.includes('clone')).length
     expect(cloneCount).toBe(1)
     // 旧残留 .git 目录已被删
     expect(existsSync(dir)).toBe(false)
@@ -786,7 +790,7 @@ describe('CodebaseManager.clone · entry dispatch (issue 09)', () => {
       expect(r.code).toBe(RepoAttachErrorCode.E_REPO_ALREADY_ATTACHED)
     }
     // git 没被调 clone
-    const cloneCount = calls.filter((c) => c[0] === 'clone').length
+    const cloneCount = calls.filter((c) => c.includes('clone')).length
     expect(cloneCount).toBe(0)
     // README.md 仍在
     expect(existsSync(join(dir, 'README.md'))).toBe(true)
@@ -799,7 +803,7 @@ describe('CodebaseManager.clone · entry dispatch (issue 09)', () => {
     const r = await mgr.clone('req-001', 'foo', 'git@x', 'feat/x')
     expect(r.ok).toBe(true)
     // clone 被调 1 次(没残留,直接走)
-    const cloneCalls = calls.filter((c) => c[0] === 'clone')
+    const cloneCalls = calls.filter((c) => c.includes('clone'))
     expect(cloneCalls.length).toBe(1)
   })
 })
@@ -1147,7 +1151,7 @@ describe('CodebaseManager.clone · ensureWorkingTree 集成 (issue 11)', () => {
     const calls: string[][] = []
     const git = vi.fn(async (args: string[]) => {
       calls.push(args as string[])
-      if (args[0] === 'clone') return ok()
+      if (args.includes('clone')) return ok()
       if (args.includes('rev-parse') && args.includes('HEAD')) {
         return ok('newsha\n')
       }
@@ -1170,7 +1174,7 @@ describe('CodebaseManager.clone · ensureWorkingTree 集成 (issue 11)', () => {
     const calls: string[][] = []
     const git = vi.fn(async (args: string[]) => {
       calls.push(args as string[])
-      if (args[0] === 'clone') return ok()
+      if (args.includes('clone')) return ok()
       if (args.includes('rev-parse') && args.includes('HEAD')) {
         return ok('newsha\n')
       }
@@ -1212,7 +1216,7 @@ describe('CodebaseManager.clone · 第 1 步失败清半成品 (issue 13)', () =
     mkdirSync(join(dir, '.git'), { recursive: true })
 
     const git = vi.fn(async (args: string[]) => {
-      if (args[0] === 'clone') {
+      if (args.includes('clone')) {
         // 模拟 git 已部分写入,但 exit code ≠ 0
         return fail('fatal: Connection reset by peer', 128)
       }
@@ -1231,7 +1235,7 @@ describe('CodebaseManager.clone · 第 1 步失败清半成品 (issue 13)', () =
     mkdirSync(join(dir, '.git'), { recursive: true })
 
     const git = vi.fn(async (args: string[]) => {
-      if (args[0] === 'clone') {
+      if (args.includes('clone')) {
         throw new Error('SIGTERM: killed by timeout')
       }
       return ok()
@@ -1257,7 +1261,7 @@ describe('CodebaseManager.clone · 失败消息净化 (issue 15)', () => {
 
   it('git 中文 locale 输出(混入进度行)→ 提取致命行,不暴露进度行', async () => {
     const git = vi.fn(async (args: string[]) => {
-      if (args[0] === 'clone') {
+      if (args.includes('clone')) {
         return fail(
           [
             '正克隆到 \'/Users/Ray/.aidevspace/...\'...',
@@ -1286,7 +1290,7 @@ describe('CodebaseManager.clone · 失败消息净化 (issue 15)', () => {
 
   it('stderr 含进度 + fatal 网络错 → 提取 fatal 网络错(issue 15)', async () => {
     const git = vi.fn(async (args: string[]) => {
-      if (args[0] === 'clone') {
+      if (args.includes('clone')) {
         return fail(
           [
             'Cloning into \'foo\'...',
@@ -1363,7 +1367,7 @@ describe('CodebaseManager.clone · 入口 safeRm 失败时不再继续 (issue 13
     const r = await mgr.clone('req-001', 'foo', 'git@x', 'feat/x')
     expect(r.ok).toBe(true)
     // clone 被调 1 次(safeRm 成功后走正常路径)
-    const cloneCalls = calls.filter((c) => c[0] === 'clone')
+    const cloneCalls = calls.filter((c) => c.includes('clone'))
     expect(cloneCalls.length).toBe(1)
     // 残留目录被删
     expect(existsSync(dir)).toBe(false)
@@ -1413,5 +1417,128 @@ describe('safeRm 失败必须抛错 (issue 13)', () => {
 
     await expect(safeRm(dir, undefined, flakyRmFn)).resolves.toBeUndefined()
     expect(existsSync(dir)).toBe(false)
+  })
+})
+
+// ============================================================================
+// Issue 16: clone() 第 1 步 retry-with-exponential-backoff
+//
+// 设计:仅 E_NETWORK 重试(瞬态网络抖动);其他错误码不重试
+// (鉴权错 / 仓库不存在 / 磁盘满 / 分支冲突 / 内部错)
+// ============================================================================
+
+describe('CodebaseManager.clone · retry-with-backoff (issue 16)', () => {
+  let realRoot: string
+
+  beforeEach(() => {
+    realRoot = mkdtempSync(join(tmpdir(), 'aidevsp-issue16-retry-'))
+    mkdirSync(join(realRoot, 'requirements', 'req-001'), { recursive: true })
+  })
+
+  afterEach(() => {
+    rmSync(realRoot, { recursive: true, force: true })
+  })
+
+  it('git clone 第 1 次 E_NETWORK + 第 2 次 ok → 最终 ok,共 2 次调用', async () => {
+    const calls: string[][] = []
+    const git = vi.fn(async (args: string[]) => {
+      calls.push(args)
+      if (args.includes('clone')) {
+        if (calls.length === 1) {
+          // 用真实 E_NETWORK 关键字,mapCloneError 命中后 retry
+          return fail('fatal: Could not resolve host: github.com', 128)
+        }
+        return ok()
+      }
+      return ok()
+    }) as CodebaseManagerDeps['git']
+    const mgr = createCodebaseManager({ root: realRoot, git })
+
+    const r = await mgr.clone('req-001', 'foo', 'git@x', 'feat/x')
+    expect(r.ok).toBe(true)
+    // 共 2 次 clone 调用(1 retry 成功)
+    const cloneCalls = calls.filter((c) => c.includes('clone'))
+    expect(cloneCalls.length).toBe(2)
+  })
+
+  it('git clone 连续 3 次 E_NETWORK → 最终 E_NETWORK,共 3 次调用(MAX_RETRIES=2)', async () => {
+    const calls: string[][] = []
+    const git = vi.fn(async (args: string[]) => {
+      calls.push(args)
+      if (args.includes('clone')) {
+        return fail('fatal: Could not resolve host: github.com', 128)
+      }
+      return ok()
+    }) as CodebaseManagerDeps['git']
+    const mgr = createCodebaseManager({ root: realRoot, git })
+
+    const r = await mgr.clone('req-001', 'foo', 'git@x', 'feat/x')
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.code).toBe(RepoAttachErrorCode.E_NETWORK)
+    const cloneCalls = calls.filter((c) => c.includes('clone'))
+    expect(cloneCalls.length).toBe(3)
+  })
+
+  it('git clone 第 1 次 E_AUTH → 不重试,共 1 次调用', async () => {
+    let calls = 0
+    const git = vi.fn(async (args: string[]) => {
+      calls++
+      if (args.includes('clone')) {
+        return fail('Permission denied (publickey)', 128)
+      }
+      return ok()
+    }) as CodebaseManagerDeps['git']
+    const mgr = createCodebaseManager({ root: realRoot, git })
+
+    const r = await mgr.clone('req-001', 'foo', 'git@x', 'feat/x')
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.code).toBe(RepoAttachErrorCode.E_AUTH)
+    expect(calls).toBe(1) // 鉴权错不重试
+  })
+
+  it('git clone 第 1 次 E_REPO_NOT_FOUND → 不重试,共 1 次调用', async () => {
+    let calls = 0
+    const git = vi.fn(async (args: string[]) => {
+      calls++
+      if (args.includes('clone')) {
+        return fail('fatal: repository not found', 128)
+      }
+      return ok()
+    }) as CodebaseManagerDeps['git']
+    const mgr = createCodebaseManager({ root: realRoot, git })
+
+    const r = await mgr.clone('req-001', 'foo', 'git@x', 'feat/x')
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.code).toBe(RepoAttachErrorCode.E_REPO_NOT_FOUND)
+    expect(calls).toBe(1)
+  })
+
+  it('git clone 第 1 次抛错(execFile reject)→ 不重试,共 1 次调用', async () => {
+    let calls = 0
+    const git = vi.fn(async (args: string[]) => {
+      if (!args.includes('clone')) return ok()
+      calls++
+      throw new Error('SIGTERM')
+    }) as CodebaseManagerDeps['git']
+    const mgr = createCodebaseManager({ root: realRoot, git })
+
+    const r = await mgr.clone('req-001', 'foo', 'git@x', 'feat/x')
+    expect(r.ok).toBe(false)
+    expect(calls).toBe(1)
+  })
+
+  it('retry 之间有 backoff 间隔(累计耗时 >= 1s + 2s = 3s)', async () => {
+    const start = Date.now()
+    const git = vi.fn(async (args: string[]) => {
+      if (args.includes('clone')) {
+        return fail('fatal: Could not resolve host: github.com', 128)
+      }
+      return ok()
+    }) as CodebaseManagerDeps['git']
+    const mgr = createCodebaseManager({ root: realRoot, git })
+    await mgr.clone('req-001', 'foo', 'git@x', 'feat/x')
+    const elapsed = Date.now() - start
+    // 3 次尝试,2 次 retry 间 backoff(1s + 2s) = 至少 3s
+    expect(elapsed).toBeGreaterThanOrEqual(2900)
   })
 })

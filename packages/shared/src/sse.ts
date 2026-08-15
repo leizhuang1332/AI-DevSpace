@@ -430,9 +430,10 @@ export type SseEvent =
    * 单个 repo 的克隆进度事件。
    *
    * - `repoName` —— 仓库 name(注册表唯一标识)
-   * - `status` —— 4 态:`pending`(已排队但还没启动) / `cloning`(真实
-   *   `git clone` 在跑) / `ready`(成功,codebasePath 已落盘) / `failed`
-   *   (克隆失败,可能伴随半成品清理)
+   * - `status` —— 5 态:`pending`(已排队但还没启动) / `cloning`(真实
+   *   `git clone` 在跑) / `retrying`(Issue 16:clone 失败 + E_NETWORK
+   *   准备重试,带 backoff;用户看到「第 N 次重试」蓝色 badge)
+   *   / `ready`(成功,codebasePath 已落盘) / `failed`(克隆失败,可能伴随半成品清理)
    * - `error` —— 仅 `status === 'failed'` 时附,前端用作红色 banner 文案
    * - `ts` —— 推送时刻 epoch ms(便于前端计算耗时)
    */
@@ -440,9 +441,30 @@ export type SseEvent =
       type: 'repo-clone-progress'
       reqId: string
       repoName: string
-      status: 'pending' | 'cloning' | 'ready' | 'failed'
+      status: RepoCloneProgressStatus
       ts: number
       error?: string
+      /**
+       * Issue 16:仅 `status === 'retrying'` 时附。
+       * 1-based 次数(第 1 次 retry = attempt=1),spec 16.5 badge 用此显示「第 N/2 次重试」。
+       */
+      attempt?: number
     }
+
+/**
+ * Issue 16:统一的 repo-clone-progress 状态枚举。
+ * 5 态:`pending`(已排队但还没启动) / `cloning`(真实 git clone 在跑) /
+ * `retrying`(网络抖动准备重试,带 backoff) / `ready`(成功) /
+ * `failed`(克隆失败,可能伴随半成品清理)。
+ *
+ * 单独导出避免 shotgun surgery —— 加新状态时只需改这一处,
+ * 各前端/后端消费方共享 canonical union(issue 16 review 标记)。
+ */
+export type RepoCloneProgressStatus =
+  | 'pending'
+  | 'cloning'
+  | 'retrying'
+  | 'ready'
+  | 'failed'
 
 export const SSE_HEARTBEAT_MS = 30_000

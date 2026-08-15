@@ -1,16 +1,19 @@
 /**
- * RequirementService —— issue 03 (ADR-0030 D3 / D5) 需求关联独立 clone
+ * RequirementService —— issue 03 (ADR-0030 D3 / D5) + issue 16 需求关联独立 clone
  *
  * 封装对每个 repo 走 `git clone` + `git checkout -b` 的业务逻辑:
  * 1. 校验 req 目录是否存在
  * 2. 校验 repo 在 workspace 注册表里(否则 E_REPO_NOT_FOUND)
  * 3. 调 CodebaseManager.clone(reqId, repoName, gitUrl, branchName)
  * 4. 任一成功 → 写 meta.yaml.branchName(SSR 持久化契约沿用)
- * 5. 通过 SseHub 推 `repo-clone-progress` 事件(panding → cloning → ready/failed)
+ * 5. 通过 SseHub 推 `repo-clone-progress` 事件
+ *    (pending → cloning → retrying → ready/failed)
  *
- * 设计要点:
+ * 设计要点(issue 16):
+ * - **串行执行**:`for (const name of repoNames) await this.attachRepo(...)`
+ *   取代 issue 03 的 Promise.allSettled 并行 —— 并发 git clone 是网络层
+ *   sideband packet 错位 + GitHub HTTPS 并发竞争的根因,治本必须串行
  * - 纯函数语义:每个 repo 的失败独立处理,不抛到调用方
- * - 并行执行(`Promise.allSettled`),每个 repo 独立推进
  * - CodebaseManager 通过 DI 注入,单元测试用 fake codebasemgr
  * - SseHub 可选注入(测试时给 fakeHub 验证事件顺序)
  */
@@ -23,6 +26,7 @@ import {
   MAX_UPLOAD_BYTES,
   MAX_UPLOAD_IMAGE_BYTES,
   RepoAttachErrorCode,
+  RepoCloneProgressStatus,
   RequirementErrorCode,
   STATUS_PROGRESS_MAP,
   UPLOAD_VALIDATION_MESSAGES,
@@ -330,10 +334,26 @@ export class RequirementService {
     await this.codebaseMgr.setPending(reqId, repoName)
     this.broadcastProgress(reqId, repoName, 'cloning')
 
-    // 3. clone
+    // 3. clone(Issue 16:传 onRetry 回调,SSE 推送 retrying 状态)
     let result: Awaited<ReturnType<typeof this.codebaseMgr.clone>>
     try {
-      result = await this.codebaseMgr.clone(reqId, repoName, entry.gitUrl, branchName)
+      result = await this.codebaseMgr.clone(
+        reqId,
+        repoName,
+        entry.gitUrl,
+        branchName,
+        // attempt 是 1-based 次数(第 1 次 retry = 第 2 次尝试)。
+        // spec 16.5 badge 用 attempt 显示「第 N/2 次重试」(N=attempt, 2=MAX_RETRIES)
+        (attempt) => {
+          this.broadcastProgressWithAttempt(
+            reqId,
+            repoName,
+            'retrying',
+            attempt,
+            `网络抖动,第 ${attempt} 次重试中...`,
+          )
+        },
+      )
     } catch (err) {
       // clone 不应抛(默认实现都返 result);兜底
       await this.codebaseMgr.clearPending(reqId, repoName)
@@ -384,7 +404,21 @@ export class RequirementService {
   private broadcastProgress(
     reqId: string,
     repoName: string,
-    status: 'pending' | 'cloning' | 'ready' | 'failed',
+    status: RepoCloneProgressStatus,
+    error?: string,
+  ): void {
+    this.broadcastProgressWithAttempt(reqId, repoName, status, undefined, error)
+  }
+
+  /**
+   * Issue 16:broadcastProgress 的变体 —— 附 `attempt` 数字。
+   * SSE 事件带 attempt 字段,前端 badge 用此显示「第 N/2 次重试」文案。
+   */
+  private broadcastProgressWithAttempt(
+    reqId: string,
+    repoName: string,
+    status: RepoCloneProgressStatus,
+    attempt?: number,
     error?: string,
   ): void {
     if (!this.sseHub) return
@@ -395,6 +429,7 @@ export class RequirementService {
       status,
       ts: Date.now(),
       ...(error ? { error } : {}),
+      ...(attempt !== undefined ? { attempt } : {}),
     }
     this.sseHub.publish(reqId, event)
   }
@@ -427,7 +462,7 @@ export class RequirementService {
   }
 
   /**
-   * 批量 attach(issue 03):并行 + 异步,任一成功 → meta.yaml 持久化 branchName。
+   * 批量 attach(issue 03 + 16):**串行** + 异步,任一成功 → meta.yaml 持久化 branchName。
    *
    * 流程:
    * 0. 校验:所有 repoName 必须在注册表存在(否则提前返 E_REPO_NOT_FOUND)
@@ -473,24 +508,26 @@ export class RequirementService {
       this.broadcastProgress(reqId, name, 'pending')
     }
 
-    // 2. 并行跑 attachRepo
-    const settled = await Promise.allSettled(
-      repoNames.map((name) => this.attachRepo(reqId, name, branchName)),
-    )
+    // 2. Issue 16:串行跑 attachRepo,不再 Promise.allSettled 并行
+    //    根因:多个 git clone OS 进程并发时,网络层 sideband packet 错位
+    //    + GitHub HTTPS 并发大文件下载竞争 → 多个 repo 同时失败
+    //    取舍:N 个 repo 用户等 N×T 时间,体感稳定可预测(每个都成功/失败清晰)
+    const results: AttachRepoResult[] = []
+    for (const name of repoNames) {
+      try {
+        results.push(await this.attachRepo(reqId, name, branchName))
+      } catch (err) {
+        // attachRepo 不应抛(默认实现都返 result);兜底
+        results.push({
+          ok: false as const,
+          repoName: name,
+          code: RepoAttachErrorCode.E_INTERNAL,
+          message: err instanceof Error ? err.message : String(err),
+        })
+      }
+    }
 
-    // 3. 收集结果
-    const results: AttachRepoResult[] = settled.map((r) =>
-      r.status === 'fulfilled'
-        ? r.value
-        : {
-            ok: false as const,
-            repoName: '?',
-            code: RepoAttachErrorCode.E_INTERNAL,
-            message: r.reason instanceof Error ? r.reason.message : String(r.reason),
-          },
-    )
-
-    // 4. 任一成功 → 写 meta.yaml.branchName(SSR 持久化契约)
+    // 3. 任一成功 → 写 meta.yaml.branchName(SSR 持久化契约)
     if (results.some((r) => r.ok)) {
       this.persistBranchName(reqId, branchName)
     }
