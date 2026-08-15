@@ -31,6 +31,8 @@ import { join } from 'node:path'
 import { RepoAttachErrorCode } from '@ai-devspace/shared'
 import {
   createCodebaseManager,
+  ensureWorkingTree,
+  isCompleteCodebase,
   mapCloneError,
   safeRm,
   type CodebaseManagerDeps,
@@ -144,7 +146,12 @@ describe('CodebaseManager.clone · success', () => {
   })
 
   it('clone + checkout -b 成功 → rev-parse HEAD 拿 commit', async () => {
-    const { git, calls } = makeFakeGit()
+    const { git, calls } = makeFakeGit((args) => {
+      // Issue 11 ensureWorkingTree 也会调 ls-files,返非空让 ensureWorkingTree no-op,
+      // 保持原测试「3 次调用」的意图。
+      if (args.includes('ls-files')) return ok('README.md\n')
+      return ok()
+    })
     // mock 第二/三次调用 (clone → checkout → rev-parse HEAD)
     const mgr = createCodebaseManager({ root: realRoot, git })
 
@@ -158,8 +165,8 @@ describe('CodebaseManager.clone · success', () => {
       expect(r.head).toBe('')
       expect(r.branch).toBe('feat/x')
     }
-    // 调用序列:clone → checkout -b → rev-parse HEAD(3 次)
-    expect(calls.length).toBe(3)
+    // 调用序列:clone → checkout -b → rev-parse HEAD → ls-files(no-op 自检,3 次主体 + 1 自检 = 4 次)
+    expect(calls.length).toBe(4)
     expect(calls[0]?.[0]).toBe('clone')
     expect(calls[0]?.[1]).toBe('git@github.com:co/order.git')
     // 注:实际传给 git 的 codebasePath 走 `toPosixPath`(Windows 上
@@ -631,9 +638,6 @@ describe('isCompleteCodebase (issue 09)', () => {
     // 间接验证更贴近集成路径)。这里用「clone 不存在的 req」,前置 mkdir 缺失
     // 会触发 mkdir 路径,但 isCompleteCodebase 永远不被调(因为 existsSync 假)
     // —— 所以这个 case 单独走 isCompleteCodebase 直调
-    const { isCompleteCodebase } = await import(
-      '../../codebase/CodebaseManager.js'
-    )
     const result = await isCompleteCodebase(
       git,
       join(realRoot, 'requirements', 'req-001', 'codebase', 'ghost'),
@@ -965,5 +969,191 @@ describe('CodebaseManager.scanOrphanedCodebases (issue 10)', () => {
 
     const orphans = await mgr.scanOrphanedCodebases()
     expect(orphans).toEqual([])
+  })
+})
+
+// ============================================================================
+// Issue 11: ensureWorkingTree 自检 + reset --hard 兜底
+// ============================================================================
+
+describe('ensureWorkingTree (issue 11)', () => {
+  let realRoot: string
+
+  beforeEach(() => {
+    realRoot = mkdtempSync(join(tmpdir(), 'aidevsp-ensurewt-'))
+  })
+
+  afterEach(() => {
+    rmSync(realRoot, { recursive: true, force: true })
+  })
+
+  function makeLogger() {
+    const warns: Array<{ obj: Record<string, unknown>; msg?: string }> = []
+    return {
+      warns,
+      warn: (obj: Record<string, unknown>, msg?: string) => {
+        warns.push({ obj, msg })
+      },
+    }
+  }
+
+  it('working tree 有文件(ls-files 非空)→ no-op,不调 reset', async () => {
+    const dir = join(realRoot, 'complete')
+    mkdirSync(dir, { recursive: true })
+    mkdirSync(join(dir, '.git'), { recursive: true })
+    writeFileSync(join(dir, '.git', 'HEAD'), 'ref: refs/heads/main\n', 'utf8')
+
+    const calls: string[][] = []
+    const git = vi.fn(async (args: string[]) => {
+      calls.push(args as string[])
+      if (args.includes('ls-files')) return ok('README.md\n')
+      return ok()
+    }) as CodebaseManagerDeps['git']
+    const logger = makeLogger()
+    await ensureWorkingTree(git, dir, logger)
+
+    // reset --hard 没被调
+    const resetCalls = calls.filter(
+      (c) => c.includes('reset') && c.includes('--hard'),
+    )
+    expect(resetCalls).toHaveLength(0)
+    // 无 warn
+    expect(logger.warns).toHaveLength(0)
+  })
+
+  it('working tree 空(ls-files 空)→ 调 reset --hard HEAD + warn', async () => {
+    const dir = join(realRoot, 'empty-tree')
+    mkdirSync(dir, { recursive: true })
+    mkdirSync(join(dir, '.git'), { recursive: true })
+    writeFileSync(join(dir, '.git', 'HEAD'), 'ref: refs/heads/main\n', 'utf8')
+
+    const calls: string[][] = []
+    const git = vi.fn(async (args: string[]) => {
+      calls.push(args as string[])
+      if (args.includes('ls-files')) return ok('') // 空 working tree
+      return ok()
+    }) as CodebaseManagerDeps['git']
+    const logger = makeLogger()
+    await ensureWorkingTree(git, dir, logger)
+
+    // reset --hard 被调 1 次
+    const resetCalls = calls.filter(
+      (c) => c.includes('reset') && c.includes('--hard') && c.includes('HEAD'),
+    )
+    expect(resetCalls).toHaveLength(1)
+    expect(resetCalls[0]).toEqual([
+      '-C',
+      toPosixPath(dir),
+      'reset',
+      '--hard',
+      'HEAD',
+    ])
+    // 期望 warn
+    expect(
+      logger.warns.some((w) =>
+        String(w.msg).includes('working tree empty after success'),
+      ),
+    ).toBe(true)
+  })
+
+  it('reset --hard 也失败 → log warn 但不抛', async () => {
+    const dir = join(realRoot, 'reset-fails')
+    mkdirSync(dir, { recursive: true })
+    mkdirSync(join(dir, '.git'), { recursive: true })
+    writeFileSync(join(dir, '.git', 'HEAD'), 'ref: refs/heads/main\n', 'utf8')
+
+    const git = vi.fn(async (args: string[]) => {
+      if (args.includes('ls-files')) return ok('') // 触发 reset
+      if (args.includes('reset')) {
+        return fail('fatal: unable to reset', 128)
+      }
+      return ok()
+    }) as CodebaseManagerDeps['git']
+    const logger = makeLogger()
+    // 不抛
+    await expect(ensureWorkingTree(git, dir, logger)).resolves.toBeUndefined()
+    // 期望有「reset failed」warn
+    expect(
+      logger.warns.some((w) => String(w.msg).includes('reset --hard HEAD failed')),
+    ).toBe(true)
+  })
+
+  it('不传 logger → 静默 no-op(向后兼容)', async () => {
+    const dir = join(realRoot, 'no-logger')
+    mkdirSync(dir, { recursive: true })
+    mkdirSync(join(dir, '.git'), { recursive: true })
+    writeFileSync(join(dir, '.git', 'HEAD'), 'ref: refs/heads/main\n', 'utf8')
+
+    const git = vi.fn(async (args: string[]) => {
+      if (args.includes('ls-files')) return ok('') // 触发 reset
+      if (args.includes('reset')) return ok() // reset 成功
+      return ok()
+    }) as CodebaseManagerDeps['git']
+    // 不传 logger 不抛
+    await expect(ensureWorkingTree(git, dir)).resolves.toBeUndefined()
+  })
+})
+
+// ============================================================================
+// Issue 11: clone() 集成 ensureWorkingTree
+// ============================================================================
+
+describe('CodebaseManager.clone · ensureWorkingTree 集成 (issue 11)', () => {
+  let realRoot: string
+
+  beforeEach(() => {
+    realRoot = mkdtempSync(join(tmpdir(), 'aidevsp-clone-ensurewt-'))
+    mkdirSync(join(realRoot, 'requirements', 'req-001'), { recursive: true })
+  })
+
+  afterEach(() => {
+    rmSync(realRoot, { recursive: true, force: true })
+  })
+
+  it('clone 成功 + ls-files 空 → 触发 reset --hard 自愈', async () => {
+    // 模拟场景:codebase 目录不存在 → 走正常 clone → 但 ls-files 返空 →
+    // ensureWorkingTree 触发 reset --hard
+    const calls: string[][] = []
+    const git = vi.fn(async (args: string[]) => {
+      calls.push(args as string[])
+      if (args[0] === 'clone') return ok()
+      if (args.includes('rev-parse') && args.includes('HEAD')) {
+        return ok('newsha\n')
+      }
+      if (args.includes('ls-files')) return ok('') // working tree 空
+      if (args.includes('reset')) return ok()
+      return ok()
+    }) as CodebaseManagerDeps['git']
+    const mgr = createCodebaseManager({ root: realRoot, git })
+
+    const r = await mgr.clone('req-001', 'foo', 'git@x', 'feat/x')
+    expect(r.ok).toBe(true)
+    // reset --hard 被调
+    const resetCalls = calls.filter(
+      (c) => c.includes('reset') && c.includes('--hard'),
+    )
+    expect(resetCalls).toHaveLength(1)
+  })
+
+  it('clone 成功 + ls-files 非空 → 不调 reset(正常路径 no-op)', async () => {
+    const calls: string[][] = []
+    const git = vi.fn(async (args: string[]) => {
+      calls.push(args as string[])
+      if (args[0] === 'clone') return ok()
+      if (args.includes('rev-parse') && args.includes('HEAD')) {
+        return ok('newsha\n')
+      }
+      if (args.includes('ls-files')) return ok('README.md\n')
+      return ok()
+    }) as CodebaseManagerDeps['git']
+    const mgr = createCodebaseManager({ root: realRoot, git })
+
+    const r = await mgr.clone('req-001', 'foo', 'git@x', 'feat/x')
+    expect(r.ok).toBe(true)
+    // reset --hard 没被调
+    const resetCalls = calls.filter(
+      (c) => c.includes('reset') && c.includes('--hard'),
+    )
+    expect(resetCalls).toHaveLength(0)
   })
 })

@@ -471,6 +471,103 @@ describe.skipIf(process.platform === 'win32')(
       },
       30_000,
     )
+
+    it(
+      'issue 11: attach 成功后手动 rm working tree → 再 attach → working tree 自愈',
+      async () => {
+        // 场景:用户第一次 attach 成功,working tree 完整;然后手动 rm
+        // <codebase>/foo/*(只保留 .git)模拟外力损坏 → 第二次 attach
+        // 应走 issue 09 的「半成品残留」路径:safeRm + 重 clone,
+        // working tree 恢复。
+        const { url, root, token } = await boot()
+        const { barePath } = await makeUpstreamRepo(root, 'self-heal-svc')
+        await registerRepo(url, token, 'self-heal-svc', `file://${barePath}`)
+        mkdirSync(join(root, 'requirements', 'req-self-heal'), { recursive: true })
+
+        // 1. 第一次 attach:成功 + working tree 完整
+        const first = await fetch(
+          `${url}/api/requirement/req-self-heal/repos`,
+          {
+            method: 'POST',
+            headers: {
+              'x-aidevspace-token': token,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              repoNames: ['self-heal-svc'],
+              branchName: 'feat/first',
+            }),
+          },
+        )
+        expect(first.status).toBe(200)
+        const codebasePath = join(
+          root,
+          'requirements',
+          'req-self-heal',
+          'codebase',
+          'self-heal-svc',
+        )
+        expect(existsSync(codebasePath)).toBe(true)
+        expect(existsSync(join(codebasePath, 'README.md'))).toBe(true)
+        expect(existsSync(join(codebasePath, '.git'))).toBe(true)
+
+        // 2. 模拟外力损坏:rm working tree,只保留 .git
+        //    用 find 删除所有非 .git 文件 + 目录
+        await execFileP('find', [
+          codebasePath,
+          '-mindepth',
+          '1',
+          '-maxdepth',
+          '1',
+          '!',
+          '-name',
+          '.git',
+          '-exec',
+          'rm',
+          '-rf',
+          '{}',
+          '+',
+        ])
+        // sanity:working tree 被清空(只留 .git)
+        expect(existsSync(join(codebasePath, 'README.md'))).toBe(false)
+        expect(existsSync(join(codebasePath, '.git'))).toBe(true)
+
+        // 3. 第二次 attach:应走 issue 09 路径 —— safeRm 半成品 + 重 clone
+        //    → working tree 恢复
+        const second = await fetch(
+          `${url}/api/requirement/req-self-heal/repos`,
+          {
+            method: 'POST',
+            headers: {
+              'x-aidevspace-token': token,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              repoNames: ['self-heal-svc'],
+              branchName: 'feat/second',
+            }),
+          },
+        )
+        expect(second.status).toBe(200)
+        const secondBody = (await second.json()) as {
+          results: Array<{ ok: boolean; code?: string }>
+        }
+        // 期望 ok:true(自愈成功)而不是 E_REPO_ALREADY_ATTACHED
+        expect(secondBody.results[0]?.ok).toBe(true)
+        // working tree 已恢复:README.md 重新存在 + .git/HEAD 在新分支
+        expect(existsSync(join(codebasePath, 'README.md'))).toBe(true)
+        expect(existsSync(join(codebasePath, '.git'))).toBe(true)
+        const { stdout: branch } = await execFileP('git', [
+          '-C',
+          codebasePath,
+          'rev-parse',
+          '--abbrev-ref',
+          'HEAD',
+        ])
+        expect(branch.trim()).toBe('feat/second')
+      },
+      30_000,
+    )
   },
 )
 

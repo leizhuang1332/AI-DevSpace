@@ -345,6 +345,10 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
     const headRes = await git(headArgs)
     const head = headRes.code === 0 ? headRes.stdout.trim() : ''
 
+    // 4. 自检 + 兜底(Issue 11):working tree 必须非空
+    //    边缘 case:.git 完整但 <codebase>/ 下没 tracked 文件(外部 rm / fs 损坏)
+    await ensureWorkingTree(git, codebasePath, logger)
+
     return { ok: true, path: codebasePath, head, branch: branchName }
   }
 
@@ -582,34 +586,85 @@ export function mapCloneError(stderr: string): CloneErrorCodeT {
 /**
  * 「codebase 路径是不是一个完整 git 仓库 + working tree」
  * - 不存在 → false
- * - 仅 .git 存在但 working tree 为空(残留半成品 / HEAD 指向空 commit)→ false
- * - 完整仓库 + 至少有 1 个 tracked 文件 → true
+ * - 仅 .git 存在但 working tree 为空(残留半成品 / working tree 被外力清空)→ false
+ * - 完整仓库 + working tree 至少有 1 个非 .git 文件 → true
  *
- * 实现(Issue 09):<path>/.git/HEAD 存在 + `git -C <path> ls-files` 非空。
+ * 实现(Issue 09 + Issue 11 e2e 反馈修正):
+ * - `<path>/.git/HEAD` 存在 —— 说明 `.git` 元数据完整
+ * - `readdirSync(path)` 至少 1 个非 . 前缀条目 —— 说明 working tree 有真实内容
+ *
+ * 不用 `git ls-files`:ls-files 列 HEAD commit 的 tracked 文件,与 working tree
+ * 当前内容无关。working tree 被 `rm -rf` 清空后,ls-files 仍会列 HEAD commit 文件,
+ * 导致误判为「完整仓库」。readdirSync 直接看 working tree,语义与 spec「working tree
+ * 是否有内容」严格对齐。
+ *
  * 仅在 clone() 入口做幂等判断时跑(只有 existsSync 命中才调),不污染干净路径。
+ * 导出(供 Issue 10 `scanOrphanedCodebases` 复用):本质是「判定函数」。
  *
- * 导出(供 Issue 10 `scanOrphanedCodebases` 复用):本质是「判定函数」,
- * 测试也可以直接验 4 种状态。
+ * @param _git 保留参数(向后兼容测试 fixture);实现已不再需要 git 调用。
  */
 export async function isCompleteCodebase(
-  git: GitExec,
+  _git: GitExec,
   path: string,
 ): Promise<boolean> {
   if (!existsSync(path)) return false
   const gitHead = join(path, '.git', 'HEAD')
   if (!existsSync(gitHead)) return false
   try {
-    const res = await git(['-C', toPosixPath(path), 'ls-files'])
-    if (res.code !== 0) return false
-    return res.stdout.trim().length > 0
+    const entries = readdirSync(path)
+    // 隐藏文件(.git/.pending-*/.DS_Store/.archived)不算 working tree 内容
+    return entries.some((e) => !e.startsWith('.'))
   } catch {
     return false
   }
 }
 
 /**
+ * Issue 11:确保 working tree 至少有 1 个 tracked 文件(防御性兜底)。
+ *
+ * - 正常情况:git clone + checkout -b 之后 working tree 必有内容,no-op
+ * - 边缘 case:working tree 被外部干扰清空(.git 完整但 <codebase>/ 空)
+ *   → 跑 `git reset --hard HEAD` 强制恢复
+ *
+ * 与 `isCompleteCodebase` 的边界:
+ * - `isCompleteCodebase` 是「判定用」(true/false),用于入口短路
+ * - `ensureWorkingTree` 是「修复用」(void),用于 clone 成功后兜底
+ *
+ * 风险:`git reset --hard HEAD` 有破坏性,但本函数只在 ls-files 为空时调,
+ * 此时 working tree 已经没有未提交改动可丢,reset 是安全的。
+ *
+ * 导出供测试验证 4 种行为:有内容 / 空 → reset / reset 失败 / 不传 logger。
+ */
+export async function ensureWorkingTree(
+  git: GitExec,
+  codebasePath: string,
+  logger?: SafeRmLogger,
+): Promise<void> {
+  const checkArgs = ['-C', toPosixPath(codebasePath), 'ls-files']
+  const checkRes = await git(checkArgs)
+  if (checkRes.code === 0 && checkRes.stdout.trim().length > 0) return
+  // working tree 为空 → 强制 reset
+  logger?.warn(
+    { path: codebasePath },
+    'clone: working tree empty after success, running reset --hard HEAD',
+  )
+  const resetRes = await git([
+    '-C',
+    toPosixPath(codebasePath),
+    'reset',
+    '--hard',
+    'HEAD',
+  ])
+  if (resetRes.code !== 0) {
+    logger?.warn(
+      { path: codebasePath, stderr: resetRes.stderr },
+      'clone: reset --hard HEAD failed, leaving empty working tree',
+    )
+  }
+}
+
+/**
  * rm -rf 兜底(Issue 09):目录可能不存在,任何错误都 swallow(清理不应抛)
- * —— 但**不再**静默:失败必须 warn;fd 竞争下 retry 3 次兜底。
  *
  * macOS Finder / Spotlight 索引偶尔会持有 fd,rmSync 会 EBUSY / EACCES;
  * 旧实现静默吞错导致 .git 残留 + 下次 attach 命中 E_REPO_ALREADY_ATTACHED
