@@ -108,14 +108,30 @@ export type PutRepoRegistryRequest = z.infer<typeof PutRepoRegistryRequestSchema
 // ---------------------------------------------------------------------------
 
 /**
- * 单条 codebase 使用记录 —— DELETE /api/repos/:name 二次确认时回给前端。
+ * 单条 codebase 使用记录 —— DELETE /api/repos/:name 二次确认 + 列表页「被 N 个需求使用」派生。
  *
  * `requirementId` 是 `~/.aidevspace/requirements/<id>/` 目录名;`branch` 是
  * 用户当初关联时起的统一分支名(从 meta.yaml 派生);`codebasePath` 是
  * `requirements/<id>/codebase/<repo-name>/` 的真实路径,前端用来在 UI 显示本地路径。
  */
-export interface CodebaseUsageEntry {
-  requirementId: string
-  branch: string
-  codebasePath: string
-}
+export const CodebaseUsageEntrySchema = z.object({
+  requirementId: z.string().min(1),
+  branch: z.string(), // 读不到 meta.yaml 时返 ''(空串也合法)
+  codebasePath: z.string().min(1),
+})
+export type CodebaseUsageEntry = z.infer<typeof CodebaseUsageEntrySchema>
+
+/**
+ * `GET /api/repos/:name/usage` 响应 schema —— issue 07 列表 / 详情页派生「被 N 个需求使用」。
+ *
+ * - `repoName` 回显,便于前端在多仓库并发请求时按 name 对号入座
+ * - `usage` 可为空数组(无人使用 / 注册表有但未关联)
+ *
+ * 复用 CodebaseUsageEntrySchema,与 DELETE /api/repos/:name 的 409 响应 body
+ * (`usage` 字段)形态一致,前端可共用类型。
+ */
+export const RepoUsageResponseSchema = z.object({
+  repoName: z.string().min(1),
+  usage: z.array(CodebaseUsageEntrySchema),
+})
+export type RepoUsageResponse = z.infer<typeof RepoUsageResponseSchema>

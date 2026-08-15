@@ -1,4 +1,4 @@
-import { reposFor } from '@/app/(workspace)/data/mock';
+import { REFUND_REPOS, type RepoCard } from '@/app/(workspace)/data/mock';
 import { fetchRequirementsServer } from '@/lib/requirement-list.server';
 
 interface Props { params: { id: string }; }
@@ -7,7 +7,9 @@ export default async function RequirementReposPage({ params }: Props) {
   // ticket 07b D5:保留 `?? requirements[0]` fallback(本期 0 N+1 优化,后续 07c 加详情接口后改)
   const all = await fetchRequirementsServer()
   const req = all.find(r => r.id === params.id) ?? all[0];
-  const repos = reposFor(params.id);
+  // ticket 07 (ADR-0030 D3) 暂保留 demo 数据 REFUND_REPOS 作为 fallback;
+  // 后续切到「codebase 实时派生」(每个 req 独立 git clone)的 GET 端点后再收敛。
+  const repos: RepoCard[] = params.id === 'req-001' ? REFUND_REPOS : [];
 
   if (!req) {
     return (

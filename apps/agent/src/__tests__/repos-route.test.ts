@@ -745,6 +745,135 @@ describe('HTTP /api/repos (issue 02 CRUD)', () => {
       expect(res.json()).toMatchObject({ error: 'E_REPO_NOT_FOUND' })
     })
   })
+
+  // -------------------------------------------------------------------------
+  // GET /api/repos/:name/usage —— issue 07 D6 「被 N 个需求使用」派生
+  // -------------------------------------------------------------------------
+
+  describe('GET /api/repos/:name/usage', () => {
+    it('注册表有该仓库 + 无需求使用 → 200 {repoName, usage: []}', async () => {
+      // 先种一条
+      const setup = await app.inject({
+        method: 'POST',
+        url: '/api/repos',
+        headers: { ...authHeaders(), 'content-type': 'application/json' },
+        payload: { name: 'refund', gitUrl: 'good', description: 'd' },
+      })
+      expect(setup.statusCode).toBe(201)
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/repos/refund/usage',
+        headers: authHeaders(),
+      })
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({ repoName: 'refund', usage: [] })
+    })
+
+    it('注册表有该仓库 + 1 个需求使用 → 200 含 1 条 usage', async () => {
+      // 种仓库
+      const setup = await app.inject({
+        method: 'POST',
+        url: '/api/repos',
+        headers: { ...authHeaders(), 'content-type': 'application/json' },
+        payload: { name: 'refund', gitUrl: 'good', description: 'd' },
+      })
+      expect(setup.statusCode).toBe(201)
+
+      // 模拟 req-001 已 clone + meta.yaml 含 branchName
+      mkdirSync(
+        join(tmpRoot, 'requirements', 'req-001', 'codebase', 'refund'),
+        { recursive: true },
+      )
+      writeFileSync(
+        join(tmpRoot, 'requirements', 'req-001', 'meta.yaml'),
+        yaml.stringify({ branchName: 'feat/foo' }),
+        'utf8',
+      )
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/repos/refund/usage',
+        headers: authHeaders(),
+      })
+      expect(res.statusCode).toBe(200)
+      const body = res.json() as {
+        repoName: string
+        usage: Array<{
+          requirementId: string
+          branch: string
+          codebasePath: string
+        }>
+      }
+      expect(body.repoName).toBe('refund')
+      expect(body.usage).toHaveLength(1)
+      expect(body.usage[0]).toEqual({
+        requirementId: 'req-001',
+        branch: 'feat/foo',
+        codebasePath: join(
+          tmpRoot,
+          'requirements',
+          'req-001',
+          'codebase',
+          'refund',
+        ),
+      })
+    })
+
+    it('注册表无该仓库 → 404 E_REPO_NOT_FOUND(usage 仍返空无意义,前端需要知道)', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/repos/nope/usage',
+        headers: authHeaders(),
+      })
+      expect(res.statusCode).toBe(404)
+      expect(res.json()).toMatchObject({ error: 'E_REPO_NOT_FOUND' })
+    })
+
+    it('.pending-<name> 克隆中标记存在 → usage 跳过该 req(与 DELETE 语义一致)', async () => {
+      // 种仓库
+      const setup = await app.inject({
+        method: 'POST',
+        url: '/api/repos',
+        headers: { ...authHeaders(), 'content-type': 'application/json' },
+        payload: { name: 'refund', gitUrl: 'good', description: 'd' },
+      })
+      expect(setup.statusCode).toBe(201)
+
+      // req-001 处于克隆中
+      mkdirSync(
+        join(tmpRoot, 'requirements', 'req-001', 'codebase', 'refund'),
+        { recursive: true },
+      )
+      writeFileSync(
+        join(
+          tmpRoot,
+          'requirements',
+          'req-001',
+          'codebase',
+          '.pending-refund',
+        ),
+        'pending',
+        'utf8',
+      )
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/repos/refund/usage',
+        headers: authHeaders(),
+      })
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({ repoName: 'refund', usage: [] })
+    })
+
+    it('鉴权失败:无 token → 401(authPlugin 拦截)', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/repos/anything/usage',
+      })
+      expect(res.statusCode).toBe(401)
+    })
+  })
 })
 
 // ---------------------------------------------------------------------------

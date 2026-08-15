@@ -25,6 +25,7 @@ import {
   PostRepoRegistryRequestSchema,
   PutRepoRegistryRequestSchema,
   RepoRegistryResponseSchema,
+  RepoUsageResponseSchema,
   type RepoRegistryEntry,
 } from '@ai-devspace/shared'
 import type { WorkspaceService } from '../services/WorkspaceService.js'
@@ -332,6 +333,34 @@ export async function reposRoutes(
       }
 
       return reply.code(204).send()
+    },
+  )
+
+  // ==========================================================================
+  // GET /api/repos/:name/usage —— issue 07 / ADR-0030 D6
+  // 「该仓库被哪些需求使用」派生端点,供 /repos 列表页 + /repos/[name] 详情页使用。
+  //
+  // 设计:
+  // - 注册表无此 name → 404 E_REPO_NOT_FOUND(前端需要明确知道,避免静默返空)
+  // - 有但 usage=[] → 200 {repoName, usage: []}(列表页要显示「0 个需求使用」)
+  // - .pending-<name> 标记存在 → 跳过该 req(与 DELETE 语义一致,克隆中不算关联)
+  // ==========================================================================
+  app.get<{ Params: { name: string } }>(
+    '/api/repos/:name/usage',
+    async (req, reply) => {
+      const { name } = req.params
+
+      const existing = await workspace.findRepoByName(name)
+      if (!existing) {
+        return reply.code(404).send({
+          error: 'E_REPO_NOT_FOUND',
+          message: `仓库 ${name} 不存在`,
+        })
+      }
+
+      const usage = await workspace.findCodebaseUsage(name)
+      const body = RepoUsageResponseSchema.parse({ repoName: name, usage })
+      return reply.code(200).send(body)
     },
   )
 }

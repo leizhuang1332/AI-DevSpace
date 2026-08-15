@@ -11,13 +11,15 @@ export type AIStatus =
 
 export interface Session { id: string; requirementId: string; title: string; aiStatus: AIStatus; currentTask?: string; filesRead?: number; ageMinutes: number; }
 export interface InboxItem { id: string; kind: 'question' | 'error' | 'todo'; requirementTitle: string; message: string; agoMinutes: number; }
-export interface Repository { name: string; branch: string; latestCommit: string; changedFiles: number; }
 export interface Artifact { id: string; name: string; type: 'database' | 'config' | 'api' | 'test' | 'doc' | 'other'; requirementId: string; createdBy: string; agoMinutes: number; size: number; }
 
 // ticket 07b:`requirements` mock 数组已收敛,真实数据走 `GET /api/requirements`(见
-// apps/web/src/lib/requirement-list.server.ts)。sessions / inbox / repositories /
-// knowledge / skills / settings / artifacts / repoDetails 等其他 mock 暂保留
-// (P1+ 才收敛)。
+// apps/web/src/lib/requirement-list.server.ts)。
+// ticket 07 (ADR-0030 D6):`repositories` / `repoDetails` / `EMPTY_REPO_DETAIL` /
+// `reposFor` / `WorktreeBadgeTone` 等仓库相关 mock 已删除——
+// 真实数据走 `GET /api/repos` + `GET /api/repos/:name/usage`(见 apps/web/src/lib/repos.server.ts)。
+// `REFUND_REPOS` / `RepoCard` 作为 req-001 的 codebase demo fallback 暂保留
+// (P1+ 切到 GET /api/requirement/:id/repos 派生后即可删)。
 // mock 集合（Step 2 内增长；P1+ 改 SSE 接入）
 
 export const sessions: Session[] = [
@@ -29,17 +31,6 @@ export const inbox: InboxItem[] = [
   { id: 'i-1', kind: 'question', requirementTitle: '退款功能', message: '退款失败时是否要回滚已扣减的优惠券额度？目前 code-stage 阻塞在这里', agoMinutes: 2 },
   { id: 'i-2', kind: 'error', requirementTitle: '支付链路灰度切流', message: 'SDK 调用失败：Anthropic API 502，Agent 已自动重试 2 次', agoMinutes: 15 },
   { id: 'i-3', kind: 'question', requirementTitle: '会员等级', message: '黄金会员的成长值是否继承历史等级？需要业务确认', agoMinutes: 60 },
-];
-
-export const repositories: Repository[] = [
-  { name: 'refund-service',  branch: 'feature/refund-optimize', latestCommit: 'a8f3e21', changedFiles: 12 },
-  { name: 'order-service',   branch: 'main',                     latestCommit: '9d2e0ab', changedFiles: 0  },
-  { name: 'member-service',  branch: 'feature/member-tier',      latestCommit: 'b1c7e22', changedFiles: 3  },
-  { name: 'pay-gateway',     branch: 'feature/gray-payment',     latestCommit: 'c4d9f30', changedFiles: 7  },
-  { name: 'risk-service',    branch: 'main',                     latestCommit: 'e5a1b82', changedFiles: 0  },
-  { name: 'coupon-service',  branch: 'feature/coupon-stack',     latestCommit: 'f6b2c93', changedFiles: 5  },
-  { name: 'cart-service',    branch: 'main',                     latestCommit: '7d8e4a1', changedFiles: 0  },
-  { name: 'seckill-service', branch: 'main',                     latestCommit: '8e9f5b2', changedFiles: 0  },
 ];
 
 export interface KnowledgeItem {
@@ -349,6 +340,17 @@ export function settingsFor(reqId: string): RequirementSettings | null {
   return null;
 }
 
+// =====================================================================
+// ticket 07 (ADR-0030 D6):仓库相关 mock 已收敛
+// - 删除:`repositories` 数组、`repoDetails` map、`EMPTY_REPO_DETAIL` 常量、
+//   `reposFor` helper、`WorktreeBadgeTone` 类型、`RepoDetail` / `RepoWorktree` /
+//   `RepoCommit` / `RepoDetailStats` / `RepoRepoStats` / `RepoTag` 等类型
+// - 真实数据走 `GET /api/repos` + `GET /api/repos/:name/usage`
+//   (见 apps/web/src/lib/repos.server.ts)
+// - 保留:`RepoCard` 类型 + `REFUND_REPOS` 数据(req-001 codebase demo fallback),
+//   供 `/requirements/[id]/repos/` 页面在 P1 切到 GET /api/requirement/:id/repos 派生之前使用
+// =====================================================================
+
 export interface RepoCard {
   name: string;
   branch: string;
@@ -359,7 +361,14 @@ export interface RepoCard {
   commits: { sha: string; msg: string; meta: string }[];
 }
 
-const REFUND_REPOS: RepoCard[] = [
+/**
+ * req-001 (退款功能优化) 关联仓库的 demo 数据 —— 仅作为
+ * `/requirements/[id]/repos/` 页面在 P1 切换前的 fallback。
+ * 字段含义(worktreeShort / commits)反映 ADR-0003 worktree 时代形态,与
+ * ADR-0030 D3 「per-requirement 独立 clone」不一致;后续该页面切到 codebase
+ * 派生后整段删除。
+ */
+export const REFUND_REPOS: RepoCard[] = [
   {
     name: 'refund-service',
     branch: 'req-2024-007-refund-optimize',
@@ -386,188 +395,3 @@ const REFUND_REPOS: RepoCard[] = [
     ],
   },
 ];
-
-export function reposFor(reqId: string): RepoCard[] {
-  if (reqId === 'req-001') return REFUND_REPOS;
-  return [];
-}
-
-// =====================================================================
-// 仓库详情 (page 09 repos/[name]) — 下沉以避免与 repositories[] 漂移
-// =====================================================================
-
-export type WorktreeBadgeTone = 'succ' | 'warm' | 'plain';
-
-export interface RepoWorktree {
-  branch: string;
-  meta: string;
-  path: string;
-  reqLink?: string;
-  badgeTone: WorktreeBadgeTone;
-  badgeText: string;
-}
-
-export interface RepoCommit {
-  sha: string;
-  msg: string;
-  author: string;
-}
-
-export interface RepoDetailStats {
-  worktrees: number;
-  linkedReqs: number;
-  disk?: string;
-  fetchText: string;
-}
-
-export interface RepoRepoStats {
-  worktrees: number;
-  linkedReqs: number;
-  fetchText: string;
-  ahead: string;
-}
-
-export interface RepoTag {
-  label: string;
-  tone: WorktreeBadgeTone;
-}
-
-export interface RepoDetail {
-  worktrees: RepoWorktree[];
-  commits: RepoCommit[];
-  detailStats: RepoDetailStats;
-  repoStats: RepoRepoStats;
-  tags: RepoTag[];
-  date: string;
-}
-
-export const EMPTY_REPO_DETAIL: RepoDetail = {
-  worktrees: [],
-  commits: [],
-  detailStats: { worktrees: 1, linkedReqs: 0, fetchText: '—' },
-  repoStats:   { worktrees: 1, linkedReqs: 1, fetchText: '—', ahead: 'synced' },
-  tags: [],
-  date: '—',
-};
-
-export const repoDetails: Record<string, RepoDetail> = {
-  'refund-service': {
-    worktrees: [
-      { branch: 'main',                                 meta: '主分支 · 最新 commit 3 天前',                       path: '~/.aidevspace/repos/refund-service',                            badgeTone: 'succ',  badgeText: '干净' },
-      { branch: 'req-2024-007-refund-optimize',         meta: '10 分钟前 · a8f3e21',                                path: '~/.aidevspace/requirements/req-2024-007/refund-service',        reqLink: '退款功能优化', badgeTone: 'warm',  badgeText: '12 文件 · +847' },
-      { branch: 'req-2024-002-refund-v2',               meta: '2 天前 · e1b2c4d',                                   path: '~/.aidevspace/requirements/req-2024-002/refund-service',        reqLink: '退款链路 v2',   badgeTone: 'warm',  badgeText: '3 文件 · +124' },
-    ],
-    commits: [
-      { sha: 'a8f3e21', msg: 'feat(refund): 退款订单表索引优化',   author: '李雷 · 10 分钟前' },
-      { sha: '9d2e0ab', msg: 'feat(order): 退款时回写订单状态',   author: '李雷 · 25 分钟前' },
-      { sha: '7c91b44', msg: 'feat(refund): 添加退款状态机',      author: '李雷 · 1 小时前' },
-      { sha: '3e0d9a1', msg: 'chore: 升级 spring-boot 3.2',      author: '李雷 · 昨天'     },
-      { sha: '5b71f3c', msg: 'feat: 接入 Prometheus 监控',       author: '李雷 · 2 天前'   },
-    ],
-    detailStats: { worktrees: 3, linkedReqs: 2, disk: '128 MB', fetchText: '5 分钟前' },
-    repoStats:   { worktrees: 3, linkedReqs: 2, fetchText: '5 分钟前',  ahead: '12 commits ahead' },
-    tags: [
-      { label: '退款功能优化',    tone: 'succ'  },
-      { label: '退款链路 v2',     tone: 'plain' },
-      { label: '退款幂等性修复', tone: 'warm' },
-    ],
-    date: '2026-07-08',
-  },
-  'order-service': {
-    worktrees: [
-      { branch: 'main',                                 meta: '主分支 · synced',                                     path: '~/.aidevspace/repos/order-service',                              badgeTone: 'succ',  badgeText: '干净' },
-      { branch: 'req-2024-007-refund-optimize',         meta: '25 分钟前 · 9d2e0ab',                                 path: '~/.aidevspace/requirements/req-2024-007/order-service',         reqLink: '退款功能优化', badgeTone: 'warm',  badgeText: '4 文件 · +128' },
-    ],
-    commits: [
-      { sha: '9d2e0ab', msg: 'feat(order): 退款时回写订单状态',   author: '李雷 · 25 分钟前' },
-      { sha: '7c91b44', msg: 'feat(order): 订单导出 CSV',          author: '李雷 · 2 天前'   },
-    ],
-    detailStats: { worktrees: 2, linkedReqs: 2, disk: '92 MB', fetchText: '2 小时前' },
-    repoStats:   { worktrees: 2, linkedReqs: 2, fetchText: '2 小时前',  ahead: 'synced'          },
-    tags: [
-      { label: '退款功能优化',   tone: 'succ'  },
-      { label: '订单导出（CSV）', tone: 'plain' },
-    ],
-    date: '2026-07-08',
-  },
-  'member-service': {
-    worktrees: [
-      { branch: 'main',                                 meta: '主分支 · synced',                                     path: '~/.aidevspace/repos/member-service',                             badgeTone: 'succ',  badgeText: '干净' },
-      { branch: 'feature/member-tier',                  meta: '3 天前 · b1c7e22',                                    path: '~/.aidevspace/requirements/req-002-tier/member-service',        reqLink: '会员等级体系重构', badgeTone: 'warm',  badgeText: '3 文件 · +56' },
-    ],
-    commits: [
-      { sha: 'b1c7e22', msg: 'feat(member): 等级体系重构',          author: '李雷 · 3 天前'   },
-      { sha: '4b1cd09', msg: 'fix: 成长值并发更新',                author: '李雷 · 1 周前'   },
-    ],
-    detailStats: { worktrees: 2, linkedReqs: 1, disk: '64 MB', fetchText: '昨天' },
-    repoStats:   { worktrees: 1, linkedReqs: 1, fetchText: '昨天',     ahead: '3 commits behind' },
-    tags: [{ label: '会员等级体系重构', tone: 'warm' }],
-    date: '2026-07-07',
-  },
-  'pay-gateway': {
-    worktrees: [
-      { branch: 'main',                                 meta: '主分支 · synced',                                     path: '~/.aidevspace/repos/pay-gateway',                                badgeTone: 'succ',  badgeText: '干净' },
-      { branch: 'feature/gray-payment',                 meta: '1 小时前 · c4d9f30',                                  path: '~/.aidevspace/requirements/req-003-gray/pay-gateway',           reqLink: '支付链路灰度切流', badgeTone: 'warm',  badgeText: '7 文件 · +212' },
-    ],
-    commits: [
-      { sha: 'c4d9f30', msg: 'feat(pay): 灰度切流配置',             author: '李雷 · 1 小时前' },
-      { sha: '8a7e6d5', msg: 'feat(pay): 风险引擎接入',            author: '李雷 · 2 天前'   },
-    ],
-    detailStats: { worktrees: 2, linkedReqs: 2, disk: '156 MB', fetchText: '3 小时前' },
-    repoStats:   { worktrees: 2, linkedReqs: 2, fetchText: '3 小时前',  ahead: 'synced'          },
-    tags: [
-      { label: '支付链路灰度切流', tone: 'plain' },
-      { label: '风险决策引擎接入', tone: 'warm'  },
-    ],
-    date: '2026-07-09',
-  },
-  'risk-service': {
-    worktrees: [
-      { branch: 'main',                                 meta: '主分支 · synced',                                     path: '~/.aidevspace/repos/risk-service',                               badgeTone: 'succ',  badgeText: '干净' },
-    ],
-    commits: [
-      { sha: 'e5a1b82', msg: 'feat(risk): 决策引擎 v2',             author: '李雷 · 5 小时前' },
-    ],
-    detailStats: { worktrees: 1, linkedReqs: 1, disk: '48 MB', fetchText: '5 小时前' },
-    repoStats:   { worktrees: 1, linkedReqs: 1, fetchText: '5 小时前',  ahead: 'synced'          },
-    tags: [{ label: '风险决策引擎接入', tone: 'plain' }],
-    date: '2026-07-08',
-  },
-  'coupon-service': {
-    worktrees: [
-      { branch: 'main',                                 meta: '主分支 · 1 commit behind',                            path: '~/.aidevspace/repos/coupon-service',                             badgeTone: 'succ',  badgeText: '干净' },
-      { branch: 'feature/coupon-stack',                 meta: '5 天前 · f6b2c93',                                    path: '~/.aidevspace/requirements/req-005-coupon/coupon-service',      reqLink: '优惠券叠加规则', badgeTone: 'warm',  badgeText: '5 文件 · +189' },
-    ],
-    commits: [
-      { sha: 'f6b2c93', msg: 'feat(coupon): 叠加规则配置化',       author: '李雷 · 5 天前'   },
-    ],
-    detailStats: { worktrees: 2, linkedReqs: 1, disk: '72 MB', fetchText: '2 天前' },
-    repoStats:   { worktrees: 1, linkedReqs: 1, fetchText: '2 天前',    ahead: '1 commit behind' },
-    tags: [{ label: '优惠券叠加规则', tone: 'plain' }],
-    date: '2026-07-07',
-  },
-  'cart-service': {
-    worktrees: [
-      { branch: 'main',                                 meta: '主分支 · synced',                                     path: '~/.aidevspace/repos/cart-service',                               badgeTone: 'succ',  badgeText: '干净' },
-    ],
-    commits: [
-      { sha: '7d8e4a1', msg: 'feat(cart): 持久化 Redis',           author: '李雷 · 2 周前'   },
-    ],
-    detailStats: { worktrees: 1, linkedReqs: 1, disk: '38 MB', fetchText: '昨天' },
-    repoStats:   { worktrees: 1, linkedReqs: 1, fetchText: '昨天',      ahead: 'synced'          },
-    tags: [],
-    date: '2026-07-08',
-  },
-  'seckill-service': {
-    worktrees: [
-      { branch: 'main',                                 meta: '主分支 · synced',                                     path: '~/.aidevspace/repos/seckill-service',                            badgeTone: 'succ',  badgeText: '干净' },
-    ],
-    commits: [
-      { sha: '8e9f5b2', msg: 'chore: 压测报告归档',                author: '李雷 · 1 周前'   },
-    ],
-    detailStats: { worktrees: 1, linkedReqs: 1, disk: '54 MB', fetchText: '1 周前' },
-    repoStats:   { worktrees: 1, linkedReqs: 1, fetchText: '1 周前',    ahead: 'synced'          },
-    tags: [],
-    date: '2026-07-05',
-  },
-};

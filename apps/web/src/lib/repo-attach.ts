@@ -17,10 +17,15 @@ import { z } from 'zod'
 import {
   AttachReposRequestSchema,
   AttachReposResponseSchema,
+  PostRepoRegistryRequestSchema,
+  RepoRegistryEntrySchema,
   RepoRegistryResponseSchema,
+  RepoUsageResponseSchema,
   type AttachReposRequest,
   type AttachReposResponse,
+  type RepoRegistryEntry,
   type RepoRegistryResponse,
+  type RepoUsageResponse,
 } from '@ai-devspace/shared'
 import { agentFetch, AgentError } from './agent-client'
 
@@ -106,8 +111,106 @@ export async function fetchRepoRegistry(
 // Re-export Zod schema + 类型 —— 让 web 端不必再 import @ai-devspace/shared
 // ============================================================================
 
-export { AttachReposRequestSchema, AttachReposResponseSchema, RepoRegistryResponseSchema }
-export type { AttachReposRequest, AttachReposResponse, RepoRegistryResponse }
+export {
+  AttachReposRequestSchema,
+  AttachReposResponseSchema,
+  RepoRegistryResponseSchema,
+  RepoUsageResponseSchema,
+}
+export type {
+  AttachReposRequest,
+  AttachReposResponse,
+  RepoRegistryResponse,
+  RepoUsageResponse,
+}
+
+// ============================================================================
+// issue 07 (ADR-0030 D6):GET /api/repos/:name/usage —— 「被 N 个需求使用」派生
+// ============================================================================
+
+/**
+ * 拉取单个仓库的关联需求列表(ADR-0030 D6)。
+ *
+ * 用途:
+ * - /repos 列表页:每个仓库卡片显示「被 N 个需求使用」徽章
+ * - /repos/[name] 详情页:完整关联需求列表(branch + codebasePath)
+ *
+ * 错误处理:AgentError(404 E_REPO_NOT_FOUND / 401 / 500)透传;
+ * 网络错 / ZodError 透传。调用方决定 fallback(列表页一般用 0 兜底)。
+ */
+export async function fetchRepoUsage(
+  repoName: string,
+  opts?: { signal?: AbortSignal },
+): Promise<RepoUsageResponse> {
+  const raw = await agentFetch<RepoUsageResponse>(
+    `/api/repos/${encodeURIComponent(repoName)}/usage`,
+    {
+      method: 'GET',
+      signal: opts?.signal,
+    },
+  )
+  return RepoUsageResponseSchema.parse(raw)
+}
+
+// ============================================================================
+// issue 07 (ADR-0030 D8):POST /api/repos —— 「+ 添加仓库」弹层使用
+// ============================================================================
+
+/**
+ * 调后端添加仓库条目。
+ *
+ * - 入参 / 出参 schema 双重校验
+ * - 非 2xx 抛 AgentError(带 status + body,前端按 status 决定文案)
+ * - 网络错 / ZodError 透传
+ *
+ * 行为:后端必跑 `git ls-remote` 验证可达 + 凭据可用(决策 Q5),
+ * 通常 ~5-10s,所以弹层需要 loading 态。
+ */
+export interface CreateRepoPayload {
+  name: string
+  gitUrl: string
+  description: string
+}
+
+export async function createRepo(
+  payload: CreateRepoPayload,
+  opts?: { signal?: AbortSignal },
+): Promise<RepoRegistryEntry> {
+  const parsed = PostRepoRegistryRequestSchema.parse(payload)
+  const raw = await agentFetch<RepoRegistryEntry>('/api/repos', {
+    method: 'POST',
+    body: JSON.stringify(parsed),
+    signal: opts?.signal,
+  })
+  return RepoRegistryEntrySchema.parse(raw)
+}
+
+export { PostRepoRegistryRequestSchema, RepoRegistryEntrySchema }
+export type { RepoRegistryEntry }
+
+// ============================================================================
+// issue 07 (ADR-0030 Q7):DELETE /api/repos/:name —— 卡片 hover「删除」使用
+// ============================================================================
+
+/**
+ * 删除注册表条目。
+ *
+ * - 204 No Content → undefined
+ * - 409 E_REPO_IN_USE(被 N≥1 需求使用 + 未带 force)→ 抛 AgentError(让前端弹二次确认)
+ * - 404 / 其他 → 抛 AgentError
+ *
+ * `force=true` 时即使被使用也删除,但**不** rm 任何 codebase/(决策 113 沿用)。
+ */
+export async function deleteRepo(
+  repoName: string,
+  opts?: { force?: boolean; signal?: AbortSignal },
+): Promise<void> {
+  const query = opts?.force ? '?force=true' : ''
+  await agentFetch<void>(`/api/repos/${encodeURIComponent(repoName)}${query}`, {
+    method: 'DELETE',
+    signal: opts?.signal,
+  })
+}
 
 // Zod 的版本断言 schema(简单 typeguard,避免 web 端 import z 重复声明)
 export function isAttachReposError(err: unknown): err is AttachReposError {
