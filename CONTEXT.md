@@ -3,7 +3,7 @@
 > 本文档是项目的"活字典"。所有领域名词在此有且仅有一个含义。修改任何产品设计前，请先来对照术语。
 >
 > 创建：2026-07-08  
-> 当前版本：v1.0.7（仓库注册表化 + 需求级独立 clone；ADR-0003/0016 部分 superseded）
+> 当前版本：v1.0.8（HTTP/2 stream SSH 提示 + 追加仓库增量语义；ADR-0032/0033 新立）
 
 ---
 
@@ -557,6 +557,17 @@ ANALYZING 主区不再使用永久 320px 抽屉，改为 **「默认折叠的浮
 | 116 | **旧 `~/.aidevspace/repos/` 目录 = 启动时一次性自动迁移**（读各子仓库 `git remote get-url origin` 生成 `repos.yaml` 条目，description 留空）；**不删**旧目录（可能含未 push 提交），UI 提示「可手动删除」；`SUBDIRS` 移除 `'repos'` | [ADR-0030](docs/adr/0030-repo-registry-and-per-requirement-clone.md) D2 |
 | 117 | **旧 `requirements/*/repos/`（worktree 形态）= 不迁移**，代码只认 `codebase/`；老需求显示未关联，用户重新关联即走 clone；worktree 形态一次性出局（不双形态共存，避免清理逻辑长期埋雷） | [ADR-0030](docs/adr/0030-repo-registry-and-per-requirement-clone.md) D4 |
 | 118 | **workspace `.gitignore` 必补 `requirements/*/codebase/`** + `*/codebase/**/.git/`；否则若 workspace 自身是 git 仓库，大量嵌套 git 仓库会污染版本管理 | [ADR-0030](docs/adr/0030-repo-registry-and-per-requirement-clone.md) 负面 |
+
+---
+
+## v1.0.8 增量决策（2 轮 grilling 沉淀 · 2026-08-16）
+
+> 本节是 v1.0.7 锁定后的迭代记录，不修改上面 v1.0 / v1.0.1 / ... / v1.0.7 决策。所有增量由 [ADR-0032](docs/adr/0032-http2-stream-reset-ssh-hint.md) + [ADR-0033](docs/adr/0033-incremental-attach-repos.md) 两份新立 ADR 承载完整内容。
+
+| # | 决策 | 关联 ADR |
+| --- | ------ | ---------- |
+| 119 | **HTTP/2 stream 失败 = 新错误码 `E_HTTP2_STREAM_RESET`**：`mapCloneError` 在 E_NETWORK 前加分支，正则 `/HTTP\/2 stream/` `/curl \d+ HTTP\/2/` 命中全 stderr；**不重试**(fail-fast,协议层硬错重试大概率再错,白白等 3s+);错误 message 附加根因 + SSH workaround(用户去 `/repos` 改 git URL);前端 `CloneStatusBadge` 不新增 UI,文案走 SSE `repo-clone-progress` 事件 `error` 字段 | [ADR-0032](docs/adr/0032-http2-stream-reset-ssh-hint.md) D1-D5 |
+| 120 | **追加仓库 = 增量追加**(取代旧的"全量追加"语义):append 模式下,`pickedRepoNames` 中的仓库 checkbox checked + disabled + 末尾「✓ 已关联」徽章 + **置顶排序**(pickedRepoNames 顺序优先);selectedNames 保留 pickedRepoNames 初值(UI 真相源),**submit 时 filter** 排除已关联;footer 数字 = 本次新增数;全已关联态显示绿色 banner「✓ 本需求已关联全部 N 个仓库,无需追加」 | [ADR-0033](docs/adr/0033-incremental-attach-repos.md) D1-D5 |
 
 ---
 
