@@ -3,7 +3,7 @@
 > 本文档是项目的"活字典"。所有领域名词在此有且仅有一个含义。修改任何产品设计前，请先来对照术语。
 >
 > 创建：2026-07-08  
-> 当前版本：v1.0.8（HTTP/2 stream SSH 提示 + 追加仓库增量语义；ADR-0032/0033 新立）
+> 当前版本：v1.0.9（需求级 codebase detach；ADR-0034 新立）
 
 ---
 
@@ -83,6 +83,20 @@ _Avoid_: 仓库池（"池"暗示里面装着东西，现在只装条目）、仓
 - 归属 ADR：[ADR-0030](docs/adr/0030-repo-registry-and-per-requirement-clone.md) D3/D4
 
 _Avoid_: worktree（v1.0 概念，已退役；`.git` 是文件 vs 真目录的差异不能混用）、工作副本、源码目录
+
+### Detach（取消关联）
+
+把某个 repo 从某个 Requirement 中解除关联，**删除该需求下的 codebase 副本**（`safeRm requirements/<req-id>/codebase/<repoName>/`）。与全局仓库池条目删除（`DELETE /api/repos/:name`）严格独立 —— repos.yaml 永远不动。
+
+- 触发：DRAFTING 页面 RepoBar chip 上的红色 ✕ 按钮
+- 二次确认：DetachCodebaseDialog（数据丢失前最后一道闸；不可逆 —— 重 attach 等于重 clone）
+- 状态门禁：仅 DRAFTING 状态可执行；ANALYZING / BOARD / WRAP-UP 期间拒绝（409 `E_REQUIREMENT_NOT_DRAFTING`）
+- 联动清理：N=1→0 时顺带清 `meta.yaml::branchName`（per-requirement 字段，所有 repo 共享）；N≥1 时 branchName 保留
+- 端点：`DELETE /api/requirement/:id/codebase/:name`（204 成功 / 404 需求或 codebase 不存在 / 409 状态门禁 / 500 safeRm 抛错）
+- 并发保护：`RequirementService.withRequirementLock(reqId, fn)` 与 `attachRepo` / `attachRepos` 共用同一把进程内 mutex（同 `WorkspaceService.registryLock` 模式）
+- 归属 ADR：[ADR-0034](docs/adr/0034-detach-requirement-codebase.md)
+
+_Avoid_: 「detach = 删 repos.yaml 条目」（错误 —— repos.yaml 由 `DELETE /api/repos/:name` 独立删除；detach 永远不动它）、「detach = 软删除可撤销」（错误 —— rm 目录后无法撤销，重 attach 是重 clone，不是恢复）
 
 ### Task（任务）
 
