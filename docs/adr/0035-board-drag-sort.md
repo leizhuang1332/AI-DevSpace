@@ -85,16 +85,22 @@
 > 不选 react-dnd(社区在迁出,HTML5 backend 为主)。
 > 不选 framer-motion Reorder(跨列天然弱,包体 250 KB 违 Linear 紧凑)。
 
-### D4. 触发器 = 左侧 hover 才显拖拽手柄
+### D4. 触发器 = card-top 整行 + Notion 2024 视觉(v2,2026-08-16 grill 替换原 D4)
 
-- Card 整体仍是 `cursor: pointer`(点击进详情,沿用 ADR-0027 D5)
-- 左侧 `⋮⋮` 6 点 sprite,默认 `opacity: 0`,`group-hover:opacity-100`
-- 仅手柄区域 `cursor: grab` / `cursor: grabbing`(拖拽中)
-- 移动阈值 = 5px(由 @dnd-kit `PointerSensor` 默认 `activationConstraint.distance`)
-- 移动 < 5px → 当点击进详情
+> **v1.0.8 增量**:原 D4「左侧 `⋮⋮` 6 点 sprite,hover 才显」被 grill 替换为「card-top 整行可拖 + Notion 2024 视觉」。D1-D3 / D5-D7 不动,本节以 v2 为准。
 
-> 不选整张可拖(与点击进详情冲突,ghost 遮挡菜单)。
-> 不选始终显手柄(5 列 × N 卡片 = 视觉噪声,违 Linear 紧凑)。
+- **触发器**:`card-top` 整行(包含 id 短哈希 + 菜单 `⋯`),`useSortable` 的 listeners + attributes 绑到此 div
+- **不可拖区**:title 主体(2 行 line-clamp)+ meta 行(priority / source / labels / assignee);`onClick` 仍触发进详情
+- **hover 反馈**:`cursor: grab` + `background: var(--brand-50)` + `box-shadow: inset 0 2px 0 var(--brand)`(Linear 风格 2px 顶线,不挤压 padding)
+- **焦点反馈**:`.card:focus-visible` 显 `outline:2px solid var(--brand)` + `outline-offset:2px` + `box-shadow:0 0 0 4px var(--brand-50)`(决策 24 / 30 a11y 一致)
+- **菜单 click 行为**:`onClick` = `handleMenuToggle`(stopPropagation + setMenuOpen);`onPointerDown` = `e.stopPropagation()`(避免 @dnd-kit PointerSensor 误触发)
+- **拖拽中视觉**:DragOverlay 渲染 ghost,`transform: scale(1.04) rotate(2deg)` + brand-700 阴影 + 2px brand border
+- **目标列**:空列 + 跨列拖 → 显示 120px placeholder "释放此处 →"(2px 虚线 + brand-50 背景);非空列 + 跨列拖 → 现有卡片 `translateY(8px) + opacity:0.7`,200ms ease-out 让位
+- **移动阈值** = 5px(`PointerSensor { activationConstraint: { distance: 5 } }`);< 5px 仍识别为点击进详情
+
+> 不选 Linear 现状(用户 grill 后改向 Notion 2024 + id 区触发,理由:触发区 = 整行(240px × 24px)远大于 `⋮⋮ 6 点 12px`,id 区 = 卡片身份 primary key,语义更直观)
+> 不选 Trello 整张可拖(与点击进详情冲突,5px 阈值长按容易误判)
+> 不选始终显手柄(5 列 × N 卡片 = 视觉噪声)
 
 ### D5. 落盘策略 = 分级乐观 / 悲观
 

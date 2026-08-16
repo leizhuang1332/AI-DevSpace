@@ -3,7 +3,8 @@
 /**
  * board 单张卡片(中等密度 112-120px,图 1 形态)— issue 07 / ADR-0027 D3
  *
- * 视觉对照基线:`docs/design/pages/board-color-options.html` .card 规则。
+ * 视觉对照基线:`docs/design/pages/board-color-options.html` .card 规则;
+ * 拖拽视觉对照基线:`docs/design/pages/board-drag-sort-C.html`(C 方案)。
  *
  * 卡片结构(自上而下):
  * - 顶部:id-short(mono,ULID 末 4)+ 右侧 ⋯ 菜单(archive)
@@ -15,7 +16,10 @@
  * `/requirements/[id]/board/[cardId]` 详情页(ADR-0027 D5 toggle 双态)。
  * `onClick` prop 仍 optional —— 无 onClick 时卡片不可点击(测试 / 静态展示用)。
  *
- * 拖拽(issue 19 / ADR-0035 D4):左侧 `⋮⋮` 6 点手柄,hover 才显,默认 `opacity: 0`。
+ * 拖拽(issue 19 / ADR-0035 D4 v2):触发器 = `card-top` 整行(id 短哈希 + 菜单)
+ * 而非「左侧 ⋮⋮ 6 点 sprite」。hover signaller = brand-50 背景 + 2px brand 顶线
+ * (Linear 风格,不挤压 padding)。键盘 focus 状态 = 2px outline + 4px brand-50 outer。
+ *
  * `useSortable` 接管 transform / transition / ref;`isDragging` 时整张卡淡化让
  * DragOverlay (BoardSection) 接管 visual。
  */
@@ -40,13 +44,19 @@ export interface BoardCardProps {
   onArchive?: (cardId: string) => void
   /**
    * 拖拽开关(issue 19 / ADR-0035)。
-   * - `true`(默认)→ 接 `useSortable`,左侧手柄可拖
-   * - `false` → 跳过 sortable,左侧手柄不渲染(测试 / 静态展示用)
+   * - `true`(默认)→ 接 `useSortable`,card-top 整行可拖
+   * - `false` → 跳过 sortable,card-top 不可拖(测试 / 静态展示用)
    */
   draggable?: boolean
+  /**
+   * 让位状态(issue 19 / ADR-0035 C 方案):
+   * - `true` → 跨列拖时本列其他卡片显 `translateY(8px) + opacity:0.7` 200ms 让位
+   * - `false`(默认) → 正常态
+   */
+  displaced?: boolean
 }
 
-export function BoardCard({ card, onClick, onArchive, draggable = true }: BoardCardProps) {
+export function BoardCard({ card, onClick, onArchive, draggable = true, displaced = false }: BoardCardProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const priorityBadge = card.priority ? PRIORITY_BADGE[card.priority] : null
   const sourceLabel = SOURCE_LABEL[card.source]
@@ -78,9 +88,10 @@ export function BoardCard({ card, onClick, onArchive, draggable = true }: BoardC
     setMenuOpen((v) => !v)
   }
 
-  // 手柄 click / keydown 触发拖拽 — 阻止冒泡到 article 的 onClick(进详情)
-  const handleDragHandle = (e: React.SyntheticEvent) => {
+  // 菜单 click 不触发拖拽(避免冒泡)
+  const handleMenuToggle = (e: React.MouseEvent) => {
     e.stopPropagation()
+    setMenuOpen((v) => !v)
   }
 
   return (
@@ -96,43 +107,33 @@ export function BoardCard({ card, onClick, onArchive, draggable = true }: BoardC
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
       style={draggable ? dragStyle : undefined}
-      className={`group bg-bg-elevated border border-border rounded-md p-3 flex flex-col gap-2 transition-all ${
+      data-displaced={displaced ? 'true' : 'false'}
+      className={`group bg-bg-elevated border border-border rounded-md p-3 flex flex-col gap-2 transition-all duration-200 ease-out focus:outline-none focus-visible:outline-2 focus-visible:outline-brand focus-visible:outline-offset-2 focus-visible:shadow-[0_0_0_4px_var(--brand-50)] ${
         onClick ? 'cursor-pointer hover:border-brand hover:shadow-md hover:-translate-y-px' : ''
-      }`}
+      } ${displaced ? 'translate-y-2 opacity-70' : ''}`}
     >
-      {/* 顶部:id-short + 菜单 */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          {/* 拖拽手柄(issue 19 / ADR-0035 D4):左侧 ⋮⋮ 6 点,hover 才显 */}
-          {draggable && (
-            <button
-              type="button"
-              data-testid="board-card-drag-handle"
-              aria-label="拖动卡片"
-              onClick={handleDragHandle}
-              onMouseDown={handleDragHandle}
-              className="cursor-grab active:cursor-grabbing text-text-3 opacity-0 group-hover:opacity-100 transition-opacity leading-none px-0.5 -ml-1 touch-none"
-              {...attributes}
-              {...listeners}
-            >
-              <span className="inline-grid grid-cols-2 gap-[1px] text-[10px]" aria-hidden="true">
-                <span>⋮</span>
-                <span>⋮</span>
-                <span>⋮</span>
-                <span>⋮</span>
-              </span>
-            </button>
-          )}
-          <span className="font-mono text-xs text-text-3" data-testid="board-card-id">
-            {shortCardId(card.id)}
-          </span>
-        </div>
+      {/* 顶部:id-short + 菜单 · 拖拽触发器(issue 19 / ADR-0035 D4 v2)*/}
+      <div
+        data-testid="board-card-top"
+        data-drag-handle={draggable ? 'true' : 'false'}
+        className={`flex items-center justify-between -m-1 p-1 rounded transition-colors ${
+          draggable
+            ? 'cursor-grab active:cursor-grabbing hover:bg-brand-50 hover:shadow-[inset_0_2px_0_var(--brand)]'
+            : ''
+        }`}
+        {...(draggable ? attributes : {})}
+        {...(draggable ? listeners : {})}
+      >
+        <span className="font-mono text-xs text-text-3" data-testid="board-card-id">
+          {shortCardId(card.id)}
+        </span>
         {onArchive && (
           <div className="relative">
             <button
               type="button"
               data-testid="board-card-menu"
-              onClick={toggleMenu}
+              onClick={handleMenuToggle}
+              onPointerDown={(e) => e.stopPropagation()}
               aria-label="卡片菜单"
               className="text-text-3 hover:text-text-1 text-sm leading-none px-1"
             >
@@ -157,7 +158,7 @@ export function BoardCard({ card, onClick, onArchive, draggable = true }: BoardC
         )}
       </div>
 
-      {/* title(2 行) */}
+      {/* title(2 行)· 不可拖,click = 进详情 */}
       <div
         className="text-sm font-medium text-text-1 leading-snug"
         style={{
@@ -187,7 +188,7 @@ export function BoardCard({ card, onClick, onArchive, draggable = true }: BoardC
         </div>
       )}
 
-      {/* 底部 meta 行 */}
+      {/* 底部 meta 行 · 不可拖 */}
       <div
         data-testid="board-card-meta"
         className="flex items-center gap-2 pt-1 mt-1 border-t border-dashed border-border"

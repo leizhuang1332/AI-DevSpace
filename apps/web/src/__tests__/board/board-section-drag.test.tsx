@@ -147,17 +147,19 @@ afterEach(() => {
 // 拖拽 DOM 标记
 // ---------------------------------------------------------------------------
 
-describe('BoardSection · 拖拽 DOM 标记(issue 19 / ADR-0035 D4)', () => {
-  it('每张卡片渲染左侧 ⋮⋮ 拖拽手柄', () => {
+describe('BoardSection · 拖拽 DOM 标记(issue 19 / ADR-0035 D4 v2 · C 方案)', () => {
+  it('每张卡片 card-top 区域 = 拖拽触发器(替换 A 方案左侧 ⋮⋮)', () => {
     renderBoard('req-001', [
       makeCard({ id: '01J7X3K2P5EVR0Z3YQJD8HFK1', status: 'backlog' }),
     ])
-    const handle = screen.getByTestId('board-card-drag-handle')
-    expect(handle).toBeInTheDocument()
-    expect(handle).toHaveAttribute('aria-label', '拖动卡片')
+    const top = screen.getByTestId('board-card-top')
+    expect(top).toBeInTheDocument()
+    expect(top.getAttribute('data-drag-handle')).toBe('true')
+    // cursor: grab 由 className 体现(grill 锁定 C 方案)
+    expect(top.className).toMatch(/cursor-grab/)
   })
 
-  it('卡片根 article 接 draggable 状态(含 data-card-id + data-status)', () => {
+  it('卡片根 article 接 draggable 状态(含 data-card-id + data-status + data-displaced=false)', () => {
     renderBoard('req-001', [
       makeCard({ id: '01J7X3K2P5EVR0Z3YQJD8HFK1', status: 'todo' }),
     ])
@@ -165,6 +167,7 @@ describe('BoardSection · 拖拽 DOM 标记(issue 19 / ADR-0035 D4)', () => {
     expect(card.getAttribute('data-card-id')).toBe('01J7X3K2P5EVR0Z3YQJD8HFK1')
     expect(card.getAttribute('data-status')).toBe('todo')
     expect(card.getAttribute('data-dragging')).toBe('false')
+    expect(card.getAttribute('data-displaced')).toBe('false')
   })
 
   it('5 列均渲染 data-status(BoardSection 通过 useDroppable 标识列)', () => {

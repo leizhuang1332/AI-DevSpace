@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>board 拖拽重排 5 方案对比索引 · ADR-0035 redesign · AI-DevSpace</title>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+:root{
+  --brand:#5e6ad2; --brand-50:#eef0fb; --brand-100:#dadef7; --brand-600:#525bc7; --brand-700:#4147a3;
+  --bg:#fbfbfd; --bg-elevated:#ffffff; --bg-subtle:#f5f5f7; --bg-hover:#f1f1f3;
+  --border:#ebebef; --border-strong:#d8d8de;
+  --text-1:#0f172a; --text-2:#475569; --text-3:#94a3b8;
+  --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px; --space-6:24px; --space-8:32px;
+  --text-xs:11px; --text-sm:12px; --text-base:13px; --text-md:14px; --text-lg:16px; --text-xl:18px; --text-2xl:20px;
+  --radius-md:6px; --radius-lg:8px; --radius-xl:12px;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.04); --shadow-md:0 2px 4px rgba(0,0,0,.06);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--text-1);font-family:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;font-size:var(--text-base);line-height:1.5;-webkit-font-smoothing:antialiased}
+.page-wrap{padding:var(--space-8);max-width:1480px;margin:0 auto}
+h1{font-size:var(--text-2xl);font-weight:600;letter-spacing:-0.02em;margin-bottom:var(--space-2)}
+.sub{color:var(--text-3);font-size:var(--text-sm);margin-bottom:var(--space-8);line-height:1.7}
+.sub code{font-family:'JetBrains Mono',monospace;background:var(--bg-subtle);padding:1px 6px;border-radius:4px;font-size:12px;color:var(--brand-700)}
+
+.scheme{display:flex;gap:var(--space-5);padding:var(--space-5);background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-xl);margin-bottom:var(--space-4);box-shadow:var(--shadow-sm);transition:border-color .12s,box-shadow .12s}
+.scheme:hover{border-color:var(--brand);box-shadow:var(--shadow-md)}
+.scheme .num{width:64px;height:64px;border-radius:50%;background:var(--brand-50);color:var(--brand-700);font-size:28px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.scheme .body{flex:1;min-width:0}
+.scheme .body h2{font-size:var(--text-lg);font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:var(--space-2)}
+.scheme .body h2 .tag{font-size:var(--text-xs);padding:2px 8px;border-radius:4px;font-weight:500}
+.scheme .body h2 .tag.rec{background:var(--brand-50);color:var(--brand-700)}
+.scheme .body h2 .tag.alt{background:var(--bg-subtle);color:var(--text-3)}
+.scheme .body .desc{font-size:var(--text-sm);color:var(--text-2);margin-bottom:var(--space-3);line-height:1.6}
+.scheme .body .meta{display:flex;flex-wrap:wrap;gap:var(--space-2);margin-bottom:var(--space-3)}
+.scheme .body .meta span{font-size:var(--text-xs);color:var(--text-2);padding:3px 8px;background:var(--bg-subtle);border-radius:4px;font-weight:500}
+.scheme .body .meta span.pro{color:var(--success);background:rgba(22,163,74,.08)}
+.scheme .body .meta span.con{color:var(--error);background:rgba(239,68,68,.08)}
+.scheme .body .open{display:inline-flex;align-items:center;gap:6px;font-size:var(--text-sm);font-weight:500;color:var(--brand-700);text-decoration:none;padding:6px 14px;border:1px solid var(--brand);border-radius:6px;transition:all .12s}
+.scheme .body .open:hover{background:var(--brand);color:#fff}
+
+.note{margin-top:var(--space-8);padding:var(--space-5);background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-lg);font-size:var(--text-sm);color:var(--text-2);line-height:1.8}
+.note strong{color:var(--text-1)}
+.note code{font-family:'JetBrains Mono',monospace;background:var(--bg-subtle);padding:1px 6px;border-radius:4px;font-size:12px;color:var(--brand-700)}
+</style>
+</head>
+<body>
+
+<div class="page-wrap">
+
+<h1>board 拖拽重排 · 5 方案对比索引</h1>
+<p class="sub">
+  本期 ADR-0035 锁定方案 A(Linear 风格 / hover 才显手柄)。用户反馈希望重新审视交互形式,
+  给出 5 个候选方案,每个方案独立全尺寸原型(点击进入查看)。<br>
+  算法 / 库 / 冲突 UI / 详情页只读行 = 5 方案共用(<code>浮点中位</code> + <code>@dnd-kit</code> + <code>StatusConstraintModal</code>),
+  本索引只对比**触发器 + 拖拽中视觉** + **交互流**。
+</p>
+
+<!-- A. Linear 现状 -->
+<a class="scheme" href="board-drag-sort-A.html" style="text-decoration:none;color:inherit">
+  <div class="num">A</div>
+  <div class="body">
+    <h2>Linear 现状 · hover 才显手柄 <span class="tag rec">推荐</span></h2>
+    <div class="desc">左侧 <code>⋮⋮</code> 6 点 sprite,默认 <code>opacity:0</code>,<code>group-hover:opacity:1</code>。卡片其他区域仍是 cursor-pointer(点击进详情)。移动 5px 阈值,小于阈值 = 点击。</div>
+    <div class="meta">
+      <span class="pro">决策 17 「Linear 风格」字面落地</span>
+      <span class="pro">0 视觉噪声</span>
+      <span class="pro">工业事实标准</span>
+      <span class="con">没用过的用户需 hover 才发现可拖</span>
+    </div>
+    <span class="open">全尺寸查看 →</span>
+  </div>
+</a>
+
+<!-- B. Trello 整张可拖 -->
+<a class="scheme" href="board-drag-sort-B.html" style="text-decoration:none;color:inherit">
+  <div class="num">B</div>
+  <div class="body">
+    <h2>Trello 整张可拖 · 0 视觉负载 <span class="tag alt">备选</span></h2>
+    <div class="desc">整张卡片 cursor: grab,无手柄,移动 5px 启动拖拽。卡片其他区域 = 点击进详情 仍生效,但 hover 整张卡就显 cursor: grab 暗示可拖。</div>
+    <div class="meta">
+      <span class="pro">0 视觉负载</span>
+      <span class="pro">用户不需要"找手柄"</span>
+      <span class="con">点击 / 拖拽都用同一区域</span>
+      <span class="con">移动 5px 阈值长按容易误判</span>
+    </div>
+    <span class="open">全尺寸查看 →</span>
+  </div>
+</a>
+
+<!-- C. Notion 2024 风格 + id 区触发 -->
+<a class="scheme" href="board-drag-sort-C.html" style="text-decoration:none;color:inherit">
+  <div class="num">C</div>
+  <div class="body">
+    <h2>Notion 2024 · id 区触发 + 放大 ghost + 让位 <span class="tag rec">用户选定</span></h2>
+    <div class="desc">触发器 = <strong>card-top 整行(id 短哈希 + 菜单 <code>⋯</code>)</strong>,<code>cursor: grab</code> + hover 显 brand-50 高亮;无 <code>⋮⋮</code> 手柄。title 主体 + meta 行 click 行为不变(进详情)。拖拽中:notion 风 ghost scale(1.04) + placeholder 虚线 + 列内让位 200ms。</div>
+    <div class="meta">
+      <span class="pro">强烈视觉反馈</span>
+      <span class="pro">id 区 = 卡片身份 primary key,语义直观</span>
+      <span class="pro">触发区 = 整行,比 A 的 6 点大 40 倍</span>
+      <span class="con">实现复杂(@dnd-kit + 动画)</span>
+      <span class="con">与决策 24 「克制,在场」张力</span>
+    </div>
+    <span class="open">全尺寸查看 →</span>
+  </div>
+</a>
+
+<!-- D. 飞书任务 右侧 chevron -->
+<a class="scheme" href="board-drag-sort-D.html" style="text-decoration:none;color:inherit">
+  <div class="num">D</div>
+  <div class="body">
+    <h2>飞书任务 · 右侧 chevron `›` 手柄 <span class="tag alt">备选</span></h2>
+    <div class="desc">右侧 <code>›</code> chevron,hover 才显。镜像现状到右侧;右侧区域已存在 <code>⋯</code> 菜单,chevron 排在菜单**左侧**(顺序: title → ``›`` → `⋯`)。</div>
+    <div class="meta">
+      <span class="pro">右侧更符合"操作区"心智</span>
+      <span class="pro">不挡 ID 短哈希</span>
+      <span class="con">菜单与手柄相邻易误触</span>
+    </div>
+    <span class="open">全尺寸查看 →</span>
+  </div>
+</a>
+
+<!-- E. Move 按钮 + 快捷键 -->
+<a class="scheme" href="board-drag-sort-E.html" style="text-decoration:none;color:inherit">
+  <div class="num">E</div>
+  <div class="body">
+    <h2>Move 按钮 + 快捷键 · 无 drag,纯键盘可达 <span class="tag alt">无障碍</span></h2>
+    <div class="desc">卡片不参与 drag;操作走"卡片菜单 → 移动到 → 选列" 或 快捷键 <code>⌘+↑↓←→</code> 移动焦点卡片。100% 键盘可达,但失去"拖拽"字面语义(用户原诉求)。</div>
+    <div class="meta">
+      <span class="pro">无 a11y 顾虑</span>
+      <span class="pro">键盘 100% 可达</span>
+      <span class="con">失去"拖拽"字面语义</span>
+      <span class="con">违反用户原始诉求</span>
+    </div>
+    <span class="open">全尺寸查看 →</span>
+  </div>
+</a>
+
+<!-- 决策守门 -->
+<div class="note">
+  <strong>grill 守门(已 commit ADR-0035 锁定的 7 决策,本轮不变)</strong><br>
+  • 算法 = 浮点中位法(D2)<br>
+  • 库 = <code>@dnd-kit/core + @dnd-kit/sortable</code>(D3)<br>
+  • 落盘 = 跨列拖悲观 + 列内重排乐观(D5)<br>
+  • 冲突 UI = 复用 StatusConstraintModal 三选项(D6)<br>
+  • 详情页 = 右栏「列内位置 #N / M」只读行(D7)<br>
+  本轮 grilling 仅限**触发器(D4) + 拖拽中视觉**,不重论 D1/D2/D3/D5/D6/D7。
+</div>
+
+</div>
+</body>
+</html>

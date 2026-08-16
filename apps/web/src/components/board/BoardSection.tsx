@@ -399,6 +399,8 @@ export function BoardSection({
                   onCardClick={handleCardClick}
                   onCardArchive={handleArchive}
                   onAddCard={handleAddInColumn}
+                  activeDragCardId={activeDragCardId}
+                  activeDragFromStatus={activeDragCard?.status ?? null}
                 />
               ))}
             </div>
