@@ -7,7 +7,7 @@ import { useTabFocusTrap } from '@/hooks/use-tab-focus-trap'
 
 /**
  * 关联 / 追加仓库弹层(issue 01 ticket · UI-POLISH-SPEC §9 ·
- *   repo-registry-clone/issues/06-web-frontend-followup.md)
+ *   repo-registry-clone/issues/06-web-frontend-followup.md · 18-incremental-attach-repos.md)
  *
  * 视觉对照基线:`docs/design/pages/01-new-requirement-modal.html` §5
  *
@@ -17,9 +17,14 @@ import { useTabFocusTrap } from '@/hooks/use-tab-focus-trap'
  * - **'append'**(追加关联):**不**显示分支名 input,顶部紫色 banner
  *   提示 `将使用统一分支名 <branchName>(创建时已锁定)`
  *
- * 仓库选择(checkbox 列表):
+ * 仓库选择(checkbox 列表 — ADR-0033 / issue 18):
  * - 从 `availableRepos` 渲染(全局仓库池,字段名 name/gitUrl/description)
- * - 已选中的 name(`pickedRepoNames` prop)默认勾选
+ * - 已关联的 name(`pickedRepoNames` prop)默认勾选 + **置顶排序** +
+ *   checkbox **disabled** + 行末 **「✓ 已关联」徽章**
+ * - 未关联仓库 checkbox 可勾;append 模式 submit 时 **filter 排除已关联**
+ *   (深度防御:避免后端 `E_REPO_ALREADY_ATTACHED` 错误路径)
+ * - footer 数字 = **本次新增数**(selectedNames - pickedRepoNames)
+ * - 全已关联态:顶部绿色 banner「✓ 本需求已关联全部 N 个仓库,无需追加」
  *
  * 移除项(决策 Q14):
  * - 「＋ 添加新仓库(粘贴 Git URL)」入口 —— 改为弹层底部一行链接
@@ -27,7 +32,7 @@ import { useTabFocusTrap } from '@/hooks/use-tab-focus-trap'
  *   (兑现 ADR-0016 D7 欠账,issue 06 ticket 跟改)
  *
  * 校验:
- * - 至少勾选 1 个仓库
+ * - 至少勾选 1 个仓库(append 模式下指**新增**数 ≥ 1)
  * - first 模式:`branchName.trim()` 非空 + 长度 ≤ 100 + 不含路径非法字符
  *   (`\` `/` `:` `*` `?` `"` `<` `>` `|` 空白)
  *
@@ -189,9 +194,41 @@ export function AttachReposDialog({
     () => (mode === 'first' ? validateBranchName(branchName) : null),
     [mode, branchName],
   )
+  // ADR-0033 / issue 18:已关联仓库(append 模式 + pickedRepoNames)排序置顶,
+  // 同段内保持 pickedRepoNames 顺序(用户最早关联的在最前)。
+  // first 模式 pickedRepoNames=[] → 排序后等价 availableRepos。
+  const sortedRepos = useMemo(() => {
+    if (mode !== 'append' || pickedRepoNames.length === 0) return availableRepos
+    const attached = pickedRepoNames
+      .map((name) => availableRepos.find((r) => r.name === name))
+      .filter((r): r is DraftingRepo => r !== undefined)
+    const rest = availableRepos.filter(
+      (r) => !pickedRepoNames.includes(r.name),
+    )
+    return [...attached, ...rest]
+  }, [availableRepos, pickedRepoNames, mode])
+
+  // ADR-0033:本次新增数 = selectedNames 减去已关联;first 模式下 pickedRepoNames=[]
+  //   → 等价 selectedNames.size;append 模式下 = 新增数(footer 与 submit 一致)。
+  const newPickCount = useMemo(
+    () =>
+      [...selectedNames].filter((n) => !pickedRepoNames.includes(n)).length,
+    [selectedNames, pickedRepoNames],
+  )
+
+  // ADR-0033:全已关联态检测(append 模式 + 注册表非空 + 全部已在 pickedRepoNames)
+  const isAllAttached = useMemo(
+    () =>
+      mode === 'append' &&
+      availableRepos.length > 0 &&
+      availableRepos.every((r) => pickedRepoNames.includes(r.name)),
+    [mode, availableRepos, pickedRepoNames],
+  )
+
   // issue 06 (ADR-0030 D7 / 决策 Q14):删除 Git URL 入口后,提交数 = 选中数;
   // 不再有 "+1 个待创建" 的过渡项需要并入。
-  const pickedRepoCount = selectedNames.size
+  // ADR-0033:append 模式下提交数 = newPickCount(不含已关联);first 模式 = selectedNames.size。
+  const pickedRepoCount = mode === 'append' ? newPickCount : selectedNames.size
   // Issue 14:in-flight 期间强制 disabled,防止用户连点触发重复提交
   const canSubmit =
     pickedRepoCount > 0 &&
@@ -213,7 +250,11 @@ export function AttachReposDialog({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!canSubmit) return
-    const finalRepoNames = Array.from(selectedNames)
+    // ADR-0033 / issue 18:深度防御 — submit 时 filter 排除已关联的 name。
+    // 后端 `E_REPO_ALREADY_ATTACHED` (决策 109) 仍是兜底,这里保证正常 UI 流不命中。
+    const finalRepoNames = Array.from(selectedNames).filter(
+      (name) => !pickedRepoNames.includes(name),
+    )
     const finalBranchName =
       mode === 'first' ? branchCheck?.sanitized ?? '' : lockedBranchName ?? ''
     onSubmit({ repoNames: finalRepoNames, branchName: finalBranchName })
@@ -286,6 +327,16 @@ export function AttachReposDialog({
             </div>
           )}
 
+          {/* ADR-0033 / issue 18:全已关联态绿色 banner */}
+          {isAllAttached && (
+            <div
+              data-testid="attach-repos-dialog-all-attached-banner"
+              className="px-3 py-2 rounded-md text-xs bg-green-50 text-green-700 border border-green-200"
+            >
+              ✓ 本需求已关联全部 {availableRepos.length} 个仓库,无需追加
+            </div>
+          )}
+
           {/* 仓库选择(checkbox 列表) */}
           <div>
             <label className="block text-sm font-medium text-text-1 mb-2">
@@ -302,8 +353,11 @@ export function AttachReposDialog({
                   暂无可选仓库
                 </div>
               ) : (
-                availableRepos.map((repo) => {
+                sortedRepos.map((repo) => {
                   const checked = selectedNames.has(repo.name)
+                  // ADR-0033 / issue 18:append 模式下已关联仓库 = locked
+                  const isAlreadyAttached =
+                    mode === 'append' && pickedRepoNames.includes(repo.name)
                   // Issue 14:SSE 进度表里有此 repo → 显示 status badge
                   const statusInfo = cloneStatuses?.[repo.name]
                   const status = statusInfo?.status
@@ -313,11 +367,15 @@ export function AttachReposDialog({
                       data-testid="attach-repos-dialog-repo-option"
                       data-repo-name={repo.name}
                       data-checked={checked ? 'true' : 'false'}
+                      data-already-attached={isAlreadyAttached ? 'true' : 'false'}
                       className={[
                         'flex items-center gap-3 px-2 py-1.5 rounded-md text-sm',
-                        inFlight
-                          ? 'cursor-not-allowed opacity-70'
+                        // ADR-0033:已关联仓库强制 cursor-not-allowed(disabled 鼠标)
+                        isAlreadyAttached || inFlight
+                          ? 'cursor-not-allowed'
                           : 'cursor-pointer',
+                        // ADR-0033:已关联仓库行底色更浅 + 透明度降低(置灰视觉)
+                        isAlreadyAttached ? 'opacity-60' : '',
                         checked ? 'bg-bg-elevated' : 'hover:bg-bg-elevated',
                       ].join(' ')}
                     >
@@ -327,12 +385,22 @@ export function AttachReposDialog({
                         data-repo-name={repo.name}
                         checked={checked}
                         onChange={() => handleToggleRepo(repo.name)}
-                        disabled={inFlight}
+                        // ADR-0033:已关联仓库 disabled(disabled input 浏览器不触发 onChange)
+                        disabled={isAlreadyAttached || inFlight}
                         className="w-4 h-4 accent-brand-500 disabled:opacity-50"
                       />
                       <span className="font-mono font-medium text-text-1 flex-1">
                         {repo.name}
                       </span>
+                      {/* ADR-0033:已关联仓库行末徽章 */}
+                      {isAlreadyAttached && (
+                        <span
+                          data-testid="attach-repos-dialog-repo-already-attached-badge"
+                          className="inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded bg-green-50 text-green-700 border border-green-200"
+                        >
+                          ✓ 已关联
+                        </span>
+                      )}
                       {/* Issue 14 + 16:实时 clone 进度 badge(只在 in-flight + 有状态时显示) */}
                       {inFlight && status && (
                         <CloneStatusBadge
@@ -470,6 +538,9 @@ export function AttachReposDialog({
                   </svg>
                   关联中...
                 </>
+              ) : isAllAttached ? (
+                // ADR-0033 / issue 18:全已关联态 submit 文案
+                <>已全部关联</>
               ) : (
                 <>✓ 添加</>
               )}

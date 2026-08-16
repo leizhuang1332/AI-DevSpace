@@ -428,6 +428,242 @@ describe('AttachReposDialog · 关闭路径', () => {
 })
 
 // ============================================================================
+// ADR-0033 / issue 18:append 模式增量追加
+//   - 已关联仓库 = checkbox checked + disabled + 行末「✓ 已关联」徽章 + 置顶
+//   - submit 时 filter 排除已关联(深度防御)
+//   - footer 数字 = 本次新增数(不含已关联)
+//   - 全已关联态 = 顶部绿色 banner + submit 文案改「已全部关联」 + disable
+// ============================================================================
+
+describe('AttachReposDialog · 增量追加(ADR-0033)', () => {
+  // -----------------------------------------------------------------
+  // 已关联仓库状态:disabled + 徽章 + 置顶
+  // -----------------------------------------------------------------
+
+  it('append + 已关联仓库 → checkbox checked + disabled', () => {
+    renderDialog({
+      mode: 'append',
+      titlePrefix: '追加仓库',
+      lockedBranchName: 'feat/x',
+      pickedRepoNames: ['refund-service'],
+    })
+    const refundOpt = screen
+      .getAllByTestId('attach-repos-dialog-repo-option')
+      .find((o) => o.getAttribute('data-repo-name') === 'refund-service')!
+    const checkbox = screen
+      .getAllByTestId('attach-repos-dialog-repo-checkbox')
+      .find((c) => c.getAttribute('data-repo-name') === 'refund-service') as HTMLInputElement
+    // 选中态 + disabled
+    expect(refundOpt.getAttribute('data-checked')).toBe('true')
+    expect(refundOpt.getAttribute('data-already-attached')).toBe('true')
+    expect(checkbox.checked).toBe(true)
+    expect(checkbox.disabled).toBe(true)
+  })
+
+  it('append + 已关联仓库 → 行末「✓ 已关联」徽章', () => {
+    renderDialog({
+      mode: 'append',
+      titlePrefix: '追加仓库',
+      lockedBranchName: 'feat/x',
+      pickedRepoNames: ['refund-service'],
+    })
+    const badge = screen
+      .getAllByTestId('attach-repos-dialog-repo-already-attached-badge')
+      .find((b) => b.closest('[data-repo-name="refund-service"]'))!
+    expect(badge.textContent).toContain('✓ 已关联')
+  })
+
+  it('append + 已关联仓库 → 排序置顶(同段内按 pickedRepoNames 顺序)', () => {
+    renderDialog({
+      mode: 'append',
+      titlePrefix: '追加仓库',
+      lockedBranchName: 'feat/x',
+      // pickedRepoNames 顺序:order-service, refund-service → 渲染也应如此
+      pickedRepoNames: ['order-service', 'refund-service'],
+    })
+    const opts = screen.getAllByTestId('attach-repos-dialog-repo-option')
+    expect(opts[0]?.getAttribute('data-repo-name')).toBe('order-service')
+    expect(opts[1]?.getAttribute('data-repo-name')).toBe('refund-service')
+    // 剩余未关联仓库按原顺序接在后面
+    expect(opts[2]?.getAttribute('data-repo-name')).toBe('payment-gateway')
+  })
+
+  it('append + 未关联仓库 → checkbox 正常可勾(无 disabled + 无徽章)', () => {
+    renderDialog({
+      mode: 'append',
+      titlePrefix: '追加仓库',
+      lockedBranchName: 'feat/x',
+      pickedRepoNames: ['refund-service'],
+    })
+    const orderOpt = screen
+      .getAllByTestId('attach-repos-dialog-repo-option')
+      .find((o) => o.getAttribute('data-repo-name') === 'order-service')!
+    expect(orderOpt.getAttribute('data-already-attached')).toBe('false')
+    const checkbox = screen
+      .getAllByTestId('attach-repos-dialog-repo-checkbox')
+      .find((c) => c.getAttribute('data-repo-name') === 'order-service') as HTMLInputElement
+    expect(checkbox.disabled).toBe(false)
+    expect(
+      screen
+        .queryAllByTestId('attach-repos-dialog-repo-already-attached-badge')
+        .find((b) => b.closest('[data-repo-name="order-service"]')),
+    ).toBeUndefined()
+  })
+
+  // -----------------------------------------------------------------
+  // submit filter:深度防御 — 后端不收到已关联 name
+  // -----------------------------------------------------------------
+
+  it('append + 已关联 + 勾选新仓库 → submit 仅携带新 name', async () => {
+    const { onSubmit } = renderDialog({
+      mode: 'append',
+      titlePrefix: '追加仓库',
+      lockedBranchName: 'feat/refund-optimization',
+      pickedRepoNames: ['refund-service'],
+    })
+    const user = userEvent.setup()
+    // 勾一个新仓库
+    await user.click(
+      screen
+        .getAllByTestId('attach-repos-dialog-repo-option')
+        .find((o) => o.getAttribute('data-repo-name') === 'order-service')!,
+    )
+    await user.click(screen.getByTestId('attach-repos-dialog-submit'))
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+    // 不含已关联 refund-service
+    expect(onSubmit).toHaveBeenCalledWith({
+      repoNames: ['order-service'],
+      branchName: 'feat/refund-optimization',
+    })
+  })
+
+  it('append + 仅已关联 + 勾选新仓库 → submit payload 长度 = 新增数', async () => {
+    const { onSubmit } = renderDialog({
+      mode: 'append',
+      titlePrefix: '追加仓库',
+      lockedBranchName: 'feat/x',
+      pickedRepoNames: ['refund-service', 'order-service'],
+    })
+    const user = userEvent.setup()
+    await user.click(
+      screen
+        .getAllByTestId('attach-repos-dialog-repo-option')
+        .find((o) => o.getAttribute('data-repo-name') === 'payment-gateway')!,
+    )
+    await user.click(screen.getByTestId('attach-repos-dialog-submit'))
+    expect(onSubmit.mock.calls[0][0].repoNames).toEqual(['payment-gateway'])
+  })
+
+  // -----------------------------------------------------------------
+  // footer 数字 = 本次新增数(不含已关联)
+  // -----------------------------------------------------------------
+
+  it('append + 已关联 2 + 勾选 1 新 → footer "追加 1 个仓库"', async () => {
+    renderDialog({
+      mode: 'append',
+      titlePrefix: '追加仓库',
+      lockedBranchName: 'feat/x',
+      pickedRepoNames: ['refund-service', 'order-service'],
+    })
+    const user = userEvent.setup()
+    await user.click(
+      screen
+        .getAllByTestId('attach-repos-dialog-repo-option')
+        .find((o) => o.getAttribute('data-repo-name') === 'payment-gateway')!,
+    )
+    expect(
+      screen.getByTestId('attach-repos-dialog-footer-left').textContent,
+    ).toContain('追加 1 个仓库')
+  })
+
+  it('append + 仅已关联 + 不勾新 → footer "追加 0 个仓库" + submit disable', () => {
+    renderDialog({
+      mode: 'append',
+      titlePrefix: '追加仓库',
+      lockedBranchName: 'feat/x',
+      pickedRepoNames: ['refund-service'],
+    })
+    expect(
+      screen.getByTestId('attach-repos-dialog-footer-left').textContent,
+    ).toContain('追加 0 个仓库')
+    expect(screen.getByTestId('attach-repos-dialog-submit')).toBeDisabled()
+  })
+
+  // -----------------------------------------------------------------
+  // 全已关联态:绿色 banner + submit disable + 文案改「已全部关联」
+  // -----------------------------------------------------------------
+
+  it('append + 注册表全已关联 → 顶部绿色 banner 显示', () => {
+    renderDialog({
+      mode: 'append',
+      titlePrefix: '追加仓库',
+      lockedBranchName: 'feat/x',
+      // REPOS 全 3 个都在 pickedRepoNames
+      pickedRepoNames: ['refund-service', 'order-service', 'payment-gateway'],
+    })
+    const banner = screen.getByTestId(
+      'attach-repos-dialog-all-attached-banner',
+    )
+    expect(banner.textContent).toContain('✓')
+    expect(banner.textContent).toContain('全部')
+    expect(banner.textContent).toContain('3')
+  })
+
+  it('append + 注册表全已关联 → submit 按钮 disable + 文案 "已全部关联"', () => {
+    renderDialog({
+      mode: 'append',
+      titlePrefix: '追加仓库',
+      lockedBranchName: 'feat/x',
+      pickedRepoNames: ['refund-service', 'order-service', 'payment-gateway'],
+    })
+    const submit = screen.getByTestId('attach-repos-dialog-submit')
+    expect(submit).toBeDisabled()
+    expect(submit.textContent).toContain('已全部关联')
+  })
+
+  it('append + 部分已关联 → 不显示 banner', () => {
+    renderDialog({
+      mode: 'append',
+      titlePrefix: '追加仓库',
+      lockedBranchName: 'feat/x',
+      pickedRepoNames: ['refund-service'], // 还有 2 个未关联
+    })
+    expect(
+      screen.queryByTestId('attach-repos-dialog-all-attached-banner'),
+    ).toBeNull()
+  })
+
+  it('first + 全已关联(pickedRepoNames=REPOS)→ 不显示 banner(只 append 模式生效)', () => {
+    renderDialog({
+      mode: 'first',
+      pickedRepoNames: ['refund-service', 'order-service', 'payment-gateway'],
+    })
+    expect(
+      screen.queryByTestId('attach-repos-dialog-all-attached-banner'),
+    ).toBeNull()
+  })
+
+  // -----------------------------------------------------------------
+  // first 模式 = 零改动
+  // -----------------------------------------------------------------
+
+  it('first + pickedRepoNames 非空 → checkbox 不 disabled(零改动)', () => {
+    renderDialog({
+      mode: 'first',
+      pickedRepoNames: ['refund-service'],
+    })
+    const refundOpt = screen
+      .getAllByTestId('attach-repos-dialog-repo-option')
+      .find((o) => o.getAttribute('data-repo-name') === 'refund-service')!
+    expect(refundOpt.getAttribute('data-already-attached')).toBe('false')
+    const checkbox = screen
+      .getAllByTestId('attach-repos-dialog-repo-checkbox')
+      .find((c) => c.getAttribute('data-repo-name') === 'refund-service') as HTMLInputElement
+    expect(checkbox.disabled).toBe(false)
+  })
+})
+
+// ============================================================================
 // 打开时 reset
 // ============================================================================
 
