@@ -1,7 +1,7 @@
 /**
  * board section React Query hooks(issue 07 / ADR-0027)
  *
- * 3 个 hook:
+ * 5 个 hook:
  * - `useBoardCards(requirementId, filter, initialData?)` —— 列表查询
  *   queryKey `['board', requirementId, filter]`(对齐 issue spec)
  *   拉全量(active 卡),客户端按 `filterCardsByBoardFilter` 过滤(后端
@@ -10,6 +10,10 @@
  *   成功后 invalidate `['board', requirementId]` → 列重拉 + N 计数更新
  * - `useArchiveBoardCard(requirementId)` —— 卡片菜单 archive mutation
  *   成功后 invalidate `['board', requirementId]`
+ * - `useMoveCardToColumn(requirementId)` —— 跨列拖(issue 19 / ADR-0035 D1+D5)
+ *   悲观(等 Guard),status 改后再 order_index;冲突 = 返 conflicts, caller 弹 Modal
+ * - `useReorderCard(requirementId)` —— 列内重排(issue 19 / ADR-0035 D1+D5)
+ *   乐观(立即视觉成功),失败还原 cache + 抛错让 caller 弹 Toast
  *
  * 走 `agentFetch`(`@/lib/agent-client`),cookie 鉴权已封装。
  * 不触发 Run(守门 zero-touch,ADR-0023);manual 创建直接 POST 落盘。
@@ -21,9 +25,11 @@ import type {
   BoardCardCreateResponse,
   BoardCardListResponse,
   TaskCard,
+  TaskCardStatusT,
 } from '@ai-devspace/shared'
 import { agentFetch } from './agent-client'
 import { filterCardsByBoardFilter, type BoardFilter, type BoardCardListData } from './board'
+import type { UpdateCardStatusResponse } from './board-detail-hooks'
 
 // ---------------------------------------------------------------------------
 // 列表查询
@@ -164,6 +170,151 @@ export function useArchiveBoardCard(requirementId: string) {
       ),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['board', requirementId] })
+    },
+  })
+}
+
+// ---------------------------------------------------------------------------
+// 拖拽 mutation(issue 19 / ADR-0035 D1 + D5)
+// ---------------------------------------------------------------------------
+
+/**
+ * 跨列拖(改 status + order_index)—— 走「先 status 后 order_index」二段式。
+ *
+ * 调度策略(ADR-0035 D5):**悲观**等 Guard;冲突 = 返 `UpdateCardStatusResponse`
+ * `{ ok: false, conflicts }` 给 caller 弹 `StatusConstraintModal`,不调 order_index。
+ *
+ * 链路:
+ * 1. `PATCH /board/cards/:cardId/status` body `{ status, override: false }`
+ * 2. `ok:false` → 直接 return statusRes,caller 弹 Modal
+ * 3. `ok:true` → `PATCH /board/cards/:cardId` body `{ order_index }`
+ * 4. 任意一段 throw(network / 500) → mutation error, caller 弹 Toast
+ *
+ * `onSuccess` 仅在 `ok:true` 时 invalidate(`ok:false` 没落盘,缓存不变)。
+ */
+export interface MoveCardToColumnInput {
+  cardId: string
+  toStatus: TaskCardStatusT
+  /** 目标列内落位 order_index;undefined 跳过 order_index PATCH(仅改 status) */
+  toOrderIndex?: number | null
+  /**
+   * 用户在 Modal 里选 A「强制 override」时传 true,后续 PATCH order_index 阶段不受 Guard 影响
+   * (order_index 字段白名单 PATCH 不走 Guard,但 override 透传到 PATCH /status)
+   */
+  override?: boolean
+}
+
+export function useMoveCardToColumn(requirementId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: MoveCardToColumnInput): Promise<UpdateCardStatusResponse> => {
+      // 1. 改 status(走 Guard)
+      const statusRes = await agentFetch<UpdateCardStatusResponse>(
+        `/api/requirement/${encodeURIComponent(requirementId)}/board/cards/${encodeURIComponent(input.cardId)}/status`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({
+            status: input.toStatus,
+            override: input.override ?? false,
+          }),
+        },
+      )
+      // 2. 冲突 → 不调 order_index,直接返回 statusRes(让 caller 弹 Modal)
+      if (!statusRes.ok) return statusRes
+      // 3. ok:true → 改 order_index(乐观)
+      if (input.toOrderIndex !== undefined && input.toOrderIndex !== null) {
+        await agentFetch<{ card: TaskCard }>(
+          `/api/requirement/${encodeURIComponent(requirementId)}/board/cards/${encodeURIComponent(input.cardId)}`,
+          {
+            method: 'PATCH',
+            body: JSON.stringify({ order_index: input.toOrderIndex }),
+          },
+        )
+      }
+      return statusRes
+    },
+    onSuccess: (data, vars) => {
+      // ok:false → 没落盘,缓存不变;ok:true → invalidate
+      if (!data.ok) return
+      void qc.invalidateQueries({ queryKey: ['board-card', requirementId, vars.cardId] })
+      void qc.invalidateQueries({ queryKey: ['board', requirementId] })
+    },
+  })
+}
+
+/**
+ * 列内重排(仅改 order_index)—— 乐观(立即视觉成功)。
+ *
+ * 调度策略(ADR-0035 D5):**乐观**(`onMutate` 改 queryCache),失败(`onError`)
+ * 还原 `previousData` + throw,让 caller 弹 Toast 提示「排序保存失败,已回滚」。
+ *
+ * 乐观更新范围 = `['board', reqId, ...filters]` 全部子键(filter 切换后也能 hit)。
+ *
+ * 注:不走 SSR 注水缓存(只走 `['board', reqId, filter]` 树,`['board', reqId, 'detail']`
+ * 平级不同前缀,本函数跳过 —— 详情页修 status 后会自己 invalidate)。
+ */
+export interface ReorderCardInput {
+  cardId: string
+  newOrderIndex: number
+  /** 目标列 status(只改 order_index 不改 status);caller 必传 */
+  toStatus: TaskCardStatusT
+}
+
+/**
+ * 内部辅助:在所有 `['board', reqId, ...]` 子树 queryData 上做 order_index 替换。
+ * 替换函数 = 把目标卡片挪到目标 status 列内,确保局部乐观更新视图一致。
+ */
+function applyOptimisticReorder(
+  data: BoardCardListData | undefined,
+  input: ReorderCardInput,
+): BoardCardListData | undefined {
+  if (!data) return data
+  const nextCards = data.cards.map((c) =>
+    c.id === input.cardId
+      ? { ...c, status: input.toStatus, order_index: input.newOrderIndex }
+      : c,
+  )
+  return { ...data, cards: nextCards }
+}
+
+export function useReorderCard(requirementId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: ReorderCardInput): Promise<{ card: TaskCard }> => {
+      return agentFetch<{ card: TaskCard }>(
+        `/api/requirement/${encodeURIComponent(requirementId)}/board/cards/${encodeURIComponent(input.cardId)}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ order_index: input.newOrderIndex }),
+        },
+      )
+    },
+    // 乐观:把目标卡片在新 order_index 写入所有 ['board', reqId, ...] 子树缓存
+    onMutate: async (input) => {
+      const queries = qc.getQueryCache().findAll({
+        queryKey: ['board', requirementId],
+      })
+      const previousData = new Map<readonly unknown[], BoardCardListData>()
+      for (const q of queries) {
+        const data = q.state.data as BoardCardListData | undefined
+        if (!data) continue
+        previousData.set(q.queryKey, data)
+        qc.setQueryData(q.queryKey, applyOptimisticReorder(data, input))
+      }
+      return { previousData }
+    },
+    // 失败:还原 + 抛错(让 caller 弹 Toast)
+    onError: (_err, _input, ctx) => {
+      const context = ctx as { previousData: Map<readonly unknown[], BoardCardListData> } | undefined
+      if (!context) return
+      for (const [key, data] of context.previousData) {
+        qc.setQueryData(key, data)
+      }
+    },
+    // 终态:invalidate 兜底,确保服务端真相最终一致
+    onSettled: (_data, _err, vars) => {
+      void qc.invalidateQueries({ queryKey: ['board', requirementId] })
+      void qc.invalidateQueries({ queryKey: ['board-card', requirementId, vars.cardId] })
     },
   })
 }

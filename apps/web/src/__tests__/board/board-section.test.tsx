@@ -26,6 +26,8 @@ let mockFilter: BoardFilter = 'all'
 let mockIsError = false
 const mockArchiveMutate = vi.fn()
 const mockCreateMutate = vi.fn()
+const mockMoveMutate = vi.fn()
+const mockReorderMutate = vi.fn()
 
 vi.mock('@/lib/board-hooks', () => ({
   useBoardCards: (_reqId: string, filter: BoardFilter) => {
@@ -47,6 +49,19 @@ vi.mock('@/lib/board-hooks', () => ({
   }),
   useCreateBoardCard: () => ({
     mutate: mockCreateMutate,
+    isPending: false,
+    isError: false,
+    error: null,
+  }),
+  // issue 19 / ADR-0035 拖拽 hook 的 BoardSection mock
+  useMoveCardToColumn: () => ({
+    mutate: mockMoveMutate,
+    isPending: false,
+    isError: false,
+    error: null,
+  }),
+  useReorderCard: () => ({
+    mutate: mockReorderMutate,
     isPending: false,
     isError: false,
     error: null,

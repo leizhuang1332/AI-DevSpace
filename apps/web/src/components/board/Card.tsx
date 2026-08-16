@@ -14,10 +14,16 @@
  * 本期卡片点击(issue 08):由 BoardSection 注入 `onClick` → router.push 进
  * `/requirements/[id]/board/[cardId]` 详情页(ADR-0027 D5 toggle 双态)。
  * `onClick` prop 仍 optional —— 无 onClick 时卡片不可点击(测试 / 静态展示用)。
+ *
+ * 拖拽(issue 19 / ADR-0035 D4):左侧 `⋮⋮` 6 点手柄,hover 才显,默认 `opacity: 0`。
+ * `useSortable` 接管 transform / transition / ref;`isDragging` 时整张卡淡化让
+ * DragOverlay (BoardSection) 接管 visual。
  */
 
 import { useState } from 'react'
 import type { TaskCard } from '@ai-devspace/shared'
+import { useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import {
   PRIORITY_BADGE,
   SOURCE_LABEL,
@@ -32,15 +38,34 @@ export interface BoardCardProps {
   onClick?: (cardId: string) => void
   /** 卡片菜单 archive 触发 */
   onArchive?: (cardId: string) => void
+  /**
+   * 拖拽开关(issue 19 / ADR-0035)。
+   * - `true`(默认)→ 接 `useSortable`,左侧手柄可拖
+   * - `false` → 跳过 sortable,左侧手柄不渲染(测试 / 静态展示用)
+   */
+  draggable?: boolean
 }
 
-export function BoardCard({ card, onClick, onArchive }: BoardCardProps) {
+export function BoardCard({ card, onClick, onArchive, draggable = true }: BoardCardProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const priorityBadge = card.priority ? PRIORITY_BADGE[card.priority] : null
   const sourceLabel = SOURCE_LABEL[card.source]
   const summary = summarizeContent(card.content)
   const initial = assigneeInitial(card.assignee)
   const hasAssignee = card.assignee !== null && card.assignee.length > 0
+
+  // 拖拽(issue 19 / ADR-0035 D4):useSortable 由 BoardSection <DndContext> 包裹
+  const sortable = useSortable({
+    id: card.id,
+    disabled: !draggable,
+    data: { type: 'card', status: card.status },
+  })
+  const { setNodeRef, attributes, listeners, transform, transition, isDragging } = sortable
+  const dragStyle: React.CSSProperties = {
+    transform: CSS.Translate.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : undefined,
+  }
 
   const handleArchive = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -53,25 +78,55 @@ export function BoardCard({ card, onClick, onArchive }: BoardCardProps) {
     setMenuOpen((v) => !v)
   }
 
+  // 手柄 click / keydown 触发拖拽 — 阻止冒泡到 article 的 onClick(进详情)
+  const handleDragHandle = (e: React.SyntheticEvent) => {
+    e.stopPropagation()
+  }
+
   return (
     <article
+      ref={draggable ? setNodeRef : undefined}
       data-testid="board-card"
       data-card-id={card.id}
       data-status={card.status}
       data-priority={card.priority ?? 'none'}
       data-source={card.source}
+      data-dragging={isDragging ? 'true' : 'false'}
       onClick={onClick ? () => onClick(card.id) : undefined}
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
-      className={`bg-bg-elevated border border-border rounded-md p-3 flex flex-col gap-2 transition-all ${
+      style={draggable ? dragStyle : undefined}
+      className={`group bg-bg-elevated border border-border rounded-md p-3 flex flex-col gap-2 transition-all ${
         onClick ? 'cursor-pointer hover:border-brand hover:shadow-md hover:-translate-y-px' : ''
       }`}
     >
       {/* 顶部:id-short + 菜单 */}
       <div className="flex items-center justify-between">
-        <span className="font-mono text-xs text-text-3" data-testid="board-card-id">
-          {shortCardId(card.id)}
-        </span>
+        <div className="flex items-center gap-1.5">
+          {/* 拖拽手柄(issue 19 / ADR-0035 D4):左侧 ⋮⋮ 6 点,hover 才显 */}
+          {draggable && (
+            <button
+              type="button"
+              data-testid="board-card-drag-handle"
+              aria-label="拖动卡片"
+              onClick={handleDragHandle}
+              onMouseDown={handleDragHandle}
+              className="cursor-grab active:cursor-grabbing text-text-3 opacity-0 group-hover:opacity-100 transition-opacity leading-none px-0.5 -ml-1 touch-none"
+              {...attributes}
+              {...listeners}
+            >
+              <span className="inline-grid grid-cols-2 gap-[1px] text-[10px]" aria-hidden="true">
+                <span>⋮</span>
+                <span>⋮</span>
+                <span>⋮</span>
+                <span>⋮</span>
+              </span>
+            </button>
+          )}
+          <span className="font-mono text-xs text-text-3" data-testid="board-card-id">
+            {shortCardId(card.id)}
+          </span>
+        </div>
         {onArchive && (
           <div className="relative">
             <button

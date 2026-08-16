@@ -11,9 +11,17 @@
  * - 列背景 tint(bgColor)+ 列名文字色(nameColor)按 `STATUS_COLUMNS` token
  *
  * `+` 按钮触发 `onAddCard(status)` → 预填该列 status 打开 NewTaskModal。
+ *
+ * 拖拽(issue 19 / ADR-0035):卡片槽包 `<SortableContext>` 让卡片列内 sortable;
+ * 列接 `useDroppable` 让空列也能 drop(其他列跨列拖)。
  */
 
 import type { TaskCard, TaskCardStatusT } from '@ai-devspace/shared'
+import { useDroppable } from '@dnd-kit/core'
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
 import { STATUS_COLUMNS } from '@/lib/board'
 import { BoardCard } from './Card'
 
@@ -43,11 +51,18 @@ export function BoardColumn({
       }
     : { background: col.dotColor }
 
+  // 列整体可 drop(issue 19 / ADR-0035):让跨列拖的目标列即使是空列也能接受
+  const { setNodeRef, isOver } = useDroppable({
+    id: `column-${status}`,
+    data: { type: 'column', status },
+  })
+
   return (
     <section
       data-testid="board-column"
       data-status={status}
       data-count={String(cards.length)}
+      data-over={isOver ? 'true' : 'false'}
       className="rounded-lg p-3 flex flex-col gap-2 border border-border"
       style={{ background: col.bgColor }}
     >
@@ -85,28 +100,34 @@ export function BoardColumn({
         )}
       </div>
 
-      {/* cards 槽 */}
+      {/* cards 槽(SortableContext + useDroppable) */}
       <div
+        ref={setNodeRef}
         data-testid="board-column-cards"
         className="flex flex-col gap-2 flex-1 min-h-[200px]"
       >
-        {cards.length === 0 ? (
-          <div
-            data-testid="board-column-empty"
-            className="flex-1 flex items-center justify-center text-xs text-text-3 border border-dashed border-border rounded-md min-h-[80px]"
-          >
-            拖动卡片到此处
-          </div>
-        ) : (
-          cards.map((card) => (
-            <BoardCard
-              key={card.id}
-              card={card}
-              onClick={onCardClick}
-              onArchive={onCardArchive}
-            />
-          ))
-        )}
+        <SortableContext
+          items={cards.map((c) => c.id)}
+          strategy={verticalListSortingStrategy}
+        >
+          {cards.length === 0 ? (
+            <div
+              data-testid="board-column-empty"
+              className="flex-1 flex items-center justify-center text-xs text-text-3 border border-dashed border-border rounded-md min-h-[80px]"
+            >
+              拖动卡片到此处
+            </div>
+          ) : (
+            cards.map((card) => (
+              <BoardCard
+                key={card.id}
+                card={card}
+                onClick={onCardClick}
+                onArchive={onCardArchive}
+              />
+            ))
+          )}
+        </SortableContext>
       </div>
     </section>
   )

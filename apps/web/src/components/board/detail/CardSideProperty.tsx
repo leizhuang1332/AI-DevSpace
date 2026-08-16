@@ -16,6 +16,7 @@
  */
 
 import type { TaskCard, TaskCardStatusT } from '@ai-devspace/shared'
+import { rankInColumn } from '@ai-devspace/shared'
 import {
   PRIORITY_BADGE,
   SOURCE_LABEL,
@@ -48,6 +49,11 @@ export function CardSideProperty({
   const priorityBadge = card.priority ? PRIORITY_BADGE[card.priority] : null
   const dependencies = filterDependencies(cards, card)
   const blockedBy = filterBlockedBy(cards, card.id)
+
+  // 「列内位置 #N / M」(issue 19 / ADR-0035 D7):同 status 列内 1-indexed 序号 / 列总数
+  const columnCards = cards.filter((c) => c.status === card.status)
+  const rank = rankInColumn(card, columnCards)
+  const columnTotal = columnCards.length
 
   return (
     <div
@@ -220,7 +226,7 @@ export function CardSideProperty({
         {/* repeat 行(占位) */}
         <div
           data-testid="board-detail-prop-repeat"
-          className="flex items-center gap-3 py-2 text-sm"
+          className="flex items-center gap-3 py-2 text-sm border-b border-border"
         >
           <div className="flex items-center gap-2 text-text-3 text-xs w-[84px] shrink-0">
             <span>↻</span>重复
@@ -228,6 +234,27 @@ export function CardSideProperty({
           <div className="flex-1 flex items-center gap-2">
             <span className="text-text-1">不重复</span>
             <span className="ml-auto text-text-3 text-xs">▾</span>
+          </div>
+        </div>
+
+        {/* 列内位置 行(issue 19 / ADR-0035 D7)—— readonly,看板是唯一编辑入口 */}
+        <div
+          data-testid="board-detail-prop-position"
+          className="flex items-center gap-3 py-2 text-sm"
+        >
+          <div className="flex items-center gap-2 text-text-3 text-xs w-[84px] shrink-0">
+            <span>📍</span>列内位置
+          </div>
+          <div className="flex-1 flex items-center gap-2">
+            <span
+              className="text-text-1 font-mono text-xs"
+              data-testid="board-detail-prop-position-value"
+              data-rank={rank}
+              data-total={columnTotal}
+            >
+              {rank > 0 ? `#${rank} / ${columnTotal}` : '—'}
+            </span>
+            <span className="text-text-3 text-[10px]">在看板拖动</span>
           </div>
         </div>
       </div>

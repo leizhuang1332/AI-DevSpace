@@ -583,6 +583,20 @@ ANALYZING 主区不再使用永久 320px 抽屉，改为 **「默认折叠的浮
 | 119 | **HTTP/2 stream 失败 = 新错误码 `E_HTTP2_STREAM_RESET`**：`mapCloneError` 在 E_NETWORK 前加分支，正则 `/HTTP\/2 stream/` `/curl \d+ HTTP\/2/` 命中全 stderr；**不重试**(fail-fast,协议层硬错重试大概率再错,白白等 3s+);错误 message 附加根因 + SSH workaround(用户去 `/repos` 改 git URL);前端 `CloneStatusBadge` 不新增 UI,文案走 SSE `repo-clone-progress` 事件 `error` 字段 | [ADR-0032](docs/adr/0032-http2-stream-reset-ssh-hint.md) D1-D5 |
 | 120 | **追加仓库 = 增量追加**(取代旧的"全量追加"语义):append 模式下,`pickedRepoNames` 中的仓库 checkbox checked + disabled + 末尾「✓ 已关联」徽章 + **置顶排序**(pickedRepoNames 顺序优先);selectedNames 保留 pickedRepoNames 初值(UI 真相源),**submit 时 filter** 排除已关联;footer 数字 = 本次新增数;全已关联态显示绿色 banner「✓ 本需求已关联全部 N 个仓库,无需追加」 | [ADR-0033](docs/adr/0033-incremental-attach-repos.md) D1-D5 |
 
+### v1.0.8 增量（7 轮 grilling 沉淀 · 2026-08-16 · board 拖拽重排）
+
+> 本节子段是 v1.0.8 内紧接决策 119/120 的迭代记录（同日沉淀），不修改上面 v1.0 / v1.0.1 / ... / v1.0.7 决策 1-118。所有增量由 [ADR-0035](docs/adr/0035-board-drag-sort.md) 单一承载，**解锁** [ADR-0027](docs/adr/0027-board-section-intro.md) D3 「拖拽(本期不做,留 P1+)」延期项。
+
+| # | 决策 | 关联 ADR |
+| --- | ------ | ---------- |
+| 121 | **board 拖拽范围 = 跨列 + 列内重排**：跨列拖 = 改 `status` + 改 `order_index` 到目标列的目标位置；列内重排 = 仅改 `order_index`；列内排序 = `order_index asc, updated_at desc`（null 视为 ∞ 列尾追加） | [ADR-0035](docs/adr/0035-board-drag-sort.md) D1 |
+| 122 | **`order_index` 算法 = 浮点中位法**：拖到前卡 `[prev]` 与后卡 `[next]` 之间 → `(prev + next) / 2`；列头 = `first.order_index / 2`；列尾 = `last.order_index + 1`；空列起始 = 1；精度耗尽（前后差 < 1e-6）→ 整列批量重排为 1..N | [ADR-0035](docs/adr/0035-board-drag-sort.md) D2 |
+| 123 | **拖拽库 = `@dnd-kit/core` + `@dnd-kit/sortable`**：Apache 2.0；a11y 一等公民（键盘拖移 / `aria-roledescription` / focus 保持）；Sortable + Multi-container preset；tree-shake 核心 ~30 KB gz | [ADR-0035](docs/adr/0035-board-drag-sort.md) D3 |
+| 124 | **拖拽触发器 = 左侧 hover 才显手柄**：`⋮⋮` 6 点 sprite；默认 `opacity: 0`；`group-hover:opacity-100`；激活区域 = 5px 移动阈值（@dnd-kit `PointerSensor` 默认 `activationConstraint.distance`）；移动 < 5px = 当点击进详情 | [ADR-0035](docs/adr/0035-board-drag-sort.md) D4 |
+| 125 | **落盘策略 = 分级**：跨列拖（改 status）走 `PATCH /status` 悲观 + Guard；列内重排（改 order_index）走 `PATCH /cardId` 乐观 + 失败回滚 + Toast | [ADR-0035](docs/adr/0035-board-drag-sort.md) D5 |
+| 126 | **父子互锁冲突 UI = 复用 `StatusConstraintModal`**：跨列拖命中冲突 → 弹 Modal 三选项 A/B/C 完全沿用 [ADR-0025](docs/adr/0025-parent-child-status-lock.md) D2；拖拽中零预提示（决策 24「克制,在场」）；目标列不变色、不打 hover 提示 | [ADR-0035](docs/adr/0035-board-drag-sort.md) D6 |
+| 127 | **详情页 `order_index` 只读展示**：右栏属性表新增「列内位置」行；展示形式 = `「#N / M」`（N = 列内 1-indexed 序号，按 `order_index asc, null last`；M = 列内总数）；readonly，无编辑控件（看板仍是唯一编辑入口） | [ADR-0035](docs/adr/0035-board-drag-sort.md) D7 |
+
 ---
 
 ## 不在范围内（明确剔除 v1.0）

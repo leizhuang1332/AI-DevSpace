@@ -19,32 +19,75 @@
  * - manual 创建 → mutation → invalidate → 列重拉 → N 计数更新
  * - **卡片点击**(issue 08):router.push 进 `/requirements/[id]/board/[cardId]`
  *
+ * 拖拽(issue 19 / ADR-0035):BoardSection 包 `<DndContext>` + `<DragOverlay>`,
+ * `handleDragEnd` 拆两种:
+ * - over 是 column → 跨列拖 = `useMoveCardToColumn`(先 status 后 order_index)
+ * - over 是 card → 列内重排 = `useReorderCard`(只改 order_index,乐观)
+ *
  * 守门(ADR-0023 zero-touch):不触发 Run;PRD 拆走 /split-from-prd(agent 端 Run,
  * web 端轮询 + 落地候选走 POST /board/cards)。
  */
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { TaskCard, TaskCardStatusT } from '@ai-devspace/shared'
-import { useBoardCards, useArchiveBoardCard } from '@/lib/board-hooks'
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+  type DragEndEvent,
+  type DragStartEvent,
+} from '@dnd-kit/core'
+import {
+  useBoardCards,
+  useArchiveBoardCard,
+  useMoveCardToColumn,
+  useReorderCard,
+} from '@/lib/board-hooks'
 import {
   STATUS_COLUMN_ORDER,
   type BoardFilter,
   type BoardCardListData,
 } from '@/lib/board'
+import {
+  computeOrderIndex,
+  computeOrderIndexForEmptyColumn,
+  computeOrderIndexForHead,
+  computeOrderIndexForTail,
+  sortByOrderIndex,
+} from '@ai-devspace/shared'
 import { BoardToolbar } from './BoardToolbar'
 import { BoardColumn } from './Column'
+import { BoardCard } from './Card'
 import { NewTaskModal } from './NewTaskModal'
 import { SplitFromPrdModal } from './detail/SplitFromPrdModal'
 import { PrdSplitResultBanner } from './detail/PrdSplitResultBanner'
 import { PrdSplitReviewModal } from './detail/PrdSplitReviewModal'
 import { EmptyState } from '../empty-state'
+import { StatusConstraintModal } from './detail/StatusConstraintModal'
 
 export interface BoardSectionProps {
   requirementId: string
   /** SSR 注水的活跃卡全集(filter='all' 时复用) */
   initialCards: TaskCard[]
   initialTotal: number
+}
+
+/**
+ * 跨列拖命中 ADR-0025 父子互锁冲突时,弹 Modal 让用户选 A/B/C。
+ * - A 强制 override → 再 PATCH(override=true) 走 log
+ * - B 父降级 → 本期未实现,弹禁选灰按钮占位(细节待 v1.0.x 下一轮 grill)
+ * - C 取消 → 关闭 Modal,卡回原列(无操作)
+ */
+interface PendingConflictState {
+  cardId: string
+  toStatus: TaskCardStatusT
+  toOrderIndex: number
+  parentStatus: string
+  conflicts: unknown[]
 }
 
 export function BoardSection({
@@ -61,6 +104,9 @@ export function BoardSection({
   const [splitModalOpen, setSplitModalOpen] = useState(false)
   const [activeSplitRunId, setActiveSplitRunId] = useState<string | null>(null)
   const [reviewModalOpen, setReviewModalOpen] = useState(false)
+  // 拖拽(issue 19 / ADR-0035)
+  const [activeDragCardId, setActiveDragCardId] = useState<string | null>(null)
+  const [pendingConflict, setPendingConflict] = useState<PendingConflictState | null>(null)
 
   const initialData: BoardCardListData | undefined =
     filter === 'all'
@@ -73,6 +119,13 @@ export function BoardSection({
     initialData,
   )
   const archiveMutation = useArchiveBoardCard(requirementId)
+  const moveMutation = useMoveCardToColumn(requirementId)
+  const reorderMutation = useReorderCard(requirementId)
+
+  // 拖拽 sensors:PointerSensor 5px 阈值(ADR-0035 D4)
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  )
 
   const handleNewTask = () => {
     setModalDefaultStatus('backlog')
@@ -95,6 +148,145 @@ export function BoardSection({
     )
   }
 
+  // 拖拽开始(仅记录 active card id,DragOverlay 渲染它)
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveDragCardId(String(event.active.id))
+  }
+
+  // 拖拽结束(ADR-0035 D1 + D5)
+  const handleDragEnd = (event: DragEndEvent) => {
+    setActiveDragCardId(null)
+    const { active, over } = event
+    if (!over) return
+    const activeCard = cards.find((c) => c.id === active.id)
+    if (!activeCard) return
+
+    const overData = over.data.current as
+      | { type: 'card'; status: TaskCardStatusT }
+      | { type: 'column'; status: TaskCardStatusT }
+      | undefined
+
+    // 跨列拖(over 是 column) vs 列内重排(over 是 card)
+    if (overData?.type === 'column') {
+      const toStatus = overData.status
+      const targetColumn = cards
+        .filter((c) => c.status === toStatus && c.id !== activeCard.id)
+      const sorted = sortByOrderIndex(targetColumn)
+      // 目标列含现有卡 → 拖到列尾 = last + 1;空列 = 1
+      const toOrderIndex =
+        sorted.length === 0
+          ? computeOrderIndexForEmptyColumn()
+          : computeOrderIndexForTail(sorted[sorted.length - 1]!.order_index ?? 0)
+      if (toStatus === activeCard.status) {
+        // 实际是同列(没有 over card 情况)—— 走 ReorderCard
+        reorderMutation.mutate({
+          cardId: activeCard.id,
+          toStatus,
+          newOrderIndex: toOrderIndex,
+        })
+        return
+      }
+      // 跨列:走 MoveCardToColumn(走 Guard,冲突时返 conflicts)
+      moveMutation.mutate(
+        {
+          cardId: activeCard.id,
+          toStatus,
+          toOrderIndex,
+        },
+        {
+          onSuccess: (data) => {
+            if (!data.ok) {
+              // 冲突 → 弹 Modal
+              setPendingConflict({
+                cardId: activeCard.id,
+                toStatus,
+                toOrderIndex,
+                parentStatus: data.parent_status,
+                conflicts: data.conflicts,
+              })
+            }
+          },
+        },
+      )
+      return
+    }
+
+    // over 是 card → 列内重排(同列或跨列)
+    const overCard = cards.find((c) => c.id === over.id)
+    if (!overCard) return
+    const toStatus = overCard.status
+    const columnWithoutActive = cards
+      .filter((c) => c.status === toStatus && c.id !== activeCard.id)
+    const sorted = sortByOrderIndex(columnWithoutActive)
+    const overIndex = sorted.findIndex((c) => c.id === overCard.id)
+    const prev = overIndex > 0 ? sorted[overIndex - 1]!.order_index : null
+    const next = sorted[overIndex]!.order_index
+
+    // overIndex 为 0 → 列头拖入;target = prev/2
+    // overIndex > 0 → prev (overIndex-1) 与 next (overIndex) 之间
+    let newOrderIndex: number
+    if (prev === null) {
+      newOrderIndex =
+        next !== null
+          ? computeOrderIndexForHead(next)
+          : computeOrderIndexForEmptyColumn()
+    } else {
+      newOrderIndex = computeOrderIndex(
+        prev,
+        next ?? computeOrderIndexForTail(prev),
+      )
+    }
+
+    // 如果跨列(over card 所在列 != active card 所在列)→ 改 status + order_index
+    if (toStatus !== activeCard.status) {
+      moveMutation.mutate(
+        {
+          cardId: activeCard.id,
+          toStatus,
+          toOrderIndex: newOrderIndex,
+        },
+        {
+          onSuccess: (data) => {
+            if (!data.ok) {
+              setPendingConflict({
+                cardId: activeCard.id,
+                toStatus,
+                toOrderIndex: newOrderIndex,
+                parentStatus: data.parent_status,
+                conflicts: data.conflicts,
+              })
+            }
+          },
+        },
+      )
+      return
+    }
+    // 同列重排
+    reorderMutation.mutate({
+      cardId: activeCard.id,
+      toStatus,
+      newOrderIndex,
+    })
+  }
+
+  // 冲突 modal:A 强制 override → 走 moveMutation override=true;B 父降级 → 灰;
+  // C 取消 → setPendingConflict(null),卡回原列(已在原列,UI 不需动)
+  const handleConflictForceSwitch = () => {
+    if (!pendingConflict) return
+    const { cardId, toStatus, toOrderIndex } = pendingConflict
+    moveMutation.mutate(
+      { cardId, toStatus, toOrderIndex, override: true },
+      {
+        onSuccess: (data) => {
+          if (data.ok) setPendingConflict(null)
+        },
+      },
+    )
+  }
+  const handleConflictCancel = () => {
+    setPendingConflict(null)
+  }
+
   // PRD 拆 Run 启动成功 → 切 banner 轮询
   const handleSplitSuccess = (runId: string) => {
     setActiveSplitRunId(runId)
@@ -113,18 +305,24 @@ export function BoardSection({
   }
 
   // 按 status 分组到 5 列
-  const byStatus: Record<TaskCardStatusT, TaskCard[]> = {
-    backlog: [],
-    todo: [],
-    in_progress: [],
-    in_review: [],
-    done: [],
-  }
-  for (const card of cards) {
-    byStatus[card.status].push(card)
-  }
+  const byStatus = useMemo<Record<TaskCardStatusT, TaskCard[]>>(() => {
+    const out: Record<TaskCardStatusT, TaskCard[]> = {
+      backlog: [],
+      todo: [],
+      in_progress: [],
+      in_review: [],
+      done: [],
+    }
+    for (const card of cards) {
+      out[card.status].push(card)
+    }
+    return out
+  }, [cards])
 
   const isEmpty = cards.length === 0 && filter === 'all'
+  const activeDragCard = activeDragCardId
+    ? cards.find((c) => c.id === activeDragCardId) ?? null
+    : null
 
   return (
     <main
@@ -173,7 +371,7 @@ export function BoardSection({
           <EmptyState
             icon="📋"
             title="看板还没有卡片"
-            subtitle="点击右上角 [+ 新任务] 创建第一张任务卡片,或用 [+ 从 PRD 拆] 从 PRD 智能拆解(即将上线)。"
+            subtitle="点击右上角 [+ 新任务] 创建第一张任务卡片，或用 [+ 从 PRD 拆] 从 PRD 智能拆解(即将上线)。"
             cta={{
               label: '+ 新任务',
               onClick: handleNewTask,
@@ -181,23 +379,36 @@ export function BoardSection({
           />
         </div>
       ) : (
-        <div
-          data-testid="board-grid"
-          className="flex-1 overflow-auto p-3"
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDragCancel={() => setActiveDragCardId(null)}
         >
-          <div className="grid gap-3 min-w-[1100px]" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
-            {STATUS_COLUMN_ORDER.map((status) => (
-              <BoardColumn
-                key={status}
-                status={status}
-                cards={byStatus[status]}
-                onCardClick={handleCardClick}
-                onCardArchive={handleArchive}
-                onAddCard={handleAddInColumn}
-              />
-            ))}
+          <div data-testid="board-grid" className="flex-1 overflow-auto p-3">
+            <div
+              className="grid gap-3 min-w-[1100px]"
+              style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}
+            >
+              {STATUS_COLUMN_ORDER.map((status) => (
+                <BoardColumn
+                  key={status}
+                  status={status}
+                  cards={byStatus[status]}
+                  onCardClick={handleCardClick}
+                  onCardArchive={handleArchive}
+                  onAddCard={handleAddInColumn}
+                />
+              ))}
+            </div>
           </div>
-        </div>
+          <DragOverlay>
+            {activeDragCard ? (
+              <BoardCard card={activeDragCard} draggable={false} />
+            ) : null}
+          </DragOverlay>
+        </DndContext>
       )}
 
       <NewTaskModal
@@ -221,6 +432,19 @@ export function BoardSection({
         onClose={() => setReviewModalOpen(false)}
         onLanded={handleLanded}
       />
+
+      {/* 父子互锁冲突(issue 19 / ADR-0035 D6):复用 detail 页 StatusConstraintModal */}
+      {pendingConflict && (
+        <StatusConstraintModal
+          open
+          pendingStatus={pendingConflict.toStatus}
+          parentStatus={pendingConflict.parentStatus}
+          conflicts={pendingConflict.conflicts as Parameters<typeof StatusConstraintModal>[0]['conflicts']}
+          onForceSwitch={handleConflictForceSwitch}
+          onAdjustChildren={handleConflictCancel}
+          onCancel={handleConflictCancel}
+        />
+      )}
     </main>
   )
 }
