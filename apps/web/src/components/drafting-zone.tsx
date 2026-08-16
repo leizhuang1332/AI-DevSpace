@@ -60,6 +60,9 @@ function errorCodeToMessage(
       return `分支名 "${branchName}" 与上游默认分支冲突,请改名后重试`
     case RepoAttachErrorCode.E_AUTH:
       return '鉴权失败:请检查仓库凭据(SSH key / Token)是否正确'
+    case RepoAttachErrorCode.E_HTTP2_STREAM_RESET:
+      // ADR-0032:HTTP/2 stream 中断(HTTPS 走代理/防火墙场景),SSH workaround
+      return 'HTTP/2 传输中断:建议改用 SSH 地址(避开 HTTP 传输层问题),去 /repos 修改 git URL 后重新关联'
     case RepoAttachErrorCode.E_NETWORK:
       return '网络不可达:请检查网络或 Git 远程地址是否正确'
     case RepoAttachErrorCode.E_REPO_NOT_FOUND:

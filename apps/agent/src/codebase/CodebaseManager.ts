@@ -377,7 +377,14 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
       // 给前端。只取 fatal 末行(若没有 → 空字符串),让前端错误码 → 友好文案映射兜底
       // 完整 stderr 进 server log(便于排查,见 server.ts attach 路径)
       const fatalLine = extractFatalLine(cloneRes.stderr)
-      const message = fatalLine ?? `git clone exited with code ${cloneRes.code}`
+      const baseMessage = fatalLine ?? `git clone exited with code ${cloneRes.code}`
+      // ADR-0032:HTTP/2 stream 中断时附加 SSH workaround 提示。
+      // 前端 `errorCodeToMessage` 用 code 查表返文案,但 message 字段仍会透传到
+      // SSE `repo-clone-progress` 事件 error 字段,让用户能看到根因 + 行动指引。
+      const message =
+        lastError.code === RepoAttachErrorCode.E_HTTP2_STREAM_RESET
+          ? `${baseMessage}\n建议改用 SSH 地址克隆(如 git@github.com:owner/repo.git),绕开 HTTP/2 传输层问题。去 /repos 页面修改 git URL 后重新关联。`
+          : baseMessage
       // stderr 落 server log
       logger?.warn(
         { stderr: cloneRes.stderr.trim(), code: cloneRes.code },
@@ -654,7 +661,18 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
  *   <branchName>` 在 clone 后会撞(origin 默认分支已存在)。前置拦截避免
  *   走到必败路径。
  *
+ * ADR-0032:新增 `E_HTTP2_STREAM_RESET` 分支。
+ * - **作用域 = 全 stderr**(不复用 fatal 末行):`RPC failed; curl 92 HTTP/2 stream ...`
+ *   这行不含 `fatal` 字样,fatal 末行是 `fatal: fetch-pack: invalid index-pack output`,
+ *   只看 fatal 会漏掉协议层证据。
+ * - **只匹配 HTTP/2 流关键字**(`/HTTP\/2 stream/` 或 `/curl \d+ HTTP\/2/`),
+ *   不扩展到 `early EOF` / `invalid index-pack` —— 那些字眼常被通用 TCP 错复用,
+ *   扩展会误判。
+ * - **在 E_NETWORK 分支前判断**:命中此分支即返,不会落 E_NETWORK,
+ *   触发 0 次重试(fail-fast)。
+ *
  * 启发式匹配:
+ * - HTTP/2 stream 关键字 → E_HTTP2_STREAM_RESET(ADR-0032,优先于网络错)
  * - 网络关键字 → E_NETWORK
  * - 鉴权关键字 → E_AUTH(走 SSoT)
  * - 磁盘满 → E_DISK_FULL
@@ -663,6 +681,16 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
  */
 export function mapCloneError(stderr: string): CloneErrorCodeT {
   const s = stderr || ''
+
+  // ADR-0032:HTTP/2 stream 中断检测 —— 作用全 stderr,不只看 fatal 末行
+  // (协议层证据在 `RPC failed; curl 92 HTTP/2 stream ...` 那行,不含 fatal 字样)
+  if (
+    /HTTP\/2 stream/.test(s) ||
+    /curl \d+ HTTP\/2/.test(s)
+  ) {
+    return RepoAttachErrorCode.E_HTTP2_STREAM_RESET
+  }
+
   // Issue 15:优先看 fatal 末行(远程拒绝 / 鉴权等场景,根因在 fatal 行)
   const fatalLine = extractFatalLine(s)
   const haystack = fatalLine ?? s

@@ -372,6 +372,57 @@ describe('mapCloneError', () => {
     expect(mapCloneError('random failure')).toBe(RepoAttachErrorCode.E_INTERNAL)
     expect(mapCloneError('')).toBe(RepoAttachErrorCode.E_INTERNAL)
   })
+
+  // ============================================================================
+  // ADR-0032:HTTP/2 stream 中断检测 —— 优先于 E_NETWORK(协议层硬错,不重试)
+  // ============================================================================
+
+  it('ADR-0032:用户报错原文 5 行合并输入 → E_HTTP2_STREAM_RESET', () => {
+    // 用户实测 stderr 原文(issue 17 ticket)
+    const userStderr = [
+      'RPC failed; curl 92 HTTP/2 stream 5 was not closed cleanly: CANCEL (err 8)',
+      'error: 1363 bytes of body are still expected',
+      'fetch-pack: unexpected disconnect while reading sideband packet',
+      'fatal: early EOF',
+      "fatal: fetch-pack: invalid index-pack output",
+    ].join('\n')
+    expect(mapCloneError(userStderr)).toBe(
+      RepoAttachErrorCode.E_HTTP2_STREAM_RESET,
+    )
+  })
+
+  it('ADR-0032:`HTTP/2 stream` 关键字单行 → E_HTTP2_STREAM_RESET', () => {
+    expect(
+      mapCloneError('RPC failed; curl 92 HTTP/2 stream 0 was not closed cleanly'),
+    ).toBe(RepoAttachErrorCode.E_HTTP2_STREAM_RESET)
+  })
+
+  it('ADR-0032:`curl N HTTP/2` 关键字 → E_HTTP2_STREAM_RESET', () => {
+    expect(mapCloneError('curl 16 HTTP/2 error')).toBe(
+      RepoAttachErrorCode.E_HTTP2_STREAM_RESET,
+    )
+  })
+
+  it('ADR-0032:`fatal: early EOF` 单独出现(无 HTTP/2 关键字)→ E_INTERNAL(不误判为 HTTP/2)', () => {
+    // 真实 TCP 早断也可能报 early EOF,但不命中 HTTP/2 关键字 → 不归 E_HTTP2_STREAM_RESET
+    // 落到 E_INTERNAL(早期 EOF / invalid index-pack 无 HTTP/2 关键字时是模糊语义,不该假定网络层)
+    expect(mapCloneError('fatal: early EOF')).toBe(
+      RepoAttachErrorCode.E_INTERNAL,
+    )
+  })
+
+  it('ADR-0032:`fatal: fetch-pack: invalid index-pack output` 单独出现 → E_INTERNAL(不误判)', () => {
+    // invalid index-pack 也可能是磁盘满 / 校验错等其他原因,无 HTTP/2 关键字时归 E_INTERNAL
+    expect(
+      mapCloneError('fatal: fetch-pack: invalid index-pack output'),
+    ).toBe(RepoAttachErrorCode.E_INTERNAL)
+  })
+
+  it('ADR-0032:普通 ECONNRESET(无 HTTP/2 关键字)→ E_NETWORK(不复用 E_HTTP2_STREAM_RESET)', () => {
+    expect(mapCloneError('read tcp: ECONNRESET')).toBe(
+      RepoAttachErrorCode.E_NETWORK,
+    )
+  })
 })
 
 // ============================================================================
