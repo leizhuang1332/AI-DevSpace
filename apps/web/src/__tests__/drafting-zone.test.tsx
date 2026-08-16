@@ -1133,6 +1133,20 @@ describe('DraftingZone · 辅助文件抽屉 (issue 05)', () => {
 // ============================================================================
 
 describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
+  // ADR-0034:✕ → dialog → detachCodebase HTTP。本 describe 旧测试预期立即更新
+  // selectedRepoNames,新测试需走 dialog 流程;此处 mock globalThis.fetch 返 204
+  // 让 dialog confirm 后能成功关闭,不需要每个 it 单独 mock。
+  beforeEach(() => {
+    // @ts-ignore - test-only mock
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(null, { status: 204 }),
+    )
+  })
+  afterEach(() => {
+    // @ts-ignore - restore
+    delete (globalThis as { fetch?: unknown }).fetch
+  })
+
   // 验收 #1 #2 sticky 顶部条 + 三段式布局(chips / 警告 / 追加)
   it('验收 #1+#2:repo-bar 渲染于工作区顶部,包含 chips / 软警告区 / 追加按钮(启动按钮已移除)', async () => {
     const data = await getDraftingData('req-001')
@@ -1266,7 +1280,7 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
   })
 
   // 验收 #7 同一 render 内更新警告可见性
-  it('验收 #7:点 × 取消关联 → 软警告在同一 render 内更新(issue 09 折叠 sticky · 字段跟改 issue 06)', async () => {
+  it('验收 #7:点 × → dialog → confirm 后软警告在同一 render 内更新(ADR-0034)', async () => {
     // 起始:2 个仓库 → 警告隐藏
     const data = {
       ...emptyDrafting('req-toggle'),
@@ -1288,22 +1302,32 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
     // 展开摘要(issue 09 默认折叠)
     await user.click(screen.getByTestId('drafting-repo-bar-summary'))
 
-    // 取消关联 order-service → 仅剩 1 个仓库 → 警告出现
+    // 取消关联 order-service:点 × → dialog 打开 → confirm
     const orderDetach = screen
       .getAllByTestId('drafting-repo-chip-detach')
       .find((b) => b.getAttribute('data-repo-name') === 'order-service') as HTMLElement
     await user.click(orderDetach)
-
+    // ADR-0034:点 × 现在弹 dialog,chip 还在
+    expect(screen.getByTestId('detach-codebase-dialog')).toBeInTheDocument()
+    // confirm 后才真正 detach
+    await user.click(screen.getByTestId('detach-codebase-dialog-confirm'))
+    await waitFor(() => {
+      expect(screen.queryByTestId('detach-codebase-dialog')).toBeNull()
+    })
+    // 仅剩 1 个仓库 → 警告出现
     expect(bar.getAttribute('data-soft-warning')).toBe('true')
     expect(bar.getAttribute('data-selected-count')).toBe('1')
     expect(screen.getByTestId('drafting-repo-soft-warning')).toBeInTheDocument()
 
     // 再取消关联 refund-service → 0 个仓库 → 警告依然显示;此时 RepoBar 进入 N=0 空态
-    // (issue 01 ticket 扩展:chips 被替换为 add button + hint)
     const refundDetach = screen
       .getAllByTestId('drafting-repo-chip-detach')
       .find((b) => b.getAttribute('data-repo-name') === 'refund-service') as HTMLElement
     await user.click(refundDetach)
+    await user.click(screen.getByTestId('detach-codebase-dialog-confirm'))
+    await waitFor(() => {
+      expect(screen.queryByTestId('detach-codebase-dialog')).toBeNull()
+    })
     expect(bar.getAttribute('data-soft-warning')).toBe('true')
     expect(bar.getAttribute('data-selected-count')).toBe('0')
     expect(bar.getAttribute('data-empty-state')).toBe('true')
@@ -1356,9 +1380,13 @@ describe('DraftingZone · 仓库底部条 + 软警告 (issue 08)', () => {
     expect(refundChip.getAttribute('data-repo-name')).toBe('refund-service')
     expect(refundChip.getAttribute('data-selected')).toBe('true')
 
-    // 点 × refund-service → 0 个仓库,bar 进入空态 + useEffect 自动收起
-    const refundDetach = screen.getByTestId('drafting-repo-chip-detach')
-    await user.click(refundDetach)
+    // 点 × refund-service → dialog 打开 → confirm → 0 个仓库,bar 进入空态
+    await user.click(screen.getByTestId('drafting-repo-chip-detach'))
+    expect(screen.getByTestId('detach-codebase-dialog')).toBeInTheDocument()
+    await user.click(screen.getByTestId('detach-codebase-dialog-confirm'))
+    await waitFor(() => {
+      expect(screen.queryByTestId('detach-codebase-dialog')).toBeNull()
+    })
     expect(screen.queryByTestId('drafting-repo-chip')).toBeNull()
     const bar = screen.getByTestId('drafting-repo-bar')
     expect(bar.getAttribute('data-empty-state')).toBe('true')

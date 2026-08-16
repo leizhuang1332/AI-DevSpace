@@ -13,6 +13,7 @@ import {
 } from '@ai-devspace/shared'
 import {
   attachReposToRequirement,
+  detachCodebase,
   fetchRepoRegistry,
   isAttachReposError,
 } from '@/lib/repo-attach'
@@ -37,6 +38,7 @@ import {
 } from './drafting-banner'
 import { DraftingSkeleton } from './drafting-skeleton'
 import { AttachReposDialog } from './attach-repos-dialog'
+import { DetachCodebaseDialog } from './repos/DetachCodebaseDialog'
 
 /**
  * 弹层关闭后焦点回弹到触发按钮(issue 01 ticket 验收 #12)。
@@ -670,15 +672,36 @@ export function DraftingZone({ data }: { data: DraftingData }) {
   )
 
   // -------------------------------------------------------------------------
-  // 取消关联(issue 09 · × 按钮回调)—— RepoBar 触发
-  // - 一键生效:从 selectedRepoNames 移除该 name,chip 即时消失
-  // - 不影响全局 repos(可逆,重新 attach 即可)
-  // - 不影响 lockedBranchName(分支名仍然锁定,只是少一个 repo 走)
+  // 取消关联(ADR-0034 · issue 09 · × 按钮回调)—— RepoBar 触发
+  //
+  // 设计要点(决策 Q3 / Q8):
+  // - ✕ 触发**不立刻**移除 selectedRepoNames,先打开 DetachCodebaseDialog 二次确认
+  // - dialog 内确认后调 detachCodebase HTTP;成功才从 selectedRepoNames 移除
+  // - 失败时(dialog 内部 error banner)chip 仍在原位,可重试
+  // - 跨请求的"detachTarget"用 useState 持有(dialog 用它展示 repoName)
   // -------------------------------------------------------------------------
+  const [detachTarget, setDetachTarget] = useState<string | null>(null)
+
   const handleDetachRepo = useCallback((repoName: string) => {
     if (!repoName) return
-    setSelectedRepoNames((prev) => prev.filter((name) => name !== repoName))
+    setDetachTarget(repoName)
   }, [])
+
+  const handleDetachCancel = useCallback(() => {
+    setDetachTarget(null)
+  }, [])
+
+  const handleDetachConfirm = useCallback(async () => {
+    const target = detachTarget
+    if (!target) return
+    // detachCodebase 抛 AgentError 时由 DetachCodebaseDialog 内部捕获并展示;
+    // 这里不 catch,确保 dialog 能感知到 reject 状态。
+    await detachCodebase(data.requirementId, target)
+    // resolve 后才从 selectedRepoNames 移除(dialog 内部 resolve 后会保留可见性
+    // 由父组件关闭 —— 关闭通过 setDetachTarget(null) 完成)
+    setSelectedRepoNames((prev) => prev.filter((name) => name !== target))
+    setDetachTarget(null)
+  }, [detachTarget, data.requirementId])
 
   // -------------------------------------------------------------------------
   // 关联仓库弹层(issue 01 ticket)—— 入口共两处(banner [+] / RepoBar ＋)
@@ -937,7 +960,10 @@ export function DraftingZone({ data }: { data: DraftingData }) {
               selectedRepoNames={selectedRepoNames}
               failedRepoNames={failedRepoNames}
               attachedBranchName={lockedBranchName}
-              onDetachRepo={handleDetachRepo}
+              // ADR-0034:✕ 触发打开 DetachCodebaseDialog(不再走 onDetachRepo 的
+              // 纯前端 state 清理路径)。onDetachRepo 保留为 @deprecated fallback,
+              // 但此处不传 —— RepoBar 内部已用 onRequestDetach 优先。
+              onRequestDetach={handleDetachRepo}
               canLaunch={validity.canLaunch}
               launchDisabledHint={launchDisabledHint}
               onLaunch={handleLaunch}
@@ -1035,6 +1061,18 @@ export function DraftingZone({ data }: { data: DraftingData }) {
         cloneStatuses={repoCloneStatuses}
         onSubmit={submitAttach}
         onClose={closeAttachDialog}
+      />
+
+      {/* ADR-0034 —— 取消关联仓库二次确认弹窗。✕ 按钮 → handleDetachRepo
+          设置 detachTarget → 弹窗打开 → onConfirm 调 detachCodebase HTTP → 成功
+          后从 selectedRepoNames 移除 + 关闭弹窗;失败时弹窗内 error banner
+          展示,父组件不重置 state,chip 仍可见。 */}
+      <DetachCodebaseDialog
+        open={detachTarget !== null}
+        reqId={data.requirementId}
+        repoName={detachTarget ?? ''}
+        onConfirm={handleDetachConfirm}
+        onCancel={handleDetachCancel}
       />
 
       {/* 辅助文件抽屉(issue 05) —— 用 portal 思路直接渲染在主元素末尾,

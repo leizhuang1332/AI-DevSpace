@@ -295,3 +295,51 @@ export const RequirementListResponseSchema = z.object({
   requirements: z.array(RequirementSummarySchema),
 })
 export type RequirementListResponse = z.infer<typeof RequirementListResponseSchema>
+
+// ============================================================================
+// ADR-0034 —— 需求级 codebase detach 契约
+//
+// 错误码常量与 Result 类型放在这里(与 `RepoAttachErrorCode` 在
+// worktree.ts 同款风格),让 web/agent 共享同一份 SSoT。
+// ============================================================================
+
+/**
+ * `DELETE /api/requirement/:id/codebase/:name` 的错误码集合(ADR-0034 Q2/Q6)。
+ *
+ * - `E_REQUIREMENT_NOT_FOUND` —— 需求目录不存在 → 404
+ * - `E_REQUIREMENT_NOT_DRAFTING` —— 需求当前状态非 drafting → 409(决策 Q2 仅 DRAFTING)
+ * - `E_CODEBASE_NOT_FOUND` —— codebase/<name>/ 目录不存在 → 404
+ * - `E_INVALID_REPO_NAME` —— name 含路径穿越字符(`/` / `\` / `..`)→ 400
+ *   (由 route 层在进 service 之前 reject,不在 service Result 里;保留字面常量
+ *   便于前端 banner 翻译)
+ * - `E_INTERNAL` —— 兜底;safeRm 失败等 → 500
+ */
+export const DetachRepoErrorCode = {
+  E_REQUIREMENT_NOT_FOUND: 'E_REQUIREMENT_NOT_FOUND',
+  E_REQUIREMENT_NOT_DRAFTING: 'E_REQUIREMENT_NOT_DRAFTING',
+  E_CODEBASE_NOT_FOUND: 'E_CODEBASE_NOT_FOUND',
+  E_INVALID_REPO_NAME: 'E_INVALID_REPO_NAME',
+  E_INTERNAL: 'E_INTERNAL',
+} as const
+
+export type DetachRepoErrorCodeT =
+  (typeof DetachRepoErrorCode)[keyof typeof DetachRepoErrorCode]
+
+/**
+ * `RequirementService.detachRepo()` 的返回结构。
+ *
+ * 失败时 `ok=false` + `code` + `message`(前端 banner 翻译用);
+ * 成功时 `ok=true` + `repoName` + `remainingRepos`(供前端派生 summary 数字)。
+ *
+ * HTTP 层映射:`ok=true` → 204;`E_REQUIREMENT_NOT_FOUND` / `E_CODEBASE_NOT_FOUND`
+ * → 404;`E_REQUIREMENT_NOT_DRAFTING` → 409;`E_INTERNAL` → 500。
+ */
+export interface DetachRepoResult {
+  ok: boolean
+  /** detach 的 repo name(成功时) */
+  repoName?: string
+  /** detach 后剩余 repo name 列表(成功时;前端可借此同步 summary 数字) */
+  remainingRepos?: string[]
+  code?: DetachRepoErrorCodeT
+  message?: string
+}

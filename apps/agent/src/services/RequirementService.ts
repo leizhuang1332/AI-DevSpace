@@ -25,6 +25,7 @@ import mammoth from 'mammoth'
 import {
   MAX_UPLOAD_BYTES,
   MAX_UPLOAD_IMAGE_BYTES,
+  DetachRepoErrorCode,
   RepoAttachErrorCode,
   RepoCloneProgressStatus,
   RequirementErrorCode,
@@ -40,6 +41,7 @@ import {
   slugify,
   type AssetMeta,
   type AttachRepoResult,
+  type DetachRepoResult,
   type RequirementMeta,
   type RequirementStatusT,
   type RequirementSummary,
@@ -132,6 +134,16 @@ export class RequirementService {
   private readonly sseHub?: SseHub
   private readonly git?: GitExec
   private readonly sleep: (ms: number) => Promise<void>
+
+  // ===========================================================================
+  // issue:需求级 codebase detach(ADR-0034)
+  //
+  // Per-requirement mutex:把所有会改 `requirements/<reqId>/codebase/` 与 meta.yaml
+  // 的入口(`attachRepo` / `attachRepos` / `detachRepo`)串行化,防止 detach + attach
+  // 同 req 并发引发的 fs 状态机错位。模式与 `WorkspaceService.registryLock`
+  // (apps/agent/src/services/WorkspaceService.ts:130-132)同款。
+  // ===========================================================================
+  private readonly requirementLocks = new Map<string, Promise<unknown>>()
 
   constructor(deps: RequirementServiceDeps) {
     this.root = deps.root
@@ -283,9 +295,25 @@ export class RequirementService {
    * 3. codebaseMgr.clone(reqId, repoName, gitUrl, branchName) → 真实 git clone
    * 4. clearPending(无论成败 —— 标记已写就清掉,半成品由 codebaseMgr 内部清理)
    *
+   * 锁:detach(ADR-0034)需要 per-requirement 互斥,因此公共 `attachRepo` 把整
+   * 个 body 包进 `withRequirementLock`;`_attachRepoInner` 是无锁实现,被
+   * `attachRepos` 在持锁的 body 内复用,避免双重 acquire 死锁。
+   *
    * @returns AttachRepoResult (ok=true 给 codebasePath,ok=false 给 code + message)
    */
   async attachRepo(
+    reqId: string,
+    repoName: string,
+    branchName: string,
+  ): Promise<AttachRepoResult> {
+    return this.withRequirementLock(reqId, () =>
+      this._attachRepoInner(reqId, repoName, branchName),
+    )
+  }
+
+  /** attachRepo 的无锁实现 —— 严禁直接从 route handler 调用,只供持锁的
+   *  `attachRepo` / `attachRepos` 在锁内调用。 */
+  private async _attachRepoInner(
     reqId: string,
     repoName: string,
     branchName: string,
@@ -474,65 +502,175 @@ export class RequirementService {
    * - 任一 repo 失败都独立返,符合 attach-repos-dialog 的部分成功渲染
    * - 半成品目录由 CodebaseManager.clone 在 checkout 失败时自清
    * - meta.yaml 写失败只 warn,不回滚已成功的 clone
+   *
+   * 锁(ADR-0034):per-requirement mutex 串行化所有 fs 写入口,防止与
+   * `detachRepo` 并发引发状态机错位。持锁 body 内调用 `_attachRepoInner`
+   * 而非 `attachRepo`,避免双重 acquire 死锁。
    */
   async attachRepos(
     reqId: string,
     repoNames: readonly string[],
     branchName: string,
   ): Promise<AttachRepoResult[]> {
-    // 0. 校验(注册表里必须有所有 repo)
-    if (!this.workspace) {
-      return repoNames.map((name) => ({
-        ok: false,
-        repoName: name,
-        code: RepoAttachErrorCode.E_INTERNAL,
-        message: 'RequirementService.workspace 未注入,无法查注册表',
-      }))
-    }
-    for (const name of repoNames) {
-      const entry = await this.workspace.findRepoByName(name)
-      if (!entry) {
-        return [
-          {
-            ok: false,
-            repoName: name,
-            code: RepoAttachErrorCode.E_REPO_NOT_FOUND,
-            message: `注册表无仓库 ${name}`,
-          },
-        ]
-      }
-    }
-
-    // 1. pending 事件(每个 repo 一次,不等 clone 启动就告诉前端「马上开始」)
-    for (const name of repoNames) {
-      this.broadcastProgress(reqId, name, 'pending')
-    }
-
-    // 2. Issue 16:串行跑 attachRepo,不再 Promise.allSettled 并行
-    //    根因:多个 git clone OS 进程并发时,网络层 sideband packet 错位
-    //    + GitHub HTTPS 并发大文件下载竞争 → 多个 repo 同时失败
-    //    取舍:N 个 repo 用户等 N×T 时间,体感稳定可预测(每个都成功/失败清晰)
-    const results: AttachRepoResult[] = []
-    for (const name of repoNames) {
-      try {
-        results.push(await this.attachRepo(reqId, name, branchName))
-      } catch (err) {
-        // attachRepo 不应抛(默认实现都返 result);兜底
-        results.push({
-          ok: false as const,
+    return this.withRequirementLock(reqId, async () => {
+      // 0. 校验(注册表里必须有所有 repo)
+      if (!this.workspace) {
+        return repoNames.map((name) => ({
+          ok: false,
           repoName: name,
           code: RepoAttachErrorCode.E_INTERNAL,
-          message: err instanceof Error ? err.message : String(err),
-        })
+          message: 'RequirementService.workspace 未注入,无法查注册表',
+        }))
+      }
+      for (const name of repoNames) {
+        const entry = await this.workspace.findRepoByName(name)
+        if (!entry) {
+          return [
+            {
+              ok: false,
+              repoName: name,
+              code: RepoAttachErrorCode.E_REPO_NOT_FOUND,
+              message: `注册表无仓库 ${name}`,
+            },
+          ]
+        }
+      }
+
+      // 1. pending 事件(每个 repo 一次,不等 clone 启动就告诉前端「马上开始」)
+      for (const name of repoNames) {
+        this.broadcastProgress(reqId, name, 'pending')
+      }
+
+      // 2. Issue 16:串行跑 _attachRepoInner,不再 Promise.allSettled 并行
+      //    根因:多个 git clone OS 进程并发时,网络层 sideband packet 错位
+      //    + GitHub HTTPS 并发大文件下载竞争 → 多个 repo 同时失败
+      //    取舍:N 个 repo 用户等 N×T 时间,体感稳定可预测(每个都成功/失败清晰)
+      //    锁:直接调 _attachRepoInner(无锁)而非 this.attachRepo(包锁),避免死锁
+      const results: AttachRepoResult[] = []
+      for (const name of repoNames) {
+        try {
+          results.push(await this._attachRepoInner(reqId, name, branchName))
+        } catch (err) {
+          // _attachRepoInner 不应抛(默认实现都返 result);兜底
+          results.push({
+            ok: false as const,
+            repoName: name,
+            code: RepoAttachErrorCode.E_INTERNAL,
+            message: err instanceof Error ? err.message : String(err),
+          })
+        }
+      }
+
+      // 3. 任一成功 → 写 meta.yaml.branchName(SSR 持久化契约)
+      if (results.some((r) => r.ok)) {
+        this.persistBranchName(reqId, branchName)
+      }
+
+      return results
+    })
+  }
+
+  // ===========================================================================
+  // ADR-0034 —— 需求级 codebase detach
+  //
+  // 取消某个 repo 与本 req 的关联:
+  // 1. 验 req 存在 / status === 'drafting'(仅 DRAFTING 可 detach)
+  // 2. 验 codebase/<name>/ 存在
+  // 3. rm 先(CodebaseManager.remove 已含 safeRm + 清 .pending-<name>)
+  // 4. deriveRepos 看剩余 N;N=0 → 顺带清 meta.yaml::branchName(用空串)
+  // 5. 返 {ok:true, remainingRepos:[]},route 层映射 204
+  //
+  // 失败语义(ADR-0034 Q7 rm 先 + Q4 仅 N=1→0 时清 branchName):
+  // - rm 失败(safeRm throw)→ 直接抛到 caller,meta.yaml 未触;route 层 500
+  // - rm 成功 + deriveRepos 看 N=0 + persistBranchName 失败 → branchName 残留,
+  //   纯字段脏;下次 attach 会用新 branchName 覆盖空字符串,无副作用
+  // ===========================================================================
+  async detachRepo(
+    reqId: string,
+    repoName: string,
+  ): Promise<DetachRepoResult> {
+    return this.withRequirementLock(reqId, async () => {
+      // 1. 验 req 存在
+      if (!(await this.checkRequirementExists(reqId))) {
+        return {
+          ok: false,
+          code: DetachRepoErrorCode.E_REQUIREMENT_NOT_FOUND,
+          message: `需求 ${reqId} 不存在`,
+        }
+      }
+
+      const reqDir = this.requirementDirPath(reqId)
+
+      // 2. 验 status === drafting(仅 DRAFTING 可 detach,Q2)
+      const status = this.deriveStatus(reqDir)
+      if (status !== 'drafting') {
+        return {
+          ok: false,
+          code: DetachRepoErrorCode.E_REQUIREMENT_NOT_DRAFTING,
+          message: `需求 ${reqId} 当前状态 ${status},仅 DRAFTING 可 detach`,
+        }
+      }
+
+      // 3. 验 codebase/<name>/ 存在
+      const codeDir = join(reqDir, 'codebase', repoName)
+      if (!existsSync(codeDir)) {
+        return {
+          ok: false,
+          code: DetachRepoErrorCode.E_CODEBASE_NOT_FOUND,
+          message: `codebase ${repoName} 不存在`,
+        }
+      }
+
+      // 4. rm 先(Q7)。CodebaseManager.remove 内部走 safeRm(fd race retry 3 次,
+      //    Issue 13 后 throw);失败直接抛出,meta.yaml 未触。
+      await this.codebaseMgr.remove(reqId, repoName)
+
+      // 5. deriveRepos 看 N,Q4:仅当 N=1→0 时清 branchName
+      const remaining = this.deriveRepos(reqDir)
+      if (remaining.length === 0) {
+        // persistBranchName(reqId, '') 走现有实现 → 覆盖 branchName 字段为空串;
+        // 失败仅 console.warn(沿用 attachRepos 同样语义),不影响 detach 主结果
+        this.persistBranchName(reqId, '')
+      }
+
+      return {
+        ok: true,
+        repoName,
+        remainingRepos: remaining,
+      }
+    })
+  }
+
+  /**
+   * Per-requirement 进程内 mutex(ADR-0034 Q5):
+   * 把所有改 `requirements/<reqId>/codebase/` 与 meta.yaml 的入口串行化。
+   *
+   * 模式参考 `WorkspaceService.registryLock`(apps/agent/src/services/
+   * WorkspaceService.ts:130-132 + 596-647)。`fn` throw → 锁自动释放。
+   *
+   * 跨进程并发(多 agent 实例 / 多进程)目前不防 —— 与 `WorkspaceService.mutateRegistry`
+   * 一样靠调用方在更高层加进程间锁。本期 DRAFTING 是单用户单进程场景,暂不引入。
+   */
+  private async withRequirementLock<T>(
+    reqId: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const prev = this.requirementLocks.get(reqId) ?? Promise.resolve()
+    let release!: () => void
+    const next = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    this.requirementLocks.set(reqId, next)
+    try {
+      await prev
+      return await fn()
+    } finally {
+      release()
+      // 仅当当前 entry 仍是本调用注册的 next 才删,避免误删并发持有的更新 entry
+      if (this.requirementLocks.get(reqId) === next) {
+        this.requirementLocks.delete(reqId)
       }
     }
-
-    // 3. 任一成功 → 写 meta.yaml.branchName(SSR 持久化契约)
-    if (results.some((r) => r.ok)) {
-      this.persistBranchName(reqId, branchName)
-    }
-
-    return results
   }
 
   /** 把 branchName 写入 meta.yaml —— 抽出独立方法便于 attachRepos 调用 */

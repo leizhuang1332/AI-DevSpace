@@ -74,8 +74,20 @@ export interface RepoBarProps {
   /**
    * 取消关联回调(issue 09 · detach 按钮):点 × 立即从
    * `selectedRepoNames` 移除。无确认、无动画。
+   *
+   * @deprecated 自 ADR-0034 起,✕ 触发的是 HTTP detach 流程(二次确认 + 悲观更新)。
+   * 新代码请用 `onRequestDetach`;此 prop 仅保留以兼容 WRAP-UP 等特殊阶段的
+   * 「纯前端 state 清理」语义。
    */
-  onDetachRepo: (repoName: string) => void
+  onDetachRepo?: (repoName: string) => void
+  /**
+   * 请求打开 detach 确认弹窗的回调(ADR-0034):
+   * - 父组件(drafting-zone)接收到 repoName 后渲染 `<DetachCodebaseDialog>`,
+   *   弹窗内确认后调 `detachCodebase()` 真实删 codebase/
+   * - 提供时 ✕ 调 `onRequestDetach`;未提供时 fallback 到 `onDetachRepo`
+   *   (兼容旧的「纯前端 state 清理」路径)
+   */
+  onRequestDetach?: (repoName: string) => void
   /**
    * Launch validity:由父组件基于 title + PRD 内容计算(issue 08 验收 #7)。
    * 故意不接受 `repos` / `selectedRepoNames` —— 软警告不参与 launch 决策。
@@ -113,6 +125,7 @@ export function RepoBar({
   selectedRepoNames,
   failedRepoNames = [],
   onDetachRepo,
+  onRequestDetach,
   canLaunch,
   launchDisabledHint,
   onLaunch,
@@ -172,9 +185,18 @@ export function RepoBar({
   const handleDetach = useCallback(
     (repoName: string) => {
       if (!selectedRepoNames.includes(repoName)) return
-      onDetachRepo(repoName)
+      // ADR-0034:优先走 onRequestDetach(打开 DetachCodebaseDialog),
+      // 未提供时 fallback 到 onDetachRepo(老的纯前端 state 清理路径,
+      // 保留以兼容 WRAP-UP 等特殊阶段)
+      if (onRequestDetach) {
+        onRequestDetach(repoName)
+        return
+      }
+      if (onDetachRepo) {
+        onDetachRepo(repoName)
+      }
     },
-    [onDetachRepo, selectedRepoNames],
+    [onRequestDetach, onDetachRepo, selectedRepoNames],
   )
 
   const handleLaunchClick = useCallback(() => {

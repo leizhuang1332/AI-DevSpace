@@ -212,6 +212,34 @@ export async function deleteRepo(
   })
 }
 
+/**
+ * 取消某个 repo 与某需求的关联(ADR-0034)。
+ *
+ * 与 `deleteRepo`(全局仓库池条目删除)严格独立:
+ * - 本函数**不**动 `repos.yaml`,只 rm `requirements/<reqId>/codebase/<repoName>/`
+ * - N=1→0 时由后端顺带清 `meta.yaml::branchName`(前端无须关心)
+ *
+ * 错误码(由 agent 路由层定义,见 routes/requirement.ts):
+ * - 204 No Content → undefined(成功)
+ * - 400 E_INVALID_REPO_NAME(name 含 `/` `\` `..` `\0`) → AgentError
+ * - 404 E_REQUIREMENT_NOT_FOUND / E_CODEBASE_NOT_FOUND       → AgentError
+ * - 409 E_REQUIREMENT_NOT_DRAFTING(非 DRAFTING 状态门禁)   → AgentError
+ * - 500 E_INTERNAL(safeRm 抛错)                              → AgentError
+ */
+export async function detachCodebase(
+  reqId: string,
+  repoName: string,
+  opts?: { signal?: AbortSignal },
+): Promise<void> {
+  await agentFetch<void>(
+    `/api/requirement/${encodeURIComponent(reqId)}/codebase/${encodeURIComponent(repoName)}`,
+    {
+      method: 'DELETE',
+      signal: opts?.signal,
+    },
+  )
+}
+
 // Zod 的版本断言 schema(简单 typeguard,避免 web 端 import z 重复声明)
 export function isAttachReposError(err: unknown): err is AttachReposError {
   return err instanceof AttachReposError

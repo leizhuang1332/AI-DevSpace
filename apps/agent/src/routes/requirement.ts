@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify'
 import {
   AttachReposRequestSchema,
   CreateRequirementRequestSchema,
+  DetachRepoErrorCode,
   ParseUploadResponseSchema,
   REASON_TO_HTTP_STATUS,
   UploadPayloadSchema,
@@ -10,6 +11,7 @@ import {
   validateBranchName,
   type AttachReposResponse,
   type CreateRequirementResponse,
+  type DetachRepoResult,
   type RequirementErrorCodeT,
 } from '@ai-devspace/shared'
 import {
@@ -47,6 +49,8 @@ function notImplemented(feature: string, issue: string): {
  * - issue 05 ticket 07a 实装 GET /api/requirements(由 filesystem 产物目录派生
  *   status / progress / repos,按 updatedAt 倒序),并对 POST 双推全局 SSE 通道
  *   `'requirements'`(决策 4 · ADR-0014)
+ * - ADR-0034 实装 DELETE /api/requirement/:id/codebase/:name —— 需求级 detach
+ *   (与全局 DELETE /api/repos/:name 严格独立,repos.yaml 不动)
  *
  * 后续 slice 替换剩余 3 个 501 stub(逐 ticket 推进)。
  */
@@ -284,6 +288,92 @@ export async function requirementRoutes(
     }
     return reply.code(200).send(body)
   })
+
+  // ============================================================================
+  // ADR-0034 —— DELETE /api/requirement/:id/codebase/:name(需求级 detach)
+  //
+  // 与全局 DELETE /api/repos/:name(routes/repos.ts:289)严格独立:
+  // - 不删 repos.yaml,只删 `requirements/<id>/codebase/<name>/`
+  // - 同步该 req 内已 attach repo 列表(派生自 fs,自动收敛)
+  // - N=1→0 时顺带清 meta.yaml::branchName(由 service.detachRepo 内部决定)
+  //
+  // 错误码 → HTTP status 映射(沿用 routes/repos.ts 风格,内联 switch):
+  // - E_REQUIREMENT_NOT_FOUND / E_CODEBASE_NOT_FOUND → 404
+  // - E_REQUIREMENT_NOT_DRAFTING                   → 409(状态门禁 Q2)
+  // - E_INTERNAL                                   → 500(safeRm 抛错等)
+  // ============================================================================
+
+  app.delete<{ Params: { id: string; name: string } }>(
+    '/api/requirement/:id/codebase/:name',
+    async (req, reply) => {
+      const { id, name } = req.params
+      const { requirementService: service } = deps
+
+      if (!service) {
+        return reply.code(503).send({ error: 'service_not_ready' })
+      }
+
+      // 1. name 入口校验:防路径穿越(decision b:detach 范围只动 codebase/<name>/)
+      if (
+        !name ||
+        name.includes('/') ||
+        name.includes('\\') ||
+        name.includes('..') ||
+        name.includes('\0')
+      ) {
+        return reply.code(400).send({
+          error: DetachRepoErrorCode.E_INVALID_REPO_NAME,
+          name,
+          message: `repo name 含非法字符`,
+        })
+      }
+
+      // 2. 调 service(service 内部走 per-requirement mutex)
+      let result: DetachRepoResult
+      try {
+        result = await service.detachRepo(id, name)
+      } catch (err) {
+        req.log.error({ err, id, name }, 'detachRepo failed')
+        return reply.code(500).send({
+          error: DetachRepoErrorCode.E_INTERNAL,
+          message: err instanceof Error ? err.message : String(err),
+        })
+      }
+
+      // 3. 错误码 → HTTP status
+      if (!result.ok) {
+        switch (result.code) {
+          case DetachRepoErrorCode.E_REQUIREMENT_NOT_FOUND:
+            return reply.code(404).send({
+              error: result.code,
+              requirementId: id,
+            })
+          case DetachRepoErrorCode.E_REQUIREMENT_NOT_DRAFTING:
+            return reply.code(409).send({
+              error: result.code,
+              message: result.message,
+              requirementId: id,
+              currentStatus: undefined, // service Result 不返回 status,此处省略
+            })
+          case DetachRepoErrorCode.E_CODEBASE_NOT_FOUND:
+            return reply.code(404).send({
+              error: result.code,
+              message: result.message,
+              requirementId: id,
+              repoName: name,
+            })
+          default:
+            return reply.code(500).send({
+              error: result.code ?? DetachRepoErrorCode.E_INTERNAL,
+              message: result.message,
+            })
+        }
+      }
+
+      // 4. 成功 → 204 No Content
+      return reply.code(204).send()
+    },
+  )
 
   // ============================================================================
   // ticket 03 (ADR-0015 D3 / D8) —— 双入口上传管道

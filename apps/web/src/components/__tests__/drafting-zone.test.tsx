@@ -821,7 +821,7 @@ describe('DraftingZone · issue 01 ticket · banner + 关联仓库弹层端到�
   // issue 09 集成测试:× 取消关联端到端(N=2 → N=1 → N=0)
   // ============================================================================
 
-  it('issue 09 集成:点 × 取消关联 → selectedRepoNames 立即更新 + chip 消失(无动画无 toast)', async () => {
+  it('issue 09 集成:点 × → dialog → confirm 后 selectedRepoNames 更新 + chip 消失(ADR-0034)', async () => {
     render(<DraftingZone data={freshDraft()} />)
     const user = userEvent.setup()
     // 先 attach 2 个 repo(issue 06 data-repo-name)
@@ -849,23 +849,28 @@ describe('DraftingZone · issue 01 ticket · banner + 关联仓库弹层端到�
     const bar = screen.getByTestId('drafting-repo-bar')
     expect(bar.getAttribute('data-selected-count')).toBe('2')
 
-    // 点 × 取消 refund-service(issue 06 data-repo-name)
+    // 点 × 取消 refund-service:点 × → dialog → confirm
     const refundDetach = screen
       .getAllByTestId('drafting-repo-chip-detach')
       .find((b) => b.getAttribute('data-repo-name') === 'refund-service') as HTMLElement
     await user.click(refundDetach)
-
-    // 立即生效:selectedRepoNames 从 2 变 1
+    // ADR-0034:点 × 现在弹 dialog,chip 还在
+    expect(screen.getByTestId('detach-codebase-dialog')).toBeInTheDocument()
+    await user.click(screen.getByTestId('detach-codebase-dialog-confirm'))
+    await waitFor(() => {
+      expect(screen.queryByTestId('detach-codebase-dialog')).toBeNull()
+    })
+    // dialog 关后 selectedRepoNames 从 2 变 1
     expect(bar.getAttribute('data-selected-count')).toBe('1')
     // chip 数量也减少
     const remainingChips = screen.getAllByTestId('drafting-repo-chip')
     expect(remainingChips).toHaveLength(1)
     expect(remainingChips[0].getAttribute('data-repo-name')).toBe('order-service')
-    // 没有 toast / 没有动画元素残留
+    // 没有 toast 残留(我们走 dialog 而非 toast)
     expect(screen.queryByTestId('detach-toast')).toBeNull()
   })
 
-  it('issue 09 集成:N=1 点 × → bar 切回 N=0 空态(自动收起 + 软警告保持)', async () => {
+  it('issue 09 集成:N=1 点 × → dialog → confirm 后 bar 切回 N=0 空态(ADR-0034)', async () => {
     render(<DraftingZone data={freshDraft()} />)
     const user = userEvent.setup()
     // 1 个 repo
@@ -883,9 +888,14 @@ describe('DraftingZone · issue 01 ticket · banner + 关联仓库弹层端到�
       expect(screen.queryByTestId('attach-repos-dialog')).toBeNull()
     })
 
-    // 展开 → 点 ×
+    // 展开 → 点 × → dialog → confirm
     await user.click(screen.getByTestId('drafting-repo-bar-summary'))
     await user.click(screen.getByTestId('drafting-repo-chip-detach'))
+    expect(screen.getByTestId('detach-codebase-dialog')).toBeInTheDocument()
+    await user.click(screen.getByTestId('detach-codebase-dialog-confirm'))
+    await waitFor(() => {
+      expect(screen.queryByTestId('detach-codebase-dialog')).toBeNull()
+    })
 
     // bar 切到 N=0:data-empty-state=true + repo-bar-empty 出现
     const bar = screen.getByTestId('drafting-repo-bar')

@@ -38,7 +38,9 @@ function renderRepoBar(
   const defaultProps = {
     repos: REPOS,
     selectedRepoNames: ['refund-service', 'order-service'],
-    onDetachRepo: vi.fn(),
+    // ADR-0034:✕ 默认走 onRequestDetach(打开 DetachCodebaseDialog 二次确认)。
+    // onDetachRepo 仅在 override 里显式传入时启用(用于 @deprecated fallback 测试)。
+    onRequestDetach: vi.fn(),
     canLaunch: true,
     onLaunch: vi.fn(),
     onRequestAttach: vi.fn(),
@@ -172,9 +174,12 @@ describe('RepoBar · 展开态 × 取消关联(issue 09 Q4 一键生效)', () =>
     detachButtons.forEach((b) => expect(b.getAttribute('data-repo-id')).toBeNull())
   })
 
-  it('点 × 立即调用 onDetachRepo 传对应 repoName(issue 06 字段从 id 改为 name)', async () => {
-    const onDetachRepo = vi.fn()
-    renderRepoBar({ selectedRepoNames: ['refund-service', 'order-service'], onDetachRepo })
+  it('点 × 立即调用 onRequestDetach 传对应 repoName(ADR-0034)', async () => {
+    const onRequestDetach = vi.fn()
+    renderRepoBar({
+      selectedRepoNames: ['refund-service', 'order-service'],
+      onRequestDetach,
+    })
     const user = userEvent.setup()
     await user.click(screen.getByTestId('drafting-repo-bar-summary'))
 
@@ -183,8 +188,8 @@ describe('RepoBar · 展开态 × 取消关联(issue 09 Q4 一键生效)', () =>
       .find((b) => b.getAttribute('data-repo-name') === 'order-service') as HTMLElement
     await user.click(orderDetach)
 
-    expect(onDetachRepo).toHaveBeenCalledTimes(1)
-    expect(onDetachRepo).toHaveBeenCalledWith('order-service')
+    expect(onRequestDetach).toHaveBeenCalledTimes(1)
+    expect(onRequestDetach).toHaveBeenCalledWith('order-service')
   })
 
   it('× 按钮有 aria-label 含仓库名(无障碍)', async () => {
@@ -195,11 +200,11 @@ describe('RepoBar · 展开态 × 取消关联(issue 09 Q4 一键生效)', () =>
     expect(detach.getAttribute('aria-label')).toBe('取消关联 refund-service')
   })
 
-  it('从 N=1 点 × → onDetachRepo 传对应 repoName(父组件负责 transition)', async () => {
-    const onDetachRepo = vi.fn()
+  it('从 N=1 点 × → onRequestDetach 传对应 repoName(父组件负责 transition)', async () => {
+    const onRequestDetach = vi.fn()
     renderRepoBar({
       selectedRepoNames: ['refund-service'],
-      onDetachRepo,
+      onRequestDetach,
     })
     const user = userEvent.setup()
 
@@ -207,11 +212,27 @@ describe('RepoBar · 展开态 × 取消关联(issue 09 Q4 一键生效)', () =>
     await user.click(screen.getByTestId('drafting-repo-bar-summary'))
     // 点 ×
     await user.click(screen.getByTestId('drafting-repo-chip-detach'))
-    // onDetachRepo 被调用 1 次,传 'refund-service'(不是 id)
+    // onRequestDetach 被调用 1 次,传 'refund-service'(不是 id)
+    expect(onRequestDetach).toHaveBeenCalledTimes(1)
+    expect(onRequestDetach).toHaveBeenCalledWith('refund-service')
+    // 父组件(DraftingZone)拿到回调后打开 DetachCodebaseDialog,
+    // 二次确认 + HTTP detachCodebase + setSelectedRepoNames;
+    // 这个 transition 在 drafting-zone.test.tsx 的「集成测试」里覆盖
+  })
+
+  // ADR-0034:onDetachRepo(纯前端 state 清理)的 fallback 路径
+  it('未提供 onRequestDetach 时,fallback 到 onDetachRepo(老路径,@deprecated)', async () => {
+    const onDetachRepo = vi.fn()
+    renderRepoBar({
+      selectedRepoNames: ['refund-service'],
+      onRequestDetach: undefined,
+      onDetachRepo,
+    })
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('drafting-repo-bar-summary'))
+    await user.click(screen.getByTestId('drafting-repo-chip-detach'))
     expect(onDetachRepo).toHaveBeenCalledTimes(1)
     expect(onDetachRepo).toHaveBeenCalledWith('refund-service')
-    // 父组件(DraftingZone)拿到回调后负责 setSelectedRepoNames 然后 re-render;
-    // 这个 transition 在 drafting-zone.test.tsx 的「集成测试」里覆盖
   })
 
   // issue 06 ticket:删除 PLACEHOLDER_PREFIX 过滤逻辑
