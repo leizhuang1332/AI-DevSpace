@@ -59,6 +59,8 @@ import { ChatSessionService } from './services/board/ChatSessionService.js'
 import { boardChatRoutes } from './routes/board-chat.js'
 import { prdSplitRoutes } from './prd-split/PrdSplitRoute.js'
 import { PrdSplitService } from './prd-split/PrdSplitService.js'
+import { agentRoutes } from './routes/agent.js'
+import { detectSupervisor } from './lib/supervisor-detect.js'
 
 const ALLOWED_ORIGINS: string[] = ['http://localhost:3333', 'http://127.0.0.1:3333']
 
@@ -67,15 +69,27 @@ function defaultLogPath(): string {
 }
 
 /**
- * 默认 workspace 根目录 → 复用 `WorkspaceService.resolveRoot()`,自动归一化
+ * 默认 workspace 根目录 → 复用 `WorkspaceService.resolveConfigDir()`,自动归一化
  * Git Bash mingw 路径(`/c/foo` → `C:\foo`)。此处不再独立读 env,消除 DRY 违反。
+ *
+ * ADR-0037 D1 / D2:启动期 `WorkspaceService.fromEnv` 走两阶段解析(configDir → dataRoot);
+ * 此处保留单参数 backward-compat 入口(workspaceRoot 同时当 configDir + dataRoot),
+ * 用于测试与 `BuildServerOptions` 覆盖默认。
  */
-function defaultWorkspaceRoot(): string {
-  return WorkspaceService.resolveRoot()
+function defaultConfigDir(): string {
+  return WorkspaceService.resolveConfigDir()
 }
 
 export interface BuildServerOptions {
+  /**
+   * 兼容旧 API:workspaceRoot 同时作为 configDir + dataRoot。
+   * @deprecated 优先用 `configDir` + `dataRoot` 单独覆盖,测试用 singleRoot 路径可继续使用 workspaceRoot。
+   */
   workspaceRoot?: string
+  /** ADR-0037 D1:覆盖 configDir(env 解析之外) */
+  configDir?: string
+  /** ADR-0037 D1:覆盖 dataRoot(yaml 解析之外) */
+  dataRoot?: string
   logFilePath?: string
   agentVersion?: string
   /**
@@ -102,7 +116,19 @@ export interface BuildServerOptions {
  * TokenManager.ensure() is awaited here so any 401-strict routes are safe.
  */
 export async function buildServer(opts: BuildServerOptions = {}): Promise<FastifyInstance> {
-  const workspaceRoot = opts.workspaceRoot ?? defaultWorkspaceRoot()
+  // ADR-0037 D1 / D2: configDir / dataRoot 拆分
+  // - workspaceRoot 旧 API: 同时覆盖 configDir + dataRoot(向后兼容)
+  // - configDir / dataRoot 单独覆盖:精细控制(测试 / 拆分场景)
+  const configDir =
+    opts.configDir ??
+    (opts.workspaceRoot
+      ? opts.workspaceRoot
+      : defaultConfigDir())
+  const dataRoot =
+    opts.dataRoot ??
+    opts.workspaceRoot ??
+    (opts.configDir ? opts.configDir : defaultConfigDir())
+  const workspaceRoot = dataRoot
   const logFilePath = opts.logFilePath ?? defaultLogPath()
   const bootTime = new Date()
   mkdirSync(dirname(logFilePath), { recursive: true })
@@ -148,7 +174,8 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   await fastify.register(globalEventsRoutes, { hub })
 
   // 4. Workspace (init idempotent — 含 ADR-0026 一次性清理 ~/.aidevspace/zones/*.yaml)
-  const workspace = new WorkspaceService(workspaceRoot)
+  // ADR-0037: configDir + dataRoot 双根构造
+  const workspace = new WorkspaceService(configDir, dataRoot)
   try {
     const initResult = await workspace.initWorkspace()
     fastify.log.info(
@@ -471,6 +498,9 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     provider,
   })
 
+  // ADR-0037 D4 — Agent 重启端点(workspaceRoot 改完后 / 手动重启 / config-changed)
+  await fastify.register(agentRoutes, { hub, provider })
+
   // 7. 启动 / 配置变更日志
   globalLogger.agentStarted({ root: workspaceRoot, version: opts.agentVersion ?? '0.0.0' })
   const configured = ccSwitch.getCurrent()
@@ -478,6 +508,21 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     provider: configured?.name ?? null,
     model: configured?.models.main ?? null,
   })
+
+  // ADR-0037 D4:启动期 supervisor 检测 —— 不阻断启动,仅 console.warn
+  // (决策 24「克制在场」)。未 supervise 的进程,POST /api/agent/restart 不会
+  // 自动拉起新进程,用户须手动重启。
+  if (isMain) {
+    const detection = detectSupervisor()
+    if (!detection.supervised) {
+      fastify.log.warn(
+        { hint: detection.hint },
+        '[supervisor] 当前未在 supervisor(tsx watch / pm2 / k8s)下运行 — POST /api/agent/restart 不会自动拉起新进程',
+      )
+    } else {
+      fastify.log.info({ supervisor: detection.hint }, '[supervisor] 检测到 supervisor')
+    }
+  }
 
   fastify.addHook('onClose', async () => {
     await hub.close()
@@ -496,8 +541,10 @@ const isMain = entryPath === process.argv[1]
 if (isMain) {
   const port = Number(process.env.PORT ?? 7777)
   const host = process.env.HOST ?? '0.0.0.0'
-  // defaultWorkspaceRoot() 内部已读 AIDEVSPACE_HOME + normalize,无需重复
-  const workspaceRoot = defaultWorkspaceRoot()
+  // defaultConfigDir() 内部已读 AIDEVSPACE_HOME + normalize,无需重复
+  // ADR-0037 D1: 默认情况下 configDir == dataRoot(向后兼容);只读 configDir,
+  // buildServer 内部会把它当 workspaceRoot(单根模式)透传。
+  const workspaceRoot = defaultConfigDir()
   const logFilePath = process.env.AGENT_LOG_FILE ?? defaultLogPath()
   // issue 09 e2e 守门 —— `AIDEVSPACE_FAKE_CHAT_PROVIDER=1` 时用脚本化
   // FakeChatProvider(确定性 emit PermissionPrompt / PlanModePrompt 等 11 步

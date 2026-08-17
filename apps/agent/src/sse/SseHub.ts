@@ -20,6 +20,12 @@ export type Unsubscribe = () => void
 export interface SseHub {
   subscribe(key: string, listener: SseListener): Unsubscribe
   publish(key: string, event: SseEvent): void
+  /**
+   * 广播到所有通道的所有订阅者(ADR-0037 D4)。
+   * 用于 agent 重启前的「即将退出」通知 —— 订阅者可能在任意通道上。
+   * listener 抛错仍 swallow,与 publish 一致。
+   */
+  publishAll(event: SseEvent): void
   /** 移除某个 key 的所有订阅者(per-session 关闭时调用)。 */
   closeChannel(key: string): void
   close(): Promise<void>
@@ -114,6 +120,19 @@ export function createSseHub(opts: CreateSseHubOptions = {}): SseHub {
     }
   }
 
+  function publishAll(event: SseEvent): void {
+    if (closed) return
+    for (const set of channels.values()) {
+      for (const listener of set) {
+        try {
+          listener(event)
+        } catch {
+          /* swallow */
+        }
+      }
+    }
+  }
+
   function closeChannel(key: string): void {
     const set = channels.get(key)
     if (!set) return
@@ -134,5 +153,5 @@ export function createSseHub(opts: CreateSseHubOptions = {}): SseHub {
     return { subscribers: totalSubscribers(), channels: channels.size }
   }
 
-  return { subscribe, publish, closeChannel, close, stats }
+  return { subscribe, publish, publishAll, closeChannel, close, stats }
 }
