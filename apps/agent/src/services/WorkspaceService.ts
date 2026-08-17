@@ -13,6 +13,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import yaml from 'yaml'
 import {
   DEFAULT_CONFIG,
+  normalizeWorkspaceRoot,
   type Config,
   type WorkspaceInfo,
   type ConfigPatch,
@@ -112,10 +113,19 @@ export interface InitWorkspaceResult {
 }
 
 export class WorkspaceService {
-  /** 默认根路径：AIDEVSPACE_HOME env > ~/.aidevspace */
+  /**
+   * 默认根路径:AIDEVSPACE_HOME env > ~/.aidevspace
+   *
+   * 返回值统一过 `normalizeWorkspaceRoot`:用户在 Git Bash 里
+   * `export AIDEVSPACE_HOME=$HOME/.aidevspace`(= `/c/Users/...`)时,
+   * 自动归一化为 Windows 原生 `C:\Users\...\aidevspace`,避免 Node.js
+   * `path.join` 和 git.exe 都把 `/c/foo` 当 drive-relative 写到 `<cwd_drive>:\c\...`。
+   * 已 native / POSIX 路径原样返回,无副作用。
+   */
   static resolveRoot(env: NodeJS.ProcessEnv = process.env): string {
     const override = env.AIDEVSPACE_HOME?.trim()
-    return override && override.length > 0 ? override : join(homedir(), '.aidevspace')
+    const raw = override && override.length > 0 ? override : join(homedir(), '.aidevspace')
+    return normalizeWorkspaceRoot(raw)
   }
 
   /**

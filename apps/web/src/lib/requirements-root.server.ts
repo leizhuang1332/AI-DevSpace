@@ -43,6 +43,7 @@
  */
 
 import { isAbsolute, join, resolve } from 'node:path'
+import { normalizeWorkspaceRoot } from '@ai-devspace/shared'
 import { parseFlatMap, readYamlFileOrNull } from './yaml.server'
 
 // ---------------------------------------------------------------------------
@@ -113,15 +114,19 @@ export function resolveRequirementsRoot(
 ): string {
   const configPath = options.configPath ?? getDefaultConfigPath()
 
-  // 第 1 层:config.yaml + workspaceRoot
+  // 第 1 层:config.yaml + workspaceRoot(expandHome 后再 normalize)
+  // normalize 必须在 expandHome 之后 —— `~/foo` 经 expandHome 在 win32 上
+  // 会得到 `C:\Users\...\foo`,原样即可;若 config 直接写 mingw 风格
+  // `/c/Users/...`(用户手填),归一化为 `C:\Users\...`。
   const fromConfig = readWorkspaceRootFromConfig(configPath)
-  if (fromConfig !== null) return fromConfig
+  if (fromConfig !== null) return normalizeWorkspaceRoot(fromConfig)
 
   // 第 2 层:AIDEVSPACE_HOME env
   const fromEnv = process.env.AIDEVSPACE_HOME
-  if (fromEnv && fromEnv.length > 0) return fromEnv
+  if (fromEnv && fromEnv.length > 0) return normalizeWorkspaceRoot(fromEnv)
 
   // 第 3 层:cwd + '../..'(保留 dev 默认行为)
+  // resolve() 已经 OS-native 化,无需 normalize
   return resolve(process.cwd(), '../..')
 }
 

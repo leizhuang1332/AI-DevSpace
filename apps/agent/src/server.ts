@@ -66,8 +66,12 @@ function defaultLogPath(): string {
   return join(homedir(), '.aidevspace', 'logs', 'agent.log')
 }
 
+/**
+ * 默认 workspace 根目录 → 复用 `WorkspaceService.resolveRoot()`,自动归一化
+ * Git Bash mingw 路径(`/c/foo` → `C:\foo`)。此处不再独立读 env,消除 DRY 违反。
+ */
 function defaultWorkspaceRoot(): string {
-  return process.env.AIDEVSPACE_HOME ?? join(homedir(), '.aidevspace')
+  return WorkspaceService.resolveRoot()
 }
 
 export interface BuildServerOptions {
@@ -492,7 +496,8 @@ const isMain = entryPath === process.argv[1]
 if (isMain) {
   const port = Number(process.env.PORT ?? 7777)
   const host = process.env.HOST ?? '0.0.0.0'
-  const workspaceRoot = process.env.AIDEVSPACE_HOME ?? defaultWorkspaceRoot()
+  // defaultWorkspaceRoot() 内部已读 AIDEVSPACE_HOME + normalize,无需重复
+  const workspaceRoot = defaultWorkspaceRoot()
   const logFilePath = process.env.AGENT_LOG_FILE ?? defaultLogPath()
   // issue 09 e2e 守门 —— `AIDEVSPACE_FAKE_CHAT_PROVIDER=1` 时用脚本化
   // FakeChatProvider(确定性 emit PermissionPrompt / PlanModePrompt 等 11 步

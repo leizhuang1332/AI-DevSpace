@@ -32,6 +32,7 @@ import {
   AnalysisRunStartResponseSchema,
   AnalysisRunListResponseSchema,
   AnalysisRunDetailResponseSchema,
+  normalizeWorkspaceRoot,
   type AnalysisRunStartResponse,
   type AnalysisRunListResponse,
   type AnalysisRunDetailResponse,
@@ -90,7 +91,9 @@ export const analysisRunRoutes: FastifyPluginAsync<AnalysisRunRouteDeps> = async
 ) => {
   const { hub, provider, workspaceRoot } = opts
   const resolveRoot = (): string =>
-    workspaceRoot ?? process.env.AIDEVSPACE_ROOT ?? defaultAgentRoot()
+    normalizeWorkspaceRoot(
+      workspaceRoot ?? process.env.AIDEVSPACE_ROOT ?? defaultAgentRoot(),
+    )
 
   const runService = new AnalysisRunService(resolveRoot())
   const skillService = new AnalysisSkillService(resolveRoot())

@@ -19,11 +19,23 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, resolve, sep } from 'node:path'
+import { platform } from 'node:process'
 import {
   resolveRequirementsRoot,
   expandHome,
   type ResolveRequirementsRootOptions,
 } from '@/lib/requirements-root.server'
+
+/**
+ * `normalizeWorkspaceRoot` 走 `process.platform`(live 读取)。
+ * 在 POSIX runner 上测 win32 行为 → 必须 stub `process.platform`。
+ * `Object.defineProperty(..., { configurable: true })` 是 vitest 下能干净还原
+ * 的写法(afterEach 复原)。
+ */
+const ORIGINAL_PLATFORM = platform
+function stubPlatform(value: NodeJS.Platform): void {
+  Object.defineProperty(process, 'platform', { value, configurable: true })
+}
 
 // ============================================================================
 // fixture 隔离 + env 隔离
@@ -260,5 +272,75 @@ describe('resolveRequirementsRoot · 行为契约', () => {
     } finally {
       spy.mockRestore()
     }
+  })
+})
+
+// ============================================================================
+// 跨平台归一化:Git Bash mingw 路径(/c/Users/...) → Windows 原生 (C:\Users\...)
+// ============================================================================
+//
+// 用户在 Git Bash 里 `export AIDEVSPACE_HOME=$HOME/.aidevspace`,Node.js 和
+// git.exe 都会把 `/c/foo` 当 drive-relative,落到 `<cwd_drive>:\c\...`。
+// 此处验证 `resolveRequirementsRoot` 的两层(env / config)都会自动归一化。
+//
+// 现状:config.yaml 直接写 mingw 路径(`/c/Users/...`)在 win32 上被
+// `readWorkspaceRootFromConfig` 视为非绝对路径返回 null(详见 path.isAbsolute
+// 行为)→ 实际触发归一化的入口是 env 层。下面的 env case 已覆盖本 bug 场景。
+// ============================================================================
+
+describe('resolveRequirementsRoot · win32 视角下 mingw 路径归一化', () => {
+  beforeEach(() => {
+    stubPlatform('win32')
+  })
+
+  afterEach(() => {
+    stubPlatform(ORIGINAL_PLATFORM)
+  })
+
+  it('AIDEVSPACE_HOME = /c/Users/me/aidev → C:\\Users\\me\\aidev(env 层)', () => {
+    const configPath = join(tmpRoot, 'not-exists-config.yaml')
+    process.env.AIDEVSPACE_HOME = '/c/Users/me/aidev'
+
+    const root = resolveRequirementsRoot({ configPath })
+
+    expect(root).toBe('C:\\Users\\me\\aidev')
+  })
+
+  it('AIDEVSPACE_HOME = /c/Users/Lorcan/.aidevspace → C:\\Users\\Lorcan\\.aidevspace(本 bug 场景)', () => {
+    const configPath = join(tmpRoot, 'not-exists-config.yaml')
+    process.env.AIDEVSPACE_HOME = '/c/Users/Lorcan/.aidevspace'
+
+    const root = resolveRequirementsRoot({ configPath })
+
+    expect(root).toBe('C:\\Users\\Lorcan\\.aidevspace')
+  })
+
+  it('AIDEVSPACE_HOME 盘符大写 /D/Users/foo → D:\\Users\\foo', () => {
+    const configPath = join(tmpRoot, 'not-exists-config.yaml')
+    process.env.AIDEVSPACE_HOME = '/D/Users/foo'
+
+    const root = resolveRequirementsRoot({ configPath })
+
+    expect(root).toBe('D:\\Users\\foo')
+  })
+
+  it('AIDEVSPACE_HOME = C:\\Users\\me\\aidev 原样返回(回归:已 native 路径不被双重转义)', () => {
+    const configPath = join(tmpRoot, 'not-exists-config.yaml')
+    process.env.AIDEVSPACE_HOME = 'C:\\Users\\me\\aidev'
+
+    const root = resolveRequirementsRoot({ configPath })
+
+    expect(root).toBe('C:\\Users\\me\\aidev')
+  })
+
+  it('AIDEVSPACE_HOME = /tmp/fake-root 在 win32 上原样返回(/tmp 后跟 p,不是 mingw 盘符)', () => {
+    // 回归:不要把所有 / 开头的路径都当 mingw 路径 — /tmp 不匹配 ^/[a-zA-Z]/,
+    // 必须原样返回,避免误把 /tmp 当作 /t/mp 的盘符路径。
+    const configPath = join(tmpRoot, 'not-exists-config.yaml')
+    process.env.AIDEVSPACE_HOME = '/tmp/fake-root'
+
+    const root = resolveRequirementsRoot({ configPath })
+
+    expect(root).toBe('/tmp/fake-root')
   })
 })

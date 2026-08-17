@@ -22,6 +22,7 @@
 import { cookies } from 'next/headers'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { normalizeWorkspaceRoot } from '@ai-devspace/shared'
 
 const COOKIE_NAME = 'aidevspace_token'
 const TOKEN_FILENAME = '.agent-token'
@@ -68,9 +69,11 @@ export function _getServerAgentTokenSource(): ServerAgentTokenSource | null {
 
 function resolveTokenPath(): string | null {
   // 优先级 1:AIDEVSPACE_HOME(显式配置,CI / e2e / k8s 部署都用这个)
+  // 经 normalizeWorkspaceRoot 归一化 Git Bash mingw 路径(/c/Users/... → C:\Users\...),
+  // 避免 join() 把开头 / 当 drive-relative 写到 <cwd_drive>:\c\...。
   const explicitHome = process.env.AIDEVSPACE_HOME
   if (explicitHome && explicitHome.length > 0) {
-    return join(explicitHome, TOKEN_FILENAME)
+    return join(normalizeWorkspaceRoot(explicitHome), TOKEN_FILENAME)
   }
   // 优先级 2:dev 本机 fallback —— 直接读 env,不依赖 os 模块
   // (os.homedir() 在 Node 14+ 内部实现就是读 HOME/USERPROFILE,这里等价但

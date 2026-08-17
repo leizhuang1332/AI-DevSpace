@@ -17,8 +17,11 @@
  * 路径语义(cross-platform):
  *   - getCodebasePath 返回 **OS-native 路径**(Windows 上 `C:\...`,POSIX 上
  *     `/...`),用于 fs.existsSync / mkdir 等系统调用。
- *   - 实际传给 git 的 `clone <gitUrl> <codebasePath>` / `rev-parse` 参数走
- *     `toPosixPath` 转换(Windows 上变 `/c/...`、POSIX 上保持 `/...`)。
+ *   - 传给 git 的 args 也走 OS-native:git.exe 在 win32 上原生接受 `C:\foo`
+ *     和 `C:/foo`,从 Node.js cwd 调 git.exe 时**不**做 MSYS 路径翻译
+ *     (实测:`git clone <src> /c/foo` 在 cwd `D:\` 下落到 `D:\c\foo`,
+ *     而非 `C:\foo`)。如果 git args 强行 POSIX 化,在 win32 上反而触发
+ *     drive-relative 错位。详见 `normalizeWorkspaceRoot` 注释。
  *
  * 强制 env:依赖注入的 `GitExec` 已经由 `createDefaultGitExec()` 处理
  * `GIT_TERMINAL_PROMPT=0` / `GIT_ASKPASS=""` / `SSH_ASKPASS=""` —— 缺凭据时
@@ -34,7 +37,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
-import { posixJoin, toPosixPath } from '../worktree/pathUtil.js'
+import { posixJoin } from '../worktree/pathUtil.js'
 import {
   PER_REPO_ERROR_CODES,
   RepoAttachErrorCode,
@@ -314,7 +317,7 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
 // Issue 16.2:git config 加固(protocol.version=2 / core.precomposeUnicode /
 // http.postBuffer)由 createDefaultGitExec wrapper 层自动 prepend,这里
 // 不再重复,避免和 wrapper 双层 prefix
-    const cloneArgs = ['clone', gitUrl, toPosixPath(codebasePath)]
+    const cloneArgs = ['clone', gitUrl, codebasePath]
     const MAX_RETRIES = 2
     // backoff(单位 ms)按 retry 顺序取:第 1 次 1s, 第 2 次 2s
     const BACKOFF_MS = [1000, 2000]
@@ -396,7 +399,7 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
     // 2. checkout -b <branchName>(在 clone 出来的目录里)
     const checkoutArgs = [
       '-C',
-      toPosixPath(codebasePath),
+      codebasePath,
       'checkout',
       '-b',
       branchName,
@@ -435,7 +438,7 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
     }
 
     // 3. 拿 HEAD commit(给上层当 head 字段)
-    const headArgs = ['-C', toPosixPath(codebasePath), 'rev-parse', 'HEAD']
+    const headArgs = ['-C', codebasePath, 'rev-parse', 'HEAD']
     const headRes = await git(headArgs)
     const head = headRes.code === 0 ? headRes.stdout.trim() : ''
 
@@ -490,7 +493,7 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
       try {
         const branchRes = await git([
           '-C',
-          toPosixPath(codebasePath),
+          codebasePath,
           'rev-parse',
           '--abbrev-ref',
           'HEAD',
@@ -504,7 +507,7 @@ export function createCodebaseManager(deps: CodebaseManagerDeps): CodebaseManage
         }
         const headRes = await git([
           '-C',
-          toPosixPath(codebasePath),
+          codebasePath,
           'rev-parse',
           'HEAD',
         ])
@@ -800,7 +803,7 @@ export async function ensureWorkingTree(
   codebasePath: string,
   logger?: SafeRmLogger,
 ): Promise<void> {
-  const checkArgs = ['-C', toPosixPath(codebasePath), 'ls-files']
+  const checkArgs = ['-C', codebasePath, 'ls-files']
   const checkRes = await git(checkArgs)
   if (checkRes.code === 0 && checkRes.stdout.trim().length > 0) return
   // working tree 为空 → 强制 reset
@@ -810,7 +813,7 @@ export async function ensureWorkingTree(
   )
   const resetRes = await git([
     '-C',
-    toPosixPath(codebasePath),
+    codebasePath,
     'reset',
     '--hard',
     'HEAD',

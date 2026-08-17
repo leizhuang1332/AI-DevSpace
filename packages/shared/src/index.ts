@@ -1,4 +1,5 @@
 export * from './config-defaults'
+export * from './pathUtil'
 export * from './workspace'
 export * from './zones'
 export * from './sse'

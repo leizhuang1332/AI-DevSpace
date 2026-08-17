@@ -37,7 +37,6 @@ import {
   safeRm,
   type CodebaseManagerDeps,
 } from '../../codebase/CodebaseManager.js'
-import { toPosixPath } from '../../worktree/pathUtil.js'
 
 const ROOT = '/fake/aidevsp-codebase'
 
@@ -170,15 +169,20 @@ describe('CodebaseManager.clone · success', () => {
     expect(calls.length).toBe(4)
     expect(calls[0]).toContain('clone')
     expect(calls[0]).toContain('git@github.com:co/order.git')
-    // 注:实际传给 git 的 codebasePath 走 `toPosixPath`(Windows 上
-    // 变 `/c/...`,POSIX 上保持 `/...`),所以断言必须用 toPosixPath 包一层。
-    const codebasePathPosix = toPosixPath(
-      join(realRoot, 'requirements', 'req-001', 'codebase', 'order-svc'),
+    // 实际传给 git 的 codebasePath 走 OS-native 路径(Windows 上 `C:\...`,
+    // POSIX 上 `/...`)。git.exe 在 win32 上原生接受两种分隔符,从 Node.js
+    // cwd 调 git.exe 时不 MSYS 翻译,POSIX 化反而触发 drive-relative 错位。
+    const codebasePathNative = join(
+      realRoot,
+      'requirements',
+      'req-001',
+      'codebase',
+      'order-svc',
     )
     // checkout -b <branch>
     expect(calls[1]).toEqual([
       '-C',
-      codebasePathPosix,
+      codebasePathNative,
       'checkout',
       '-b',
       'feat/x',
@@ -186,7 +190,7 @@ describe('CodebaseManager.clone · success', () => {
     // rev-parse HEAD
     expect(calls[2]).toEqual([
       '-C',
-      codebasePathPosix,
+      codebasePathNative,
       'rev-parse',
       'HEAD',
     ])
@@ -1129,7 +1133,7 @@ describe('ensureWorkingTree (issue 11)', () => {
     expect(resetCalls).toHaveLength(1)
     expect(resetCalls[0]).toEqual([
       '-C',
-      toPosixPath(dir),
+      dir,
       'reset',
       '--hard',
       'HEAD',
