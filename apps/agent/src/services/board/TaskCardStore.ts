@@ -29,6 +29,8 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
@@ -149,6 +151,15 @@ export class TaskCardStore {
   private readonly root: string
   private readonly ulidFactory: () => string
   private readonly nowIso: () => string
+  /**
+   * 物理删除用的 per-cardId 串行锁(ADR-0036 D7 决策 106 per-requirement mutex
+   * 模式的卡片级细化)。Map<cardId, Promise>;同 cardId 第二次 `delete` 会
+   * 等第一次 settle;不同 cardId 之间不阻塞。
+   *
+   * 注意:仅 `delete` 路径持锁;`archive` 走 `update`,与 delete 不共享锁语义,
+   * 避免把 archive 的并发行为绑死。
+   */
+  private readonly locks: Map<string, Promise<unknown>> = new Map()
 
   constructor(deps: TaskCardStoreDeps) {
     this.root = deps.root
@@ -168,6 +179,15 @@ export class TaskCardStore {
   /** 单卡绝对路径 */
   cardPath(reqId: string, cardId: string): string {
     return join(this.tasksDir(reqId), `${cardId}.json`)
+  }
+
+  /**
+   * 单卡的协作目录绝对路径(ADR-0028 D1 物理独立 transcript 路径):
+   * `<tasksDir>/<cardId>/transcript.yaml`。`delete()` 路径下需要
+   * `rm -rf` 这个目录。
+   */
+  cardDirFor(reqId: string, cardId: string): string {
+    return join(this.tasksDir(reqId), cardId)
   }
 
   /** `<root>/requirements/<reqId>/board/` 目录(overrides.log 父目录) */
@@ -483,10 +503,120 @@ export class TaskCardStore {
    * 软删:`is_archived = true`(状态保留);走 `update` 路径,
    * 自动 `updated_at` 改写。文件不删(便于 undo / 审计)。
    *
+   * 注:ADR-0036 D7 后,board UI 不再触发 `archive`;后端路径仍保留,
+   * 供 snapshot / CLI 工具调用 + `is_archived` 字段在 ADR-0025 D6 仍生效。
+   *
    * @throws {TaskCardStoreError} E_CARD_NOT_FOUND 卡不存在
    */
   archive(reqId: string, cardId: string): TaskCard {
     return this.update(reqId, cardId, { is_archived: true })
+  }
+
+  /**
+   * per-cardId 串行执行:同 cardId 第二次调用会等第一次 settle,
+   * 不同 cardId 之间互不阻塞(ADR-0036 D7)。
+   *
+   * 实现要点:
+   * - 链式 Promise:`prev.catch(() => {}).then(fn)`,失败不破坏链,否则一次抛错
+   *   永久卡死该 cardId
+   * - tracked promise(`next.catch(() => {})`)写回 Map,保证后续等待者拿到完整 settle
+   * - finally 中如果当前链是 Map 中最后一个值 → delete entry,避免 Map 无限增长
+   *
+   * 私有,目前仅 `delete()` 路径使用;`archive` 走 `update`,与本锁解耦。
+   */
+  private async withCardLock<T>(
+    cardId: string,
+    fn: () => Promise<T> | T,
+  ): Promise<T> {
+    const prev = this.locks.get(cardId) ?? Promise.resolve()
+    // 失败不破坏链,确保 catch 后下一个调用仍能进入
+    const safePrev = prev.catch(() => undefined)
+    const next = safePrev.then(() => fn())
+    const tracked = next.catch(() => undefined)
+    this.locks.set(cardId, tracked)
+    try {
+      return await next
+    } finally {
+      // 仅当 Map 中仍是本链时清掉;避免清掉后续等待者插入的链
+      if (this.locks.get(cardId) === tracked) {
+        this.locks.delete(cardId)
+      }
+    }
+  }
+
+  /**
+   * 物理删除一张 TaskCard(ADR-0036 D1):
+   * `rm -rf <tasksDir>/<cardId>/` + `unlink <tasksDir>/<cardId>.json`,
+   * 一次操作同时清掉 TaskCard 主数据 + transcript(ADR-0028 D1 物理独立)。
+   *
+   * 删除顺序(陷阱 2):
+   *   1. `rm -rf <cardId>/` — 先删目录(含 transcript)
+   *      抛错 → `E_IO`,**不动** .json
+   *   2. `unlink <cardId>.json` — 删主数据
+   *      抛错(罕见,目录已空时)→ console.warn + 仍返回 success
+   *        (卡已删,orphan json 可下次清理)
+   *
+   * 幂等性:cardDir 和 cardPath 都不存在 → `E_CARD_NOT_FOUND`(第二次访问的标准错误)
+   *
+   * 并发保护:走 `withCardLock(cardId, ...)`,同 cardId 串行;不同 cardId 并行。
+   *
+   * 注:blocker 检查(子任务 / 依赖方)不在 store 职责内,由 route 层
+   * 调 `getBlockers(cards, cardId)` 后再决定是否调本方法。
+   *
+   * @throws {TaskCardStoreError} E_INVALID_CARD_ID id 不合法
+   * @throws {TaskCardStoreError} E_REQUIREMENT_NOT_FOUND req 目录不存在
+   * @throws {TaskCardStoreError} E_CARD_NOT_FOUND 卡片不存在(幂等保护)
+   * @throws {TaskCardStoreError} E_IO 文件系统错误
+   */
+  async delete(reqId: string, cardId: string): Promise<void> {
+    if (!TASK_CARD_ID_RE.test(cardId)) {
+      throw new TaskCardStoreError(
+        'E_INVALID_CARD_ID',
+        `card id "${cardId}" is not a valid 26-char ULID`,
+      )
+    }
+    if (!this.exists(reqId)) {
+      throw new TaskCardStoreError(
+        'E_REQUIREMENT_NOT_FOUND',
+        `requirement ${reqId} not found`,
+      )
+    }
+    await this.withCardLock(cardId, async () => {
+      const cardDir = this.cardDirFor(reqId, cardId)
+      const cardFile = this.cardPath(reqId, cardId)
+      const dirExists = existsSync(cardDir)
+      const fileExists = existsSync(cardFile)
+      // 幂等保护:都缺失 → 当作"卡不存在"
+      if (!dirExists && !fileExists) {
+        throw new TaskCardStoreError(
+          'E_CARD_NOT_FOUND',
+          `task card ${cardId} not found in req ${reqId}`,
+        )
+      }
+      // 1) 先删目录(含 transcript)—— 抛错时 .json 不动
+      if (dirExists) {
+        try {
+          rmSync(cardDir, { recursive: true, force: true })
+        } catch (err) {
+          throw new TaskCardStoreError(
+            'E_IO',
+            `rm ${cardDir} failed: ${(err as Error).message}`,
+          )
+        }
+      }
+      // 2) 再删主数据 —— 罕见失败 → warn + 仍 success(orphan 可后续清理)
+      if (fileExists) {
+        try {
+          unlinkSync(cardFile)
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[TaskCardStore] unlink ${cardFile} failed after dir rm; orphan json, manual cleanup suggested:`,
+            err,
+          )
+        }
+      }
+    })
   }
 }
 

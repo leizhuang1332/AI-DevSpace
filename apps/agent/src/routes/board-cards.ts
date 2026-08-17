@@ -20,6 +20,7 @@ import {
   BoardCardListFilterSchema,
   BoardCardPatchSchema,
   REASON_TO_HTTP_STATUS_BOARD,
+  type BoardCardBlockers,
   type BoardCardFailReason,
 } from '@ai-devspace/shared'
 import {
@@ -27,6 +28,7 @@ import {
   TaskCardStoreError,
   type TaskCardStoreDeps,
 } from '../services/board/TaskCardStore.js'
+import { getBlockers } from '../services/board/get-blockers.js'
 
 export interface BoardCardRoutesDeps {
   /** 未注入时所有端点 503 `service_not_ready`(与其他 routes 风格一致) */
@@ -217,6 +219,75 @@ export async function boardCardRoutes(
           return failWith(reply, storeErrorToReason(err), err.message, req.log)
         }
         req.log.error({ err }, 'archive card failed unexpectedly')
+        return failWith(reply, 'internal', 'internal error', req.log)
+      }
+    },
+  )
+
+  // ==========================================================================
+  // DELETE /api/requirement/:id/board/cards/:cardId —— 物理删除(ADR-0036)
+  //
+  // 流程:
+  //   1. req 目录存在? 否 → 404 requirement-not-found
+  //   2. card 存在? 否 → 404 card-not-found(包含幂等二次访问)
+  //   3. blocker 检查(子任务 / 依赖方)→ 命中 → 409 card-has-blockers
+  //   4. 调 store.delete(id, cardId) → 200 { deleted: true }
+  //
+  // blocker 检查放 route 层而非 store 层:store 职责单一(物理删),
+  // blocker 是业务规则(可能因后续批量真删复用但与单卡物理删解耦)。
+  // ==========================================================================
+  app.delete<{ Params: { id: string; cardId: string } }>(
+    '/api/requirement/:id/board/cards/:cardId',
+    async (req, reply) => {
+      const { store } = deps
+      if (!store) return reply.code(503).send({ error: 'service_not_ready' })
+
+      const { id, cardId } = req.params
+
+      if (!store.exists(id)) {
+        return failWith(
+          reply,
+          'requirement-not-found',
+          `requirement ${id} not found`,
+          req.log,
+        )
+      }
+      const card = store.get(id, cardId)
+      if (!card) {
+        return failWith(
+          reply,
+          'card-not-found',
+          `card ${cardId} not found in req ${id}`,
+          req.log,
+        )
+      }
+
+      // blocker 检查 —— ADR-0036 D2
+      const allCards = store.list(id, { includeArchived: false })
+      const blockers = getBlockers(allCards, cardId)
+      if (blockers.subtasks.length > 0 || blockers.dependents.length > 0) {
+        req.log.warn(
+          { cardId, blockers },
+          'delete card blocked by subtasks/dependents',
+        )
+        const blockersPayload: BoardCardBlockers = blockers
+        return reply.code(409).send({
+          error: 'E_CARD_HAS_BLOCKERS',
+          reason: 'card-has-blockers',
+          message: `cannot delete card ${cardId}: ${blockers.subtasks.length} subtask(s), ${blockers.dependents.length} dependent(s)`,
+          blockers: blockersPayload,
+        })
+      }
+
+      // 物理删除 —— store 内部串行锁 + rm -rf
+      try {
+        await store.delete(id, cardId)
+        return reply.code(200).send({ deleted: true, id: cardId })
+      } catch (err) {
+        if (err instanceof TaskCardStoreError) {
+          return failWith(reply, storeErrorToReason(err), err.message, req.log)
+        }
+        req.log.error({ err }, 'delete card failed unexpectedly')
         return failWith(reply, 'internal', 'internal error', req.log)
       }
     },

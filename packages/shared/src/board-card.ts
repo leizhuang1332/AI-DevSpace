@@ -36,6 +36,7 @@ export const TaskCardIdSchema = z.string().regex(TASK_CARD_ID_RE)
  *
  * - `invalid-id` / `invalid-body` —— 路由层 400
  * - `requirement-not-found` / `card-not-found` —— 404
+ * - `card-has-blockers` —— 409(物理删除前的 blocker 硬拒绝,见 ADR-0036 D2)
  * - `internal` —— 500
  *
  * 单一来源 → `REASON_TO_HTTP_STATUS`,route 层不另写映射。
@@ -45,6 +46,7 @@ export type BoardCardFailReason =
   | 'invalid-body'
   | 'requirement-not-found'
   | 'card-not-found'
+  | 'card-has-blockers'
   | 'internal'
 
 export const REASON_TO_HTTP_STATUS_BOARD: Record<
@@ -58,7 +60,21 @@ export const REASON_TO_HTTP_STATUS_BOARD: Record<
     status: 404,
   },
   'card-not-found': { code: 'E_CARD_NOT_FOUND', status: 404 },
+  'card-has-blockers': { code: 'E_CARD_HAS_BLOCKERS', status: 409 },
   'internal': { code: 'E_INTERNAL', status: 500 },
+}
+
+/**
+ * 物理删除时的 blocker 响应体(ADR-0036 D2)。
+ *
+ * - `subtasks`:该卡片的非 archived 子卡(parent_id === cardId)
+ * - `dependents`:depends_on 引用该卡的非 archived 卡
+ *
+ * 两类均为空数组时,board-cards DELETE route 不会返回 409,而是走 200。
+ */
+export interface BoardCardBlockers {
+  subtasks: Array<{ id: string; title: string }>
+  dependents: Array<{ id: string; title: string }>
 }
 
 // ---------------------------------------------------------------------------

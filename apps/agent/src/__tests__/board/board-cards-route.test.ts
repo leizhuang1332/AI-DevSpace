@@ -483,3 +483,258 @@ describe('POST /api/requirement/:id/board/cards/:cardId/archive', () => {
     expect(body.error).toBe('E_CARD_NOT_FOUND')
   })
 })
+
+// ---------------------------------------------------------------------------
+// DELETE /api/requirement/:id/board/cards/:cardId (issue 02 / ADR-0036)
+// ---------------------------------------------------------------------------
+
+describe('DELETE /api/requirement/:id/board/cards/:cardId', () => {
+  it('200 + { deleted: true } on hit; the .json file is physically gone', async () => {
+    seedRequirement('req-001-test')
+    const store = freshStore()
+    const card = store.create('req-001-test', { title: 'x' })
+    const filePath = join(
+      tmpRoot,
+      'requirements',
+      'req-001-test',
+      'board',
+      'tasks',
+      `${card.id}.json`,
+    )
+    expect(existsSync(filePath)).toBe(true)
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/api/requirement/req-001-test/board/cards/${card.id}`,
+      headers: authHeaders(),
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as { deleted: boolean; id: string }
+    expect(body.deleted).toBe(true)
+    expect(body.id).toBe(card.id)
+    expect(existsSync(filePath)).toBe(false)
+  })
+
+  it('404 E_REQUIREMENT_NOT_FOUND when req missing', async () => {
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/api/requirement/req-999-missing/board/cards/01J7X3K2P5EVR0Z3YQJD8HFKXX',
+      headers: authHeaders(),
+    })
+    expect(res.statusCode).toBe(404)
+    const body = res.json() as { error: string; reason: string }
+    expect(body.error).toBe('E_REQUIREMENT_NOT_FOUND')
+  })
+
+  it('404 E_CARD_NOT_FOUND when card missing', async () => {
+    seedRequirement('req-001-test')
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/api/requirement/req-001-test/board/cards/01J7X3K2P5EVR0Z3YQJD8HFKXX',
+      headers: authHeaders(),
+    })
+    expect(res.statusCode).toBe(404)
+    const body = res.json() as { error: string; reason: string }
+    expect(body.error).toBe('E_CARD_NOT_FOUND')
+  })
+
+  it('404 E_CARD_NOT_FOUND on a second delete (idempotency surface)', async () => {
+    seedRequirement('req-001-test')
+    const store = freshStore()
+    const card = store.create('req-001-test', { title: 'x' })
+
+    // 第一次成功
+    const first = await app.inject({
+      method: 'DELETE',
+      url: `/api/requirement/req-001-test/board/cards/${card.id}`,
+      headers: authHeaders(),
+    })
+    expect(first.statusCode).toBe(200)
+
+    // 第二次 404
+    const second = await app.inject({
+      method: 'DELETE',
+      url: `/api/requirement/req-001-test/board/cards/${card.id}`,
+      headers: authHeaders(),
+    })
+    expect(second.statusCode).toBe(404)
+    const body = second.json() as { error: string; reason: string }
+    expect(body.error).toBe('E_CARD_NOT_FOUND')
+  })
+
+  it('409 E_CARD_HAS_BLOCKERS with blockers body when a subtask exists', async () => {
+    seedRequirement('req-001-test')
+    const store = freshStore()
+    const parent = store.create('req-001-test', { title: 'parent' })
+    // create 强制 parent_id=reqId,用 update 把 child reparent 到 parent(模拟子任务)
+    const child = store.create('req-001-test', { title: '子任务' })
+    store.update('req-001-test', child.id, { parent_id: parent.id })
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/api/requirement/req-001-test/board/cards/${parent.id}`,
+      headers: authHeaders(),
+    })
+    expect(res.statusCode).toBe(409)
+    const body = res.json() as {
+      error: string
+      reason: string
+      blockers: {
+        subtasks: Array<{ id: string; title: string }>
+        dependents: Array<{ id: string; title: string }>
+      }
+    }
+    expect(body.error).toBe('E_CARD_HAS_BLOCKERS')
+    expect(body.reason).toBe('card-has-blockers')
+    expect(body.blockers.subtasks).toEqual([{ id: child.id, title: '子任务' }])
+    expect(body.blockers.dependents).toEqual([])
+
+    // 父卡文件应仍在(被拒绝,没删)
+    const filePath = join(
+      tmpRoot,
+      'requirements',
+      'req-001-test',
+      'board',
+      'tasks',
+      `${parent.id}.json`,
+    )
+    expect(existsSync(filePath)).toBe(true)
+  })
+
+  it('409 E_CARD_HAS_BLOCKERS with dependents body when a card depends_on the target', async () => {
+    seedRequirement('req-001-test')
+    const store = freshStore()
+    const target = store.create('req-001-test', { title: 'target' })
+    const dependent = store.create('req-001-test', {
+      title: '依赖方',
+      depends_on: [target.id],
+    })
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/api/requirement/req-001-test/board/cards/${target.id}`,
+      headers: authHeaders(),
+    })
+    expect(res.statusCode).toBe(409)
+    const body = res.json() as {
+      error: string
+      reason: string
+      blockers: {
+        subtasks: Array<{ id: string; title: string }>
+        dependents: Array<{ id: string; title: string }>
+      }
+    }
+    expect(body.error).toBe('E_CARD_HAS_BLOCKERS')
+    expect(body.blockers.subtasks).toEqual([])
+    expect(body.blockers.dependents).toEqual([
+      { id: dependent.id, title: '依赖方' },
+    ])
+  })
+
+  it('archived blockers are NOT counted (regression: ADR-0025 D6 + ADR-0036 D2 archived 豁免)', async () => {
+    seedRequirement('req-001-test')
+    const store = freshStore()
+    const parent = store.create('req-001-test', { title: 'parent' })
+    // 子任务先 reparent 到 parent,再 archive(模拟:之前归档过,但仍占 parent_id 引用)
+    const child = store.create('req-001-test', { title: 'archived child' })
+    store.update('req-001-test', child.id, { parent_id: parent.id })
+    store.archive('req-001-test', child.id)
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/api/requirement/req-001-test/board/cards/${parent.id}`,
+      headers: authHeaders(),
+    })
+    // archived 子任务不算 blocker → 应直接 200
+    expect(res.statusCode).toBe(200)
+  })
+
+  it('archived card can itself be deleted (ADR-0036 D5: 物理删 = 等同 archived)', async () => {
+    seedRequirement('req-001-test')
+    const store = freshStore()
+    const card = store.create('req-001-test', { title: 'x' })
+    store.archive('req-001-test', card.id)
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/api/requirement/req-001-test/board/cards/${card.id}`,
+      headers: authHeaders(),
+    })
+    expect(res.statusCode).toBe(200)
+    const filePath = join(
+      tmpRoot,
+      'requirements',
+      'req-001-test',
+      'board',
+      'tasks',
+      `${card.id}.json`,
+    )
+    expect(existsSync(filePath)).toBe(false)
+  })
+
+  it('401 without token (authPlugin intercepts)', async () => {
+    seedRequirement('req-001-test')
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/api/requirement/req-001-test/board/cards/01J7X3K2P5EVR0Z3YQJD8HFKXX',
+    })
+    expect(res.statusCode).toBe(401)
+  })
+
+  it('removes the per-card transcript directory on success', async () => {
+    seedRequirement('req-001-test')
+    const store = freshStore()
+    const card = store.create('req-001-test', { title: 'x' })
+    // 模拟 transcript 子目录已存在
+    const { mkdirSync, writeFileSync } = require('node:fs') as typeof import('node:fs')
+    const transcriptDir = join(
+      tmpRoot,
+      'requirements',
+      'req-001-test',
+      'board',
+      'tasks',
+      card.id,
+    )
+    mkdirSync(transcriptDir, { recursive: true })
+    writeFileSync(join(transcriptDir, 'transcript.yaml'), 'entries: []\n', 'utf8')
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/api/requirement/req-001-test/board/cards/${card.id}`,
+      headers: authHeaders(),
+    })
+    expect(res.statusCode).toBe(200)
+    expect(existsSync(transcriptDir)).toBe(false)
+    expect(existsSync(join(
+      tmpRoot,
+      'requirements',
+      'req-001-test',
+      'board',
+      'tasks',
+      `${card.id}.json`,
+    ))).toBe(false)
+  })
+
+  it('serializes concurrent DELETE on the same cardId (withCardLock at HTTP layer)', async () => {
+    seedRequirement('req-001-test')
+    const store = freshStore()
+    const card = store.create('req-001-test', { title: 'x' })
+
+    // 并发 5 次
+    const responses = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        app.inject({
+          method: 'DELETE',
+          url: `/api/requirement/req-001-test/board/cards/${card.id}`,
+          headers: authHeaders(),
+        }),
+      ),
+    )
+    const statusCounts = responses.reduce<Record<number, number>>((acc, r) => {
+      acc[r.statusCode] = (acc[r.statusCode] ?? 0) + 1
+      return acc
+    }, {})
+    // 1 个 200 + 4 个 404(card-not-found)
+    expect(statusCounts).toEqual({ 200: 1, 404: 4 })
+  })
+})

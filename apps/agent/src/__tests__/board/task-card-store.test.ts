@@ -450,3 +450,129 @@ describe('TaskCardStore.exists', () => {
     expect(store.exists('req-999-missing')).toBe(false)
   })
 })
+
+// ---------------------------------------------------------------------------
+// delete (issue 02 / ADR-0036 D1)
+// ---------------------------------------------------------------------------
+
+describe('TaskCardStore.delete', () => {
+  it('removes the .json file physically; subsequent get() returns null', async () => {
+    seedRequirement()
+    const created = store.create('req-001-test', { title: 'x' })
+    const file = join(tmpRoot, 'requirements', 'req-001-test', 'board', 'tasks', `${created.id}.json`)
+    expect(existsSync(file)).toBe(true)
+
+    await store.delete('req-001-test', created.id)
+
+    expect(existsSync(file)).toBe(false)
+    expect(store.get('req-001-test', created.id)).toBeNull()
+  })
+
+  it('removes the per-card transcript directory <tasksDir>/<cardId>/', async () => {
+    seedRequirement()
+    const created = store.create('req-001-test', { title: 'x' })
+    const { mkdirSync, writeFileSync } = require('node:fs') as typeof import('node:fs')
+    const transcriptDir = join(tmpRoot, 'requirements', 'req-001-test', 'board', 'tasks', created.id)
+    mkdirSync(transcriptDir, { recursive: true })
+    writeFileSync(join(transcriptDir, 'transcript.yaml'), 'entries: []\n', 'utf8')
+    expect(existsSync(transcriptDir)).toBe(true)
+
+    await store.delete('req-001-test', created.id)
+
+    expect(existsSync(transcriptDir)).toBe(false)
+    expect(existsSync(join(tmpRoot, 'requirements', 'req-001-test', 'board', 'tasks', `${created.id}.json`))).toBe(false)
+  })
+
+  it('throws E_CARD_NOT_FOUND on a second delete call (idempotency surface)', async () => {
+    seedRequirement()
+    const created = store.create('req-001-test', { title: 'x' })
+    await store.delete('req-001-test', created.id)
+
+    try {
+      await store.delete('req-001-test', created.id)
+      expect.fail('expected throw on second delete')
+    } catch (err) {
+      expect((err as TaskCardStoreError).code).toBe('E_CARD_NOT_FOUND')
+    }
+  })
+
+  it('throws E_CARD_NOT_FOUND when card never existed', async () => {
+    seedRequirement()
+    try {
+      await store.delete('req-001-test', '01J7X3K2P5EVR0Z3YQJD8HFKXX')
+      expect.fail('expected throw')
+    } catch (err) {
+      expect((err as TaskCardStoreError).code).toBe('E_CARD_NOT_FOUND')
+    }
+  })
+
+  it('throws E_INVALID_CARD_ID when cardId is not a valid ULID', async () => {
+    seedRequirement()
+    try {
+      await store.delete('req-001-test', 'not-a-ulid')
+      expect.fail('expected throw')
+    } catch (err) {
+      expect((err as TaskCardStoreError).code).toBe('E_INVALID_CARD_ID')
+    }
+  })
+
+  it('throws E_REQUIREMENT_NOT_FOUND when req dir missing', async () => {
+    try {
+      await store.delete('req-999-missing', '01J7X3K2P5EVR0Z3YQJD8HFKXX')
+      expect.fail('expected throw')
+    } catch (err) {
+      expect((err as TaskCardStoreError).code).toBe('E_REQUIREMENT_NOT_FOUND')
+    }
+  })
+
+  it('deletes an archived card (ADR-0036 D5: archived 不参与父 status 校验,物理删同样适用)', async () => {
+    seedRequirement()
+    const created = store.create('req-001-test', { title: 'x' })
+    store.archive('req-001-test', created.id)
+    const file = join(tmpRoot, 'requirements', 'req-001-test', 'board', 'tasks', `${created.id}.json`)
+    expect(existsSync(file)).toBe(true)
+
+    await store.delete('req-001-test', created.id)
+
+    expect(existsSync(file)).toBe(false)
+  })
+
+  it('serializes concurrent delete calls on the same cardId (withCardLock)', async () => {
+    seedRequirement()
+    const created = store.create('req-001-test', { title: 'x' })
+    const file = join(tmpRoot, 'requirements', 'req-001-test', 'board', 'tasks', `${created.id}.json`)
+    // 并发发起 5 次 delete —— 第一次成功,后续 4 次都抛 E_CARD_NOT_FOUND
+    const results = await Promise.allSettled(
+      Array.from({ length: 5 }, () => store.delete('req-001-test', created.id)),
+    )
+    const fulfilled = results.filter((r) => r.status === 'fulfilled')
+    const rejected = results.filter((r) => r.status === 'rejected')
+    expect(fulfilled).toHaveLength(1)
+    expect(rejected).toHaveLength(4)
+    for (const r of rejected) {
+      expect((r as PromiseRejectedResult).reason).toBeInstanceOf(TaskCardStoreError)
+      expect(((r as PromiseRejectedResult).reason as TaskCardStoreError).code).toBe(
+        'E_CARD_NOT_FOUND',
+      )
+    }
+    expect(existsSync(file)).toBe(false)
+  })
+
+  it('archive still works (regression AC: 后端软删路径保留,UI 不再触发但 API 仍可用)', () => {
+    seedRequirement()
+    const created = store.create('req-001-test', { title: 'x' })
+    const archived = store.archive('req-001-test', created.id)
+    expect(archived.is_archived).toBe(true)
+    const file = join(tmpRoot, 'requirements', 'req-001-test', 'board', 'tasks', `${created.id}.json`)
+    expect(existsSync(file)).toBe(true) // 软删 → 文件保留
+  })
+
+  it('archive + delete composes: archive-then-delete removes the file', async () => {
+    seedRequirement()
+    const created = store.create('req-001-test', { title: 'x' })
+    store.archive('req-001-test', created.id)
+    await store.delete('req-001-test', created.id)
+    const file = join(tmpRoot, 'requirements', 'req-001-test', 'board', 'tasks', `${created.id}.json`)
+    expect(existsSync(file)).toBe(false)
+  })
+})
