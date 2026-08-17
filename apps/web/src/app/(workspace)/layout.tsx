@@ -8,6 +8,7 @@ import { ShortcutsCheatsheet } from '@/components/shortcuts-cheatsheet';
 import { NewRequirementModal } from '@/components/new-requirement-modal';
 import { ZoneBar } from '@/components/zone-bar';
 import { SSEInvalidator } from '@/components/sse-invalidator';
+import { AgentRestartBanner } from '@/components/agent-restart-banner';
 import { fetchRequirementsServer } from '@/lib/requirement-list.server';
 import { QueryProvider } from './providers';
 
@@ -51,6 +52,8 @@ export default async function WorkspaceLayout({ children }: { children: ReactNod
           <ShortcutsCheatsheet />
           <NewRequirementModal />
           <SSEInvalidator />
+          {/* ADR-0037 D4: 全局监听 agent-restarting / 自动重连 → 顶部 toast */}
+          <AgentRestartBanner />
         </AnalyzingHistoryFabControllerProvider>
       </UIOverlayProvider>
     </QueryProvider>

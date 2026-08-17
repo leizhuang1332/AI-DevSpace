@@ -34,6 +34,8 @@ function makeWrapper() {
 
 const fakeInfo: WorkspaceInfo = {
   root: '/h/.aidevspace',
+  configDir: '/h/.aidevspace',
+  dataRoot: '/h/.aidevspace',
   exists: true,
   createdAt: 1000,
   subdirs: { requirements: true, repos: true, knowledge: true, skills: true, logs: true },
