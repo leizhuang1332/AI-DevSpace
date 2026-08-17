@@ -3,7 +3,7 @@
 > 本文档是项目的"活字典"。所有领域名词在此有且仅有一个含义。修改任何产品设计前，请先来对照术语。
 >
 > 创建：2026-07-08  
-> 当前版本：v1.0.10（board 卡片物理删除；ADR-0036 新立；ADR-0027 D3 联动修改）
+> 当前版本：v1.0.11（workspaceRoot 可编辑 + configDir/dataRoot 拆分；ADR-0037 新立）
 
 ---
 
@@ -37,11 +37,50 @@ AI 在本平台不是工具栏、不是聊天窗口、不是工作流编排者�
 
 ### Workspace（工作空间）
 
-用户本机上的一个工作目录，物理根目录为 `~/.aidevspace/`，包含该用户所有的需求、仓库、知识、配置。是用户管理的最大边界。
+用户本机上的一个工作目录，**逻辑边界**——包含该用户所有的需求、仓库、知识、配置。是用户管理的最大边界。
 
 - **单用户** 默认
 - 可整体打包、迁移、备份
 - 未来如需多用户协作，再做分层
+
+#### ConfigDir（配置目录）
+
+Workspace 的**配置面**——`config.yaml` 唯一居住地。
+
+- 物理位置 = `$AIDEVSPACE_HOME`（env，已 `normalizeWorkspaceRoot` 归一化）或 `~/.aidevspace`（env 缺时默认）
+- **唯一内容**：`config.yaml`（含 `workspaceRoot` / `theme` / `agentEndpoint` / `ai.provider` 等本机设置）
+- env 切换 = 切换「配置目录」语义；与「数据目录」独立
+- `AIDEVSPACE_HOME` 是 12-factor 风格的「运行时根覆盖」约定，devops / docker / systemd 友好
+- 归属 ADR：[ADR-0037](docs/adr/0037-editable-workspace-root.md) D1
+
+_Avoid_: 把 configDir 称作「workspace」「root」「home」——都是模糊旧词；新模型必须用 configDir / dataRoot 二分
+
+#### DataRoot（数据目录）
+
+Workspace 的**数据面**——requirements / knowledge / skills / analysis-skills / logs / repos.yaml / snapshots 全部物理落点。
+
+- 物理位置 = `config.yaml::workspaceRoot`（已 normalize）；若字段为空或缺失则等于 ConfigDir（同住，向后兼容）
+- 与 ConfigDir **逻辑独立**但**默认同住**；用户改 `workspaceRoot` → opt-in 分离
+- 数据目录是「git clone」「本地落盘」「文件读取」的目标；ConfigDir 是「配置读写」的目标——分离后两套 IO 完全解耦
+- 启动期确定后**进程级 immutable**；改 root 须重启 Agent
+- 归属 ADR：[ADR-0037](docs/adr/0037-editable-workspace-root.md) D1 / D2 / D4
+
+_Avoid_: 用 `workspaceRoot` 直接指代「Workspace」或「~/.aidevspace」——前者是字段，后者是历史默认；语义混乱
+
+#### WorkspaceTrace（workspace 痕迹）
+
+DataRoot 候选路径是否「看起来已经是个 workspace」的**纯 fs 判定**——`requirements/`、`knowledge/`、`skills/`、`analysis-skills/` 四目录中**任一存在**即视为有痕迹。
+
+- **超集定义**（不要求 `config.yaml`）：用户 mv 数据时一般整体 mv，但 config.yaml 由 settings 接管后被新写，不依赖旧文件
+- **判定时机** = settings PATCH workspaceRoot 时（前端 debounce + 后端强制）；不在 agent 启动时判定
+- **判定形态** = 纯函数 `validateWorkspaceRoot(p) → { exists, isWorkspace, errorCode? }`，前端 / 后端共享（packages/shared/src/workspace-schema.ts）
+- **三档 UI 反馈**：
+  - 路径不存在 → 红 inline「目标路径不存在」
+  - 存在但无痕迹 → 黄 inline「将初始化空白 workspace;旧路径数据留在原地」
+  - 存在有痕迹 → 绿 inline「检测到 N 项数据,将接管」
+- 归属 ADR：[ADR-0037](docs/adr/0037-editable-workspace-root.md) D3
+
+_Avoid_: 把 trace 定义为「包含 config.yaml」（过严，旧 mv 不带 yaml 会误判为空）；定义为「包含全部 5 子目录」（过宽，用户手建单个 skills/ 会被误判接管）
 
 ### Requirement（需求）
 
