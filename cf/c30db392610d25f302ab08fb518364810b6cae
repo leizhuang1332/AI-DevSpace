@@ -1,0 +1,37 @@
+apps/agent/src/__tests__/repos-route.test.ts
+  s_12e81d56e0b642::t_5bddde47c48850 49,889
+apps/agent/src/__tests__/workspace-init.test.ts
+  s_12e81d56e0b642::t_56dfe35d19a0eb 12
+apps/agent/src/__tests__/WorkspaceService-yaml.test.ts
+  s_12e81d56e0b642::t_6ea65787f0616c 36
+apps/agent/src/__tests__/workspace-update.test.ts
+  s_12e81d56e0b642::t_2bcf92518f98ab 12
+  s_12e81d56e0b642::t_f6b0122ff8a80b 98
+apps/agent/src/__tests__/WorkspaceService-migrate.test.ts
+  s_12e81d56e0b642::t_80d6db2dfd1e47 31
+apps/agent/src/__tests__/WorkspaceService-gitignore.test.ts
+  s_12e81d56e0b642::t_041b1015a7b9cd 29
+apps/agent/src/__tests__/workspace-service-split.test.ts
+  s_12e81d56e0b642::t_d5634db5bc3736 37,39-52
+  s_12e81d56e0b642::t_bef058029477a7 1-36,38,53-190
+apps/agent/src/services/WorkspaceService.ts
+  s_12e81d56e0b642::t_4f6d8d78125b99 96-103
+  s_12e81d56e0b642::t_97579bbd414db8 17-18,22,49,81,89,104,106-109,111-154,158-171,174,178,181,186,188,196-197,204,220-222,231,234,252,263,266,294,300-308,311,317,326-328,331-334,354-391,395,454,463-464,468,539,572
+  s_12e81d56e0b642::t_de3788acd7ac61 663
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "cfc30db392610d25f302ab08fb518364810b6cae",
+  "prompts": {},
+  "sessions": {
+    "s_12e81d56e0b642": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5d2c6987-62c9-43d2-8101-109eef0af273",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
