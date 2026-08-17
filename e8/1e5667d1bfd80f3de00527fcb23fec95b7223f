@@ -1,0 +1,24 @@
+.scratch/board-card-delete/issues/04-e2e.md
+  s_7f70b918e8d625::t_d12428c0afdbf6 1-86
+apps/web/e2e/board-card-delete.spec.ts
+  s_7f70b918e8d625::t_b8ed32e43c240e 156
+  s_7f70b918e8d625::t_9d858a64d70ca3 1-24,26-155,157-172,174-385
+  s_7f70b918e8d625::t_26d13dbf548484 25
+  s_7f70b918e8d625::t_5f8ac58b8dc623 173
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "e81e5667d1bfd80f3de00527fcb23fec95b7223f",
+  "prompts": {},
+  "sessions": {
+    "s_7f70b918e8d625": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "09f91028-6c33-4e29-916d-089954a8bbe2",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
