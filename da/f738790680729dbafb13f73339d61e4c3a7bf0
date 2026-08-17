@@ -1,0 +1,48 @@
+apps/agent/src/lib/supervisor-detect.ts
+  s_12e81d56e0b642::t_5b01264df33fa2 1-71
+apps/agent/src/routes/workspace.ts
+  s_12e81d56e0b642::t_e79a9b3f45efd0 2-6,8,14-20,29-58,67-83,102
+apps/agent/src/routes/agent.ts
+  s_12e81d56e0b642::t_1042405efaa0c5 1-8,11-27,32-43,47-63,65-79
+  s_12e81d56e0b642::t_060229cafafbbd 9-10,28-31,44-46,64
+apps/agent/src/server.ts
+  s_12e81d56e0b642::t_5567ec594b2f0e 544-547
+  s_12e81d56e0b642::t_39c2bab696ef17 177-178
+  s_12e81d56e0b642::t_5feccafe4941b2 72,74-77,79-80,84-87,89-92
+  s_12e81d56e0b642::t_2731db7cff4c6c 512-525
+  s_12e81d56e0b642::t_727b454dffea76 119-131
+  s_12e81d56e0b642::t_b2ca69ee3b10ac 62-63
+  s_12e81d56e0b642::t_d2e919c22d257b 501-503
+  s_12e81d56e0b642::t_bf5998ab012ef2 526
+apps/agent/src/__tests__/agent-restart-route.test.ts
+  s_12e81d56e0b642::t_ad32bd236236aa 4-9,11-14,18,22,24-25,28-32,36-47,54,59,63,77-79,104-106,110-142,148
+  s_12e81d56e0b642::t_8f21c3a3ce28ad 19,35
+  s_12e81d56e0b642::t_4b58540144ffcb 1-3,10,15-17,20-21,23,26-27,33-34,48-53,56-58,60-62,64-76,80-103,107-109,143-147,149-192
+  s_12e81d56e0b642::t_3b8b44bc65ff0d 55
+apps/agent/src/services/AgentLifecycle.ts
+  s_12e81d56e0b642::t_e7e237104981d0 1-20
+apps/agent/src/__tests__/workspace-route-validate.test.ts
+  s_12e81d56e0b642::t_961b38ca011fdb 1-216
+apps/agent/src/sse/SseHub.ts
+  s_12e81d56e0b642::t_efd5256e0572ea 23-28
+  s_12e81d56e0b642::t_07a619e34a3e1b 156
+  s_12e81d56e0b642::t_6835a4d42c0190 123-135
+apps/agent/src/error/WorkspaceErrorCodes.ts
+  s_12e81d56e0b642::t_60798b5bf855fa 1-17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "daf738790680729dbafb13f73339d61e4c3a7bf0",
+  "prompts": {},
+  "sessions": {
+    "s_12e81d56e0b642": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5d2c6987-62c9-43d2-8101-109eef0af273",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
