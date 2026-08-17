@@ -33,7 +33,7 @@ let svc: WorkspaceService
 
 beforeEach(() => {
   tmpRoot = mkdtempSync(join(tmpdir(), 'aidev-ws-yaml-'))
-  svc = new WorkspaceService(tmpRoot)
+  svc = WorkspaceService.singleRoot(tmpRoot)
 })
 
 afterEach(() => {

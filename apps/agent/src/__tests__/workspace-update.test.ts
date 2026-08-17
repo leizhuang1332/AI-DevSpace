@@ -9,7 +9,7 @@ let ws: WorkspaceService
 
 beforeEach(() => {
   tmpRoot = mkdtempSync(join(tmpdir(), 'aidev-test-'))
-  ws = new WorkspaceService(tmpRoot)
+  ws = WorkspaceService.singleRoot(tmpRoot)
 })
 
 afterEach(() => {
@@ -95,7 +95,7 @@ describe('slice 11: 磁盘占用', () => {
 
 describe('slice 8 (补) : getWorkspaceInfo 完整契约', () => {
   it('根路径不存在时 exists: false、createdAt null、diskUsage 0', async () => {
-    const ws2 = new WorkspaceService(join(tmpRoot, 'does-not-exist'))
+    const ws2 = WorkspaceService.singleRoot(join(tmpRoot, 'does-not-exist'))
     const info = await ws2.getWorkspaceInfo()
     expect(info.exists).toBe(false)
     expect(info.createdAt).toBe(null)

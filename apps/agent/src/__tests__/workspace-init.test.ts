@@ -9,7 +9,7 @@ let ws: WorkspaceService
 
 beforeEach(() => {
   tmpRoot = mkdtempSync(join(tmpdir(), 'aidev-test-'))
-  ws = new WorkspaceService(tmpRoot)
+  ws = WorkspaceService.singleRoot(tmpRoot)
 })
 
 afterEach(() => {

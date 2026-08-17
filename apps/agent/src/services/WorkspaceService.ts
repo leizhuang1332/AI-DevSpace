@@ -14,9 +14,12 @@ import yaml from 'yaml'
 import {
   DEFAULT_CONFIG,
   normalizeWorkspaceRoot,
+  validateWorkspaceRootPure,
+  WORKSPACE_TRACE_DIRS,
   type Config,
   type WorkspaceInfo,
   type ConfigPatch,
+  type WorkspaceValidation,
   type RepoRegistry,
   type RepoRegistryEntry,
   RepoRegistrySchema,
@@ -34,20 +37,6 @@ const SUBDIRS = ['requirements', 'knowledge', 'skills', 'analysis-skills', 'logs
 
 /**
  * 从 `<dir>/.git/config` 文本里抽 `[remote "origin"]` 段下的 `url = ...` 行。
- *
- * INI 格式示例:
- * ```
- * [core]
- * 	repositoryformatversion = 0
- * [remote "origin"]
- * 	url = git@github.com:acme/refund-service.git
- * 	fetch = +refs/heads/*:refs/remotes/origin/*
- * ```
- *
- * - 没 origin 段 → 返 null(常见情形:local-only repo / 用户手工 git init)
- * - url 行缺失 / 空白 → 返 null
- *
- * 手解而非引入 git2 / libgitten:迁移动作仅启动一次,不值得新增依赖。
  */
 function parseOriginUrl(text: string): string | null {
   const originSectionMatch = text.match(/\[remote\s+"origin"\]([\s\S]*?)(?=\n\[|$)/)
@@ -57,13 +46,7 @@ function parseOriginUrl(text: string): string | null {
   return urlMatch?.[1]?.trim() || null
 }
 
-// workspace `.gitignore` 标准内容。
-//
-//  - 行 `requirements/*/codebase/`              : 独立 clone 出的源码目录(每份完整 git worktree,几十 MB)
-//  - 行 `requirements/*/codebase/(..)/.git/`    : 嵌套 git 仓库(`<name>/.git`) → 不污染 workspace 自身的 git status
-//
-// 仅当 workspace 自身是 git 仓库(根下有 .git 目录)时才写这个文件 —— 不需要 git 管理的本地 workspace
-// (例如 CI / 演示环境)不需要 .gitignore 内容。
+// workspace `.gitignore` 标准内容。位于 dataRoot(代码 + 工作区层面的 git 仓库)
 const GITIGNORE_CONTENT = [
   '# AI DevSpace workspace',
   'logs/',
@@ -88,33 +71,14 @@ export interface InitWorkspaceResult {
   existedDirs: string[]
   configCreated: boolean
   configBackfilled: boolean
-  /**
-   * `.gitignore` 是否被本调用创建。
-   *
-   * 仅当 workspace 是 git 仓库(根下有 `.git/`)且原本没有 `.gitignore` 时才为 true。
-   * 非 git workspace 永远为 false(issue 04 4.5:避免给不需要 git 管理的本地 workspace
-   * 强制塞一份 .gitignore)。
-   */
   gitignoreCreated: boolean
-  /**
-   * ADR-0026:一次性清理老用户升级时残留的 `~/.aidevspace/zones/*.yaml`
-   * (声明式注册表已退役)。true = 删除了 zones/ 目录(含 yaml),false = 无需清理。
-   * 失败不阻断启动(仅记日志),详见 `cleanupRetiredZonesDir()`。
-   */
   zonesDirRetired: boolean
-  /**
-   * ADR-0030 / issue 04 4.4:旧 `<root>/repos/` 目录里成功迁入 `<root>/repos.yaml`
-   * 的仓库 name 列表(顺序 = readdir 顺序)。空数组 = 无可迁移内容(目录不存在 /
-   * 子目录无 `.git` / 全部 name 已在 yaml 中存在)。
-   *
-   * UI 据此显示一次性提示横幅「旧目录可手动删除 `~/.aidevspace/repos/`」(决策 Q3)。
-   */
   migratedRepos: string[]
 }
 
 export class WorkspaceService {
   /**
-   * 默认根路径:AIDEVSPACE_HOME env > ~/.aidevspace
+   * 默认配置目录路径:AIDEVSPACE_HOME env > ~/.aidevspace
    *
    * 返回值统一过 `normalizeWorkspaceRoot`:用户在 Git Bash 里
    * `export AIDEVSPACE_HOME=$HOME/.aidevspace`(= `/c/Users/...`)时,
@@ -122,41 +86,106 @@ export class WorkspaceService {
    * `path.join` 和 git.exe 都把 `/c/foo` 当 drive-relative 写到 `<cwd_drive>:\c\...`。
    * 已 native / POSIX 路径原样返回,无副作用。
    */
-  static resolveRoot(env: NodeJS.ProcessEnv = process.env): string {
+  static resolveConfigDir(env: NodeJS.ProcessEnv = process.env): string {
     const override = env.AIDEVSPACE_HOME?.trim()
     const raw = override && override.length > 0 ? override : join(homedir(), '.aidevspace')
     return normalizeWorkspaceRoot(raw)
   }
 
   /**
+   * @deprecated Use `resolveConfigDir` (ADR-0037 D1 / D2 拆分语义后,「root」=「configDir」不准确)。
+   * 保留一期内测 + 现有调用点平滑迁移。
+   */
+  static resolveRoot(env: NodeJS.ProcessEnv = process.env): string {
+    return WorkspaceService.resolveConfigDir(env)
+  }
+
+  /**
+   * 从 `<configDir>/config.yaml` 解析出 dataRoot。
+   *
+   * 算法(ADR-0037 D2):
+   * - config.yaml 不存在 → 返回 configDir(首次启动;initWorkspace 会 seed)
+   * - 存在且 `workspaceRoot` 字段非空 → 返回 normalize 后的字段值
+   * - 存在但 `workspaceRoot` 字段缺失 / 空字符串 → 返回 configDir(向后兼容)
+   *
+   * 解析失败(非对象 / IO 错)→ 返回 configDir(防御性,initWorkspace 会修正)
+   */
+  static async resolveDataRoot(configDir: string): Promise<string> {
+    const configPath = join(configDir, 'config.yaml')
+    if (!existsSync(configPath)) return configDir
+    try {
+      const raw = await readFile(configPath, 'utf8')
+      const parsed = yaml.parse(raw)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const root = (parsed as Record<string, unknown>).workspaceRoot
+        if (typeof root === 'string' && root.trim() !== '') {
+          return normalizeWorkspaceRoot(root.trim())
+        }
+      }
+    } catch {
+      // fall through to default
+    }
+    return configDir
+  }
+
+  /**
+   * 启动期单次调用,封装 configDir + dataRoot 解析。
+   *
+   * 用法:`const ws = await WorkspaceService.fromEnv(process.env)`
+   * 替代旧的 `new WorkspaceService(WorkspaceService.resolveRoot())`。
+   */
+  static async fromEnv(env: NodeJS.ProcessEnv = process.env): Promise<WorkspaceService> {
+    const configDir = WorkspaceService.resolveConfigDir(env)
+    const dataRoot = await WorkspaceService.resolveDataRoot(configDir)
+    return new WorkspaceService(configDir, dataRoot)
+  }
+
+  /**
+   * 旧 API 单参数形式的兼容构造:configDir = dataRoot = root。
+   *
+   * @deprecated 用 `new WorkspaceService(configDir, dataRoot)` 或 `await WorkspaceService.fromEnv(env)` 替代。
+   * 保留一期内测 + 现有 100+ 调用点平滑迁移。
+   */
+  static singleRoot(root: string): WorkspaceService {
+    return new WorkspaceService(root, root)
+  }
+
+  /**
    * 注册表写互斥锁 —— 在进程内串行化所有 mutateRegistry 调用。
-   *
-   * 单纯 read-modify-write + 退避重试覆盖不了「读后写中间被穿插」
-   * 的并发场景:两个线程读到 [],各自追加不同 name,各自写入 —— 后写
-   * 的把先写的整文件覆盖掉,造成 lost update。
-   *
-   * 加 in-process mutex 后,所有 read→mutate→write 原子段被串行,
-   * 不存在穿插;跨进程并发仍由 fs 文件锁 + 退避兜底(决策 113 沿用)。
    */
   private registryLock: Promise<void> = Promise.resolve()
 
-  constructor(public readonly root: string) {}
+  constructor(
+    /** 配置目录:`config.yaml` 唯一居住地(env 或 ~/.aidevspace) */
+    public readonly configDir: string,
+    /** 数据目录:requirements / knowledge / skills / repos.yaml / snapshots */
+    public readonly dataRoot: string,
+  ) {}
+
+  /**
+   * @deprecated Use `this.dataRoot` directly in new code.
+   * 旧 `root` 别名返回 dataRoot,保留下游 service deps 的 `root: string` 兼容。
+   */
+  get root(): string {
+    return this.dataRoot
+  }
 
   get configPath(): string {
-    return join(this.root, 'config.yaml')
+    return join(this.configDir, 'config.yaml')
   }
 
   get gitignorePath(): string {
-    return join(this.root, '.gitignore')
+    return join(this.dataRoot, '.gitignore')
   }
 
-  /** 幂等初始化 workspace */
+  /** 幂等初始化 workspace(ADR-0037 D1 / D2 + ADR-0030 仓库真相源迁移) */
   async initWorkspace(): Promise<InitWorkspaceResult> {
     const createdDirs: string[] = []
     const existedDirs: string[] = []
 
+    // 1. dataRoot 下建子目录(requirements / knowledge / skills / analysis-skills / logs)
     for (const d of SUBDIRS) {
-      const p = join(this.root, d)
+      const p = join(this.dataRoot, d)
       if (existsSync(p)) existedDirs.push(d)
       else {
         await mkdir(p, { recursive: true })
@@ -164,22 +193,15 @@ export class WorkspaceService {
       }
     }
 
-    // .gitignore: 仅当 workspace 自身是 git 仓库时才补齐。
-    //
-    // 背景:workspace 如果不被 git 管理(CI / 演示 / 临时容器),往里写 .gitignore 既无意义
-    // 也会让没有 ~/.gitconfig 的用户看到一份「不知道从哪来的」gitignore。issue 04 4.5 显式约定。
-    //
-    // 缺失的 .gitignore + 工作区不是 git 仓库 → 跳过(不写)
-    // 缺失的 .gitignore + 工作区是 git 仓库   → 写
-    // 已存在的 .gitignore                       → 保留(不覆盖)
-    const isGitWorkspace = existsSync(join(this.root, '.git'))
+    // 2. dataRoot/.gitignore(仅当 dataRoot 是 git 仓库时)
+    const isGitWorkspace = existsSync(join(this.dataRoot, '.git'))
     let gitignoreCreated = false
     if (isGitWorkspace && !existsSync(this.gitignorePath)) {
       await this.writeFileAtomic(this.gitignorePath, GITIGNORE_CONTENT)
       gitignoreCreated = true
     }
 
-    // config.yaml: 不存在则写默认；存在则补缺
+    // 3. configDir/config.yaml(seed / backfill)
     let configCreated = false
     let configBackfilled = false
     const existing = await this.readConfigFileSafe()
@@ -195,9 +217,9 @@ export class WorkspaceService {
           dirty = true
         }
       }
-      // workspaceRoot 缺失或不一致 → 覆盖
-      if (merged.workspaceRoot !== this.root) {
-        merged.workspaceRoot = this.root
+      // workspaceRoot 缺失或不一致 → 覆盖(种子 = dataRoot)
+      if (merged.workspaceRoot !== this.dataRoot) {
+        merged.workspaceRoot = this.dataRoot
         dirty = true
       }
       if (dirty) {
@@ -206,12 +228,10 @@ export class WorkspaceService {
       }
     }
 
-    // ADR-0026:一次性清理老用户升级时残留的 ~/.aidevspace/zones/*.yaml
-    // (声明式注册表已退役,改为 web 端 SECTION_META hardcode)。失败不阻断。
+    // 4. ADR-0026: 一次性清理老用户升级残留的 zones/ 目录(dataRoot 下)
     const zonesDirRetired = await this.cleanupRetiredZonesDir()
 
-    // ADR-0030 / issue 04 4.4:旧 `<root>/repos/` 物理目录 → `<root>/repos.yaml`
-    // 一次性迁移。注意:旧目录仍保留(决策 Q3:可能有未 push 提交),不在此处删除。
+    // 5. ADR-0030 / issue 04 4.4: 旧 `<dataRoot>/repos/` 物理目录 → `<dataRoot>/repos.yaml` 一次性迁移
     const migratedRepos = await this.migrateOldReposDirIfPresent()
 
     return {
@@ -227,51 +247,29 @@ export class WorkspaceService {
 
   /**
    * ADR-0026 D6.1:一次性清理 `~/.aidevspace/zones/` 目录(声明式注册表退役)。
-   *
-   * - 目录不存在 → 返 false(全新安装,合法空态)
-   * - 目录存在 → 递归 rm(含 *.yaml),返 true
-   * - rm 失败 → 静默吞掉(返 false),不阻断 agent 启动;老用户升级容错
-   *
-   * 幂等:目录被删后,下次启动 existsSync=false 直接返 false,无副作用。
    */
   private async cleanupRetiredZonesDir(): Promise<boolean> {
-    const zonesDir = join(this.root, 'zones')
+    const zonesDir = join(this.dataRoot, 'zones')
     if (!existsSync(zonesDir)) return false
     try {
       await rm(zonesDir, { recursive: true, force: true })
       return true
     } catch {
-      // 静默失败:不阻断启动;zones yaml 残留不影响新逻辑(无消费方)
       return false
     }
   }
 
   /**
-   * ADR-0030 / issue 04 4.4:旧 `<root>/repos/` 物理目录 → `<root>/repos.yaml` 一次性迁移。
-   *
-   * 行为契约:
-   * - **不**在此处删旧目录(决策 Q3):用户可能有未 push 的本地提交
-   * - 子目录无 `.git/config` → 跳过(可能是用户误建的随机文件)
-   * - 子目录有 `.git/config` 但找不到 origin URL(罕见,例如 local-only repo)→ 跳过
-   * - name 已在 `repos.yaml` 里存在 → 跳过(保留 yaml 既有条目;避免覆盖用户精编的 gitUrl)
-   * - 单条 addRepo 失败(并发 / IO)→ 跳过该条,不影响其他条目继续迁
-   * - 全部情形 → 返成功迁移的 name 列表(顺序 = readdir 顺序,空数组 = 无可迁)
-   *
-   * 调用方:`initWorkspace()`,仅在 `<root>/repos/` 存在时调用。
+   * ADR-0030 / issue 04 4.4:旧 `<dataRoot>/repos/` 物理目录 → `<dataRoot>/repos.yaml` 一次性迁移。
    */
   private async migrateOldReposDirIfPresent(): Promise<string[]> {
-    const oldDir = join(this.root, 'repos')
+    const oldDir = join(this.dataRoot, 'repos')
     if (!existsSync(oldDir)) return []
     return this.migrateOldReposDir(oldDir)
   }
 
-  /**
-   * 实际迁移旧 `repos/<n>/.git/config` → `repos.yaml`。读 `.git/config` 用 git 仓库标准
-   * INI 格式(text,行:`[remote "origin"]` + `	url = <url>`),手解避免引入 git 库。
-   */
   private async migrateOldReposDir(oldDir: string): Promise<string[]> {
     const migrated: string[] = []
-    // sync readdir —— 已知目录小(老用户仓库数 < 100),顺序可预期
     const entries = readdirSync(oldDir, { withFileTypes: true }).filter((e) =>
       e.isDirectory(),
     )
@@ -283,36 +281,40 @@ export class WorkspaceService {
       try {
         configText = await readFile(configPath, 'utf8')
       } catch {
-        // .git/config 不可读(权限 / IO)→ 跳过
         continue
       }
       const gitUrl = parseOriginUrl(configText)
       if (!gitUrl) continue
-      // name 已存在 → 跳过(避免覆盖用户精编的 gitUrl / description)
       const existing = await this.findRepoByName(name)
       if (existing) continue
       try {
         await this.addRepo({ name, gitUrl, description: '' })
         migrated.push(name)
       } catch {
-        // RegistryConflictError / IO 失败 → 跳过该条,继续迁剩余条目
-        // (next 启动再撞,addRepo 自身的重试会兜底)
+        // skip on conflict / IO
       }
     }
     return migrated
   }
 
-  async getWorkspaceInfo(): Promise<WorkspaceInfo> {
-    const rootExists = existsSync(this.root)
+  /**
+   * WorkspaceInfo 派生读取(SSR 契约,web 端 settings shell 消费)。
+   *
+   * @param includes 决定返回字段:默认全字段;'server-init' 可省 diskUsageBytes 减少首屏 IO
+   */
+  async getWorkspaceInfo(
+    includes: { diskUsage: boolean } = { diskUsage: true },
+  ): Promise<WorkspaceInfo> {
+    const rootExists = existsSync(this.dataRoot)
     let createdAt: number | null = null
     if (rootExists) {
-      const s = await stat(this.root)
+      const s = await stat(this.dataRoot)
       createdAt = s.birthtimeMs || s.ctimeMs
     }
 
     const subdirs: Record<string, boolean> = {}
     for (const d of SUBDIRS) {
-      subdirs[d] = existsSync(join(this.root, d))
+      subdirs[d] = existsSync(join(this.dataRoot, d))
     }
 
     const config = await this.readConfigFileSafe()
@@ -321,10 +323,15 @@ export class WorkspaceService {
     const gitignoreExists = existsSync(this.gitignorePath)
 
     let diskUsageBytes = 0
-    if (rootExists) diskUsageBytes = await this.computeDiskUsage(this.root)
+    if (includes.diskUsage && rootExists) {
+      diskUsageBytes = await this.computeDiskUsage(this.dataRoot)
+    }
 
     return {
-      root: this.root,
+      // ADR-0037 D1: 同时暴露 configDir / dataRoot + 旧 `root` 别名(dataRoot)
+      root: this.dataRoot,
+      configDir: this.configDir,
+      dataRoot: this.dataRoot,
       exists: rootExists,
       createdAt,
       subdirs,
@@ -344,11 +351,48 @@ export class WorkspaceService {
     return { config: next }
   }
 
-  /** 默认 config 模板，注入当前 root 路径 */
+  /**
+   * settings PATCH 前的路径校验(POST /api/workspace/validate-path 共用)。
+   *
+   * ADR-0037 D3:三档反馈
+   * - 路径不存在 → E_WS_ROOT_PATH_NOT_EXISTS
+   * - 存在但无 workspace 痕迹(超集) → E_WS_ROOT_PATH_NOT_WORKSPACE
+   * - 存在有 workspace 痕迹 → 无 errorCode
+   *
+   * 走 shared 纯函数 `validateWorkspaceRootPure`,fs 检查在 agent 层做(避免 web bundle 引入 node:fs)。
+   */
+  validatePath(p: string): WorkspaceValidation {
+    if (!p || p.trim() === '') {
+      return validateWorkspaceRootPure({ path: '', exists: false, hasAnyTrace: false })
+    }
+    let exists = false
+    try {
+      exists = existsSync(p)
+    } catch {
+      return validateWorkspaceRootPure({ path: p, exists: false, hasAnyTrace: false })
+    }
+    if (!exists) {
+      return validateWorkspaceRootPure({ path: p, exists: false, hasAnyTrace: false })
+    }
+    let hasAnyTrace = false
+    for (const dir of WORKSPACE_TRACE_DIRS) {
+      try {
+        if (existsSync(join(p, dir))) {
+          hasAnyTrace = true
+          break
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return validateWorkspaceRootPure({ path: p, exists, hasAnyTrace })
+  }
+
+  /** 默认 config 模板,注入当前 dataRoot 路径 */
   private seedConfig(): Config {
     return {
       ...(DEFAULT_CONFIG as unknown as Config),
-      workspaceRoot: this.root,
+      workspaceRoot: this.dataRoot,
     }
   }
 
@@ -407,7 +451,7 @@ export class WorkspaceService {
             /* ignore */
           }
         }
-        if (count > 50_000) return total // 兜底：超过 50k 文件不再深算
+        if (count > 50_000) return total
       }
     }
     return total
@@ -416,63 +460,31 @@ export class WorkspaceService {
   // ===========================================================================
   // RepoRegistry CRUD —— issue 02-repos-route-crud.md / ADR-0030 D1 / D8
   //
-  // 真相源 = `<root>/repos.yaml`(独立单文件,顶层 {version: 1, repos: []})
-  // 与 config.yaml 职责分离(本机设置 vs 可移植清单,决策 Q2)。
-  //
-  // 所有读 / 写都走 service 层:route handler 不直接 fs,避免并发 read-modify-write
-  // 漂移(issue 02 风险"macOS / Windows 文件锁语义差异")。并发保护分两层:
-  // - 进程内:registryLock(简单 Promise chain)串行化所有 read→mutate→write
-  // - 跨进程:200ms 退避重试 + yaml.stringify 覆盖写(决策 113 沿用)
+  // 真相源 = `<dataRoot>/repos.yaml`(独立单文件)
+  // 与 config.yaml 职责分离(本机设置 vs 可移植清单)
   // ===========================================================================
 
-  /** `<root>/repos.yaml` 绝对路径 —— service 内部 + 测试共享 */
   get repoRegistryPath(): string {
-    return join(this.root, 'repos.yaml')
+    return join(this.dataRoot, 'repos.yaml')
   }
 
-  /**
-   * 读 `<root>/repos.yaml` → RepoRegistry。
-   *
-   * - 文件不存在 → 返 `{version: 1, repos: []}`(全新安装合法态,沿用 ADR-0016 D6 语义)
-   * - 解析失败 / 校验失败 → 抛 `Error`(route 层映射 500 E_REPO_REGISTRY_READ_FAILED)
-   */
   async readRepoRegistry(): Promise<RepoRegistry> {
     if (!existsSync(this.repoRegistryPath)) {
       return { version: 1, repos: [] }
     }
     const raw = await readFile(this.repoRegistryPath, 'utf8')
     const parsed = yaml.parse(raw)
-    // 空文件 / 解析返 null → 当空注册表处理(yaml.parse 对空字符串 / '# comment only' 返 null)
     if (parsed === null || parsed === undefined) {
       return { version: 1, repos: [] }
     }
-    // Zod 校验 —— 多余字段 strip / 缺字段报错
     return RepoRegistrySchema.parse(parsed)
   }
 
-  /**
-   * 按 name 找仓库条目;不存在返 null。
-   *
-   * name 是全局唯一即标识(决策 105),无需处理 "repo-<name>" slug 派生链
-   * —— ADR-0016 时代的 `id` 字段已退役。
-   */
   async findRepoByName(name: string): Promise<RepoRegistryEntry | null> {
     const reg = await this.readRepoRegistry()
     return reg.repos.find((r) => r.name === name) ?? null
   }
 
-  /**
-   * 追加一条仓库条目 —— 必须在外部先跑 ls-remote 验证可达(Q5)。
-   *
-   * 写盘 = read-modify-write 全文件,加 200ms 退避的轻量重试(最多 5 次)
-   * 覆盖 yaml 库 / fs 层面的并发竞态。**不**保留读到的条目顺序之外的状态;
-   * add 永远追加到尾部。
-   *
-   * 抛错条件:
-   * - name 已被占用(由调用方预先查 `findRepoByName` 决定 —— 此处不重复查,
-   *   走 read-modify-write 自然撞 → 抛 RegistryConflictError)
-   * - yaml 写失败(磁盘满 / IO 错)
-   */
   async addRepo(entry: RepoRegistryEntry): Promise<void> {
     await this.mutateRegistry((current) => {
       if (current.repos.some((r) => r.name === entry.name)) {
@@ -485,14 +497,6 @@ export class WorkspaceService {
     })
   }
 
-  /**
-   * 按 name 更新 gitUrl / description。
-   *
-   * - name 字段不可改(标识)
-   * - 改动 gitUrl 时调用方必须先跑 ls-remote 验证(Q5)
-   * - 未提供字段保持原值
-   * - name 不存在抛 RegistryNotFoundError
-   */
   async updateRepo(
     name: string,
     patch: Partial<Pick<RepoRegistryEntry, 'gitUrl' | 'description'>>,
@@ -516,18 +520,11 @@ export class WorkspaceService {
       return { ...current, repos: nextRepos }
     })
     if (!updated) {
-      // 防御性:mutateRegistry 失败时这里不会到;留给类型系统兜底
       throw new RegistryNotFoundError(`仓库 ${name} 不存在`, 'E_REPO_NOT_FOUND')
     }
     return updated
   }
 
-  /**
-   * 按 name 移除仓库条目;name 不存在抛 RegistryNotFoundError。
-   *
-   * **绝不** rm 任何 `requirements/<req-id>/codebase/<name>/` 目录(决策 113)——
-   * 注册表与 codebase 是两套真相源,解耦。
-   */
   async removeRepo(name: string): Promise<void> {
     await this.mutateRegistry((current) => {
       const next = current.repos.filter((r) => r.name !== name)
@@ -538,17 +535,8 @@ export class WorkspaceService {
     })
   }
 
-  /**
-   * 扫 `requirements/<req-id>/codebase/<name>/` 派生「该仓库被 N 个需求使用」(决策 Q6 / 114)。
-   *
-   * 路径:`<root>/requirements/<reqId>/codebase/<name>/` —— `.pending-<name>`
-   * 标记视作「克隆中」,不计入 usage(未就绪不算关联)。
-   *
-   * 性能:仓库数 < 100,需求数通常 < 50,N×M 远低于 5000;filesystem stat 无并发问题。
-   * 单次 readdir 不抛 ENOENT(目录不存在 → 返空数组)。
-   */
   async findCodebaseUsage(name: string): Promise<CodebaseUsageEntry[]> {
-    const reqDir = join(this.root, 'requirements')
+    const reqDir = join(this.dataRoot, 'requirements')
     if (!existsSync(reqDir)) return []
     const out: CodebaseUsageEntry[] = []
     for (const e of await readdir(reqDir, { withFileTypes: true })) {
@@ -556,12 +544,8 @@ export class WorkspaceService {
       const reqId = e.name
       const codeDir = join(reqDir, reqId, 'codebase', name)
       if (!existsSync(codeDir)) continue
-      // 跳过 .pending-<name>(克隆中标记,不算关联)
-      // —— directory 实体本身就是 codeDir,不被 prefix 过滤,需要单独看
-      // pending 标记文件存在 → 跳过整条 usage
       const pendingMarker = join(reqDir, reqId, 'codebase', `.pending-${name}`)
       if (existsSync(pendingMarker)) continue
-      // 读 meta.yaml 拿 branchName(SSR 持久化契约沿用)
       const branch = await this.readBranchNameSafe(join(reqDir, reqId))
       out.push({
         requirementId: reqId,
@@ -572,7 +556,6 @@ export class WorkspaceService {
     return out
   }
 
-  /** 读 `requirements/<id>/meta.yaml` 的 branchName 字段;失败返 ''(不阻断 usage 列表) */
   private async readBranchNameSafe(reqDir: string): Promise<string> {
     const metaPath = join(reqDir, 'meta.yaml')
     if (!existsSync(metaPath)) return ''
@@ -583,26 +566,12 @@ export class WorkspaceService {
         const b = (parsed as Record<string, unknown>).branchName
         if (typeof b === 'string') return b
       }
-      return ''
     } catch {
       return ''
     }
+    return ''
   }
 
-  /**
-   * 注册表 read-modify-write 原子操作(轻量重试覆盖并发)。
-   *
-   * 行为:
-   * - 串行化:所有调用通过 registryLock 排队,避免 read→mutate→write 中间被穿插
-   * - 读 → 改(由 mutator 计算)→ 写
-   * - mutator 抛冲突错(RegistryConflictError / RegistryNotFoundError)
-   *   → 不重试,直接抛出 —— 这是业务级冲突,与并发无关
-   * - 写失败(ENOENT / EEXIST / EAGAIN 等 IO 错)→ 200ms 退避重试,最多 5 次
-   * - 超过 5 次 → 抛 RegistryWriteError(让 route 层映射 500 E_REGISTRY_WRITE_FAILED)
-   *
-   * 注:yaml 库本身不保证并发安全;靠 in-process mutex + 退避重试兜底,
-   * 跨进程并发仍由 fs 文件锁 + 退避兜底(决策 113 沿用)。
-   */
   private async mutateRegistry(
     mutator: (current: RepoRegistry) => RepoRegistry,
   ): Promise<void> {
@@ -620,14 +589,12 @@ export class WorkspaceService {
           const current = await this.readRepoRegistry()
           next = mutator(current)
         } catch (err) {
-          // 业务级冲突(mutor 主动抛出)—— 不重试,直接抛给 caller
           if (
             err instanceof RegistryConflictError ||
             err instanceof RegistryNotFoundError
           ) {
             throw err
           }
-          // 读阶段意外错(理论上 readRepoRegistry 自身不会抛业务错)—— 当 write 错处理
           lastErr = err
           if (attempt < REGISTRY_WRITE_MAX_RETRIES - 1) {
             const backoffMs = REGISTRY_WRITE_BASE_BACKOFF_MS * (attempt + 1)
@@ -641,7 +608,6 @@ export class WorkspaceService {
         } catch (err) {
           lastErr = err
           if (attempt < REGISTRY_WRITE_MAX_RETRIES - 1) {
-            // 200ms 起步的线性退避(简单;并发冲突低概率,无需指数)
             const backoffMs = REGISTRY_WRITE_BASE_BACKOFF_MS * (attempt + 1)
             await new Promise((r) => setTimeout(r, backoffMs))
           }
@@ -657,7 +623,6 @@ export class WorkspaceService {
   }
 
   private async writeRegistryFile(reg: RepoRegistry): Promise<void> {
-    // 序列化前再过一遍 Zod(防御性 —— 防止 mutator 计算出非法数据)
     const validated = RepoRegistrySchema.parse(reg)
     const text = yaml.stringify(validated, { indent: 2, lineWidth: 0 })
     await this.writeFileAtomic(this.repoRegistryPath, text)

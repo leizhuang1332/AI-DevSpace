@@ -46,7 +46,7 @@ describe('WorkspaceService · RepoRegistry CRUD', () => {
 
   beforeEach(() => {
     tmpRoot = mkdtempSync(join(tmpdir(), 'aidev-ws-rr-'))
-    svc = new WorkspaceService(tmpRoot)
+    svc = WorkspaceService.singleRoot(tmpRoot)
   })
   afterEach(() => {
     if (existsSync(tmpRoot)) rmSync(tmpRoot, { recursive: true, force: true })
@@ -886,7 +886,7 @@ describe('WorkspaceService · yaml 并发写', () => {
 
   beforeEach(() => {
     tmpRoot = mkdtempSync(join(tmpdir(), 'aidev-ws-concurrent-'))
-    svc = new WorkspaceService(tmpRoot)
+    svc = WorkspaceService.singleRoot(tmpRoot)
   })
   afterEach(() => {
     if (existsSync(tmpRoot)) rmSync(tmpRoot, { recursive: true, force: true })
