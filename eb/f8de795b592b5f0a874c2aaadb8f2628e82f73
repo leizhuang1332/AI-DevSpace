@@ -1,0 +1,47 @@
+.scratch/workspace-root-editable/issues/05-web-workspace-section-inline-edit.md
+  s_12e81d56e0b642::t_16d1c1ffd57321 1-45
+.scratch/workspace-root-editable/issues/01-shared-validate-workspace-root.md
+  s_12e81d56e0b642::t_0482bc398c8986 1-45
+.scratch/workspace-root-editable/issues/02-agent-workspace-service-split.md
+  s_12e81d56e0b642::t_a33be82bb979fd 1-55
+.scratch/workspace-root-editable/issues/07-e2e-full-chain.md
+  s_12e81d56e0b642::t_cd42c4ec8b820d 1-55
+docs/adr/0037-editable-workspace-root.md
+  s_12e81d56e0b642::t_0181e6a90cba85 1-54,56-69,71-82,84-94,96-104,106-115,117-141,143-176
+  s_12e81d56e0b642::t_e49fd023dcb917 83
+  s_12e81d56e0b642::t_ee38b693359c54 105
+  s_12e81d56e0b642::t_6d5d679f0cd27b 116
+  s_12e81d56e0b642::t_ab2da974aa7242 55
+  s_12e81d56e0b642::t_ef6e6916be9843 70
+  s_12e81d56e0b642::t_9c97f7062e371a 142
+  s_12e81d56e0b642::t_488c26099eeca8 95
+.scratch/workspace-root-editable/decisions.md
+  s_12e81d56e0b642::t_705e1f2e1e3596 1-159
+.scratch/workspace-root-editable/issues/06-web-restart-banner.md
+  s_12e81d56e0b642::t_b190b5daa3e726 1-43
+.scratch/workspace-root-editable/issues/04-agent-restart-endpoint.md
+  s_12e81d56e0b642::t_d4e86b1a0f3d67 1-56
+CONTEXT.md
+  s_12e81d56e0b642::t_5e707d39ff275d 6,84
+  s_12e81d56e0b642::t_7669bec7861c4c 40,46-83
+.scratch/workspace-root-editable/PRD.md
+  s_12e81d56e0b642::t_e07427372df1f4 1-121
+.scratch/workspace-root-editable/issues/03-agent-validate-and-patch-route.md
+  s_12e81d56e0b642::t_677fd3c9f45700 1-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "ebf8de795b592b5f0a874c2aaadb8f2628e82f73",
+  "prompts": {},
+  "sessions": {
+    "s_12e81d56e0b642": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5d2c6987-62c9-43d2-8101-109eef0af273",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
