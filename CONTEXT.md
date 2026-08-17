@@ -90,9 +90,9 @@ _Avoid_: worktree（v1.0 概念，已退役；`.git` 是文件 vs 真目录的�
 
 - 触发：DRAFTING 页面 RepoBar chip 上的红色 ✕ 按钮
 - 二次确认：DetachCodebaseDialog（数据丢失前最后一道闸；不可逆 —— 重 attach 等于重 clone）
-- 状态门禁：仅 DRAFTING 状态可执行；ANALYZING / BOARD / WRAP-UP 期间拒绝（409 `E_REQUIREMENT_NOT_DRAFTING`）
+- 状态门禁：**已去掉**（2026-08-17 翻案），任何状态（analyzing / board / wrap-up）都可 detach —— 用户场景是 analyzing 阶段发现 attach 错了库需重来。Detach 是破坏性操作，二次确认对话框仍是兜底。
 - 联动清理：N=1→0 时顺带清 `meta.yaml::branchName`（per-requirement 字段，所有 repo 共享）；N≥1 时 branchName 保留
-- 端点：`DELETE /api/requirement/:id/codebase/:name`（204 成功 / 404 需求或 codebase 不存在 / 409 状态门禁 / 500 safeRm 抛错）
+- 端点：`DELETE /api/requirement/:id/codebase/:name`（204 成功 / 404 需求或 codebase 不存在 / 400 name 非法 / 500 safeRm 抛错）
 - 并发保护：`RequirementService.withRequirementLock(reqId, fn)` 与 `attachRepo` / `attachRepos` 共用同一把进程内 mutex（同 `WorkspaceService.registryLock` 模式）
 - 归属 ADR：[ADR-0034](docs/adr/0034-detach-requirement-codebase.md)
 

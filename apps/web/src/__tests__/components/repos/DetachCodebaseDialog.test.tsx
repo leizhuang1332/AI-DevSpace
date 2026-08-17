@@ -127,10 +127,12 @@ describe('DetachCodebaseDialog · submitting / error 状态(Q8 悲观更新)', (
   })
 
   it('onConfirm reject → error banner 显示,按钮恢复', async () => {
+    // 后端已不再返 E_REQUIREMENT_NOT_DRAFTING,改测更通用的 E_INTERNAL
+    // —— dialog 的悲观更新路径仍走通,错误码翻译走 default 分支展示 message。
     const onConfirm = vi.fn().mockRejectedValue(
-      new AgentError(409, {
-        error: 'E_REQUIREMENT_NOT_DRAFTING',
-        message: '需求已进入 analyzing,无法 detach',
+      new AgentError(500, {
+        error: 'E_INTERNAL',
+        message: 'safeRm failed: EBUSY',
       }),
     )
     renderDialog({ onConfirm })
@@ -140,7 +142,7 @@ describe('DetachCodebaseDialog · submitting / error 状态(Q8 悲观更新)', (
 
     // 等 error banner 出现
     const errorBanner = await screen.findByTestId('detach-codebase-dialog-error')
-    expect(errorBanner.textContent).toContain('analyzing')
+    expect(errorBanner.textContent).toContain('safeRm failed')
 
     // 按钮恢复可用
     const confirmBtn = screen.getByTestId('detach-codebase-dialog-confirm')

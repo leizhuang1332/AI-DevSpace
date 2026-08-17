@@ -223,8 +223,10 @@ export async function deleteRepo(
  * - 204 No Content → undefined(成功)
  * - 400 E_INVALID_REPO_NAME(name 含 `/` `\` `..` `\0`) → AgentError
  * - 404 E_REQUIREMENT_NOT_FOUND / E_CODEBASE_NOT_FOUND       → AgentError
- * - 409 E_REQUIREMENT_NOT_DRAFTING(非 DRAFTING 状态门禁)   → AgentError
  * - 500 E_INTERNAL(safeRm 抛错)                              → AgentError
+ *
+ * 状态门禁已去掉:任何状态(analyzing / board / wrap-up)都可 detach,见 ADR-0034
+ * 「状态门禁」段;前端不再需要"非 DRAFTING → 走错提示"分支。
  */
 export async function detachCodebase(
   reqId: string,

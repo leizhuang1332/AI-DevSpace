@@ -574,11 +574,16 @@ export class RequirementService {
   // ADR-0034 —— 需求级 codebase detach
   //
   // 取消某个 repo 与本 req 的关联:
-  // 1. 验 req 存在 / status === 'drafting'(仅 DRAFTING 可 detach)
+  // 1. 验 req 存在
   // 2. 验 codebase/<name>/ 存在
   // 3. rm 先(CodebaseManager.remove 已含 safeRm + 清 .pending-<name>)
   // 4. deriveRepos 看剩余 N;N=0 → 顺带清 meta.yaml::branchName(用空串)
   // 5. 返 {ok:true, remainingRepos:[]},route 层映射 204
+  //
+  // 状态门禁:已去掉。原 Q2 "仅 DRAFTING 可 detach" 限制 ANALYZING / BOARD /
+  // WRAP-UP 期间无法取消关联,但用户实际操作中存在需求已 analyzing 才发现
+  // attach 错了库、必须 detach 重来的场景 —— 加状态门禁只会把"重新 attach"
+  // 的修复路径堵死。Detach 是破坏性操作,确认对话框 (ADR-0034 Q3) 是兜底。
   //
   // 失败语义(ADR-0034 Q7 rm 先 + Q4 仅 N=1→0 时清 branchName):
   // - rm 失败(safeRm throw)→ 直接抛到 caller,meta.yaml 未触;route 层 500
@@ -601,17 +606,7 @@ export class RequirementService {
 
       const reqDir = this.requirementDirPath(reqId)
 
-      // 2. 验 status === drafting(仅 DRAFTING 可 detach,Q2)
-      const status = this.deriveStatus(reqDir)
-      if (status !== 'drafting') {
-        return {
-          ok: false,
-          code: DetachRepoErrorCode.E_REQUIREMENT_NOT_DRAFTING,
-          message: `需求 ${reqId} 当前状态 ${status},仅 DRAFTING 可 detach`,
-        }
-      }
-
-      // 3. 验 codebase/<name>/ 存在
+      // 2. 验 codebase/<name>/ 存在
       const codeDir = join(reqDir, 'codebase', repoName)
       if (!existsSync(codeDir)) {
         return {
@@ -621,11 +616,11 @@ export class RequirementService {
         }
       }
 
-      // 4. rm 先(Q7)。CodebaseManager.remove 内部走 safeRm(fd race retry 3 次,
+      // 3. rm 先(Q7)。CodebaseManager.remove 内部走 safeRm(fd race retry 3 次,
       //    Issue 13 后 throw);失败直接抛出,meta.yaml 未触。
       await this.codebaseMgr.remove(reqId, repoName)
 
-      // 5. deriveRepos 看 N,Q4:仅当 N=1→0 时清 branchName
+      // 4. deriveRepos 看 N,Q4:仅当 N=1→0 时清 branchName
       const remaining = this.deriveRepos(reqDir)
       if (remaining.length === 0) {
         // persistBranchName(reqId, '') 走现有实现 → 覆盖 branchName 字段为空串;

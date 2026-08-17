@@ -196,7 +196,10 @@ describe('RequirementService.detachRepo (ADR-0034)', () => {
     expect(existsSync(join(root, 'requirements', 'req-999-missing'))).toBe(false)
   })
 
-  it('req 状态为 analyzing:返回 E_REQUIREMENT_NOT_DRAFTING,不动 fs', async () => {
+  it('req 状态为 analyzing:不再被门禁,正常 detach 成功', async () => {
+    // 历史:曾返回 E_REQUIREMENT_NOT_DRAFTING(原 Q2 仅 DRAFTING 可 detach)。
+    // 改动后任何状态都可 detach —— 用户场景:已 analyzing 才发现自己 attach
+    // 了错库,需要 detach 重来。二次确认对话框 (DetachCodebaseDialog) 是兜底。
     const reqId = 'req-004-analyzing'
     createReqWithCodebases(reqId, ['x'], {
       branchName: 'feat/y',
@@ -205,20 +208,45 @@ describe('RequirementService.detachRepo (ADR-0034)', () => {
 
     const result = await service.detachRepo(reqId, 'x')
 
-    expect(result.ok).toBe(false)
-    expect(result.code).toBe('E_REQUIREMENT_NOT_DRAFTING')
-    expect(result.message).toContain('analyzing')
-    // 状态门禁 — codebase/ 必须保留(Q2)
+    expect(result.ok).toBe(true)
+    expect(result.repoName).toBe('x')
+    expect(result.remainingRepos).toEqual([])
+    // codebase/<x>/ 必须已 rm
     expect(existsSync(join(root, 'requirements', reqId, 'codebase', 'x'))).toBe(
-      true,
+      false,
     )
-    // meta.yaml::branchName 也必须保留(没碰 meta.yaml)
+    // N=1→0 → meta.yaml::branchName 被清空(同 drafting 路径)
     const metaRaw = readFileSync(
       join(root, 'requirements', reqId, 'meta.yaml'),
       'utf8',
     )
     const parsed = yaml.parse(metaRaw) as { branchName?: string }
-    expect(parsed.branchName).toBe('feat/y')
+    expect(parsed.branchName ?? '').toBe('')
+  })
+
+  it('req 状态为 analyzing 且 N=2→1:meta.yaml::branchName 保留', async () => {
+    // analyzing 状态 + 多个 codebase detach 一个 → 行为与 drafting 一致:
+    // branchName 仍在,只删指定 codebase 目录
+    const reqId = 'req-004b-analyzing-mid'
+    createReqWithCodebases(reqId, ['a', 'b'], {
+      branchName: 'feat/shared',
+      status: 'analyzing',
+    })
+
+    const result = await service.detachRepo(reqId, 'a')
+
+    expect(result.ok).toBe(true)
+    expect(result.remainingRepos).toEqual(['b'])
+    expect(existsSync(join(root, 'requirements', reqId, 'codebase', 'a'))).toBe(
+      false,
+    )
+    expect(existsSync(join(root, 'requirements', reqId, 'codebase', 'b'))).toBe(true)
+    const metaRaw = readFileSync(
+      join(root, 'requirements', reqId, 'meta.yaml'),
+      'utf8',
+    )
+    const parsed = yaml.parse(metaRaw) as { branchName?: string }
+    expect(parsed.branchName).toBe('feat/shared')
   })
 
   it('codebase/<name>/ 不存在:返回 E_CODEBASE_NOT_FOUND,不动 fs', async () => {
@@ -361,7 +389,9 @@ describe('HTTP DELETE /api/requirement/:id/codebase/:name (ADR-0034)', () => {
     expect(body.requirementId).toBe('req-010-missing')
   })
 
-  it('req 非 drafting → 409 E_REQUIREMENT_NOT_DRAFTING', async () => {
+  it('req 非 drafting(analyzing) → 204,codebase 正常 detach', async () => {
+    // 历史:曾返 409 E_REQUIREMENT_NOT_DRAFTING(原 Q2 仅 DRAFTING)。改动后
+    // 任何状态都可 detach —— 二次确认对话框 (DetachCodebaseDialog) 是兜底。
     const reqId = 'req-011-analyzing'
     createReqWithCodebases(reqId, ['y'], {
       branchName: 'feat/y',
@@ -372,8 +402,11 @@ describe('HTTP DELETE /api/requirement/:id/codebase/:name (ADR-0034)', () => {
       'DELETE',
       `/api/requirement/${reqId}/codebase/y`,
     )
-    expect(statusCode).toBe(409)
-    expect(body.error).toBe('E_REQUIREMENT_NOT_DRAFTING')
+    expect(statusCode).toBe(204)
+    expect(body).toEqual({}) // 204 不带 body
+    expect(existsSync(join(root, 'requirements', reqId, 'codebase', 'y'))).toBe(
+      false,
+    )
   })
 
   it('codebase 不存在 → 404 E_CODEBASE_NOT_FOUND', async () => {

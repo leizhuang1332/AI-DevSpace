@@ -299,8 +299,11 @@ export async function requirementRoutes(
   //
   // 错误码 → HTTP status 映射(沿用 routes/repos.ts 风格,内联 switch):
   // - E_REQUIREMENT_NOT_FOUND / E_CODEBASE_NOT_FOUND → 404
-  // - E_REQUIREMENT_NOT_DRAFTING                   → 409(状态门禁 Q2)
   // - E_INTERNAL                                   → 500(safeRm 抛错等)
+  //
+  // 状态门禁已去掉(原 Q2 "仅 DRAFTING"):任何阶段(ANALYZING / BOARD / WRAP-UP)
+  // 都允许 detach —— 用户场景:已 analyzing 才发现自己 attach 了错库,需要 detach
+  // 重来。Detach 是破坏性操作,二次确认对话框已兜底(见 apps/web .../DetachCodebaseDialog)。
   // ============================================================================
 
   app.delete<{ Params: { id: string; name: string } }>(
@@ -347,13 +350,6 @@ export async function requirementRoutes(
             return reply.code(404).send({
               error: result.code,
               requirementId: id,
-            })
-          case DetachRepoErrorCode.E_REQUIREMENT_NOT_DRAFTING:
-            return reply.code(409).send({
-              error: result.code,
-              message: result.message,
-              requirementId: id,
-              currentStatus: undefined, // service Result 不返回 status,此处省略
             })
           case DetachRepoErrorCode.E_CODEBASE_NOT_FOUND:
             return reply.code(404).send({

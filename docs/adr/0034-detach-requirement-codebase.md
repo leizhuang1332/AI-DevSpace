@@ -37,9 +37,15 @@ DRAFTING 页面 RepoBar 展开态 chip 上的红色 ✕ 按钮(见用户截图)�
 
 `requirements/<reqId>/codebase/<repoName>/` 目录被 `CodebaseManager.remove`(已存在)清理。`meta.yaml::branchName` 是 **per-requirement** 字段(所有 repo 共享),**只在 N=1→0 时清** —— 其他 repo 还在时,branchName 必须保留以维持 chip 上的 🟢 + 分支名显示。`repos.yaml` 全局条目**永远不动**(决策 113 沿用,与 `DELETE /api/repos/:name` 严格独立)。
 
-### 2. 状态门禁 = 仅 DRAFTING
+### 2. 状态门禁 = 去掉(任何状态都可 detach)
 
-API 层校验 `requirement.status === 'drafting'`,否则 409 `E_REQUIREMENT_NOT_DRAFTING`。ANALYZING / BOARD / WRAP-UP 期间 codebase 正在被分析任务读,真要切库应走"停止分析 → 再 detach",不该静默切。
+API 层不校验 `requirement.status`。ANALYZING / BOARD / WRAP-UP 期间也可 detach。
+
+**历史**:第一版曾设"仅 DRAFTING 可 detach",后端 409 `E_REQUIREMENT_NOT_DRAFTING`。理由是"分析期间 codebase 正在被读,静默切库不安全"。
+
+**现状**(2026-08-17 翻案):实际用户场景里,需求已 analyzing / board 才发现自己 attach 了错的库 —— 这时唯一能"重来"的路径就是 detach + 重 attach。门禁把这条修复路径堵死了。"真要切应先停止分析"理论上对,但产品没暴露"停止分析"动作给用户,等价于"让用户去找 agent 维护者手动改文件"。
+
+**取舍**:ANALYZING / BOARD 期间 rm codebase 目录,Agent 进程内的分析子任务可能在 stale path 上跑 —— 但分析任务是短命的(一次 analyze run 几秒到几分钟),且分析结果只影响后续步骤的状态机,丢失本次结果不会让 req 崩。Detach 是破坏性操作,二次确认对话框(决策 Q3)仍是兜底。
 
 ### 3. 二次确认 = 弹确认框
 
@@ -47,9 +53,11 @@ API 层校验 `requirement.status === 'drafting'`,否则 409 `E_REQUIREMENT_NOT_
 
 ### 4. 端点 = `DELETE /api/requirement/:id/codebase/:name`
 
-与 `DELETE /api/repos/:name` 一对平行端点,**全局仓库池删除 vs 需求级 detach** 语义对称。`codebase/` 命名直接对应文件系统路径,避免 `repos/` 与 repos.yaml 命名混淆。路由层 4 个错误码映射:
+与 `DELETE /api/repos/:name` 一对平行端点,**全局仓库池删除 vs 需求级 detach** 语义对称。`codebase/` 命名直接对应文件系统路径,避免 `repos/` 与 repos.yaml 命名混淆。
+
+路由层 3 个错误码映射(决策 §2 翻案后去掉 `E_REQUIREMENT_NOT_DRAFTING`):
+
 - `E_REQUIREMENT_NOT_FOUND` / `E_CODEBASE_NOT_FOUND` → 404
-- `E_REQUIREMENT_NOT_DRAFTING` → 409
 - `E_INVALID_REPO_NAME`(`/`, `\`, `..`, `\0`)→ 400
 - `E_INTERNAL`(safeRm throw)→ 500
 
@@ -172,3 +180,4 @@ sequenceDiagram
         Dialog->>RepoBar: chip 恢复原位
     end
 ```
+

@@ -16,7 +16,11 @@
  *   这里只管自己 dialog 的 submitting / error 状态
  * - **错误码翻译**(translateError):继承 AddRepoModal 风格,把 AgentError 的
  *   body.error 翻译为中文 banner;detach 错误码主要是 E_REQUIREMENT_NOT_FOUND
- *   / E_CODEBASE_NOT_FOUND / E_REQUIREMENT_NOT_DRAFTING / E_INTERNAL
+ *   / E_CODEBASE_NOT_FOUND / E_INVALID_REPO_NAME / E_INTERNAL
+ *
+ * 状态门禁已去掉:任何状态(analyzing / board / wrap-up)都可触发 detach —— 用户
+ * 场景是 analyzing 阶段发现 attach 错了库需要重来。二次确认对话框仍是兜底,
+ * 见 ADR-0034「状态门禁」段。
  */
 
 import { useEffect, useState } from 'react'
@@ -37,9 +41,12 @@ export interface DetachCodebaseDialogProps {
  * detach 错误码(见 routes/requirement.ts DELETE handler):
  * - E_REQUIREMENT_NOT_FOUND → 「需求已不存在」
  * - E_CODEBASE_NOT_FOUND    → 「codebase 已不存在,可能已被自动清理」
- * - E_REQUIREMENT_NOT_DRAFTING → 「该需求已进入后续阶段,无法在 DRAFTING 之外 detach」
  * - E_INVALID_REPO_NAME      → 「仓库名包含非法字符」(理论上 route 层先拦)
  * - 其他                     → 通用后端 message
+ *
+ * 历史:曾处理 `E_REQUIREMENT_NOT_DRAFTING`(analyzing/board 状态门禁)。后端已
+ * 去掉该错误码 —— 任何状态都可触发 detach,见 ADR-0034「状态门禁」段;此处保留
+ * `case 'E_REQUIREMENT_NOT_DRAFTING':` 兜底,即便旧 agent 在跑也只展示 message。
  */
 function translateError(err: unknown): string {
   if (err instanceof AgentError) {
@@ -51,7 +58,8 @@ function translateError(err: unknown): string {
       case 'E_CODEBASE_NOT_FOUND':
         return 'codebase 已不存在(可能被自动清理),无需 detach'
       case 'E_REQUIREMENT_NOT_DRAFTING':
-        return message ?? '该需求已进入后续阶段,无法在 DRAFTING 之外 detach'
+        // 后端已不返此码,仅作历史兼容(旧 agent 升级期)
+        return message ?? '该需求已进入后续阶段,无法 detach'
       case 'E_INVALID_REPO_NAME':
         return '仓库名包含非法字符(/ \\ .. 等)'
       default:

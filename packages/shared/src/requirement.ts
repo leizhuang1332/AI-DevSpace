@@ -304,19 +304,20 @@ export type RequirementListResponse = z.infer<typeof RequirementListResponseSche
 // ============================================================================
 
 /**
- * `DELETE /api/requirement/:id/codebase/:name` 的错误码集合(ADR-0034 Q2/Q6)。
+ * `DELETE /api/requirement/:id/codebase/:name` 的错误码集合(ADR-0034)。
  *
  * - `E_REQUIREMENT_NOT_FOUND` —— 需求目录不存在 → 404
- * - `E_REQUIREMENT_NOT_DRAFTING` —— 需求当前状态非 drafting → 409(决策 Q2 仅 DRAFTING)
  * - `E_CODEBASE_NOT_FOUND` —— codebase/<name>/ 目录不存在 → 404
  * - `E_INVALID_REPO_NAME` —— name 含路径穿越字符(`/` / `\` / `..`)→ 400
  *   (由 route 层在进 service 之前 reject,不在 service Result 里;保留字面常量
  *   便于前端 banner 翻译)
  * - `E_INTERNAL` —— 兜底;safeRm 失败等 → 500
+ *
+ * 历史:曾有 `E_REQUIREMENT_NOT_DRAFTING`(原 Q2 仅 DRAFTING 可 detach),后移除
+ * —— 任何状态都可 detach,见 ADR-0034「状态门禁」段;二次确认对话框仍是兜底。
  */
 export const DetachRepoErrorCode = {
   E_REQUIREMENT_NOT_FOUND: 'E_REQUIREMENT_NOT_FOUND',
-  E_REQUIREMENT_NOT_DRAFTING: 'E_REQUIREMENT_NOT_DRAFTING',
   E_CODEBASE_NOT_FOUND: 'E_CODEBASE_NOT_FOUND',
   E_INVALID_REPO_NAME: 'E_INVALID_REPO_NAME',
   E_INTERNAL: 'E_INTERNAL',
@@ -332,7 +333,7 @@ export type DetachRepoErrorCodeT =
  * 成功时 `ok=true` + `repoName` + `remainingRepos`(供前端派生 summary 数字)。
  *
  * HTTP 层映射:`ok=true` → 204;`E_REQUIREMENT_NOT_FOUND` / `E_CODEBASE_NOT_FOUND`
- * → 404;`E_REQUIREMENT_NOT_DRAFTING` → 409;`E_INTERNAL` → 500。
+ * → 404;`E_INTERNAL` → 500。
  */
 export interface DetachRepoResult {
   ok: boolean
