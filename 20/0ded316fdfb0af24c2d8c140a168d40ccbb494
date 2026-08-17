@@ -1,0 +1,29 @@
+packages/shared/src/__tests__/workspace-validation.test.ts
+  s_12e81d56e0b642::t_2ed5e8229abdb2 1-152
+packages/shared/src/sse.ts
+  s_12e81d56e0b642::t_ed4e0863d9861f 453-466
+  s_12e81d56e0b642::t_1f9571738d5e2a 484-497
+  s_12e81d56e0b642::t_9accdf49e12aad 498
+packages/shared/src/workspace.ts
+  s_12e81d56e0b642::t_21aeff1d89b0b2 18-22,24-27
+packages/shared/src/index.ts
+  s_12e81d56e0b642::t_227a6ad104a7de 20-21
+packages/shared/src/workspace-validation.ts
+  s_12e81d56e0b642::t_354a99fc24f250 1-79
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "200ded316fdfb0af24c2d8c140a168d40ccbb494",
+  "prompts": {},
+  "sessions": {
+    "s_12e81d56e0b642": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5d2c6987-62c9-43d2-8101-109eef0af273",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
