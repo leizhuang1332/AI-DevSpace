@@ -1,0 +1,40 @@
+apps/web/src/__tests__/settings/shell.test.tsx
+  s_12e81d56e0b642::t_ac643a2532001b 30-31
+apps/web/src/__tests__/settings/workspace-section.test.tsx
+  s_12e81d56e0b642::t_63a9d1d83d9d4d 27-28
+  s_12e81d56e0b642::t_9b192e65d0f31e 3-4,16-24,41-43,49-55,57,66,75
+apps/web/src/__tests__/settings/workspace-section-inline-edit.test.tsx
+  s_12e81d56e0b642::t_c4a0566650545a 1-290
+apps/web/src/app/(workspace)/settings/sections/workspace.tsx
+  s_12e81d56e0b642::t_1e8727d1367088 122
+  s_12e81d56e0b642::t_23ee50112292e2 3,6-10,24-121,123-154,163-171,178-181,184,187-188,193-260,287
+  s_12e81d56e0b642::t_bf1cf5553329e6 5
+apps/web/src/components/agent-restart-banner.tsx
+  s_12e81d56e0b642::t_39ca90468419a6 1-97
+apps/web/src/__tests__/components/agent-restart-banner.test.tsx
+  s_12e81d56e0b642::t_d527e0cfd410d3 69-70
+  s_12e81d56e0b642::t_f6bfdc183605a2 1-68,71-153
+apps/web/src/lib/config-hooks.ts
+  s_12e81d56e0b642::t_df854328721c4d 37-98
+apps/web/src/app/(workspace)/layout.tsx
+  s_12e81d56e0b642::t_fb8793760abebd 11
+  s_12e81d56e0b642::t_fe5bda9c39a75a 55-56
+apps/web/src/__tests__/lib/config-hooks.test.tsx
+  s_12e81d56e0b642::t_08986164c5db76 37-38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "8afa5bd78c00ce4598cfe8dfbcaafc31b7fcb3ed",
+  "prompts": {},
+  "sessions": {
+    "s_12e81d56e0b642": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5d2c6987-62c9-43d2-8101-109eef0af273",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
