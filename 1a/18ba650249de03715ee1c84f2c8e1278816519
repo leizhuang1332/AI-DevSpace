@@ -1,0 +1,25 @@
+apps/web/src/components/board/BoardSection.tsx
+  s_d11280d0402e51::t_085add9ec0bec7 208-213
+  s_d11280d0402e51::t_7110266b002530 80-114
+  s_d11280d0402e51::t_10b0d08fece0c3 79
+apps/web/src/__tests__/board/board-section-drag.test.tsx
+  s_d11280d0402e51::t_11687563216dbd 238-331
+  s_d11280d0402e51::t_b5c217cf6bc308 17-20
+  s_d11280d0402e51::t_70f467ea3b2115 332
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "1a18ba650249de03715ee1c84f2c8e1278816519",
+  "prompts": {},
+  "sessions": {
+    "s_d11280d0402e51": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "77010b01-0ab2-4b7f-82a0-ddadab8a4576",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
