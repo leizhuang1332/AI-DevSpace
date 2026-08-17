@@ -1,0 +1,84 @@
+apps/web/src/components/board/BoardSection.tsx
+  s_7f70b918e8d625::t_fd9cfdc4e918af 160-168,180-182,185,202-247
+  s_7f70b918e8d625::t_69c7d93019cd59 554-572
+  s_7f70b918e8d625::t_21bc76c5f7beb0 504
+  s_7f70b918e8d625::t_7789721fcaf8a4 4,15-16,23-24,37-41,54,57,59,61,82-84
+apps/web/src/__tests__/board/board-section-drag-id-handle.test.tsx
+  s_7f70b918e8d625::t_baa3e6ff875e06 141-142
+  s_7f70b918e8d625::t_aad943a2e03a83 27-28
+  s_7f70b918e8d625::t_9a9ad8867f5fed 271,277-278,281,287-289
+  s_7f70b918e8d625::t_3e2c545b6c804d 45-47
+apps/web/src/__tests__/board/board-section.test.tsx
+  s_7f70b918e8d625::t_d8e8d0a5e6b138 2,9-10,14,28-29,46-48
+  s_7f70b918e8d625::t_d40a28a8f20926 226-227,230,232-245
+  s_7f70b918e8d625::t_ff67f89db919b9 18
+  s_7f70b918e8d625::t_205bd8003417ab 103-104
+  s_7f70b918e8d625::t_81705edf22c1a9 246-248
+apps/web/src/components/board/detail/BoardCardDetailPage.tsx
+  s_7f70b918e8d625::t_196321b62ae30e 257
+  s_7f70b918e8d625::t_f08bfd5a210764 29,42-50
+  s_7f70b918e8d625::t_7e2cea0282c2b3 163-186,188-200
+  s_7f70b918e8d625::t_588076549c006f 295-319
+  s_7f70b918e8d625::t_134e7c261e9aee 187
+apps/web/src/__tests__/board/board-card.test.tsx
+  s_7f70b918e8d625::t_4bcc6c46c39bcb 153-156,160-162,165-166,169
+apps/web/src/components/board/Column.tsx
+  s_7f70b918e8d625::t_774725b716c322 38-42,55
+  s_7f70b918e8d625::t_c72eee0e7518ed 161
+apps/web/src/components/board/detail/CardDetail.tsx
+  s_7f70b918e8d625::t_4acc9171a9cb89 88,91-94,97
+  s_7f70b918e8d625::t_8f7e21ed364723 9,18,44-48,56
+apps/web/src/__tests__/board/board-section-drag.test.tsx
+  s_7f70b918e8d625::t_2770d483daf3cd 28-29
+  s_7f70b918e8d625::t_8f954dc05182a1 46-48
+  s_7f70b918e8d625::t_0d1c0c8e45e71e 144-145
+  s_7f70b918e8d625::t_84661adee5153d 206,212-214
+docs/adr/0027-board-section-intro.md
+  s_7f70b918e8d625::t_9508ae8a36592e 85
+  s_7f70b918e8d625::t_d7f65feb30f4fe 4
+  s_7f70b918e8d625::t_196a7a67938f8d 206-207
+apps/web/src/components/board/delete/ConfirmDeleteDialog.tsx
+  s_7f70b918e8d625::t_8c9a8e1b8e901a 1-186
+apps/web/src/lib/board-hooks.ts
+  s_7f70b918e8d625::t_029114ac598c7e 163-165,181-240
+  s_7f70b918e8d625::t_c3a14c0f39c07f 24,31,241-244
+apps/web/src/components/board/Card.tsx
+  s_7f70b918e8d625::t_1b7cce77c44129 48-52,67,88,91
+  s_7f70b918e8d625::t_537466add67ad2 133,152-153,156
+  s_7f70b918e8d625::t_5c8c08e79ee8ce 10,23-26,47
+CONTEXT.md
+  s_7f70b918e8d625::t_7adf912cc01e7b 121-134
+  s_7f70b918e8d625::t_b3c5d9877d2ee2 6
+  s_7f70b918e8d625::t_372916c9827fc9 617-634
+apps/web/src/__tests__/board/board-column.test.tsx
+  s_7f70b918e8d625::t_176e02aaf0a719 130-132,137,141-142
+apps/web/src/components/board/delete/BlockerModal.tsx
+  s_7f70b918e8d625::t_f3796ea68feac4 1-158
+apps/web/src/lib/use-toast.ts
+  s_7f70b918e8d625::t_c1a9aa835ebec5 1-40
+apps/web/src/__tests__/board/board-card-detail-page.test.tsx
+  s_7f70b918e8d625::t_c60e2eb26857e0 377-403
+  s_7f70b918e8d625::t_20d3600f7af0d9 2,12,14-15
+  s_7f70b918e8d625::t_a0bf0459376a08 106-123
+  s_7f70b918e8d625::t_681506da5dac15 166-167
+apps/web/src/__tests__/board/card-detail.test.tsx
+  s_7f70b918e8d625::t_476b0398636821 151-152,158,161-162,165,167
+  s_7f70b918e8d625::t_64e9742192253b 51,57,63
+  s_7f70b918e8d625::t_e95613c65d8b15 2,5,13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "e404bce2a061bc0c8fbd7db648da757eb9a68542",
+  "prompts": {},
+  "sessions": {
+    "s_7f70b918e8d625": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "09f91028-6c33-4e29-916d-089954a8bbe2",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
