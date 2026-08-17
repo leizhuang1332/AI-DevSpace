@@ -24,7 +24,8 @@ import type { BoardFilter } from '@/lib/board'
 let mockCards: TaskCard[] = []
 let mockFilter: BoardFilter = 'all'
 let mockIsError = false
-const mockArchiveMutate = vi.fn()
+const mockDeleteMutate = vi.fn()
+const mockDeleteMutateAsync = vi.fn()
 const mockCreateMutate = vi.fn()
 const mockMoveMutate = vi.fn()
 const mockReorderMutate = vi.fn()
@@ -41,8 +42,9 @@ vi.mock('@/lib/board-hooks', () => ({
       error: mockIsError ? new Error('boom') : null,
     }
   },
-  useArchiveBoardCard: () => ({
-    mutate: mockArchiveMutate,
+  useDeleteBoardCard: () => ({
+    mutate: mockDeleteMutate,
+    mutateAsync: mockDeleteMutateAsync,
     isPending: false,
     isError: false,
     error: null,
@@ -136,7 +138,8 @@ afterEach(() => {
   mockCards = []
   mockFilter = 'all'
   mockIsError = false
-  mockArchiveMutate.mockReset()
+  mockDeleteMutate.mockReset()
+  mockDeleteMutateAsync.mockReset()
   mockCreateMutate.mockReset()
   mockMoveMutate.mockReset()
   mockReorderMutate.mockReset()
@@ -265,25 +268,25 @@ describe('BoardCard · C 方案 · 菜单 click 行为', () => {
     expect(mockPush).not.toHaveBeenCalled()
   })
 
-  it('菜单 ⋯ click 展开 dropdown 含 archive 选项', () => {
+  it('菜单 ⋯ click 展开 dropdown 含 delete 选项', () => {
     renderBoard('req-001', [
       makeCard({ id: '01J7X3K2P5EVR0Z3YQJD8HFK1', status: 'backlog' }),
     ])
     const menu = screen.getByTestId('board-card-menu')
     fireEvent.click(menu)
-    const archiveBtn = screen.getByTestId('board-card-menu-archive')
-    expect(archiveBtn).toBeInTheDocument()
+    const deleteBtn = screen.getByTestId('board-card-menu-delete')
+    expect(deleteBtn).toBeInTheDocument()
   })
 
-  it('菜单 archive click 仍走 useArchiveBoardCard.mutate', () => {
+  it('菜单 delete click 打开 ConfirmDeleteDialog(issue 03 / ADR-0036)', () => {
     renderBoard('req-001', [
       makeCard({ id: '01J7X3K2P5EVR0Z3YQJD8HFK1', status: 'backlog' }),
     ])
     const menu = screen.getByTestId('board-card-menu')
     fireEvent.click(menu)
-    const archiveBtn = screen.getByTestId('board-card-menu-archive')
-    fireEvent.click(archiveBtn)
-    expect(mockArchiveMutate).toHaveBeenCalledWith('01J7X3K2P5EVR0Z3YQJD8HFK1')
+    const deleteBtn = screen.getByTestId('board-card-menu-delete')
+    fireEvent.click(deleteBtn)
+    expect(screen.getByTestId('confirm-delete-dialog')).toBeInTheDocument()
   })
 })
 

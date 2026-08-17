@@ -25,7 +25,8 @@ import type { BoardFilter } from '@/lib/board'
 let mockCards: TaskCard[] = []
 let mockFilter: BoardFilter = 'all'
 let mockIsError = false
-const mockArchiveMutate = vi.fn()
+const mockDeleteMutate = vi.fn()
+const mockDeleteMutateAsync = vi.fn()
 const mockCreateMutate = vi.fn()
 const mockMoveMutate = vi.fn()
 const mockReorderMutate = vi.fn()
@@ -42,8 +43,9 @@ vi.mock('@/lib/board-hooks', () => ({
       error: mockIsError ? new Error('boom') : null,
     }
   },
-  useArchiveBoardCard: () => ({
-    mutate: mockArchiveMutate,
+  useDeleteBoardCard: () => ({
+    mutate: mockDeleteMutate,
+    mutateAsync: mockDeleteMutateAsync,
     isPending: false,
     isError: false,
     error: null,
@@ -139,7 +141,8 @@ afterEach(() => {
   mockCards = []
   mockFilter = 'all'
   mockIsError = false
-  mockArchiveMutate.mockReset()
+  mockDeleteMutate.mockReset()
+  mockDeleteMutateAsync.mockReset()
   mockCreateMutate.mockReset()
   mockMoveMutate.mockReset()
   mockReorderMutate.mockReset()
@@ -200,15 +203,15 @@ describe('BoardSection · 拖拽状态机(issue 19 / ADR-0035 D5)', () => {
     expect(mockReorderMutate).not.toHaveBeenCalled()
   })
 
-  it('卡片 menu archive 仍调用 useArchiveBoardCard.mutate(不影响拖拽)', () => {
+  it('卡片 menu delete 仍打开 ConfirmDeleteDialog(不影响拖拽)', () => {
     renderBoard('req-001', [
       makeCard({ id: '01J7X3K2P5EVR0Z3YQJD8HFK1', status: 'backlog' }),
     ])
     const menu = screen.getByTestId('board-card-menu')
     fireEvent.click(menu)
-    const archiveBtn = screen.getByTestId('board-card-menu-archive')
-    fireEvent.click(archiveBtn)
-    expect(mockArchiveMutate).toHaveBeenCalledWith('01J7X3K2P5EVR0Z3YQJD8HFK1')
+    const deleteBtn = screen.getByTestId('board-card-menu-delete')
+    fireEvent.click(deleteBtn)
+    expect(screen.getByTestId('confirm-delete-dialog')).toBeInTheDocument()
   })
 })
 

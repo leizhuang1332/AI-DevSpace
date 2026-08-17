@@ -26,6 +26,7 @@
 import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import type {
+  BoardCardBlockers,
   RequirementSummary,
   TaskCard,
   TaskCardStatusT,
@@ -38,7 +39,15 @@ import {
   useUpdateCardStatus,
   useCardTranscript,
 } from '@/lib/board-detail-hooks'
-import { useArchiveBoardCard } from '@/lib/board-hooks'
+import {
+  useDeleteBoardCard,
+  type DeleteBoardCardError,
+} from '@/lib/board-hooks'
+import { useToast } from '@/lib/use-toast'
+import { shortCardId } from '@/lib/board'
+import { ConfirmDeleteDialog } from '@/components/board/delete/ConfirmDeleteDialog'
+import { BlockerModal } from '@/components/board/delete/BlockerModal'
+import { ToastHost } from '@/components/toast-host'
 import { CardDetail } from './CardDetail'
 import { CardSideProperty } from './CardSideProperty'
 import { CardTranscriptPanel } from './CardTranscriptPanel'
@@ -100,7 +109,6 @@ export function BoardCardDetailPage({
   // legacy banner 判定线索(hasLegacyTranscript 由父组件提供)。
   useCardTranscript(requirementId, cardId, initialTranscript)
   const statusMutation = useUpdateCardStatus(requirementId)
-  const archiveMutation = useArchiveBoardCard(requirementId)
 
   // status 变更流(Guard → 可能弹 Modal)
   const handleStatusChange = useCallback(
@@ -152,10 +160,44 @@ export function BoardCardDetailPage({
   // 发送 transcript 消息 —— 由 CardTranscriptPanel 内部用 SDK session 流接管
   // (issue 07 / ADR-0029 D9 + D10)。此处不再有顶层 sendMutation。
 
-  // archive
-  const handleArchive = useCallback(() => {
-    archiveMutation.mutate(cardId)
-  }, [archiveMutation, cardId])
+  // 删除任务(issue 03 / ADR-0036):打开二次确认
+  const [confirmingDelete, setConfirmingDelete] = useState<{
+    cardId: string
+    cardTitle: string
+  } | null>(null)
+  const [blockersModal, setBlockersModal] = useState<{
+    cardId: string
+    blockers: BoardCardBlockers
+  } | null>(null)
+  const { items: toasts, push: pushToast, dismiss: dismissToast } = useToast()
+  const deleteMutation = useDeleteBoardCard(requirementId)
+
+  const handleDeleteRequest = useCallback(() => {
+    if (!card) return
+    setConfirmingDelete({ cardId: card.id, cardTitle: card.title })
+  }, [card])
+
+  // 路由错误(陷阱 3):E_CARD_HAS_BLOCKERS → BlockerModal / E_CARD_NOT_FOUND → silent /
+  // 其他 → pushToast。成功 → router.push 回 board(详情页已无对应卡)
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!confirmingDelete) return
+    try {
+      await deleteMutation.mutateAsync(confirmingDelete.cardId)
+      setConfirmingDelete(null)
+      pushToast('任务已删除', 'info')
+      router.push(`/requirements/${encodeURIComponent(requirementId)}/board/`)
+    } catch (err) {
+      const e = err as DeleteBoardCardError
+      setConfirmingDelete(null)
+      if (e?.code === 'E_CARD_HAS_BLOCKERS' && e.blockers) {
+        setBlockersModal({ cardId: confirmingDelete.cardId, blockers: e.blockers })
+      } else if (e?.code === 'E_CARD_NOT_FOUND') {
+        // silent:本地已删,hook 已 invalidate 兜底
+      } else {
+        pushToast(e?.message ?? '删除失败', 'err')
+      }
+    }
+  }, [confirmingDelete, deleteMutation, pushToast, requirementId, router])
 
   if (!card) {
     return (
@@ -212,7 +254,7 @@ export function BoardCardDetailPage({
             cards={cards}
             parentSummary={summary}
             onStatusChange={handleStatusChange}
-            onArchive={handleArchive}
+            onDelete={handleDeleteRequest}
           />
         </div>
 
@@ -250,6 +292,31 @@ export function BoardCardDetailPage({
         onAdjustChildren={handleAdjustChildren}
         onCancel={handleCancel}
       />
+
+      {/* 删除任务二次确认(issue 03 / ADR-0036) */}
+      <ConfirmDeleteDialog
+        open={confirmingDelete !== null}
+        cardTitle={confirmingDelete?.cardTitle ?? ''}
+        cardIdShort={
+          confirmingDelete ? shortCardId(confirmingDelete.cardId) : ''
+        }
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => setConfirmingDelete(null)}
+      />
+
+      {/* 删除失败 blocker 列表 */}
+      <BlockerModal
+        open={blockersModal !== null}
+        blockers={
+          blockersModal?.blockers ?? { subtasks: [], dependents: [] }
+        }
+        deletingCardId={blockersModal?.cardId ?? ''}
+        requirementId={requirementId}
+        onClose={() => setBlockersModal(null)}
+      />
+
+      {/* Toast 出口(issue 03 / ADR-0036 D4) */}
+      <ToastHost items={toasts} onDismiss={dismissToast} />
     </main>
   )
 }

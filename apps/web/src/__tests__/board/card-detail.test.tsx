@@ -1,8 +1,8 @@
 /**
- * CardDetail 组件测试 — issue 08 / ADR-0027 D5
+ * CardDetail 组件测试 — issue 08 / ADR-0027 D5 + issue 03 / ADR-0036
  *
  * 验收:
- * - task-title row 渲染 shortCardId + title + archive/more
+ * - task-title row 渲染 shortCardId + title + delete/more
  * - 6 chip 行(status/priority/source/assignee/created/updated)
  * - 父进度条(done/total)
  * - Content Markdown 渲染
@@ -10,7 +10,7 @@
  * - 依赖卡列表(filterDependencies)
  * - 详细信息折叠块(8 冷字段)
  * - status select 改 → onStatusChange 回调
- * - archive btn → onArchive 回调
+ * - delete btn → onDelete 回调(issue 03 / ADR-0036)
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest'
@@ -48,19 +48,19 @@ function makeCard(overrides: Partial<TaskCard> = {}): TaskCard {
 afterEach(() => cleanup())
 
 describe('CardDetail · 渲染', () => {
-  it('task-title row 渲染 shortCardId + title + archive/more', () => {
+  it('task-title row 渲染 shortCardId + title + delete/more', () => {
     render(
       <CardDetail
         card={makeCard()}
         cards={[]}
         parentSummary={null}
-        onArchive={vi.fn()}
+        onDelete={vi.fn()}
       />,
     )
     // shortCardId 取 ULID 末 4 位(FKX9)
     expect(screen.getByTestId('board-detail-id')).toHaveTextContent('FKX9')
     expect(screen.getByTestId('board-detail-title')).toHaveTextContent('主卡标题')
-    expect(screen.getByTestId('board-detail-archive')).toBeInTheDocument()
+    expect(screen.getByTestId('board-detail-delete')).toBeInTheDocument()
   })
 
   it('6 chip 行全部渲染', () => {
@@ -148,23 +148,23 @@ describe('CardDetail · 交互', () => {
     expect(onStatusChange).toHaveBeenCalledWith('in_progress')
   })
 
-  it('archive btn → onArchive', () => {
-    const onArchive = vi.fn()
+  it('delete btn → onDelete', () => {
+    const onDelete = vi.fn()
     render(
       <CardDetail
         card={makeCard()}
         cards={[]}
         parentSummary={null}
-        onArchive={onArchive}
+        onDelete={onDelete}
       />,
     )
-    fireEvent.click(screen.getByTestId('board-detail-archive'))
-    expect(onArchive).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByTestId('board-detail-delete'))
+    expect(onDelete).toHaveBeenCalledTimes(1)
   })
 
-  it('无 onArchive 时不渲染 archive btn', () => {
+  it('无 onDelete 时不渲染 delete btn', () => {
     render(<CardDetail card={makeCard()} cards={[]} parentSummary={null} />)
-    expect(screen.queryByTestId('board-detail-archive')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('board-detail-delete')).not.toBeInTheDocument()
   })
 
   it('空 content 不渲染 Content section', () => {

@@ -1,5 +1,5 @@
 /**
- * BoardCardDetailPage 组件测试 — issue 07 / ADR-0027 D5 + ADR-0028 D5 + ADR-0029
+ * BoardCardDetailPage 组件测试 — issue 07 / ADR-0027 D5 + ADR-0028 D5 + ADR-0029 + issue 03 / ADR-0036
  *
  * 验收:
  * - 渲染 card + crumb + 左主区 + 右栏默认态(property)
@@ -9,8 +9,10 @@
  * - status 变更 → statusMutation mutate;res.ok=false → 弹 StatusConstraintModal
  * - StatusConstraintModal 选项 A/B/C
  * - 切到 chat panel 后 SDK session 输入 + 发送走 stream hook
+ * - 删除按钮 → 打开 ConfirmDeleteDialog(issue 03 / ADR-0036)
  *
- * mock:vi.mock board-detail-hooks + board-chat-hooks + next/navigation useRouter
+ * mock:vi.mock board-detail-hooks + board-hooks(useDeleteBoardCard 来源) +
+ * board-chat-hooks + next/navigation useRouter
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest'
@@ -90,13 +92,6 @@ const mockStatusMutation = {
   isError: false,
   error: null,
 }
-const mockArchiveMutate = vi.fn()
-const mockArchiveMutation = {
-  mutate: mockArchiveMutate,
-  isPending: false,
-  isError: false,
-  error: null,
-}
 
 vi.mock('@/lib/board-detail-hooks', () => ({
   useBoardCardDetail: () => ({ card: mockCard, isLoading: false, isError: false, error: null }),
@@ -108,7 +103,24 @@ vi.mock('@/lib/board-detail-hooks', () => ({
   }),
   useCardTranscript: () => ({ transcript: mockTranscript, isLoading: false, isError: false }),
   useUpdateCardStatus: () => mockStatusMutation,
-  useArchiveBoardCard: () => mockArchiveMutation,
+}))
+
+// ---- 受控 mock:board-hooks(useDeleteBoardCard 实际来源)
+// 注:历史上这里曾 mock `@/lib/board-detail-hooks` 提供 useArchiveBoardCard,但
+// 组件实际 import 来自 `@/lib/board-hooks` —— 路径错配导致 mock 失效。原 useArchiveBoardCard
+// 已被 useDeleteBoardCard 替换(issue 03 / ADR-0036),本块提供新路径的 mock。
+const mockDeleteMutate = vi.fn()
+const mockDeleteMutateAsync = vi.fn()
+const mockDeleteMutation = {
+  mutate: mockDeleteMutate,
+  mutateAsync: mockDeleteMutateAsync,
+  isPending: false,
+  isError: false,
+  error: null,
+}
+
+vi.mock('@/lib/board-hooks', () => ({
+  useDeleteBoardCard: () => mockDeleteMutation,
 }))
 
 // ---- 受控 mock:board-chat-hooks(简化版)----
@@ -151,7 +163,8 @@ afterEach(() => {
   mockCards = []
   mockTranscript = null
   mockStatusMutate.mockClear()
-  mockArchiveMutate.mockClear()
+  mockDeleteMutate.mockClear()
+  mockDeleteMutateAsync.mockClear()
   mockStreamSend.mockClear()
   mockPush.mockClear()
   mockStatusMutation.isPending = false
@@ -357,6 +370,33 @@ describe('BoardCardDetailPage · chat 发送', () => {
       expect(mockStreamSend).toHaveBeenCalledWith(
         expect.objectContaining({ content: '测试消息' }),
       )
+    })
+  })
+})
+
+describe('BoardCardDetailPage · 删除任务(issue 03 / ADR-0036)', () => {
+  it('点 delete 按钮 → 打开 ConfirmDeleteDialog', () => {
+    mockCard = makeCard()
+    renderPage()
+    expect(screen.queryByTestId('confirm-delete-dialog')).toBeNull()
+    fireEvent.click(screen.getByTestId('board-detail-delete'))
+    expect(screen.getByTestId('confirm-delete-dialog')).toBeInTheDocument()
+  })
+
+  it('删除成功 → router.push 回 board', async () => {
+    mockDeleteMutateAsync.mockResolvedValue({ deleted: true, id: CARD_ID })
+    mockCard = makeCard()
+    renderPage()
+    fireEvent.click(screen.getByTestId('board-detail-delete'))
+    fireEvent.change(screen.getByTestId('confirm-delete-dialog-input'), {
+      target: { value: 'DELETE' },
+    })
+    fireEvent.click(screen.getByTestId('confirm-delete-dialog-confirm'))
+    await waitFor(() => {
+      expect(mockDeleteMutateAsync).toHaveBeenCalledWith(CARD_ID)
+    })
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith('/requirements/req-1/board/')
     })
   })
 })

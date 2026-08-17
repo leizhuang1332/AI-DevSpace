@@ -127,18 +127,18 @@ describe('BoardColumn · `+` 按钮', () => {
   })
 })
 
-describe('BoardColumn · archive 透传', () => {
-  it('onCardArchive 传入 → 卡片菜单 archive 触发', () => {
-    const onArchive = vi.fn()
+describe('BoardColumn · delete 透传', () => {
+  it('onCardDelete 传入 → 卡片菜单 delete 触发', () => {
+    const onDelete = vi.fn()
     render(
       <BoardColumn
         status="backlog"
         cards={[makeCard('c1')]}
-        onCardArchive={onArchive}
+        onCardDelete={onDelete}
       />,
     )
     fireEvent.click(screen.getByTestId('board-card-menu'))
-    fireEvent.click(screen.getByTestId('board-card-menu-archive'))
-    expect(onArchive).toHaveBeenCalledWith('c1')
+    fireEvent.click(screen.getByTestId('board-card-menu-delete'))
+    expect(onDelete).toHaveBeenCalledWith('c1')
   })
 })

@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * board section 主组件(5 列看板)— issue 07 / 08 / ADR-0027 D3 + D4 + D5
+ * board section 主组件(5 列看板)— issue 07 / 08 / 03 / ADR-0027 D3 + D4 + D5 + ADR-0036
  *
  * 视觉对照基线:`docs/design/pages/board-color-options.html` scheme-a。
  *
@@ -12,12 +12,16 @@
  * - SplitFromPrdModal 受控(toolbar `[+ 从 PRD 拆]` 触发,issue 08)
  * - PrdSplitResultBanner(Run 轮询 succeeded →「建议卡片组 N 条 [载入到看板]」)
  * - PrdSplitReviewModal(载入候选 → 逐条 POST /board/cards source=prd_split)
+ * - **ConfirmDeleteDialog**(issue 03 / ADR-0036):菜单「删除任务」→ 输入 DELETE 二次确认
+ * - **BlockerModal**(issue 03 / ADR-0036 D2):删除命中 blocker(子任务 / 依赖方)→ 列表 + 跳转
  *
  * 数据流:
  * - SSR 注水 `initialCards` → `useBoardCards(requirementId, filter, initialData)`
  * - filter 切换 → queryKey 变 → 重拉(或客户端过滤)
  * - manual 创建 → mutation → invalidate → 列重拉 → N 计数更新
  * - **卡片点击**(issue 08):router.push 进 `/requirements/[id]/board/[cardId]`
+ * - **物理删除**(issue 03):菜单 → ConfirmDeleteDialog → useDeleteBoardCard.mutate;
+ *   成功 invalidate + Toast;失败路由(409 blocker → BlockerModal,其他 → Toast)
  *
  * 拖拽(issue 19 / ADR-0035):BoardSection 包 `<DndContext>` + `<DragOverlay>`,
  * `handleDragEnd` 拆两种:
@@ -30,7 +34,11 @@
 
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import type { TaskCard, TaskCardStatusT } from '@ai-devspace/shared'
+import type {
+  BoardCardBlockers,
+  TaskCard,
+  TaskCardStatusT,
+} from '@ai-devspace/shared'
 import {
   DndContext,
   DragOverlay,
@@ -43,11 +51,14 @@ import {
 } from '@dnd-kit/core'
 import {
   useBoardCards,
-  useArchiveBoardCard,
+  useDeleteBoardCard,
   useMoveCardToColumn,
   useReorderCard,
+  type DeleteBoardCardError,
 } from '@/lib/board-hooks'
+import { useToast } from '@/lib/use-toast'
 import {
+  shortCardId,
   STATUS_COLUMN_ORDER,
   type BoardFilter,
   type BoardCardListData,
@@ -68,6 +79,9 @@ import { PrdSplitResultBanner } from './detail/PrdSplitResultBanner'
 import { PrdSplitReviewModal } from './detail/PrdSplitReviewModal'
 import { EmptyState } from '../empty-state'
 import { StatusConstraintModal } from './detail/StatusConstraintModal'
+import { ConfirmDeleteDialog } from './delete/ConfirmDeleteDialog'
+import { BlockerModal } from './delete/BlockerModal'
+import { ToastHost } from '../toast-host'
 
 export interface BoardSectionProps {
   requirementId: string
@@ -143,6 +157,15 @@ export function BoardSection({
   // 拖拽(issue 19 / ADR-0035)
   const [activeDragCardId, setActiveDragCardId] = useState<string | null>(null)
   const [pendingConflict, setPendingConflict] = useState<PendingConflictState | null>(null)
+  // 删除(issue 03 / ADR-0036)
+  const [confirmingDelete, setConfirmingDelete] = useState<{
+    cardId: string
+    cardTitle: string
+  } | null>(null)
+  const [blockersModal, setBlockersModal] = useState<{
+    cardId: string
+    blockers: BoardCardBlockers
+  } | null>(null)
 
   const initialData: BoardCardListData | undefined =
     filter === 'all'
@@ -154,9 +177,12 @@ export function BoardSection({
     filter,
     initialData,
   )
-  const archiveMutation = useArchiveBoardCard(requirementId)
+  // deleteMutation(issue 03 / ADR-0036)替换 archiveMutation —— board UI 不再有
+  // 软删入口;后端 archive 路径保留(snapshot / CLI),前端不再持有 hook。
+  const deleteMutation = useDeleteBoardCard(requirementId)
   const moveMutation = useMoveCardToColumn(requirementId)
   const reorderMutation = useReorderCard(requirementId)
+  const { items: toasts, push: pushToast, dismiss: dismissToast } = useToast()
 
   // 拖拽 sensors:PointerSensor 5px 阈值(ADR-0035 D4)
   const sensors = useSensors(
@@ -173,8 +199,52 @@ export function BoardSection({
     setModalOpen(true)
   }
 
-  const handleArchive = (cardId: string) => {
-    archiveMutation.mutate(cardId)
+  /**
+   * 菜单「删除任务」→ 打开 ConfirmDeleteDialog(ADR-0036 D3)。
+   * 不直接调 mutation;真正删除由 ConfirmDeleteDialog 的 onConfirm 触发。
+   */
+  const handleDeleteRequest = (cardId: string) => {
+    const card = cards.find((c) => c.id === cardId)
+    setConfirmingDelete({
+      cardId,
+      cardTitle: card?.title ?? cardId,
+    })
+  }
+
+  /**
+   * ConfirmDeleteDialog 提交回调。
+   *
+   * 错误路由(陷阱 3:useDeleteBoardCard 不 Toast,全部由 caller 决定):
+   * - `E_CARD_HAS_BLOCKERS` + blockers 非空 → 关 ConfirmDialog,改弹 BlockerModal
+   * - `E_CARD_NOT_FOUND` → silent(invalidate 让 UI 重刷,卡片已不存在)
+   * - 其他 → pushToast('err')
+   */
+  const handleDeleteConfirm = async () => {
+    if (!confirmingDelete) return
+    const { cardId } = confirmingDelete
+    try {
+      await deleteMutation.mutateAsync(cardId)
+      setConfirmingDelete(null)
+      pushToast(`已删除 ${shortCardId(cardId)}`, 'info')
+    } catch (err) {
+      const e = err as DeleteBoardCardError
+      setConfirmingDelete(null)
+      if (e?.code === 'E_CARD_HAS_BLOCKERS' && e.blockers) {
+        setBlockersModal({ cardId, blockers: e.blockers })
+      } else if (e?.code === 'E_CARD_NOT_FOUND') {
+        // silent:已删,invalidate 已在 hook 内做
+      } else {
+        pushToast(e?.message ?? '删除失败', 'err')
+      }
+    }
+  }
+
+  const handleDeleteCancel = () => {
+    setConfirmingDelete(null)
+  }
+
+  const handleBlockersClose = () => {
+    setBlockersModal(null)
   }
 
   // 卡片点击 → 进详情页(issue 08 / ADR-0027 D5)
@@ -431,7 +501,7 @@ export function BoardSection({
                   status={status}
                   cards={byStatus[status]}
                   onCardClick={handleCardClick}
-                  onCardArchive={handleArchive}
+                  onCardDelete={handleDeleteRequest}
                   onAddCard={handleAddInColumn}
                   activeDragCardId={activeDragCardId}
                   activeDragFromStatus={activeDragCard?.status ?? null}
@@ -481,6 +551,25 @@ export function BoardSection({
           onCancel={handleConflictCancel}
         />
       )}
+
+      {/* 物理删除二次确认 + blocker 列表(issue 03 / ADR-0036 D2 + D3) */}
+      <ConfirmDeleteDialog
+        open={confirmingDelete !== null}
+        cardTitle={confirmingDelete?.cardTitle ?? ''}
+        cardIdShort={confirmingDelete ? shortCardId(confirmingDelete.cardId) : ''}
+        onConfirm={handleDeleteConfirm}
+        onCancel={handleDeleteCancel}
+      />
+      <BlockerModal
+        open={blockersModal !== null}
+        blockers={blockersModal?.blockers ?? { subtasks: [], dependents: [] }}
+        deletingCardId={blockersModal?.cardId ?? ''}
+        requirementId={requirementId}
+        onClose={handleBlockersClose}
+      />
+
+      {/* Toast 容器(全局,需求级状态) */}
+      <ToastHost items={toasts} onDismiss={dismissToast} />
     </main>
   )
 }

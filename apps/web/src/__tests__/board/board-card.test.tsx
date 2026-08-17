@@ -150,23 +150,23 @@ describe('BoardCard · 空内容', () => {
   })
 })
 
-describe('BoardCard · 卡片菜单 archive', () => {
-  it('onArchive 传入 → 渲染菜单按钮', () => {
-    const onArchive = vi.fn()
-    render(<BoardCard card={makeCard()} onArchive={onArchive} />)
+describe('BoardCard · 卡片菜单 delete', () => {
+  it('onDelete 传入 → 渲染菜单按钮', () => {
+    const onDelete = vi.fn()
+    render(<BoardCard card={makeCard()} onDelete={onDelete} />)
     expect(screen.getByTestId('board-card-menu')).toBeInTheDocument()
   })
 
-  it('点菜单 → 展开 dropdown → 点归档 → 调 onArchive(cardId)', () => {
-    const onArchive = vi.fn()
-    render(<BoardCard card={makeCard()} onArchive={onArchive} />)
+  it('点菜单 → 展开 dropdown → 点删除任务 → 调 onDelete(cardId)', () => {
+    const onDelete = vi.fn()
+    render(<BoardCard card={makeCard()} onDelete={onDelete} />)
     fireEvent.click(screen.getByTestId('board-card-menu'))
     expect(screen.getByTestId('board-card-menu-dropdown')).toBeInTheDocument()
-    fireEvent.click(screen.getByTestId('board-card-menu-archive'))
-    expect(onArchive).toHaveBeenCalledWith('01J7X3K2P5EVR0Z3YQJD8HFKX9')
+    fireEvent.click(screen.getByTestId('board-card-menu-delete'))
+    expect(onDelete).toHaveBeenCalledWith('01J7X3K2P5EVR0Z3YQJD8HFKX9')
   })
 
-  it('无 onArchive → 不渲染菜单按钮', () => {
+  it('无 onDelete → 不渲染菜单按钮', () => {
     render(<BoardCard card={makeCard()} />)
     expect(screen.queryByTestId('board-card-menu')).toBeNull()
   })

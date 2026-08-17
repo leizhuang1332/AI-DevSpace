@@ -1,20 +1,21 @@
 /**
- * BoardSection 集成测试 — issue 07 / ADR-0027 D3
+ * BoardSection 集成测试 — issue 07 / ADR-0027 D3 + issue 03 / ADR-0036
  *
  * 验收:
  * - SSR 注水 initialCards → 5 列分组正确(backlog/todo/in_progress/in_review/done)
  * - filter 切换 → onFilterChange 重渲染(filter chip active 切)
  * - toolbar [+ 新任务] → 打开 NewTaskModal
  * - 列头 + → 打开 NewTaskModal + 预填该列 status
- * - 卡片菜单 archive → useArchiveBoardCard mutate
+ * - 卡片菜单 delete → 打开 ConfirmDeleteDialog;输入 DELETE → 提交触发
+ *   `useDeleteBoardCard.mutateAsync(cardId)`(issue 03 / ADR-0036)
  * - 空态(无卡 + filter=all)→ 渲染 EmptyState
  * - isError → 渲染错误态
  *
- * mock:vi.mock board-hooks 的 useBoardCards + useArchiveBoardCard。
+ * mock:vi.mock board-hooks 的 useBoardCards + useDeleteBoardCard(替换 useArchiveBoardCard)。
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { render, screen, cleanup, fireEvent } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BoardSection } from '@/components/board/BoardSection'
 import type { TaskCard } from '@ai-devspace/shared'
@@ -24,7 +25,8 @@ import type { BoardFilter } from '@/lib/board'
 let mockCards: TaskCard[] = []
 let mockFilter: BoardFilter = 'all'
 let mockIsError = false
-const mockArchiveMutate = vi.fn()
+const mockDeleteMutate = vi.fn()
+const mockDeleteMutateAsync = vi.fn()
 const mockCreateMutate = vi.fn()
 const mockMoveMutate = vi.fn()
 const mockReorderMutate = vi.fn()
@@ -41,8 +43,9 @@ vi.mock('@/lib/board-hooks', () => ({
       error: mockIsError ? new Error('boom') : null,
     }
   },
-  useArchiveBoardCard: () => ({
-    mutate: mockArchiveMutate,
+  useDeleteBoardCard: () => ({
+    mutate: mockDeleteMutate,
+    mutateAsync: mockDeleteMutateAsync,
     isPending: false,
     isError: false,
     error: null,
@@ -97,7 +100,8 @@ afterEach(() => {
   cleanup()
   mockCards = []
   mockIsError = false
-  mockArchiveMutate.mockClear()
+  mockDeleteMutate.mockClear()
+  mockDeleteMutateAsync.mockClear()
   mockCreateMutate.mockClear()
   mockPush.mockClear()
 })
@@ -219,13 +223,29 @@ describe('BoardSection · NewTaskModal', () => {
   })
 })
 
-describe('BoardSection · archive', () => {
-  it('卡片菜单 archive → useArchiveBoardCard.mutate(cardId)', () => {
+describe('BoardSection · delete(issue 03 / ADR-0036)', () => {
+  it('卡片菜单 delete → 打开 ConfirmDeleteDialog', () => {
+    mockCards = [makeCard('c1', 'backlog')]
+    renderSection()
+    expect(screen.queryByTestId('confirm-delete-dialog')).toBeNull()
+    fireEvent.click(screen.getByTestId('board-card-menu'))
+    fireEvent.click(screen.getByTestId('board-card-menu-delete'))
+    expect(screen.getByTestId('confirm-delete-dialog')).toBeInTheDocument()
+  })
+
+  it('ConfirmDeleteDialog 输入 DELETE → 调 useDeleteBoardCard.mutateAsync(cardId)', async () => {
+    mockDeleteMutateAsync.mockResolvedValue({ deleted: true, id: 'c1' })
     mockCards = [makeCard('c1', 'backlog')]
     renderSection()
     fireEvent.click(screen.getByTestId('board-card-menu'))
-    fireEvent.click(screen.getByTestId('board-card-menu-archive'))
-    expect(mockArchiveMutate).toHaveBeenCalledWith('c1')
+    fireEvent.click(screen.getByTestId('board-card-menu-delete'))
+    fireEvent.change(screen.getByTestId('confirm-delete-dialog-input'), {
+      target: { value: 'DELETE' },
+    })
+    fireEvent.click(screen.getByTestId('confirm-delete-dialog-confirm'))
+    await waitFor(() => {
+      expect(mockDeleteMutateAsync).toHaveBeenCalledWith('c1')
+    })
   })
 })
 

@@ -6,7 +6,7 @@
  * 视觉对照基线:`docs/design/pages/board-detail-final.html` .main 块。
  *
  * 结构(自上而下):
- * - task-title row:shortCardId(mono)+ h1 title + 🗄 archive / ⋯ more
+ * - task-title row:shortCardId(mono)+ h1 title + 🗑 delete / ⋯ more
  * - 顶部 6 chip(status / priority / source / assignee / created / updated)
  * - 父 Requirement 进度条(computeParentProgress → bar + 「N / M 卡」)
  * - Content Markdown(<MarkdownContent source={card.content}/>)
@@ -15,6 +15,7 @@
  * - 「详细信息 ▾」折叠(8 项冷字段)
  *
  * status chip 点击 → onStatusChange(走 PATCH /cards/:cardId/status → Guard → 可能弹 Modal)
+ * 删除按钮(issue 03 / ADR-0036)→ onDelete:caller 弹 ConfirmDeleteDialog 二次确认
  */
 
 import type { RequirementSummary, TaskCard, TaskCardStatusT } from '@ai-devspace/shared'
@@ -40,8 +41,11 @@ export interface CardDetailProps {
   parentSummary: RequirementSummary | null
   /** status 变更触发(PATCH /status → Guard → 可能弹 Modal) */
   onStatusChange?: (newStatus: TaskCardStatusT) => void
-  /** archive 触发 */
-  onArchive?: () => void
+  /**
+   * 删除任务触发(issue 03 / ADR-0036)。
+   * caller 负责弹 ConfirmDeleteDialog → 物理删除 → 路由错误(409 blocker / Toast)
+   */
+  onDelete?: () => void
 }
 
 export function CardDetail({
@@ -49,7 +53,7 @@ export function CardDetail({
   cards,
   parentSummary,
   onStatusChange,
-  onArchive,
+  onDelete,
 }: CardDetailProps) {
   const statusCol = STATUS_COLUMNS[card.status]
   const priorityBadge = card.priority ? PRIORITY_BADGE[card.priority] : null
@@ -81,16 +85,16 @@ export function CardDetail({
           {card.title}
         </h1>
         <div className="flex gap-2" data-testid="board-detail-actions">
-          {onArchive && (
+          {onDelete && (
             <button
               type="button"
-              data-testid="board-detail-archive"
-              onClick={onArchive}
-              aria-label="归档"
-              title="归档"
+              data-testid="board-detail-delete"
+              onClick={onDelete}
+              aria-label="删除任务"
+              title="删除任务"
               className="w-8 h-8 rounded-md border border-border bg-bg-elevated text-text-2 hover:border-text-3 hover:text-text-1 inline-flex items-center justify-center"
             >
-              🗄
+              🗑
             </button>
           )}
           <button

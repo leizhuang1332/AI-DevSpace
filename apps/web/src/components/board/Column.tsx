@@ -35,8 +35,11 @@ export interface BoardColumnProps {
   cards: TaskCard[]
   /** 卡片点击(进详情,本期可 undefined) */
   onCardClick?: (cardId: string) => void
-  /** 卡片菜单 archive */
-  onCardArchive?: (cardId: string) => void
+  /**
+   * 卡片菜单「删除任务」(issue 03 / ADR-0036)。
+   * BoardSection 注入:实际走物理删除流程,弹 ConfirmDeleteDialog。
+   */
+  onCardDelete?: (cardId: string) => void
   /** 列头 `+` 按钮(预填 status 创建 manual 卡) */
   onAddCard?: (status: TaskCardStatusT) => void
   /** 当前正在拖拽的卡片 id(BoardSection 注入) */
@@ -49,7 +52,7 @@ export function BoardColumn({
   status,
   cards,
   onCardClick,
-  onCardArchive,
+  onCardDelete,
   onAddCard,
   activeDragCardId = null,
   activeDragFromStatus = null,
@@ -155,7 +158,7 @@ export function BoardColumn({
                 key={card.id}
                 card={card}
                 onClick={onCardClick}
-                onArchive={onCardArchive}
+                onDelete={onCardDelete}
                 // 跨列拖时本列其它卡片让位(C 方案 + grill 锁定):
                 // translateY(8px) + opacity:0.7,200ms ease-out
                 displaced={isColDisplaced}

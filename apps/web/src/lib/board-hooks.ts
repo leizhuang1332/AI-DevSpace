@@ -21,13 +21,14 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type {
+  BoardCardBlockers,
   BoardCardCreateRequest,
   BoardCardCreateResponse,
   BoardCardListResponse,
   TaskCard,
   TaskCardStatusT,
 } from '@ai-devspace/shared'
-import { agentFetch } from './agent-client'
+import { AgentError, agentFetch } from './agent-client'
 import { filterCardsByBoardFilter, type BoardFilter, type BoardCardListData } from './board'
 import type { UpdateCardStatusResponse } from './board-detail-hooks'
 
@@ -159,6 +160,9 @@ export function useCreateBoardCard(requirementId: string) {
  * 软删卡片(POST /api/requirement/:id/board/cards/:cardId/archive)。
  *
  * 成功后 invalidate `['board', requirementId]` → 列重拉。
+ *
+ * 注:ADR-0036 D7 后,board UI 不再触发 `archive`;后端路径保留供 snapshot /
+ * CLI 工具调用。本 hook 保留以便未来"已归档抽屉"等功能(ADR-0036 D7 不在范围内)。
  */
 export function useArchiveBoardCard(requirementId: string) {
   const qc = useQueryClient()
@@ -170,6 +174,70 @@ export function useArchiveBoardCard(requirementId: string) {
       ),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['board', requirementId] })
+    },
+  })
+}
+
+// ---------------------------------------------------------------------------
+// delete(物理删除,issue 03 / ADR-0036)
+// ---------------------------------------------------------------------------
+
+/**
+ * useDeleteBoardCard —— 物理删除卡片(ADR-0036 D1)
+ *
+ * **契约:只 throw,不 Toast**(陷阱 3)。错误由 caller 路由:
+ * - `error.code === 'E_CARD_HAS_BLOCKERS'` + `error.blockers` 非空 → 弹 BlockerModal
+ * - `error.code === 'E_CARD_NOT_FOUND'` → silent(已删,本地缓存由 onSuccess invalidate 重刷)
+ * - 其他 → `pushToast(message, 'err')`
+ *
+ * 结构化错误对象(throw 出去的 Error 上挂载的字段):
+ * - `code: string` —— 后端 `error` 字段,例如 `E_CARD_HAS_BLOCKERS` / `E_CARD_NOT_FOUND`
+ * - `reason: string` —— 后端 `reason` 字段,例如 `card-has-blockers`
+ * - `blockers: BoardCardBlockers | undefined` —— 仅 409 时存在(子任务 / 依赖方)
+ * - `httpStatus: number` —— 后端 HTTP 状态
+ * - `message: string` —— 后端 `message` 字段或本地 fallback
+ */
+export interface DeleteBoardCardError extends Error {
+  code: string
+  reason: string
+  blockers?: BoardCardBlockers
+  httpStatus: number
+}
+
+export function useDeleteBoardCard(requirementId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (cardId: string): Promise<{ deleted: boolean; id: string }> => {
+      try {
+        return await agentFetch<{ deleted: boolean; id: string }>(
+          `/api/requirement/${encodeURIComponent(requirementId)}/board/cards/${encodeURIComponent(cardId)}`,
+          { method: 'DELETE' },
+        )
+      } catch (err) {
+        if (err instanceof AgentError) {
+          const body = (err.body ?? {}) as {
+            error?: string
+            reason?: string
+            message?: string
+            blockers?: BoardCardBlockers
+          }
+          const code = body.error ?? 'E_INTERNAL'
+          const reason = body.reason ?? 'internal'
+          const message = body.message ?? err.message
+          const structured: DeleteBoardCardError = Object.assign(new Error(message), {
+            code,
+            reason,
+            blockers: body.blockers,
+            httpStatus: err.status,
+          })
+          throw structured
+        }
+        throw err
+      }
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['board', requirementId] })
+      void qc.invalidateQueries({ queryKey: ['board-card', requirementId] })
     },
   })
 }

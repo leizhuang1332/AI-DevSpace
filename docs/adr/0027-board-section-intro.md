@@ -1,6 +1,7 @@
 ---
 status: accepted
 updated: 2026-08-06 · D5 toggle 双态改写(右抽屉 transcript → 右栏 toggle: 默认属性 / 展开 transcript)
+updated: 2026-08-17 · D3「自动归档 N」按钮联动修改为「本期不做,见 ADR-0036」(物理删除方案统一承载)
 ---
 
 # board section 引入 + 3 工位退出范围 + PRD 拆解工作流(ADR-0027)
@@ -81,7 +82,7 @@ board: {
 - 看板顶部 toolbar:
   - 左:`+ 新任务`(manual)、`+ 从 PRD 拆`(prd_split,见 D4)
   - 中:过滤器(priority / assignee / label / source)
-  - 右:`自动归档 N` 按钮(批量把 status='done' && 完成 > 7 天 的卡片设 `is_archived = true`)
+  - 右:**无批量操作按钮**(批量清理本期不做,见 [ADR-0036](0036-board-card-physical-delete.md) D6 / D7)
 - 拖拽行为(本期不做,留 P1+):本期只接受"点 + / 选状态"两步操作推进卡片;`order_index` 默认 null(列尾追加)
 
 ### D4. PRD → 粗卡片拆解工作流(board 触发)
@@ -202,7 +203,8 @@ board: {
 - **跨 Requirement 聚合看板**(workspace 级总看板) → 留 P1+
 - **board 详情 transcript 走 Run** → 见 [ADR-0028](0028-taskcard-transcript-independence.md) D2 约束
 - **board 详情页 UI** 的具体设计稿(typography / spacing / chip 形态) → 留 impl 阶段,本期先以图 2 形态为准
-- **board 自动归档** (D3 中 N 天规则) → D3 已包含,但具体天数配置项留 impl 阶段
+- **board 自动归档** (D3 中 N 天规则) → **本期不做**(D3 联动修改为「无批量操作按钮」),见 [ADR-0036](0036-board-card-physical-delete.md) D6 / D7
+- **批量真删 / 撤销 / 自动清理** → 留 P1+,见 [ADR-0036](0036-board-card-physical-delete.md) D7「不在范围内」
 - **`plan/tasks.md` 与 TaskCard 的迁移**(`executing` 退役时 `plan/tasks.md` 是否导入为 TaskCard) → 本期不动,在 v1.0.7 单独 ADR 决定
 
 ## 主要取舍

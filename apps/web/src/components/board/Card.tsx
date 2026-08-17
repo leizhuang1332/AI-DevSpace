@@ -7,7 +7,7 @@
  * 拖拽视觉对照基线:`docs/design/pages/board-drag-sort-C.html`(C 方案)。
  *
  * 卡片结构(自上而下):
- * - 顶部:id-short(mono,ULID 末 4)+ 右侧 ⋯ 菜单(archive)
+ * - 顶部:id-short(mono,ULID 末 4)+ 右侧 ⋯ 菜单(物理删除,issue 03 / ADR-0036)
  * - title(2 行 line-clamp)
  * - summary(2 行 line-clamp,content 首 80 字)
  * - 底部 meta 行:priority badge + 右侧(source 小标 + labels chip + assignee 头像)
@@ -19,6 +19,10 @@
  * 拖拽(issue 19 / ADR-0035 D4 v2):触发器 = `card-top` 整行(id 短哈希 + 菜单)
  * 而非「左侧 ⋮⋮ 6 点 sprite」。hover signaller = brand-50 背景 + 2px brand 顶线
  * (Linear 风格,不挤压 padding)。键盘 focus 状态 = 2px outline + 4px brand-50 outer。
+ *
+ * 删除(issue 03 / ADR-0036):
+ * - 菜单项「归档」改为「删除任务」(走 `onDelete` prop,触发物理删除流程)
+ * - 后端 `archive` 软删路径保留(供 snapshot / CLI),仅 UI 不再调用
  *
  * `useSortable` 接管 transform / transition / ref;`isDragging` 时整张卡淡化让
  * DragOverlay (BoardSection) 接管 visual。
@@ -40,8 +44,12 @@ export interface BoardCardProps {
   card: TaskCard
   /** 卡片点击(进详情)。本期默认 undefined = 不可点击(ticket 08 接详情页)。 */
   onClick?: (cardId: string) => void
-  /** 卡片菜单 archive 触发 */
-  onArchive?: (cardId: string) => void
+  /**
+   * 卡片菜单「删除任务」触发(issue 03 / ADR-0036)。
+   * - 后端走物理删除(DELETE /board/cards/:cardId)—— 不可逆
+   * - caller 负责弹 ConfirmDeleteDialog + 错误路由(409 → BlockerModal)
+   */
+  onDelete?: (cardId: string) => void
   /**
    * 拖拽开关(issue 19 / ADR-0035)。
    * - `true`(默认)→ 接 `useSortable`,card-top 整行可拖
@@ -56,7 +64,7 @@ export interface BoardCardProps {
   displaced?: boolean
 }
 
-export function BoardCard({ card, onClick, onArchive, draggable = true, displaced = false }: BoardCardProps) {
+export function BoardCard({ card, onClick, onDelete, draggable = true, displaced = false }: BoardCardProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const priorityBadge = card.priority ? PRIORITY_BADGE[card.priority] : null
   const sourceLabel = SOURCE_LABEL[card.source]
@@ -77,15 +85,10 @@ export function BoardCard({ card, onClick, onArchive, draggable = true, displace
     opacity: isDragging ? 0.4 : undefined,
   }
 
-  const handleArchive = (e: React.MouseEvent) => {
+  const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation()
     setMenuOpen(false)
-    onArchive?.(card.id)
-  }
-
-  const toggleMenu = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    setMenuOpen((v) => !v)
+    onDelete?.(card.id)
   }
 
   // 菜单 click 不触发拖拽(避免冒泡)
@@ -127,7 +130,7 @@ export function BoardCard({ card, onClick, onArchive, draggable = true, displace
         <span className="font-mono text-xs text-text-3" data-testid="board-card-id">
           {shortCardId(card.id)}
         </span>
-        {onArchive && (
+        {onDelete && (
           <div className="relative">
             <button
               type="button"
@@ -146,11 +149,11 @@ export function BoardCard({ card, onClick, onArchive, draggable = true, displace
               >
                 <button
                   type="button"
-                  data-testid="board-card-menu-archive"
-                  onClick={handleArchive}
+                  data-testid="board-card-menu-delete"
+                  onClick={handleDelete}
                   className="w-full text-left px-3 py-1.5 text-sm text-text-1 hover:bg-bg-subtle"
                 >
-                  归档
+                  删除任务
                 </button>
               </div>
             )}

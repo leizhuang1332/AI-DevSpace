@@ -3,7 +3,7 @@
 > 本文档是项目的"活字典"。所有领域名词在此有且仅有一个含义。修改任何产品设计前，请先来对照术语。
 >
 > 创建：2026-07-08  
-> 当前版本：v1.0.9（需求级 codebase detach；ADR-0034 新立）
+> 当前版本：v1.0.10（board 卡片物理删除；ADR-0036 新立；ADR-0027 D3 联动修改）
 
 ---
 
@@ -117,6 +117,20 @@ AI 可执行的工作单元（如"设计退款表结构"、"开发 refund-servic
 - 字段全集、Zod schema 与 UI 形态见 [ADR-0024](docs/adr/0024-taskcard-card-model.md)
 
 _Avoid_: 工作项 / 子任务 / Issue(都模糊;本术语锁定为 TaskCard)。**注意**:`board/tasks/<ulid>.json` 中的 `tasks` 目录名 ≠ `Task(任务)`(EXECUTING-zone 的 `plan/tasks.md`),二者并存且不互通
+
+### 删除任务(Board Card Delete)
+
+TaskCard 在 board section 内的「永久销毁」动作。物理语义 = **`fs.rm('~/.aidevspace/requirements/<req-id>/board/tasks/' + cardId, { recursive: true, force: true })`**(同时清掉 `<ulid>.json` 与 `<ulid>/transcript.yaml`),文件不可恢复。
+
+- **唯一 UI 入口**:卡片菜单 `⋯` → 「删除任务」(取代 v1.0.9 之前的「归档」入口);详情页工具栏对称
+- **二次确认 = 输入 `DELETE` 字样**(Linear / GitHub 范式):Modal 未输入 / 输错 → 确认按钮 `disabled`;输对 → 解锁
+- **blocker 硬拒绝**:删除前置检查子任务(`parent_id = cardId`)+ 被依赖(`depends_on.includes(cardId)`),任一非空 → 409 `E_CARD_HAS_BLOCKERS` + blocker 列表
+- **Toast 无撤销**:3s 静态提示,语义「不可恢复」不让 UI 打折
+- **`is_archived` 字段保留**:后端 `POST .../archive` 软删路径仍可用(snapshot / CLI 兜底),父子 status 互锁豁免([ADR-0025 D6](docs/adr/0025-parent-child-status-lock.md))仍依赖此字段
+- **本期不做**:批量真删 / undo buffer / 自动清理 / 已归档抽屉;均留 P1+
+- 归属 ADR:[ADR-0036](docs/adr/0036-board-card-physical-delete.md) D1-D8
+
+_Avoid_: 「删除 = 软删」(错误 —— 本期语义是物理 rm,不可恢复)、「删除 = 可撤销」(错误 —— 不提供 undo 按钮,后端也不维护临时区)、「删除 → 自动归档」(错误 —— 自动归档 N 按钮已联动延期,见 [ADR-0027 D3](docs/adr/0027-board-section-intro.md) + [ADR-0036 D6](docs/adr/0036-board-card-physical-delete.md))
 
 ### Artifact（产物）
 
@@ -597,6 +611,24 @@ ANALYZING 主区不再使用永久 320px 抽屉，改为 **「默认折叠的浮
 | 125 | **落盘策略 = 分级**：跨列拖（改 status）走 `PATCH /status` 悲观 + Guard；列内重排（改 order_index）走 `PATCH /cardId` 乐观 + 失败回滚 + Toast | [ADR-0035](docs/adr/0035-board-drag-sort.md) D5 |
 | 126 | **父子互锁冲突 UI = 复用 `StatusConstraintModal`**：跨列拖命中冲突 → 弹 Modal 三选项 A/B/C 完全沿用 [ADR-0025](docs/adr/0025-parent-child-status-lock.md) D2；拖拽中零预提示（决策 24「克制,在场」）；目标列不变色、不打 hover 提示 | [ADR-0035](docs/adr/0035-board-drag-sort.md) D6 |
 | 127 | **详情页 `order_index` 只读展示**：右栏属性表新增「列内位置」行；展示形式 = `「#N / M」`（N = 列内 1-indexed 序号，按 `order_index asc, null last`；M = 列内总数）；readonly，无编辑控件（看板仍是唯一编辑入口） | [ADR-0035](docs/adr/0035-board-drag-sort.md) D7 |
+
+---
+
+## v1.0.10 增量决策（9 轮 grilling 沉淀 · 2026-08-17）
+
+> 本节是 v1.0.9 锁定后的迭代记录，不修改上面 v1.0 / v1.0.1 / ... / v1.0.9 决策 1-120。所有增量由 [ADR-0036](docs/adr/0036-board-card-physical-delete.md) 单一承载，**联动修改** [ADR-0027 D3](docs/adr/0027-board-section-intro.md)「自动归档 N」按钮为「本期不做」。
+>
+> 本节取代「软删 = 归档」的隐含语义，改为「物理删除 = 唯一删除路径」。
+
+| # | 决策 | 关联 ADR |
+| --- | ------ | ---------- |
+| 129 | **删除任务 = 物理 `rm -rf`**：卡片菜单 `⋯` → 「删除任务」（取代原「归档」）；后端 `DELETE /api/requirement/:id/board/cards/:cardId` 走 `fs.rm('board/tasks/' + cardId, { recursive: true, force: true })`，**不可恢复**（决策 47 自动 snapshot 仅兜 AI 写入，不兜用户主动删除）；`is_archived` 字段保留供后端 archive 路径（snapshot / CLI）+ [ADR-0025 D6](docs/adr/0025-parent-child-status-lock.md) 父子互锁豁免 | [ADR-0036](docs/adr/0036-board-card-physical-delete.md) D1 / D8 |
+| 130 | **blocker 硬拒绝 = 409 + blocker 列表**：删除前置检查子任务（`parent_id = cardId`）+ 被依赖（`depends_on.includes(cardId)`），按 `!c.is_archived` 过滤；任一非空 → 409 `E_CARD_HAS_BLOCKERS` + `{ blockers: { subtasks: [...], dependents: [...] } }`；前端弹 BlockerModal 显示数量 + 「前往处理」跳转链接；不做级联、不静默跳过 | [ADR-0036](docs/adr/0036-board-card-physical-delete.md) D2 |
+| 131 | **二次确认 = 输入 `DELETE` 字样**（Linear / GitHub 范式）：Modal 标题「永久删除任务?」+ 警告区（此操作不可恢复、TaskCard 主数据 + transcript 一并删除）+ 输入框 placeholder `输入 DELETE 确认`；未输入 / 输错 → 确认按钮 `disabled`；输对 → 解锁；与决策 46 D1「5 类高危操作默认阻止」产品期望一致 | [ADR-0036](docs/adr/0036-board-card-physical-delete.md) D3 |
+| 132 | **Toast 无撤销 = 3s 静态提示**：删除成功后卡片 200ms 淡出 + Toast `「已删除 <id 短哈希>」`，**不**提供撤销按钮（语义「不可恢复」不让 UI 打折）；不走后端 undo buffer；React Query mutation 已能驱动重渲染，无需 SSE 推送 | [ADR-0036](docs/adr/0036-board-card-physical-delete.md) D4 |
+| 133 | **删除 = 等同 archived（沿用 ADR-0025 D6）**：被删除卡不参与父 status 互锁校验，不触发父 Requirement / 父 TaskCard 反向阻止；`TaskCardStore.list()` 不返回已删卡，派生计算自然只看"活着的"卡；[ADR-0025](docs/adr/0025-parent-child-status-lock.md) / [ADR-0024](docs/adr/0024-taskcard-card-model.md) 不动 | [ADR-0036](docs/adr/0036-board-card-physical-delete.md) D5 |
+| 134 | **[ADR-0027 D3](docs/adr/0027-board-section-intro.md)「自动归档 N」按钮本期不做**：看板顶部 toolbar 右侧**无批量操作按钮**；批量清理 / 自动归档 / undo / 已归档抽屉 全部留 P1+；`is_archived` 字段保留供后端 archive 兜底 | [ADR-0036](docs/adr/0036-board-card-physical-delete.md) D6 + [ADR-0027](docs/adr/0027-board-section-intro.md) D3 联动 |
+| 135 | **批量真删本期不做**：只走单卡路径；多选 + 批量 Modal 留 P1+（用户心智"批量 = 高频场景"未确认）；本期 UI 仅菜单点单卡 → 输入 DELETE → rm | [ADR-0036](docs/adr/0036-board-card-physical-delete.md) D7 |
 
 ---
 
