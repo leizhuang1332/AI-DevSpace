@@ -14,7 +14,10 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { BoardSection } from '@/components/board/BoardSection'
+import {
+  BoardSection,
+  computeTargetOrderIndexForColumnDrop,
+} from '@/components/board/BoardSection'
 import type { TaskCard } from '@ai-devspace/shared'
 import type { BoardFilter } from '@/lib/board'
 
@@ -230,5 +233,100 @@ describe('BoardSection · 拖拽不影响 5 列渲染(issue 19 / ADR-0035 D1)', 
     renderBoard('req-001', [])
     expect(screen.getByTestId('board-section-empty')).toBeInTheDocument()
     expect(screen.queryByTestId('board-grid')).not.toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 跨列拖 order_index 计算(handleDragEnd 的 over = column 分支)
+// ---------------------------------------------------------------------------
+
+/**
+ * 覆盖用户报的 bug:跨列拖到「含 null order_index 卡」的列时,
+ * 旧版 `?? 0` 兜底 → computeOrderIndexForTail(0) 抛 RangeError 前端崩溃。
+ *
+ * 抽成模块作用域纯函数后,可避开 jsdom 里 @dnd-kit pointer events 模拟,
+ * 直接对 order_index 计算路径做断言。
+ */
+describe('computeTargetOrderIndexForColumnDrop — null 列兜底', () => {
+  it('空列(active 在别的列)→ 1(empty column start)', () => {
+    expect(
+      computeTargetOrderIndexForColumnDrop(
+        [makeCard({ id: 'A', status: 'todo', order_index: 5 })],
+        'backlog',
+        'A',
+      ),
+    ).toBe(1)
+  })
+
+  it('列里有数 (2, 5, 8) → 9(max + 1,跨列候选不计入)', () => {
+    expect(
+      computeTargetOrderIndexForColumnDrop(
+        [
+          makeCard({ id: 'A', status: 'backlog', order_index: 5 }),
+          makeCard({ id: 'B', status: 'backlog', order_index: 2 }),
+          makeCard({ id: 'C', status: 'backlog', order_index: 8 }),
+          makeCard({ id: 'D', status: 'todo', order_index: 99 }), // 跨列候选不算入
+        ],
+        'backlog',
+        'D',
+      ),
+    ).toBe(9)
+  })
+
+  it('列里全 null → 1(修复 RangeError 用户主诉 bug)', () => {
+    expect(
+      computeTargetOrderIndexForColumnDrop(
+        [
+          makeCard({ id: 'A', status: 'backlog', order_index: null }),
+          makeCard({ id: 'B', status: 'backlog', order_index: null }),
+          makeCard({ id: 'C', status: 'todo', order_index: 5 }),
+        ],
+        'backlog',
+        'C',
+      ),
+    ).toBe(1)
+  })
+
+  it('列里混合 (2, null, 5) → 6(取最大非 null + 1,不接进 null 区)', () => {
+    expect(
+      computeTargetOrderIndexForColumnDrop(
+        [
+          makeCard({ id: 'A', status: 'backlog', order_index: 2 }),
+          makeCard({ id: 'B', status: 'backlog', order_index: null }),
+          makeCard({ id: 'C', status: 'backlog', order_index: 5 }),
+          makeCard({ id: 'D', status: 'todo', order_index: 99 }),
+        ],
+        'backlog',
+        'D',
+      ),
+    ).toBe(6)
+  })
+
+  it('exclude active:同列重排场景 active 也排除掉', () => {
+    // active=D 在 backlog 自身的最大序,目标也是 backlog
+    expect(
+      computeTargetOrderIndexForColumnDrop(
+        [
+          makeCard({ id: 'A', status: 'backlog', order_index: 5 }),
+          makeCard({ id: 'B', status: 'backlog', order_index: 10 }),
+          makeCard({ id: 'D', status: 'backlog', order_index: 999 }), // active
+        ],
+        'backlog',
+        'D',
+      ),
+    ).toBe(11)
+  })
+
+  it('支持浮点 last:last = 1.5 → tail = 2.5', () => {
+    expect(
+      computeTargetOrderIndexForColumnDrop(
+        [
+          makeCard({ id: 'A', status: 'backlog', order_index: 1.5 }),
+          makeCard({ id: 'D', status: 'todo', order_index: 5 }),
+        ],
+        'backlog',
+        'D',
+      ),
+    ).toBe(2.5)
   })
 })

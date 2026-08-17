@@ -77,6 +77,42 @@ export interface BoardSectionProps {
 }
 
 /**
+ * 计算「跨列拖到 column」(over.data.current.type === 'column')的目标 order_index。
+ *
+ * 列里有非 null 卡 → 取 sort 后的最大值 + 1(列尾追加,沿用 `computeOrderIndexForTail`)。
+ * 列里全是 null 卡(或空列) → 视为空列 = 1(`computeOrderIndexForEmptyColumn`)。
+ *
+ * 历史:旧版 `BoardSection.tsx:179` 用 `sorted[last].order_index ?? 0` 兜底 null,
+ * 当列里所有卡 `order_index` 都是 null(典型:`NewTaskModal` 创建不传 order_index +
+ * sortByOrderIndex 把 null 排到尾部)时,`?? 0` → `computeOrderIndexForTail(0)` 抛
+ * `RangeError("last (0) must be > 0")`,前端控制台崩溃,拖拽 fail。
+ *
+ * 修复:用「过滤非 null」替代 `?? 0`,让 all-null 列退化为 empty column(1)。
+ * `issue 19 / ADR-0035 D2 + D5` —— handleDragEnd 的「跨列拖到 column」分支调用。
+ *
+ * @param allCards       当前活跃卡全集(同 requirement)
+ * @param toStatus       目标列 status
+ * @param excludeCardId  被拖卡的 id(从目标列候选中排除)
+ */
+export function computeTargetOrderIndexForColumnDrop(
+  allCards: TaskCard[],
+  toStatus: TaskCardStatusT,
+  excludeCardId: string,
+): number {
+  const targetColumn = allCards.filter(
+    (c) => c.status === toStatus && c.id !== excludeCardId,
+  )
+  const sorted = sortByOrderIndex(targetColumn)
+  const nonNullCards = sorted.filter((c) => c.order_index !== null)
+  if (nonNullCards.length === 0) {
+    return computeOrderIndexForEmptyColumn()
+  }
+  return computeOrderIndexForTail(
+    nonNullCards[nonNullCards.length - 1]!.order_index as number,
+  )
+}
+
+/**
  * 跨列拖命中 ADR-0025 父子互锁冲突时,弹 Modal 让用户选 A/B/C。
  * - A 强制 override → 再 PATCH(override=true) 走 log
  * - B 父降级 → 本期未实现,弹禁选灰按钮占位(细节待 v1.0.x 下一轮 grill)
@@ -169,14 +205,12 @@ export function BoardSection({
     // 跨列拖(over 是 column) vs 列内重排(over 是 card)
     if (overData?.type === 'column') {
       const toStatus = overData.status
-      const targetColumn = cards
-        .filter((c) => c.status === toStatus && c.id !== activeCard.id)
-      const sorted = sortByOrderIndex(targetColumn)
-      // 目标列含现有卡 → 拖到列尾 = last + 1;空列 = 1
-      const toOrderIndex =
-        sorted.length === 0
-          ? computeOrderIndexForEmptyColumn()
-          : computeOrderIndexForTail(sorted[sorted.length - 1]!.order_index ?? 0)
+      // 跨列拖目标 order_index 计算抽成模块作用域纯函数,便于单测 null 列兜底
+      const toOrderIndex = computeTargetOrderIndexForColumnDrop(
+        cards,
+        toStatus,
+        String(active.id),
+      )
       if (toStatus === activeCard.status) {
         // 实际是同列(没有 over card 情况)—— 走 ReorderCard
         reorderMutation.mutate({
