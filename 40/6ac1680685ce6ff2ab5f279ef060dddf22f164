@@ -1,0 +1,45 @@
+apps/agent/src/services/board/get-blockers.ts
+  s_7f70b918e8d625::t_af2732cf31d53b 1-28,31-40
+  s_7f70b918e8d625::t_3b499d4091577c 29-30
+apps/agent/src/routes/board-cards.ts
+  s_7f70b918e8d625::t_cc59ec992acaa7 23,31
+  s_7f70b918e8d625::t_e1629a57634ad7 226-290,292
+  s_7f70b918e8d625::t_5cf0cdc846bd31 291
+  s_7f70b918e8d625::t_fc795ed32d91ff 293-294
+apps/agent/src/__tests__/board/get-blockers.test.ts
+  s_7f70b918e8d625::t_c4c0d59d6c4f2a 1-205
+apps/agent/src/__tests__/board/board-cards-route.test.ts
+  s_7f70b918e8d625::t_224cb3f30c42a6 638-640
+  s_7f70b918e8d625::t_d33fac06c8e2e5 504,515,601,672,707-708
+  s_7f70b918e8d625::t_58559ae7a0e704 486-503,505-514,516-568,572-600,602-637,641-671,673-706,709-740
+  s_7f70b918e8d625::t_294ddc7382be43 569-571
+apps/agent/src/services/board/TaskCardStore.ts
+  s_7f70b918e8d625::t_ca4a00879b4c31 191,506-508,514-620
+  s_7f70b918e8d625::t_fd371f75d07361 154-162
+  s_7f70b918e8d625::t_1bc5ac72ca2cde 184-190
+  s_7f70b918e8d625::t_ed6ae85272b298 32-33
+  s_7f70b918e8d625::t_0bdf6cb84bc56c 192
+apps/agent/src/__tests__/board/task-card-store.test.ts
+  s_7f70b918e8d625::t_acddaa2324aee7 453-578
+docs/adr/0036-board-card-physical-delete.md
+  s_7f70b918e8d625::t_2ef299df9e51c0 1-173
+packages/shared/src/board-card.ts
+  s_7f70b918e8d625::t_f3cda8ebdb9908 39,49,63,67-77
+  s_7f70b918e8d625::t_1194622caf55b2 78-79
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "406ac1680685ce6ff2ab5f279ef060dddf22f164",
+  "prompts": {},
+  "sessions": {
+    "s_7f70b918e8d625": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "09f91028-6c33-4e29-916d-089954a8bbe2",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
