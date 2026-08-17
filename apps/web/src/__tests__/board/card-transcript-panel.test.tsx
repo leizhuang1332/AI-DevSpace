@@ -69,6 +69,9 @@ function makeMeta(overrides: Partial<ChatSessionMeta> = {}): ChatSessionMeta {
     lastQueryAt: '2026-08-07T00:00:00Z',
     queryCount: 3,
     ownerUserId: 'user-1',
+    // ChatSessionMeta 上 sdkSessionEstablished 是必填 boolean,默认 false 表示
+    // 「SDK sessionId 尚未落 session.json」(issue 16 / ADR-0029 D9a)。
+    sdkSessionEstablished: false,
     cumulativeUsage: {
       cumulativeCostUsd: 0.42,
       cumulativeInputTokens: 1234,
