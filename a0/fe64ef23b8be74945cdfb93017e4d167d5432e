@@ -1,0 +1,26 @@
+apps/web/e2e/workspace-root-editable.spec.ts
+  s_12e81d56e0b642::t_8084abe1b8adb2 1-189
+apps/agent/src/__tests__/workspace-root-editable.e2e.test.ts
+  s_12e81d56e0b642::t_92d6cd02427e7a 1-55,60-79,81-91,97-99,101-154,164-168,172-243,245-250,253-257,261-271,278-279
+  s_12e81d56e0b642::t_8771ba4eb09e87 56-59,80,92-96
+  s_12e81d56e0b642::t_849a71894c1394 100
+  s_12e81d56e0b642::t_47486ff7715e4b 155-163
+  s_12e81d56e0b642::t_cde5723a2e795d 169-171
+  s_12e81d56e0b642::t_e27ec92410426c 244,251-252,258-260,272-277
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "a0fe64ef23b8be74945cdfb93017e4d167d5432e",
+  "prompts": {},
+  "sessions": {
+    "s_12e81d56e0b642": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5d2c6987-62c9-43d2-8101-109eef0af273",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
