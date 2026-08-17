@@ -450,6 +450,20 @@ export type SseEvent =
        */
       attempt?: number
     }
+  /**
+   * Agent 即将重启广播(ADR-0037 D4)。
+   *
+   * 由 `POST /api/agent/restart` 在进程退出前 publish 到所有通道的所有订阅者;
+   * Web 端 `agent-restart-banner` 据此显示「Agent 正在重启」横幅。
+   *
+   * - `reason` —— 重启原因(workspaceRoot-changed / manual / config-changed)
+   * - `ts` —— 推送时刻 epoch ms
+   */
+  | {
+      type: 'agent-restarting'
+      reason: AgentRestartReason
+      ts: number
+    }
 
 /**
  * Issue 16:统一的 repo-clone-progress 状态枚举。
@@ -466,5 +480,20 @@ export type RepoCloneProgressStatus =
   | 'retrying'
   | 'ready'
   | 'failed'
+
+/**
+ * ADR-0037 D4:agent 进程级 immutable root + restart 通知。
+ * 由 `POST /api/agent/restart` 在进程退出前广播到 **所有通道** 的订阅者,
+ * Web 端 `agent-restart-banner` 据此提示用户「配置生效需等待 Agent 重启」。
+ */
+export type AgentRestartReason =
+  | 'workspaceRoot-changed'
+  | 'manual-restart'
+  | 'config-changed'
+
+export interface AgentRestartEvent {
+  reason: AgentRestartReason
+  ts: number
+}
 
 export const SSE_HEARTBEAT_MS = 30_000
