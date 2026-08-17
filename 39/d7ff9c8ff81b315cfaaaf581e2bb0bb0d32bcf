@@ -1,0 +1,21 @@
+apps/web/src/__tests__/board/board-card-detail-page.test.tsx
+  s_d11280d0402e51::t_431f08a7eddbeb 69-71
+apps/web/src/__tests__/board/card-transcript-panel.test.tsx
+  s_d11280d0402e51::t_322ab0b4997a2c 72-74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "39d7ff9c8ff81b315cfaaaf581e2bb0bb0d32bcf",
+  "prompts": {},
+  "sessions": {
+    "s_d11280d0402e51": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "77010b01-0ab2-4b7f-82a0-ddadab8a4576",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
