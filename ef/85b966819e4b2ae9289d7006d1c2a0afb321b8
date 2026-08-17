@@ -1,0 +1,40 @@
+apps/web/src/components/repos/DetachCodebaseDialog.tsx
+  s_42dc713825b729::t_84d9d3b04f70d8 46-49,61-62
+  s_42dc713825b729::t_e946a94c20c9b1 19-23
+apps/web/src/__tests__/components/repos/DetachCodebaseDialog.test.tsx
+  s_42dc713825b729::t_b7b4e83ebfb693 130-131,133-135,145
+CONTEXT.md
+  s_42dc713825b729::t_ca5f8565caa4b7 93,95
+packages/shared/src/requirement.ts
+  s_42dc713825b729::t_32e19b5209eb6f 307,315-317,336
+apps/agent/src/routes/requirement.ts
+  s_42dc713825b729::t_43cc81acbaf83a 303-306
+apps/agent/src/services/RequirementService.ts
+  s_42dc713825b729::t_742db51556f9ae 577,583-587,609,619,623
+apps/agent/src/__tests__/requirement-detach-codebase.test.ts
+  s_42dc713825b729::t_c01a3456e8acc6 392-394,405-409
+  s_42dc713825b729::t_f5d875d8985a94 199-202,211-214,216,218,224-249
+apps/web/src/lib/repo-attach.ts
+  s_42dc713825b729::t_c59ffda62266c2 227-229
+docs/adr/0034-detach-requirement-codebase.md
+  s_42dc713825b729::t_88b96d2125dddf 1-55,60-181
+  s_42dc713825b729::t_6a906b1f170383 183
+  s_42dc713825b729::t_05bd8ee065dbf5 56-59
+  s_42dc713825b729::t_a2efccd00412a3 182
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "ef85b966819e4b2ae9289d7006d1c2a0afb321b8",
+  "prompts": {},
+  "sessions": {
+    "s_42dc713825b729": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f5008608-086e-4760-a866-26916c069ce3",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
