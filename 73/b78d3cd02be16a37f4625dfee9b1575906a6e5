@@ -1,0 +1,54 @@
+apps/agent/src/routes/analysis-run.ts
+  s_b5ee7ccd3f5d4d::t_d2353a29b4d8fa 35
+  s_b5ee7ccd3f5d4d::t_f6ae8afce2f9d1 94-96
+apps/web/src/lib/server-agent-token.ts
+  s_b5ee7ccd3f5d4d::t_37d111c2bd2c9c 25,72-73,76
+packages/shared/src/__tests__/pathUtil.test.ts
+  s_b5ee7ccd3f5d4d::t_1ada9bae496deb 1-100
+apps/agent/src/__tests__/codebase/CodebaseManager.test.ts
+  s_b5ee7ccd3f5d4d::t_50c1a16f34d77d 1136
+  s_b5ee7ccd3f5d4d::t_c8ea8fcd669933 172-180,185,193
+apps/agent/src/__tests__/workspace-service.test.ts
+  s_b5ee7ccd3f5d4d::t_37d111c2bd2c9c 1,4,7-17,19-22,55-88
+apps/agent/src/codebase/CodebaseManager.ts
+  s_b5ee7ccd3f5d4d::t_85d6187a231acf 496,510
+  s_b5ee7ccd3f5d4d::t_c16df0b88a4e82 441
+  s_b5ee7ccd3f5d4d::t_bd924fecfe03c0 402
+  s_b5ee7ccd3f5d4d::t_7a406600ac899a 40
+  s_b5ee7ccd3f5d4d::t_ebfa8f4f49c6e7 806,816
+  s_b5ee7ccd3f5d4d::t_6f06e2fccf0aef 20-24
+  s_b5ee7ccd3f5d4d::t_6765b0b884ac76 320
+apps/agent/src/server.ts
+  s_b5ee7ccd3f5d4d::t_abeaf746d05eb5 499-500
+  s_b5ee7ccd3f5d4d::t_020fb241ec3e3c 69-72,74
+apps/web/src/__tests__/requirements-root.server.test.ts
+  s_b5ee7ccd3f5d4d::t_a17f54a5a000ae 276-345
+  s_b5ee7ccd3f5d4d::t_b22dc8f21b51c2 22,29-39
+apps/web/src/lib/requirements-root.server.ts
+  s_b5ee7ccd3f5d4d::t_b0870f796ba2c2 46
+  s_b5ee7ccd3f5d4d::t_44dec11fe1d7e1 117-120,122,126,129
+packages/shared/src/pathUtil.ts
+  s_b5ee7ccd3f5d4d::t_22c8de623218d0 1-32,37-45,47-54
+  s_b5ee7ccd3f5d4d::t_23462a130d8db0 33-36,46
+packages/shared/src/index.ts
+  s_b5ee7ccd3f5d4d::t_185de865b2ab98 2
+apps/agent/src/services/WorkspaceService.ts
+  s_b5ee7ccd3f5d4d::t_2fc1fff193f802 116-124,127-128
+  s_b5ee7ccd3f5d4d::t_0fdb1eb484e8a8 16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "73b78d3cd02be16a37f4625dfee9b1575906a6e5",
+  "prompts": {},
+  "sessions": {
+    "s_b5ee7ccd3f5d4d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b790a470-4d25-4c45-8df8-d2c0ab0813be",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
