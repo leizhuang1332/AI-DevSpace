@@ -1,0 +1,24 @@
+apps/agent/src/__tests__/board/chat-session-service.test.ts
+  s_f454ce1cb1483e::t_879085d5c0873f 608-616
+  s_f454ce1cb1483e::t_3b458c92e7fe54 523-607,617
+apps/agent/src/services/board/ChatSessionService.ts
+  s_f454ce1cb1483e::t_ce29ee8e62b75c 142-153
+  s_f454ce1cb1483e::t_633a9828cf2178 82-101
+  s_f454ce1cb1483e::t_ef44fbf6bc175e 722-730
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "99bf40bfc56268362d100b084d2319851d4360c7",
+  "prompts": {},
+  "sessions": {
+    "s_f454ce1cb1483e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7f5bd392-d2dd-4f29-bb3d-4456b2e3bd90",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
