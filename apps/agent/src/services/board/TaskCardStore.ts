@@ -1,7 +1,8 @@
 /**
  * TaskCardStore —— board section 的 TaskCard 持久化服务(issue 02 / ADR-0024)
  *
- * 物理路径:`~/.aidevspace/requirements/<reqId>/board/tasks/<ulid>.json`
+ * 物理路径:`~/.aidevspace/requirements/<reqId>/board/tasks/<ulid>/<ulid>.json`
+ *   (任务目录化:每张卡片有独立目录,主数据 + transcript + chat 都在该目录下)
  *   决策 2「目录即真相」+ ADR-0024 D4 物理存储布局。
  *
  * 设计要点:
@@ -27,10 +28,10 @@
 import {
   existsSync,
   mkdirSync,
+  type Dirent,
   readdirSync,
   readFileSync,
   rmSync,
-  unlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
@@ -176,9 +177,12 @@ export class TaskCardStore {
     return join(this.root, 'requirements', reqId, 'board', 'tasks')
   }
 
-  /** 单卡绝对路径 */
+  /**
+   * 单卡主数据绝对路径(`<tasksDir>/<cardId>/<cardId>.json`)——
+   * 卡片主数据移入任务目录内,任务目录同时容纳 transcript / chat 等协作文件。
+   */
   cardPath(reqId: string, cardId: string): string {
-    return join(this.tasksDir(reqId), `${cardId}.json`)
+    return join(this.cardDirFor(reqId, cardId), `${cardId}.json`)
   }
 
   /**
@@ -214,21 +218,28 @@ export class TaskCardStore {
    *
    * - 默认过滤 `is_archived = true` 的卡 —— ADR-0025 D6「archived 不参与父 status 校验」
    * - 缺 tasks/ 目录 → 返回 []
+   * - 扫描 `<tasksDir>/<cardId>/<cardId>.json`(任务目录化后,主数据在任务子目录内)
+   *   - 枚举子目录,跳过非目录 / 名字非 ULID 的项
+   *   - 仅认 `<dir>/<dir>.json`,避免读到 `chat/session.json` 等无关文件
    * - 单文件解析失败 → 跳过该文件 + console.warn(沿用 listRequirements 容错策略)
    * - `status` / `priority` / `source` / `label` 全部为可选;任意组合 AND
    */
   list(reqId: string, opts: ListTaskCardOptions = {}): TaskCard[] {
     const dir = this.tasksDir(reqId)
     if (!existsSync(dir)) return []
-    let names: string[]
+    let entries: Dirent[]
     try {
-      names = readdirSync(dir).filter((n) => n.endsWith('.json'))
+      entries = readdirSync(dir, { withFileTypes: true }) as Dirent[]
     } catch {
       return []
     }
     const out: TaskCard[] = []
-    for (const name of names) {
-      const abs = join(dir, name)
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const cardId = entry.name
+      if (!TASK_CARD_ID_RE.test(cardId)) continue
+      const abs = this.cardPath(reqId, cardId) // <tasksDir>/<cardId>/<cardId>.json
+      if (!existsSync(abs)) continue
       let raw: string
       try {
         raw = readFileSync(abs, 'utf8')
@@ -358,7 +369,7 @@ export class TaskCardStore {
         `task card input invalid: ${parsed.error.issues.map((i) => i.message).join('; ')}`,
       )
     }
-    const dir = this.tasksDir(reqId)
+    const dir = this.cardDirFor(reqId, id)
     try {
       mkdirSync(dir, { recursive: true, mode: 0o700 })
     } catch (err) {
@@ -546,17 +557,13 @@ export class TaskCardStore {
 
   /**
    * 物理删除一张 TaskCard(ADR-0036 D1):
-   * `rm -rf <tasksDir>/<cardId>/` + `unlink <tasksDir>/<cardId>.json`,
-   * 一次操作同时清掉 TaskCard 主数据 + transcript(ADR-0028 D1 物理独立)。
+   * `rm -rf <tasksDir>/<cardId>/`,一次操作同时清掉任务目录内全部内容
+   * (主数据 `<cardId>.json` + transcript + chat session 等)。
    *
-   * 删除顺序(陷阱 2):
-   *   1. `rm -rf <cardId>/` — 先删目录(含 transcript)
-   *      抛错 → `E_IO`,**不动** .json
-   *   2. `unlink <cardId>.json` — 删主数据
-   *      抛错(罕见,目录已空时)→ console.warn + 仍返回 success
-   *        (卡已删,orphan json 可下次清理)
+   * 任务目录化后(主数据已移入 `<cardId>/<cardId>.json`),
+   * 删除逻辑简化为单一 `rm -rf cardDir`,不再分两步。
    *
-   * 幂等性:cardDir 和 cardPath 都不存在 → `E_CARD_NOT_FOUND`(第二次访问的标准错误)
+   * 幂等性:cardDir 不存在 → `E_CARD_NOT_FOUND`(第二次访问的标准错误)
    *
    * 并发保护:走 `withCardLock(cardId, ...)`,同 cardId 串行;不同 cardId 并行。
    *
@@ -583,38 +590,21 @@ export class TaskCardStore {
     }
     await this.withCardLock(cardId, async () => {
       const cardDir = this.cardDirFor(reqId, cardId)
-      const cardFile = this.cardPath(reqId, cardId)
-      const dirExists = existsSync(cardDir)
-      const fileExists = existsSync(cardFile)
-      // 幂等保护:都缺失 → 当作"卡不存在"
-      if (!dirExists && !fileExists) {
+      if (!existsSync(cardDir)) {
+        // 幂等保护:任务目录不存在 → 当作"卡不存在"
         throw new TaskCardStoreError(
           'E_CARD_NOT_FOUND',
           `task card ${cardId} not found in req ${reqId}`,
         )
       }
-      // 1) 先删目录(含 transcript)—— 抛错时 .json 不动
-      if (dirExists) {
-        try {
-          rmSync(cardDir, { recursive: true, force: true })
-        } catch (err) {
-          throw new TaskCardStoreError(
-            'E_IO',
-            `rm ${cardDir} failed: ${(err as Error).message}`,
-          )
-        }
-      }
-      // 2) 再删主数据 —— 罕见失败 → warn + 仍 success(orphan 可后续清理)
-      if (fileExists) {
-        try {
-          unlinkSync(cardFile)
-        } catch (err) {
-          // eslint-disable-next-line no-console
-          console.warn(
-            `[TaskCardStore] unlink ${cardFile} failed after dir rm; orphan json, manual cleanup suggested:`,
-            err,
-          )
-        }
+      // 一次性删干净任务目录(含 <cardId>.json + transcript + chat/)
+      try {
+        rmSync(cardDir, { recursive: true, force: true })
+      } catch (err) {
+        throw new TaskCardStoreError(
+          'E_IO',
+          `rm ${cardDir} failed: ${(err as Error).message}`,
+        )
       }
     })
   }
