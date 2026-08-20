@@ -1,0 +1,19 @@
+apps/agent/src/services/board/TaskCardStore.ts
+  s_7f70b918e8d625::t_2f3a7680c4a1b4 4-5,31,180-183,185,221-223,230,232,237-242,372,560-561,563-564,566,593-594,600-607
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "7d96ac932e5b42ce8f55d651a6fc767bdd3032bd",
+  "prompts": {},
+  "sessions": {
+    "s_7f70b918e8d625": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "09f91028-6c33-4e29-916d-089954a8bbe2",
+        "model": "unknown"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
