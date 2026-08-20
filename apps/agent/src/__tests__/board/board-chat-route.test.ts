@@ -611,6 +611,30 @@ describe('POST /chat/sessions/start', () => {
     expect(onDisk!.sdkSessionEstablished).toBe(false)
   })
 
+  it('Step 2: /start 落盘的 session.json.cwd 指向任务目录(无 /chat 后缀)', async () => {
+    // PRD task-catalog-transformation Step 2 — cwd 派生从 <tasks>/<cardId>/chat
+    // 改为 <tasks>/<cardId>。SDK 在 cwd 同级能直接读到 <cardId>.json 主数据。
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/start`,
+      headers: authHeaders(),
+      payload: {},
+    })
+    expect(res.statusCode).toBe(200)
+
+    const onDisk = chatSessionService.get(REQ_ID, CARD_ID)
+    expect(onDisk).not.toBeNull()
+    // 期望 cwd = TaskCardStore.cardDirFor(<root>/requirements/<reqId>/board/tasks/<cardId>)
+    // 不再带 /chat 后缀
+    expect(onDisk!.cwd).toBe(taskCardStore.cardDirFor(REQ_ID, CARD_ID))
+    // 守护:确认不是 chat 子目录
+    expect(onDisk!.cwd.endsWith('/chat')).toBe(false)
+    expect(onDisk!.cwd.endsWith(`${CARD_ID}/chat`)).toBe(false)
+    // session.json 物理位置仍在 chat 子目录内(Step 3 不改 ChatSessionService)
+    const sessionJsonPath = chatSessionService.sessionJsonPath(REQ_ID, CARD_ID)
+    expect(sessionJsonPath.startsWith(onDisk!.cwd)).toBe(true) // cwd 是 session.json 父目录的祖先
+  })
+
   it('issue 17: SDK provider throw 不可能发生 —— /start 完全不调 SDK', async () => {
     // 验证意图:/start 路径上根本不该有 provider.runChatQuery 调用。
     // 即便外部把 provider 替换成会 throw 的,/start 仍正常。
@@ -816,6 +840,74 @@ describe('POST /chat/sessions/:sessionId/query (SSE)', () => {
 
     // 等第一次 SSE 完成清理
     await ssePromise
+  })
+
+  it('Step 2: 无 session.json 时 /query 派生 effectiveCwd 为任务目录(无 /chat 后缀)', async () => {
+    // PRD task-catalog-transformation Step 2 —— cwd 派生从 chat 子目录改为
+    // 任务目录。本测试:完全不 seed session.json,让 fallback `cardTaskDir(reqId, cardId)`
+    // 命中。Provider.runChatQuery 收到的 `input.cwd` 应为 `<root>/.../tasks/<cardId>`。
+    provider.defaultScript = [
+      {
+        event: {
+          kind: 'session_init',
+          sessionId: 'sdk-sess-q-cwd-001',
+          cwd: '<echo>',
+          model: 'claude-sonnet-5',
+        },
+      },
+      {
+        event: {
+          kind: 'complete',
+          ts: 1,
+          sessionId: 'sdk-sess-q-cwd-001',
+          totalTokens: 0,
+          cost: 0,
+          reason: 'end_turn',
+        },
+      },
+    ]
+    // 把 fake provider 实现替换:捕 input.cwd 即可,无需额外逻辑
+    const capturedCwds: string[] = []
+    provider.runChatQuery = vi.fn(async (input: ChatQueryInput): Promise<ChatQueryResult> => {
+      capturedCwds.push(input.cwd)
+      input.onEvent({
+        kind: 'session_init',
+        sessionId: 'sdk-sess-q-cwd-001',
+        cwd: input.cwd,
+        model: 'claude-sonnet-5',
+      })
+      input.onEvent({
+        kind: 'complete',
+        ts: 1,
+        sessionId: 'sdk-sess-q-cwd-001',
+        totalTokens: 0,
+        cost: 0,
+        reason: 'end_turn',
+      })
+      return { ok: true, sessionId: 'sdk-sess-q-cwd-001' }
+    })
+
+    const res = await postSse(
+      port,
+      `/api/requirement/${REQ_ID}/board/cards/${CARD_ID}/chat/sessions/sdk-sess-q-cwd-001/query`,
+      { content: [{ kind: 'text', text: 'hi' }] },
+      { 'x-aidevspace-token': token },
+      400,
+    )
+    expect(res.statusCode).toBe(200)
+
+    expect(capturedCwds).toHaveLength(1)
+    const cwd = capturedCwds[0]!
+    // 期望 cwd = TaskCardStore.cardDirFor(...) = 任务目录(无 /chat 后缀)
+    expect(cwd).toBe(taskCardStore.cardDirFor(REQ_ID, CARD_ID))
+    // 守护:cwd 不应是 chat 子目录
+    expect(cwd.endsWith('/chat')).toBe(false)
+    expect(cwd.endsWith(`${CARD_ID}/chat`)).toBe(false)
+    // 任务目录的物理位置存在(TaskCardStore.create 时已建好)
+    expect(existsSync(cwd)).toBe(true)
+    // 同时:frozenCwd 应与 cwd 一致(Provider 层透传)
+    const lastCall = provider.runChatQuery.mock.calls[0]?.[0] as ChatQueryInput
+    expect(lastCall.frozenCwd).toBe(cwd)
   })
 })
 

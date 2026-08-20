@@ -91,7 +91,7 @@ describe('TaskCardStore.create', () => {
     expect(card.completed_at).toBeNull()
 
     // 物理文件存在
-    const file = join(tmpRoot, 'requirements', 'req-001-test', 'board', 'tasks', `${card.id}.json`)
+    const file = store.cardPath('req-001-test', card.id)
     expect(existsSync(file)).toBe(true)
     const onDisk = JSON.parse(readFileSync(file, 'utf8')) as TaskCard
     expect(onDisk.id).toBe(card.id)
@@ -120,7 +120,7 @@ describe('TaskCardStore.create', () => {
     })
     expect(card.source).toBe(TaskCardSource.PRD_SPLIT)
     // 落盘也一致
-    const file = join(tmpRoot, 'requirements', 'req-001-test', 'board', 'tasks', `${card.id}.json`)
+    const file = store.cardPath('req-001-test', card.id)
     const onDisk = JSON.parse(readFileSync(file, 'utf8')) as TaskCard
     expect(onDisk.source).toBe(TaskCardSource.PRD_SPLIT)
   })
@@ -303,7 +303,7 @@ describe('TaskCardStore.archive', () => {
   it('soft-deletes via is_archived=true; file stays on disk', () => {
     seedRequirement()
     const created = store.create('req-001-test', { title: 'x' })
-    const file = join(tmpRoot, 'requirements', 'req-001-test', 'board', 'tasks', `${created.id}.json`)
+    const file = store.cardPath('req-001-test', created.id)
 
     const archived = store.archive('req-001-test', created.id)
     expect(archived.is_archived).toBe(true)
@@ -459,7 +459,7 @@ describe('TaskCardStore.delete', () => {
   it('removes the .json file physically; subsequent get() returns null', async () => {
     seedRequirement()
     const created = store.create('req-001-test', { title: 'x' })
-    const file = join(tmpRoot, 'requirements', 'req-001-test', 'board', 'tasks', `${created.id}.json`)
+    const file = store.cardPath('req-001-test', created.id)
     expect(existsSync(file)).toBe(true)
 
     await store.delete('req-001-test', created.id)
@@ -480,7 +480,7 @@ describe('TaskCardStore.delete', () => {
     await store.delete('req-001-test', created.id)
 
     expect(existsSync(transcriptDir)).toBe(false)
-    expect(existsSync(join(tmpRoot, 'requirements', 'req-001-test', 'board', 'tasks', `${created.id}.json`))).toBe(false)
+    expect(existsSync(store.cardPath('req-001-test', created.id))).toBe(false)
   })
 
   it('throws E_CARD_NOT_FOUND on a second delete call (idempotency surface)', async () => {
@@ -529,7 +529,7 @@ describe('TaskCardStore.delete', () => {
     seedRequirement()
     const created = store.create('req-001-test', { title: 'x' })
     store.archive('req-001-test', created.id)
-    const file = join(tmpRoot, 'requirements', 'req-001-test', 'board', 'tasks', `${created.id}.json`)
+    const file = store.cardPath('req-001-test', created.id)
     expect(existsSync(file)).toBe(true)
 
     await store.delete('req-001-test', created.id)
@@ -540,7 +540,7 @@ describe('TaskCardStore.delete', () => {
   it('serializes concurrent delete calls on the same cardId (withCardLock)', async () => {
     seedRequirement()
     const created = store.create('req-001-test', { title: 'x' })
-    const file = join(tmpRoot, 'requirements', 'req-001-test', 'board', 'tasks', `${created.id}.json`)
+    const file = store.cardPath('req-001-test', created.id)
     // 并发发起 5 次 delete —— 第一次成功,后续 4 次都抛 E_CARD_NOT_FOUND
     const results = await Promise.allSettled(
       Array.from({ length: 5 }, () => store.delete('req-001-test', created.id)),
@@ -563,7 +563,7 @@ describe('TaskCardStore.delete', () => {
     const created = store.create('req-001-test', { title: 'x' })
     const archived = store.archive('req-001-test', created.id)
     expect(archived.is_archived).toBe(true)
-    const file = join(tmpRoot, 'requirements', 'req-001-test', 'board', 'tasks', `${created.id}.json`)
+    const file = store.cardPath('req-001-test', created.id)
     expect(existsSync(file)).toBe(true) // 软删 → 文件保留
   })
 
@@ -572,7 +572,7 @@ describe('TaskCardStore.delete', () => {
     const created = store.create('req-001-test', { title: 'x' })
     store.archive('req-001-test', created.id)
     await store.delete('req-001-test', created.id)
-    const file = join(tmpRoot, 'requirements', 'req-001-test', 'board', 'tasks', `${created.id}.json`)
+    const file = store.cardPath('req-001-test', created.id)
     expect(existsSync(file)).toBe(false)
   })
 })

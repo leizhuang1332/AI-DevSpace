@@ -83,7 +83,6 @@ import {
   ChatSessionService,
   ChatSessionServiceError,
   DEFAULT_PERMISSION_MODE,
-  chatDirFor,
 } from '../services/board/ChatSessionService.js'
 import type {
   AIProvider,
@@ -328,13 +327,22 @@ export async function boardChatRoutes(
       .join('\n')
   }
 
-  /** 派生 card chat 物理路径 —— 跟 ChatSessionService.chatDir 共享同一公式 */
-  function cardChatDir(reqId: string, cardId: string): string {
-    return chatDirFor(deps.workspaceRoot, reqId, cardId)
+  /**
+   * 派生 card 任务目录的 SDK cwd —— 任务目录化后(ADR-0036 / PRD task-catalog-transformation),
+   * SDK cwd 从 `<tasks>/<cardId>/chat` 改为 `<tasks>/<cardId>`。这样:
+   * - 主数据 `<cardId>/<cardId>.json` 在 cwd 同级,SDK 可读
+   * - chat 子目录是 cwd 的下层,`additionalDirectories` 不需要再覆盖 chat 目录
+   * - 物理删除(rm -rf `<tasks>/<cardId>`)一次清干净主数据 + transcript + chat
+   *
+   * 单一真相走 `TaskCardStore.cardDirFor`,与 store 的 `cardPath / delete / list`
+   * 共用同一公式,避免在 route 与 store 之间漂移。
+   */
+  function cardTaskDir(reqId: string, cardId: string): string {
+    return taskCardStore.cardDirFor(reqId, cardId)
   }
 
   /** 父 req dir(SDK additionalDirectories[0],ADR-0029 D6)—— 用注入的
-   * workspaceRoot 派生,与 cardChatDir 同源,避免依赖 env 变量 */
+   * workspaceRoot 派生,与 cardTaskDir 同源,避免依赖 env 变量 */
   function joinReqDir(reqId: string): string {
     return joinDepsReqDir(deps.workspaceRoot, reqId)
   }
@@ -423,7 +431,7 @@ export async function boardChatRoutes(
         // - 消除 fire-and-forget bootstrap 与随后 `/query` 之间的落盘竞态
         //
         // `/start` 现在是纯本地操作:生成 UUID → 落 session.json → 返回。
-        const cwd = cardChatDir(reqId, cardId)
+        const cwd = cardTaskDir(reqId, cardId)
         const serverSessionId = randomUUID()
 
         // 7. 落盘 session.json(atomic)
@@ -493,7 +501,7 @@ export async function boardChatRoutes(
         )
       }
       // session.json 缺失 → 派生 defaults(resume 协议 D9:SDK sessionId 由 URL 提供)
-      const effectiveCwd = meta?.cwd ?? cardChatDir(reqId, cardId)
+      const effectiveCwd = meta?.cwd ?? cardTaskDir(reqId, cardId)
       const effectiveModel = meta?.model ?? 'claude-sonnet-5'
       const effectivePermissionMode = meta?.permissionMode ?? DEFAULT_PERMISSION_MODE
       const effectiveAdditionalDirectories = meta

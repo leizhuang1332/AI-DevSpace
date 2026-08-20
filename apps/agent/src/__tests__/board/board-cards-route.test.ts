@@ -493,14 +493,7 @@ describe('DELETE /api/requirement/:id/board/cards/:cardId', () => {
     seedRequirement('req-001-test')
     const store = freshStore()
     const card = store.create('req-001-test', { title: 'x' })
-    const filePath = join(
-      tmpRoot,
-      'requirements',
-      'req-001-test',
-      'board',
-      'tasks',
-      `${card.id}.json`,
-    )
+    const filePath = store.cardPath('req-001-test', card.id)
     expect(existsSync(filePath)).toBe(true)
 
     const res = await app.inject({
@@ -590,14 +583,7 @@ describe('DELETE /api/requirement/:id/board/cards/:cardId', () => {
     expect(body.blockers.dependents).toEqual([])
 
     // 父卡文件应仍在(被拒绝,没删)
-    const filePath = join(
-      tmpRoot,
-      'requirements',
-      'req-001-test',
-      'board',
-      'tasks',
-      `${parent.id}.json`,
-    )
+    const filePath = store.cardPath('req-001-test', parent.id)
     expect(existsSync(filePath)).toBe(true)
   })
 
