@@ -1,0 +1,14 @@
+.scratch/task-catalog-transformation/PRD.md
+  h_19343606f5962c 1-193
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "f4d84ea7d7f9a8bf767c0c03abd10985000faac5",
+  "prompts": {},
+  "humans": {
+    "h_19343606f5962c": {
+      "author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
