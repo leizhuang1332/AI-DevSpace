@@ -1,0 +1,32 @@
+apps/agent/src/__tests__/board/board-cards-route.test.ts
+  s_f454ce1cb1483e::t_ae4068cba32ac6 586
+  s_f454ce1cb1483e::t_597358576c8f23 496
+apps/agent/src/__tests__/board/task-card-store.test.ts
+  s_f454ce1cb1483e::t_4c4b1d05c869ad 94,123
+  s_f454ce1cb1483e::t_777e0c97a4ce22 483
+  s_f454ce1cb1483e::t_2c3d3e1afedff7 306,462,532,543,566,575
+apps/agent/src/routes/board-chat.ts
+  s_f454ce1cb1483e::t_9fd098d5422660 330-341
+  s_f454ce1cb1483e::t_7e7f46a4222d4f 345
+  s_f454ce1cb1483e::t_4ba0d626ba9e0b 504
+  s_f454ce1cb1483e::t_f49ddecfa7cc10 434
+apps/agent/src/__tests__/board/board-chat-route.test.ts
+  s_f454ce1cb1483e::t_1d003cb2f13d8f 844-911
+  s_f454ce1cb1483e::t_cad175cccc9f0e 614-637
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "d90121172ec5776b7c08a2d9a4df7b121ecca528",
+  "prompts": {},
+  "sessions": {
+    "s_f454ce1cb1483e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7f5bd392-d2dd-4f29-bb3d-4456b2e3bd90",
+        "model": "MiniMax-M3"
+      },
+      "human_author": "leizhuang <lorcan.lei@jtexpress.com>"
+    }
+  }
+}
