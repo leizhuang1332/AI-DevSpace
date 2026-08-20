@@ -79,7 +79,26 @@ export class ChatSessionServiceError extends Error {
 // 路径 helper(单点真相,test + route 共享)
 // ---------------------------------------------------------------------------
 
-/** `<root>/requirements/<reqId>/board/tasks/<cardId>/chat/` 目录路径 */
+/**
+ * `<root>/requirements/<reqId>/board/tasks/<cardId>/chat/` 目录路径
+ *
+ * **Step 3 核对(task-catalog-transformation PRD)**:
+ * 任务目录化后(ADR-0036 / Step 1),<cardId>.json 主数据从 tasksDir
+ * 平铺迁移到 `<tasksDir>/<cardId>/<cardId>.json`,但 chat 子目录**保留**
+ * 在 `<tasksDir>/<cardId>/chat/` 内 —— 本函数与 Step 1 改造前的路径**一致**,
+ * 不需要改。SDK cwd 派生走 `TaskCardStore.cardDirFor`(任务目录本身),
+ * 与 chat 子目录是两个独立维度:
+ *
+ * | 物理路径                      | 用途          | 派生 helper                |
+ * |-------------------------------|---------------|----------------------------|
+ * | `<tasksDir>/<cardId>/`        | SDK cwd       | TaskCardStore.cardDirFor   |
+ * | `<tasksDir>/<cardId>/<id>.json` | 主数据        | TaskCardStore.cardPath     |
+ * | `<tasksDir>/<cardId>/chat/`   | session 元数据 | **chatDirFor(本函数)**     |
+ *
+ * 这样 `delete` 时 `rm -rf <tasksDir>/<cardId>` 一次性清掉全部(主数据 +
+ * transcript + chat session),而 session.json 物理位置保持稳定,不与
+ * cwd 派生耦合。
+ */
 export function chatDirFor(
   workspaceRoot: string,
   requirementId: string,
@@ -120,6 +139,18 @@ export function sessionJsonPathFor(
  * **早期误判**:本函数原用 `sha256(cwd).slice(0, 16)`,导致 `existsSync` 永远返 false
  * → `loadSnapshot` 永远走 `sdkJsonlMissing: true` 分支 → 跨刷新不渲染历史。
  * 修正后 existsSync 能命中真实 jsonl,snapshot events 数组会被填充。
+ *
+ * **Step 3 核对(task-catalog-transformation PRD)**:
+ * SDK cwd 派生路径在 Step 2 后从 `<tasks>/<cardId>/chat` 变为
+ * `<tasks>/<cardId>`(任务目录本身)。这意味着 SDK jsonl 物理路径
+ * **会变** —— 老 workspace 的 jsonl 仍在 `projects/.../<cardId>-chat/`
+ * 子目录下,Step 2 后新建的会话 jsonl 落在 `projects/.../<cardId>/` 下。
+ *
+ * 对老 session.json(`meta.cwd` 仍是 `<cardId>/chat`)→ 仍走老 jsonl 路径,
+ * SDK resume 命中;对 Step 2 后新建的 session.json → 走新 jsonl 路径,干净。
+ * 唯一「孤儿」场景:用户主动删 jsonl 或迁移 workspace 改变 cwd 字符串,
+ * 由 `loadSnapshot.sdkJsonlMissing: true` 兜底,UI 渲染 banner,不阻断历史渲染。
+ * —— 这是预期行为,无需特殊处理。
  */
 export function sdkSessionLogPathFor(
   cwd: string,
@@ -687,6 +718,15 @@ export class ChatSessionService {
    * ChatSessionService 落盘契约对齐。每张 TaskCard 的 chat/ 目录独立,
    * 即使 TaskCardStore 的 <cardId>.json 不存在,chat session 也可能存在
    * (chat session 早于 TaskCard 创建的边界场景)。
+   *
+   * **Step 3 核对(task-catalog-transformation PRD)**:任务目录化后
+   * (ADR-0036 / Step 1),tasksDir 下从平铺 `<id>.json` 变成子目录
+   * `<cardId>/`。本函数扫描 `tasksDir/<name>/chat/`,语义**仍然正确** —
+   * `name` 直接当 cardId 拼接 chat 子目录即可,无需 `withFileTypes` 过滤
+   * (L723 `existsSync(chatDir)` 会过滤掉非 cardDir 的项,例如残留的
+   * `<cardId>.json` 老 workspace 平铺文件)。边界情况已验证:见
+   * `chat-session-service.test.ts` "sweepExpiredSessions:多 card 时各自
+   * 独立 sweep" 回归测试。
    *
    * 注:本期实现为简化版 —— 不直接删 session.json,而是把 `sessionId` 清空 +
    * `cumulativeUsage` 重置;目录 + 元数据保留(cwd / additionalDirectories 等

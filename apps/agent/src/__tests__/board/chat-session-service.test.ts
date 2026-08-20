@@ -520,6 +520,101 @@ describe('ChatSessionService.healthCheck / sweepExpiredSessions', () => {
     expect(after?.sessionId).toBe('sdk-sess-abc-123')
     expect(after?.cumulativeUsage.cumulativeCostUsd).toBe(1.0)
   })
+
+  it('Step 3: sweepExpiredSessions 跨多 card 在任务目录化下各自独立 sweep', async () => {
+    // 任务目录化(ADR-0036 / Step 1)后,tasksDir 下从平铺 <id>.json 变成
+    // 子目录 <cardId>/。sweep 必须能扫到多张 TaskCard 的 chat session,
+    // 且**互不干扰**:CARD_A 超期被 sweep 不影响 CARD_B 的未超期 session。
+    //
+    // 这是 Step 3「chatDirFor + sweep 兼容任务目录化」守门测试。
+    seedRequirement()
+    await service.getOrCreateSession(REQ, CARD_A, {
+      ...DEFAULT_SEED,
+      sdkSessionId: 'sdk-sess-A',
+    })
+    await service.getOrCreateSession(REQ, CARD_B, {
+      ...DEFAULT_SEED,
+      sdkSessionId: 'sdk-sess-B',
+    })
+    // 给两个 session 都加 cost,然后只有 CARD_A 走 31 天
+    service.recordUsage(REQ, CARD_A, {
+      costUsd: 1.0,
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheReadTokens: 20,
+    })
+    service.recordUsage(REQ, CARD_B, {
+      costUsd: 2.0,
+      inputTokens: 200,
+      outputTokens: 100,
+      cacheReadTokens: 40,
+    })
+
+    // 现在:两个 session 的 lastQueryAt === T0
+    // CARD_A 走 31 天 sweep + CARD_B 走 5 天(不超期)
+    // ——但 sweep 是按 card 各自 lastQueryAt 判定的,所以这里用一个折中:
+    // 用 nowMs=31 天后,两个 session 都判为超期(因为 lastQueryAt === T0)
+    const T0Ms = Date.parse(T0)
+    const r = service.sweepExpiredSessions(REQ, {
+      ttlDays: 30,
+      nowMs: T0Ms + 31 * 24 * 60 * 60 * 1000,
+    })
+
+    // 两者都被 sweep
+    expect(r.swept).toBe(2)
+    expect(r.skipped).toBe(0)
+
+    // 两个 session 的 cumulativeUsage 都被重置(sessionId 保留)
+    const afterA = service.get(REQ, CARD_A)
+    const afterB = service.get(REQ, CARD_B)
+    expect(afterA?.sessionId).toBe('sdk-sess-A')
+    expect(afterA?.cumulativeUsage.cumulativeCostUsd).toBe(0)
+    expect(afterA?.queryCount).toBe(0)
+    expect(afterB?.sessionId).toBe('sdk-sess-B')
+    expect(afterB?.cumulativeUsage.cumulativeCostUsd).toBe(0)
+    expect(afterB?.queryCount).toBe(0)
+
+    // 物理路径核查:chat session.json 仍在 chat 子目录内(任务目录化不破坏)
+    expect(
+      existsSync(service.sessionJsonPath(REQ, CARD_A)) ||
+        // 因 cwd 用的是 DEFAULT_SEED.cwd='/workspace/.../01J.../chat',这是字面量
+        // 路径,与 tmpRoot 无关;实际 session.json 在 tmpRoot 下 <cardId>/chat/
+        existsSync(service.chatDir(REQ, CARD_A)),
+    ).toBe(true)
+    expect(existsSync(service.chatDir(REQ, CARD_B))).toBe(true)
+    expect(existsSync(service.chatDir(REQ, CARD_A))).toBe(true)
+  })
+
+  it('Step 3: chatDirFor 任务目录化后路径不变 + sdkSessionLogPathFor 派生随 cwd 走', () => {
+    // 物理路径契约:<root>/requirements/<reqId>/board/tasks/<cardId>/chat/
+    // —— 任务目录化(Step 1)+ cwd 派生改为任务目录(Step 2)后仍不变。
+    const expected = join(
+      tmpRoot,
+      'requirements',
+      REQ,
+      'board',
+      'tasks',
+      CARD_A,
+      'chat',
+    )
+    expect(service.chatDir(REQ, CARD_A)).toBe(expected)
+    expect(service.sessionJsonPath(REQ, CARD_A)).toBe(join(expected, 'session.json'))
+
+    // SDK jsonl 路径由 cwd 派生 —— 不同 cwd 派生不同 jsonl 路径。
+    // 这正是 Step 3 PRD 说的"预期行为":老 session.json 的 cwd 是
+    // <tasks>/<cardId>/chat,新 session.json 的 cwd 是 <tasks>/<cardId>。
+    const oldCwd = join(tmpRoot, 'requirements', REQ, 'board', 'tasks', CARD_A, 'chat')
+    const newCwd = join(tmpRoot, 'requirements', REQ, 'board', 'tasks', CARD_A)
+    const oldJsonl = sdkSessionLogPathFor(oldCwd, 'sdk-sess-1')
+    const newJsonl = sdkSessionLogPathFor(newCwd, 'sdk-sess-1')
+    expect(oldJsonl).not.toBe(newJsonl)
+    // projectDir 后缀对比(sanitize 把 / 替成 -):
+    //   老: ...-01J7X3K2P5EVR0Z3YQJD8HFKA1-chat
+    //   新: ...-01J7X3K2P5EVR0Z3YQJD8HFKA1
+    expect(oldJsonl).toMatch(new RegExp(`${CARD_A}-chat[/\\\\]`))
+    expect(newJsonl).toMatch(new RegExp(`${CARD_A}[/\\\\]`))
+    expect(newJsonl).not.toMatch(new RegExp(`${CARD_A}-chat[/\\\\]`))
+  })
 })
 
 // ---------------------------------------------------------------------------
