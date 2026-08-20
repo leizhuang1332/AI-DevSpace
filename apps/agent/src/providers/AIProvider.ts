@@ -240,6 +240,19 @@ export interface ChatQueryInput {
   onEvent: (event: ChatStreamEvent) => void
   /** 取消信号 —— 服务端清理 in-flight query 用 */
   signal?: AbortSignal
+  /**
+   * Assembler 上下文(可选)—— 传入则 chatQuery 调 SystemPromptAssembler
+   * 拼 appendSystemPrompt 塞进 sdkOptions;不传则 SDK 用内置 default。
+   * board chat 路径需要 assembler 生效时由 route 层拼好传入。
+   */
+  assemblerContext?: {
+    sessionId: string
+    reqId: string
+    /** requirement root 绝对路径(assembler 读 context 文件用) */
+    rootPath: string
+    /** meta.yaml.current_focus(可选) */
+    currentFocus?: string
+  }
 }
 
 /** chat 路径 SDK envelope → SSE 事件 统一形态 */

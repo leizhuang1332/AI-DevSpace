@@ -683,6 +683,13 @@ export async function boardChatRoutes(
           frozenCwd: effectiveCwd,
           userConfirmHandler,
           onEvent: makeOnEvent('resume' in mode),
+          // Assembler 上下文(ADR-0010 Q5):board chat 路径不经 AISession,
+          // route 层拼好传入,chatQuery 内部调 assembler 拼 appendSystemPrompt。
+          assemblerContext: {
+            sessionId,
+            reqId,
+            rootPath: joinReqDir(reqId),
+          },
         })
 
       const queryPromise = (async () => {

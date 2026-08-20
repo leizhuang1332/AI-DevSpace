@@ -716,7 +716,7 @@ export function createClaudeCodeProvider(opts: ClaudeCodeProviderOptions): AIPro
      *
      * 当前 commit:RED 守门占位,issue 03+04 实现走 GREEN。
      */
-    runChatQuery,
+    runChatQuery: (input: ChatQueryInput) => chatQuery(input, { assembler }),
   }
 }
 
@@ -901,7 +901,10 @@ const runChatQuery: ChatQueryCapableProvider['runChatQuery'] = async (
  *
  * 不直接调用 `runAnalysisQuery` / 共享 `mcpCallCounter`(issue 02 守门)。
  */
-async function chatQuery(input: ChatQueryInput): Promise<ChatQueryResult> {
+async function chatQuery(
+  input: ChatQueryInput,
+  opts?: { assembler?: SystemPromptAssembler },
+): Promise<ChatQueryResult> {
   const sdkModule = await import('@anthropic-ai/claude-agent-sdk')
   const { z } = await import('zod')
 
@@ -1078,11 +1081,57 @@ async function chatQuery(input: ChatQueryInput): Promise<ChatQueryResult> {
     sdkOptions['sessionId'] = input.newSessionId
   }
 
+  // ── Assembler 接入(ADR-0010 Q5)────────────────────────────
+  // board chat 路径不经 AISession,此处手动调 assembler 拼 appendSystemPrompt。
+  // 失败容错对齐 AISession.ts L405-431:装配失败 → 跳过,不阻断 query。
+  if (opts?.assembler && input.assemblerContext) {
+    try {
+      const ctx = input.assemblerContext
+      const base = await opts.assembler.assembleBase({
+        id: ctx.sessionId,
+        reqId: ctx.reqId,
+        kind: 'chat',
+        topic: ctx.sessionId,
+      })
+      const dynamic = await opts.assembler.assembleDynamic({
+        query: input.prompt,
+        session: {
+          id: ctx.sessionId,
+          reqId: ctx.reqId,
+          kind: 'chat',
+          topic: ctx.sessionId,
+        },
+        req: {
+          reqId: ctx.reqId,
+          rootPath: ctx.rootPath,
+          ...(ctx.currentFocus ? { currentFocus: ctx.currentFocus } : {}),
+        },
+      })
+      const appendSystemPrompt = `${base}\n\n${dynamic}`
+      if (appendSystemPrompt.length > 0) {
+        sdkOptions['appendSystemPrompt'] = appendSystemPrompt
+        console.log(
+          `[chatQuery] assembler appendSystemPrompt (${appendSystemPrompt.length} chars) ──\n${appendSystemPrompt}`,
+        )
+      }
+    } catch (err) {
+      console.warn('[chatQuery] assembler failed, fallback to SDK default:', err)
+    }
+  }
+
   // 3) 调 queryFn —— 走注入的 query(测试用 mock,生产用 SDK)
   const q = await getModuleQuery()
   let observedSessionId = ''
   let lastReason: 'end_turn' | 'cancelled' | 'error' | 'max_tokens' | null =
     null
+
+  console.log('[chatQuery] prompt:', input.prompt)
+  const { mcpServers: _mcp, ...dumpableOpts } = sdkOptions
+  console.log(
+    '[chatQuery] sdkOptions (mcpServers omitted to avoid cyclic):',
+    JSON.stringify(dumpableOpts, null, 2),
+  )
+
   try {
     const stream = q({ prompt: input.prompt, options: sdkOptions })
     for await (const raw of stream) {

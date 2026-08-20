@@ -36,6 +36,7 @@ import { createCcSwitchClient, createNullCcSwitchClient } from './providers/CcSw
 import type { CcSwitchClient } from './providers/CcSwitchClient.js'
 import { createClaudeCodeProvider } from './providers/ClaudeCodeProvider.js'
 import type { RetryableSession } from './providers/ClaudeCodeProvider.js'
+import { createSystemPromptAssembler } from './prompt/SystemPromptAssembler.js'
 import { FakeChatProvider } from './providers/FakeChatProvider.js'
 import {
   readCache as readDefaultSystemPromptCache,
@@ -252,6 +253,17 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   // 真实生产 key 由 provider 用 UUID 保证唯一。
   const retrySessions = new Map<string, RetryableSession>()
 
+  // SystemPromptAssembler(ADR-0010 Q5)——接入生产链路:
+  // - skillsRoots 用 analysisSkillService.skillsDir(built-in analysis skills)
+  // - 装配在 AISession.send 阶段触发 → 拼 appendSystemPrompt → SDK options
+  // - 影响范围:spike route(provider.createSession) + Analysis Run fallback
+  //   (board chat 走 chatQuery 独立路径,不经 AISession,不在此接入范围)
+  // - 失败容错:Assembler 内部 context 文件读不到 / Skill 解析失败 → 跳过
+  //   不阻断 send()(见 SystemPromptAssembler.ts 文件头注释)
+  const assembler = createSystemPromptAssembler({
+    skillsRoots: [analysisSkillService.skillsDir],
+  })
+
   const provider: AIProvider = opts.provider ?? createClaudeCodeProvider({
     ccSwitch,
     debug: false,
@@ -259,6 +271,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     sessionLogger,
     sessionStore,
     globalLogger,
+    assembler,
     // 同步读取 SDK default system prompt cache —— dump 时打
     defaultSystemPromptReader: () => readDefaultSystemPromptCache(workspaceRoot),
     onSessionCreated: (entry) => {

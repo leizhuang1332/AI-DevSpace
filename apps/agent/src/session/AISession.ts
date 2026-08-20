@@ -422,6 +422,7 @@ export class AiSession implements IAISession {
             ?? { reqId: this.reqId, rootPath: process.cwd() },
         })
         appendSystemPrompt = `${base}\n\n${dynamic}`
+        process.stderr.write(`[AISession ${this.id}] full system prompt before SDK call (length=${appendSystemPrompt.length}, query=${text.slice(0, 80)})\n${appendSystemPrompt}\n`)
       } catch (err) {
         // 装配失败 → 不阻断 turn,降级为不加 system prompt(SDK 默认也能跑)
         if (this.#debug) {
